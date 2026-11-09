@@ -120,3 +120,70 @@ jobs:
             GITBERTH_COMMIT=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  release-image:
+    name: Image on the release
+    # Every release shows its Docker image: the image as files to download, one per platform, for `docker load`, and a
+    # "Docker image" section in its notes with the pull command. A release's own run adds them right after the build; any
+    # later run catches up a release that's missing them. What a release has already is left as it is.
+    needs: [test, image]
+    if: always() && needs.test.result == 'success' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Attach the image and name it in the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          releases="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --exclude-drafts --json tagName,isPrerelease \
+            --jq '.[] | "\(.tagName) \(.isPrerelease)"')"
+          while read -r tag pre; do
+            [ -n "$tag" ] || continue
+            version="${tag#v}"
+            # Not built (yet): nothing to show.
+            index="$(docker buildx imagetools inspect --raw "$image:$version" 2>/dev/null)" || continue
+
+            # The image as a file per platform: pulled by that platform's digest, saved under the release's tag.
+            assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            for arch in amd64 arm64; do
+              file="gitberth-$version-linux-$arch.tar.gz"
+              if grep -qx "$file" <<< "$assets"; then continue; fi
+              digest="$(jq -r --arg a "$arch" '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $a)][0].digest // empty' <<< "$index")"
+              [ -n "$digest" ] || continue
+              docker pull -q "$image@$digest" > /dev/null
+              docker tag "$image@$digest" "$image:$version"
+              docker save "$image:$version" | gzip -6 > "$file"
+              docker rmi -f "$image:$version" "$image@$digest" > /dev/null 2>&1 || true
+              gh release upload "$tag" "$file" --repo "$GITHUB_REPOSITORY"
+              rm -f "$file"
+              echo "Attached $file to $tag."
+            done
+
+            body="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body)"
+            case "$body" in *"$image:$version"*) continue ;; esac
+            if [ "$pre" = "true" ]; then
+              tags="It's a pre-release, so \`latest\` doesn't move to it."
+            else
+              tags="\`${version%.*}\` follows the newest ${version%.*}.x release, and \`latest\` the newest release."
+            fi
+            assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            {
+              printf '## Docker image\n\n'
+              printf '`%s:%s`, for Intel/AMD and ARM. %s\n\n' "$image" "$version" "$tags"
+              printf '```bash\ndocker pull %s:%s\n```\n\n' "$image" "$version"
+              if grep -q "^gitberth-$version-linux-" <<< "$assets"; then
+                printf 'The image is also attached below, for a machine that can'"'"'t reach ghcr.io: download `gitberth-%s-linux-amd64.tar.gz` (Intel/AMD) or `gitberth-%s-linux-arm64.tar.gz` (ARM) and load it:\n\n' "$version" "$version"
+                printf '```bash\ndocker load -i gitberth-%s-linux-amd64.tar.gz\n```\n\n' "$version"
+              fi
+              printf 'Install it with the [installation guide](%s/blob/%s/docs/getting-started/install.md), or update an install with [Updating Gitberth](%s/blob/%s/docs/guides/updating-gitberth.md).\n\n' \
+                "$repo_url" "$tag" "$repo_url" "$tag"
+              printf '%s\n' "$body"
+            } > notes.md
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file notes.md
+            echo "Named $image:$version in the notes of $tag."
+          done <<< "$releases"
+

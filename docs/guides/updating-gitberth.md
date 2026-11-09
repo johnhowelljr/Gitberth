@@ -50,6 +50,8 @@ Back up Gitberth's data volume (see [Back up and restore](backups-and-restore.md
 
 Every tag is published for `linux/amd64` and `linux/arm64`. A pre-release, like `1.3.0-rc.1`, gets only its own tag, so `latest` and `1.3` never move to it. The releases are listed on the repository's **Releases** page, and the tags that exist with the package, under **Packages**.
 
+Each release's page shows its image and the `docker pull` command, and has the image attached as files, `gitberth-<version>-linux-amd64.tar.gz` (Intel/AMD) and `gitberth-<version>-linux-arm64.tar.gz` (ARM). On a machine that can't reach ghcr.io, download the one for it and load it with `docker load -i <file>`; it's tagged as the release, like `ghcr.io/johnhowelljr/gitberth:1.0.0`.
+
 ## Pin a version
 
 1. In `/opt/gitberth/docker-compose.yml`, change the `image:` line to the tag you want:
