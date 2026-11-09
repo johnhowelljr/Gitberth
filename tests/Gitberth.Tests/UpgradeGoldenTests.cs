@@ -43,7 +43,7 @@ public sealed class UpgradeGoldenTests
     };
 
     [Fact]
-    public void The_fingerprints_of_obs_and_kanban_are_step_3s()
+    public void The_fingerprints_of_orb_and_kanban_are_step_3s()
     {
         Assert.Equal(("-p 3000:80 --network name=gitberth,alias=orb###unless-stopped##", "main##Auto###True##"),
             AppService.Fingerprint(Orb(), _protector, "gitberth"));
@@ -55,7 +55,7 @@ public sealed class UpgradeGoldenTests
     }
 
     [Fact]
-    public void The_docker_run_of_obs_and_kanban_is_step_3s()
+    public void The_docker_run_of_orb_and_kanban_is_step_3s()
     {
         Assert.Equal("""
             docker run -d --name gb-orb \

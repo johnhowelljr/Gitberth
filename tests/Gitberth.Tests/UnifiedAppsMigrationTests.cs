@@ -159,7 +159,7 @@ public sealed class UnifiedAppsMigrationTests : IDisposable
     }
 
     [Fact]
-    public void It_only_adds_and_every_value_obs_and_kanban_had_stays()
+    public void It_only_adds_and_every_value_orb_and_kanban_had_stays()
     {
         NetworkModelDatabase();
         var before = Snapshot();

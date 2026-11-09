@@ -1,4 +1,6 @@
 @page "/apps/new"
+@* Pages outside Components/Pages don't get its [Authorize]: without this, New app opened without signing in. *@
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @implements IDisposable
 @inject AppCreator Creator
 @inject ImageService Images

@@ -113,7 +113,7 @@ public sealed class AppsListTests(GitberthBrowser gitberth)
     }
 
     [UiFact]
-    public async Task Pinned_obs_and_kanban_are_in_the_menu()
+    public async Task Pinned_orb_and_kanban_are_in_the_menu()
     {
         var (page, errors) = await gitberth.OpenAsync("/apps");
         var pinned = page.Locator(".gb-side nav[aria-label='Pinned apps'] .gb-nav-app");

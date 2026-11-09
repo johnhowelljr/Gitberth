@@ -902,7 +902,7 @@ public sealed class UpgradeRehearsalTests(RehearsalSnapshot snapshot, ITestOutpu
     /// menu looks as it did, with nothing else set; the new tables are empty, and Apps is never rebuilt (no row is copied).
     /// </summary>
     [RehearsalFact]
-    public void I_unified_apps_keeps_every_value_obs_and_kanban_had_and_only_adds()
+    public void I_unified_apps_keeps_every_value_orb_and_kanban_had_and_only_adds()
     {
         var s = Ready();
         output.WriteLine("UnifiedApps, as EF Core scripts it:");
