@@ -1,0 +1,451 @@
+@inject ContainerStatsCollector Stats
+
+@*
+    New app › Configure (new-app-configure.html): a new app's settings in the App page's sections, in create mode and
+    prefilled by the source: its name and image, ports (LAN by default, free host ports suggested and checked as they're
+    typed), its network (its own Docker networks, the host's, or none; a network the source names that isn't on this host is
+    shown with Create and Remove), storage, environment, command, restart and limits, its health check, and the Settings
+    tab's own Labels, Logging and Advanced sections (Advanced folded). What still has no field is carried as the source gave
+    it and listed under "Everything else"; all of it can change later in Settings.
+*@
+<div class="gb-stack">
+    <section class="gb-card gb-sec" id="cfg-basics">
+        @Head(Icons.Material.Outlined.Tune, "Basics", Form.OnNetworks ? $"Name it; containers on {Shared} will use this name to reach it." : "Name it. Gitberth calls it by this name.")
+        <div class="gb-sec-body">
+            <div class="gb-fgrid">
+                <Field Label="Name" For="cfg-name" Error="@NameProblem">
+                    <input id="cfg-name" class="gb-input" value="@Form.Name" @oninput="NameTyped" spellcheck="false" autocomplete="off" />
+                </Field>
+                <Field Label="Network name" Help="@(NameTaken is { } taken ? $"{taken.TrimEnd('.')}. Its container is gb-{Slug}." : $"Its container is gb-{Slug}.")">
+                    <span class="gb-input gb-input--mono gb-input--ro">@Slug</span>
+                </Field>
+            </div>
+            @if (NameTaken is null && Slug.Length > 0)
+            {
+                <span class="gb-hpline gb-hpline--ok" style="font-size:12.5px"><SvgIcon Icon="@Icons.Material.Outlined.Check" Size="xs" />Free on this host@(Form.OnNetworks ? $" and on {Shared}" : "")</span>
+            }
+            <div class="gb-netpick-row" style="align-items:center;flex-wrap:wrap">
+                <AppLogo Image="@Form.Image" Name="@Form.Name" Size="26" />
+                <span class="gb-mono" style="font-weight:600">@Form.Image</span>
+                <span class="gb-t3" style="font-size:12.5px;white-space:nowrap">@ImageWhere</span>
+                <span class="gb-grow"></span>
+                @if (Form.OnHost)
+                {
+                    <span class="gb-tag gb-tag--good"><SvgIcon Icon="@Icons.Material.Outlined.Check" />Already on this host</span>
+                }
+                else
+                {
+                    <span class="gb-tag"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Pulled when it's created</span>
+                }
+            </div>
+            @if (Form.Issues.Count > 0)
+            {
+                <ParseIssues Issues="Form.Issues" />
+            }
+        </div>
+    </section>
+
+    <section class="gb-card gb-sec" id="cfg-ports">
+        @Head(Icons.Material.Outlined.SettingsEthernet, "Ports", PortsSub)
+        @if (!Form.OnNetworks)
+        {
+            <div class="gb-sec-body">
+                @if (Form.Ports.Rows.Count > 0)
+                {
+                    <Banner Tone="warn" Title="@(Form.NetworkMode == "host" ? "On the host's network it has no ports of its own" : "Without a network of its own it has no ports")">
+                        <ChildContent>@(Form.NetworkMode == "host" ? $"It listens on the host's own ports, at {LanHost}:<port>, so these can't be published. Take them out to create it." : "These can't be published. Take them out to create it, or give it its networks back.")</ChildContent>
+                        <Actions><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Delete" OnClick="TakePortsOutAsync">Take the ports out</Btn></Actions>
+                    </Banner>
+                }
+                else
+                {
+                    <p class="gb-help">@(Form.NetworkMode == "host" ? $"Whatever port its program opens answers at {LanHost}:<port>, on every address of the host." : "Nothing reaches it over a network.")</p>
+                }
+            </div>
+        }
+        else
+        {
+            @if (Form.Ports.Rows.Count > 0)
+            {
+                <PortsTable Draft="Form.Ports" Name="@Slug" LanHost="@LanHost" Network="@Shared" Marks="false" Problems="PortProblems" OnChanged="ChangedAsync" />
+            }
+            <div class="gb-sec-body" style="padding-top:@(Form.Ports.Rows.Count > 0 ? "6px" : null)">
+                @if (Form.Ports.Rows.Count == 0)
+                {
+                    <p class="gb-help">No ports. That's normal for a worker; add the port its program listens on to give it an address.</p>
+                }
+                <div><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddPortAsync">Add port</Btn></div>
+            </div>
+        }
+    </section>
+
+    <section class="gb-card gb-sec" id="cfg-networks">
+        @Head(Icons.Material.Outlined.Hub, "Network", Form.OnNetworks ? "Where other containers can find it by name." : "How it's connected.")
+        <div class="gb-sec-body">
+            <Field Label="Network mode" Help="@ModeHelp">
+                <Seg T="string" Options="ModeOptions" Value="Form.NetworkMode" ValueChanged="SetModeAsync" Label="Network mode" />
+            </Field>
+            @if (Form.OnNetworks)
+            {
+                <div class="gb-netpick">
+                    <div class="gb-netpick-row on">
+                        <span class="gb-check on" aria-hidden="true"></span>
+                        <div style="min-width:0">
+                            <div class="gb-row gb-row--wrap" style="gap:8px"><span class="gb-mono" style="font-weight:600">@Shared</span><span class="gb-tag gb-tag--outline">Shared network</span></div>
+                            <div class="gb-help">@SharedWho reach it as <span class="gb-mono">@(Form.Ports.Rows.FirstOrDefault()?.ContainerPort is int p ? $"{Slug}:{p}" : Slug)</span>.</div>
+                        </div>
+                    </div>
+                    @foreach (var name in Missing)
+                    {
+                        var making = Creating == name;
+                        <div class="gb-netpick-row gb-netpick-row--missing" @key="name">
+                            <SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" Class="gb-netpick-warn" />
+                            <div class="gb-grow" style="min-width:0">
+                                <div class="gb-row gb-row--wrap" style="gap:8px"><span class="gb-mono" style="font-weight:600">@name</span><span class="gb-tag gb-tag--serious">Doesn't exist</span></div>
+                                <div class="gb-help">@(Form.Pasted ? "The paste joins it" : "It's asked for"), but this host has no network called @name. Create it as a plain bridge network, or take it out.</div>
+                            </div>
+                            <div class="gb-netpick-acts">
+                                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" Busy="making" Disabled="@(Creating is not null && !making)" OnClick="() => OnCreateNetwork.InvokeAsync(name)">Create it</Btn>
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Close" Disabled="making" OnClick="() => RemoveNetworkAsync(name)">Remove</Btn>
+                            </div>
+                        </div>
+                    }
+                    @foreach (var n in Others)
+                    {
+                        var on = Form.ExtraNetworks.Contains(n.Network.Name);
+                        <button type="button" class="gb-netpick-row @(on ? "on" : null)" style="text-align:left;font:inherit;color:inherit;cursor:pointer" role="checkbox"
+                                aria-checked="@(on ? "true" : "false")" @onclick="() => ToggleNetworkAsync(n.Network.Name)">
+                            <span class="gb-check @(on ? "on" : null)" aria-hidden="true"></span>
+                            <div style="min-width:0">
+                                <div class="gb-mono" style="font-weight:600">@n.Network.Name</div>
+                                <div class="gb-help">@(n.Members.Count == 0 ? "Nothing on it yet." : string.Join(", ", n.Members.Take(4).Select(m => m.Title.Replace(" (app)", ""))) + (n.Members.Count > 4 ? $" and {n.Members.Count - 4} more" : "") + " are on it.")</div>
+                            </div>
+                        </button>
+                    }
+                </div>
+                <Field Label="Own LAN address (optional)" For="cfg-lan" Help="Its own IP on your LAN, as well as its ports on the host. Leave it empty for none; an automatic one can be given on its Network tab later.">
+                    <input id="cfg-lan" class="gb-input gb-input--mono" placeholder="none" value="@Form.LanAddress" @onchange="e => SetAsync(() => Form.LanAddress = e.Value?.ToString())" />
+                </Field>
+            }
+            else
+            {
+                <div class="gb-ro-note">
+                    <SvgIcon Icon="@Icons.Material.Outlined.Info" Size="sm" />
+                    <span>@ModeNote</span>
+                </div>
+            }
+        </div>
+    </section>
+
+    <section class="gb-card gb-sec" id="cfg-storage">
+        @Head(Icons.Material.Outlined.Storage, "Storage", Form.Mounts.Any(m => m.FromImage) ? "The image keeps data in these folders. A named volume keeps it across updates." : "Volumes keep data across updates; a host folder shares files with the host.")
+        <div class="gb-sec-body">
+            @if (Form.Mounts.Count > 0)
+            {
+                <div class="gb-cfg-rows">
+                    @foreach (var m in Form.Mounts)
+                    {
+                        <div class="gb-cfg-row gb-cfg-row--mount" @key="m">
+                            <select class="gb-input gb-input--sm gb-mk" aria-label="Kind" value="@m.Kind" @onchange="e => SetAsync(() => m.Kind = Enum.Parse<MountKind>(e.Value?.ToString() ?? nameof(MountKind.Volume)))">
+                                <option value="@MountKind.Volume">Volume</option>
+                                <option value="@MountKind.Bind">Host folder</option>
+                                <option value="@MountKind.Tmpfs">tmpfs</option>
+                            </select>
+                            <input class="gb-input gb-input--sm gb-input--mono" aria-label="Volume or host folder" placeholder="@(m.Kind == MountKind.Bind ? "/srv/data" : m.Kind == MountKind.Tmpfs ? "in memory" : $"gb-{Slug}-data")"
+                                   value="@m.Source" disabled="@(m.Kind == MountKind.Tmpfs)" @onchange="e => SetAsync(() => m.Source = e.Value?.ToString() ?? string.Empty)" />
+                            <input class="gb-input gb-input--sm gb-input--mono" aria-label="Path inside" placeholder="/data" value="@m.Target" @onchange="e => SetAsync(() => m.Target = e.Value?.ToString() ?? string.Empty)" />
+                            <label class="gb-check-wrap"><input type="checkbox" checked="@m.ReadOnly" @onchange="e => SetAsync(() => m.ReadOnly = e.Value is true)" />Read-only</label>
+                            <button type="button" class="gb-iconbtn" aria-label="Remove" @onclick="() => SetAsync(() => Form.Mounts.Remove(m))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                        </div>
+                        @if (m.FromImage)
+                        {
+                            <div class="gb-help" style="margin-top:-4px">Declared by the image: @m.Target</div>
+                        }
+                    }
+                </div>
+            }
+            <div class="gb-row gb-row--wrap">
+                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="@(() => SetAsync(() => Form.Mounts.Add(new NewMountRow { Source = $"gb-{Slug}-data" })))">Add volume</Btn>
+                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Folder" OnClick="@(() => SetAsync(() => Form.Mounts.Add(new NewMountRow { Kind = MountKind.Bind })))">Host folder</Btn>
+            </div>
+        </div>
+    </section>
+
+    <section class="gb-card gb-sec" id="cfg-env">
+        @Head(Icons.Material.Outlined.Key, "Environment", Form.OwnEnv.Any() ? "Its own variables. Secret ones are masked wherever they're shown." : "None of its own. Add what its documentation asks for.")
+        <div class="gb-sec-body">
+            @if (Form.Env.Any(e => e.Edited))
+            {
+                <div class="gb-cfg-rows">
+                    @foreach (var e in Form.Env.Where(e => e.Edited))
+                    {
+                        @EnvRow(e)
+                    }
+                </div>
+            }
+            <div class="gb-row gb-row--wrap">
+                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="@(() => SetAsync(() => Form.Env.Add(new NewEnvRow())))">Add variable</Btn>
+                @if (Form.Env.Count(e => !e.Edited) is int fromImage && fromImage > 0)
+                {
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" EndIcon="@(showImageEnv ? Icons.Material.Outlined.ExpandLess : Icons.Material.Outlined.ExpandMore)" OnClick="() => showImageEnv = !showImageEnv">
+                        From the image (@fromImage)
+                    </Btn>
+                }
+            </div>
+            @if (showImageEnv)
+            {
+                <div class="gb-cfg-rows">
+                    @foreach (var e in Form.Env.Where(e => !e.Edited))
+                    {
+                        @EnvRow(e)
+                    }
+                </div>
+                <p class="gb-help">The image sets these. Change one and it becomes the container's own.</p>
+            }
+        </div>
+    </section>
+
+    <section class="gb-card gb-sec" id="cfg-command">
+        @Head(Icons.Material.Outlined.Terminal, "Command", "Empty fields use the image's own.")
+        <div class="gb-sec-body">
+            <div class="gb-fgrid">
+                <Field Label="Command" For="cfg-cmd" Tag="@(string.IsNullOrEmpty(Form.Command) ? "image" : null)">
+                    <input id="cfg-cmd" class="gb-input gb-input--mono" placeholder="@Join(Form.Facts?.Command)" value="@Form.Command" @onchange="e => SetAsync(() => Form.Command = e.Value?.ToString())" />
+                </Field>
+                <Field Label="Entrypoint" For="cfg-entry" Tag="@(string.IsNullOrEmpty(Form.Entrypoint) ? "image" : null)">
+                    <input id="cfg-entry" class="gb-input gb-input--mono" placeholder="@Join(Form.Facts?.Entrypoint)" value="@Form.Entrypoint" @onchange="e => SetAsync(() => Form.Entrypoint = e.Value?.ToString())" />
+                </Field>
+                <Field Label="Working directory" For="cfg-wd" Tag="@(string.IsNullOrEmpty(Form.WorkingDir) ? "image" : null)">
+                    <input id="cfg-wd" class="gb-input gb-input--mono" placeholder="@(Form.Facts?.WorkingDir ?? "/")" value="@Form.WorkingDir" @onchange="e => SetAsync(() => Form.WorkingDir = e.Value?.ToString())" />
+                </Field>
+                <Field Label="User" For="cfg-user" Tag="@(string.IsNullOrEmpty(Form.User) ? "image" : null)">
+                    <input id="cfg-user" class="gb-input gb-input--mono" placeholder="@(Form.Facts?.User is { Length: > 0 } u ? u : "root")" value="@Form.User" @onchange="e => SetAsync(() => Form.User = e.Value?.ToString())" />
+                </Field>
+            </div>
+        </div>
+    </section>
+
+    <section class="gb-card gb-sec" id="cfg-run">
+        @Head(Icons.Material.Outlined.RestartAlt, "Restart & resources", "What Docker does when it stops, and the limits that stop one app from starving the others.")
+        <div class="gb-sec-body">
+            <Field Label="Restart">
+                <Seg T="string" Options="RestartOptions" Value="Form.Restart" ValueChanged="v => SetAsync(() => Form.Restart = v)" Label="Restart policy" />
+            </Field>
+            <ResourceFields Draft="Form.More" Create="true" HostCpus="HostCpus" Changed="ChangedAsync" />
+        </div>
+    </section>
+
+    <section class="gb-card gb-sec" id="cfg-health">
+        @Head(Icons.Material.Outlined.HealthAndSafety, "Health check", HealthSub)
+        <div class="gb-sec-body">
+            <Seg T="HealthMode" Options="HealthOptions" Value="Form.Health" ValueChanged="v => SetAsync(() => Form.Health = v)" Label="Health check" />
+            @if (Form.Health == HealthMode.Custom)
+            {
+                <div class="gb-fgrid">
+                    <Field Label="Command" For="cfg-hc" Help="Run in its shell; exit code 0 means healthy.">
+                        <input id="cfg-hc" class="gb-input gb-input--mono" placeholder="curl -fs http://localhost:3000/health" value="@Form.HealthCommand" @onchange="e => SetAsync(() => Form.HealthCommand = e.Value?.ToString() ?? string.Empty)" />
+                    </Field>
+                    <Field Label="Every" For="cfg-hi">
+                        <label class="gb-input"><input id="cfg-hi" type="number" min="1" placeholder="30" value="@Form.HealthIntervalSeconds" @onchange="e => SetAsync(() => Form.HealthIntervalSeconds = int.TryParse(e.Value?.ToString(), out var s) ? s : null)" /><span class="gb-input-suffix">seconds</span></label>
+                    </Field>
+                </div>
+            }
+        </div>
+    </section>
+
+    <SettingsLabels Draft="Form.More" Create="true" Changed="ChangedAsync" Id="cfg-labels" />
+
+    <SettingsLogging Draft="Form.More" Create="true" Changed="ChangedAsync" Id="cfg-logging" />
+
+    <SettingsAdvanced Draft="Form.More" Create="true" Changed="ChangedAsync" Id="cfg-advanced" ShowNetworkMode="false" ImageStopSignal="@Form.Facts?.StopSignal" />
+
+    @if (Form.Unfielded() is { Count: > 0 } rest)
+    {
+        <section class="gb-card gb-sec" id="cfg-more">
+            @Head(Icons.Material.Outlined.MoreHoriz, "Everything else", "As the source gave it: these have no field here. Each can change after it's created.")
+            <div class="gb-sec-body">
+                <dl class="gb-everything">
+                    @foreach (var (k, v) in rest)
+                    {
+                        <dt>@k</dt>
+                        <dd class="gb-mono">@v</dd>
+                    }
+                </dl>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public NewAppForm Form { get; set; } = default!;
+    /// <summary>The network name the app gets: its slug, made unique.</summary>
+    [Parameter, EditorRequired] public string Slug { get; set; } = "";
+    /// <summary>"postgres is taken on gitberth: postgres-2", from the plan.</summary>
+    [Parameter] public string? NameTaken { get; set; }
+    [Parameter, EditorRequired] public string LanHost { get; set; } = "";
+    [Parameter] public string Shared { get; set; } = "gitberth";
+    /// <summary>Every network on the host, with who's on it.</summary>
+    [Parameter] public IReadOnlyList<NetworkView> Networks { get; set; } = [];
+    [Parameter] public IReadOnlyList<PortProblem> PortProblems { get; set; } = [];
+    /// <summary>Raised after every edit, so the preview follows.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>Raised as the name is typed (the plan works out the network name).</summary>
+    [Parameter] public EventCallback<string> OnNameChanged { get; set; }
+    /// <summary>[Create it] on a network the source names that isn't on this host: the page makes it, then reads the networks again.</summary>
+    [Parameter] public EventCallback<string> OnCreateNetwork { get; set; }
+    /// <summary>The network being created now, if any.</summary>
+    [Parameter] public string? Creating { get; set; }
+
+    private bool showImageEnv;
+
+    private int HostCpus => Stats.Current.Host?.Cpus ?? Environment.ProcessorCount;
+
+    private string? NameProblem => Form.Name.Trim().Length == 0 ? "Give it a name." : AppService.Slugify(Form.Name).Length == 0 ? "Use letters or digits in the name." : null;
+
+    // Where the image comes from, said only as far as it's known: a local image is this host's; a registry's was picked from it.
+    private string ImageWhere => Form.Source switch
+    {
+        AppSource.Local => "local image",
+        AppSource.Registry when ImageReference.Parse(Form.Image) is { } r => r.IsDockerHub ? "from Docker Hub" : $"from {r.Registry}",
+        _ => "",
+    };
+
+    // The Ports section's line: where its ports came from, said only when it's true.
+    private string PortsSub
+    {
+        get
+        {
+            if (!Form.OnNetworks) return Form.NetworkMode == "host" ? "On the host's network it uses the host's own ports." : "With no network it has no ports.";
+            if (Form.Ports.Rows.Count == 0) return "The ports its program listens on. New ones are on the LAN.";
+            if (Form.Pasted) return "As the paste publishes them. New ones are on the LAN; change any of them.";
+            return Form.Ports.ImageExposed.Count > 0 ? "From the image. New apps are on the LAN by default; change any of them." : "The ports its program listens on. New ones are on the LAN.";
+        }
+    }
+
+    private IEnumerable<NetworkView> Others => Networks.Where(n => !n.System && n.Network.Name != Shared && n.Network.Name != LanAddresses.Network
+        && n.Network.Name is not ("bridge" or "host" or "none"));
+
+    // Networks the source names that this host doesn't have.
+    private IReadOnlyList<string> Missing => Form.Missing(Networks.Select(n => n.Network.Name), Shared);
+
+    private string SharedWho
+    {
+        get
+        {
+            var who = Networks.FirstOrDefault(n => n.Network.Name == Shared)?.Members.Select(m => m.Title.Replace(" (app)", "")).Take(3).ToList() ?? [];
+            return who.Count == 0 ? "Apps" : string.Join(", ", who) + " and the rest";
+        }
+    }
+
+    private List<SegOption<string>> ModeOptions
+    {
+        get
+        {
+            var options = new List<SegOption<string>>
+            {
+                new("", "Its networks", Icons.Material.Outlined.Hub),
+                new("host", "The host's", Icons.Material.Outlined.Dns),
+                new("none", "None", Icons.Material.Outlined.Block),
+            };
+            if (Form.NetworkMode.StartsWith("container:", StringComparison.Ordinal))
+                options.Add(new(Form.NetworkMode, $"{Form.NetworkMode["container:".Length..]}'s", Icons.Material.Outlined.CallSplit));
+            return options;
+        }
+    }
+
+    private string ModeHelp => Form.NetworkMode switch
+    {
+        "" => $"On {Shared} and any networks ticked below: other containers reach it by name, and its ports can be published.",
+        "host" => "It shares the host's own network: no Docker network, no ports of its own, no name for other containers.",
+        "none" => "No network at all: nothing reaches it, and it reaches nothing.",
+        var m => $"It shares {m["container:".Length..]}'s network: that container's addresses and ports are its own.",
+    };
+
+    // What the networks list would have been, said while the mode leaves it out.
+    private string ModeNote
+    {
+        get
+        {
+            var reach = Form.NetworkMode switch
+            {
+                "host" => $"Other containers and devices reach it at the host's address ({LanHost}), on whatever port it opens, not by name. It can't have an own LAN address.",
+                "none" => "It joins no network and has no address.",
+                var m => $"It's reached wherever {m["container:".Length..]} is.",
+            };
+            var named = Form.ExtraNetworks.Where(n => n != Shared).ToList();
+            return named.Count == 0 ? reach : $"{reach} The networks it named ({string.Join(", ", named)}) are left out unless you choose its networks again.";
+        }
+    }
+
+    private string HealthSub => Form.Health switch
+    {
+        HealthMode.Custom => "A command it runs every so often: Gitberth waits for healthy after a change.",
+        HealthMode.Disabled => "No check: it counts as up once it runs.",
+        _ => Form.Facts?.Health.Mode == HealthMode.Custom ? "The image's own check." : "The image has none: it counts as up once it runs.",
+    };
+
+    private static IReadOnlyList<SegOption<string>> RestartOptions => AppFacts.RestartOptions;
+
+    private static IReadOnlyList<SegOption<HealthMode>> HealthOptions => AppFacts.HealthOptions;
+
+    private RenderFragment Head(string icon, string title, string sub) => @<div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@icon" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3">@title</div>
+            <p>@sub</p>
+        </div>
+    </div>;
+
+    private RenderFragment EnvRow(NewEnvRow e) => @<div class="gb-cfg-row gb-cfg-row--env" @key="e">
+        <input class="gb-input gb-input--sm gb-input--mono" aria-label="Name" placeholder="NAME" value="@e.Key" @onchange="v => SetAsync(() => e.Key = v.Value?.ToString() ?? string.Empty)" />
+        <input class="gb-input gb-input--sm gb-input--mono gb-envv" aria-label="@($"Value of {e.Key}")" placeholder="value" type="@(e.Secret ? "password" : "text")" value="@e.Value"
+               @onchange="v => SetAsync(() => e.Value = v.Value?.ToString() ?? string.Empty)" />
+        <label class="gb-check-wrap" title="Masked wherever it's shown"><input type="checkbox" checked="@e.Secret" @onchange="v => SetAsync(() => e.Secret = v.Value is true)" />Secret</label>
+        <button type="button" class="gb-iconbtn" aria-label="@($"Remove {e.Key}")" @onclick="() => SetAsync(() => Form.Env.Remove(e))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+    </div>;
+
+    private async Task NameTyped(ChangeEventArgs e)
+    {
+        Form.Name = e.Value?.ToString() ?? "";
+        await OnNameChanged.InvokeAsync(Form.Name);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task AddPortAsync()
+    {
+        Form.Ports.Rows.Add(Form.Ports.NewRow());
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task TakePortsOutAsync() => SetAsync(Form.TakePortsOut);
+
+    private Task SetModeAsync(string mode) => SetAsync(() => Form.NetworkMode = mode);
+
+    private async Task ToggleNetworkAsync(string name)
+    {
+        if (!Form.ExtraNetworks.Remove(name)) Form.ExtraNetworks.Add(name);
+        await OnChanged.InvokeAsync();
+    }
+
+    private Task RemoveNetworkAsync(string name) => SetAsync(() =>
+    {
+        Form.ExtraNetworks.Remove(name);
+        Form.Joins.Remove(name);
+    });
+
+    private Task ChangedAsync() => OnChanged.InvokeAsync();
+
+    private async Task SetAsync(Action change)
+    {
+        change();
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetAsync(Func<bool> change)
+    {
+        change();
+        await OnChanged.InvokeAsync();
+    }
+
+    private static string Join(IReadOnlyList<string>? words) => words is { Count: > 0 } ? string.Join(' ', words) : "the image's own";
+}

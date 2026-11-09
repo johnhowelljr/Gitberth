@@ -1,0 +1,6 @@
+{
+  "kind": "DotNetWeb",
+  "title": "ASP.NET Core (net10.0)",
+  "port": 8080,
+  "expect": "Hello from ASP.NET Core"
+}

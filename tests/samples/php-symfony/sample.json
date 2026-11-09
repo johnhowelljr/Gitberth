@@ -1,0 +1,9 @@
+{
+  "kind": "Php",
+  "title": "PHP (Symfony)",
+  "port": 8080,
+  "expect": "Hello from Symfony",
+  "env": {
+    "APP_SECRET": "8cec7368141e768f44ed03e142576d0c"
+  }
+}

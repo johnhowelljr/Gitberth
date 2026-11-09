@@ -1,0 +1,6 @@
+{
+  "kind": "NodeSpa",
+  "title": "Next.js (static export)",
+  "port": 80,
+  "expect": "Hello from Next.js, exported"
+}

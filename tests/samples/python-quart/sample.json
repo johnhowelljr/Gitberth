@@ -1,0 +1,6 @@
+{
+  "kind": "Python",
+  "title": "Quart",
+  "port": 8000,
+  "expect": "Hello from Quart"
+}

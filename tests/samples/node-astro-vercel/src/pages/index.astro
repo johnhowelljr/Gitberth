@@ -1,0 +1,16 @@
+---
+// With output: 'server' this runs for every request, so each page load shows a new time.
+const renderedAt = new Date().toISOString();
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Astro on Gitberth</title>
+  </head>
+  <body>
+    <h1>Astro on Gitberth</h1>
+    <p>Rendered on the server at {renderedAt} by Node {process.version}.</p>
+  </body>
+</html>

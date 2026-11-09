@@ -1,0 +1,43 @@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+@*
+    A port in a list, in Docker's -p order (host:container) with the colon dimmed: a web port opens, any other copies its
+    address, a host-only one has the lock, and one that isn't published is dashed and faint. The tooltip says it the way
+    docker ps does; the same address is on the app's page.
+*@
+@switch (Chip.Kind)
+{
+    case AddressChipKind.Open:
+        <a class="gb-pc" href="@Chip.Value" target="_blank" rel="noopener" title="@Chip.Tooltip" aria-label="@Chip.AccessibleName">@Parts()</a>
+        break;
+    case AddressChipKind.Unpublished:
+        <span class="gb-pc gb-pc--faint" title="@Chip.Tooltip">@Chip.Label</span>
+        break;
+    default:
+        <button type="button" class="gb-pc @(Chip.Kind == AddressChipKind.HostOnly ? "gb-pc--lock" : null)" title="@Chip.Tooltip" aria-label="@Chip.AccessibleName" @onclick="CopyAsync">
+            @if (Chip.Kind == AddressChipKind.HostOnly)
+            {
+                <SvgIcon Icon="@Icons.Material.Filled.Lock" />
+            }
+            @Parts()
+        </button>
+        break;
+}
+
+@code {
+    [Parameter, EditorRequired] public AddressChip Chip { get; set; } = default!;
+
+    private RenderFragment Parts() => Chip.Label.IndexOf(':') is var at and > 0
+        ? @<text>@Chip.Label[..at]<b>:</b>@Chip.Label[(at + 1)..]</text>
+        : @<text>@Chip.Label</text>;
+
+    private async Task CopyAsync()
+    {
+        if (Chip.Value is null) return;
+        bool copied;
+        try { copied = await JS.InvokeAsync<bool>("gitberth.copy", Chip.Value); }
+        catch (JSException) { copied = false; }
+        Snackbar.Add(copied ? $"Copied {Chip.Value}" : "Your browser blocked copying", copied ? Severity.Success : Severity.Warning);
+    }
+}

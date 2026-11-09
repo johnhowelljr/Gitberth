@@ -1,0 +1,132 @@
+@inject ActivityLog Activity
+@inject AppActions Actions
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@* Everything that happened to the app, newest first: deploys (with their logs, and Roll back for a Git app), changes, updates, starts, stops and crashes. *@
+<SectionCard Title="Activity" Icon="@Icons.Material.Outlined.History" Sub="@(items is null ? null : $"{items.Count} {(items.Count == 1 ? "entry" : "entries")}")">
+    <Actions>
+        <Seg T="string" Options="Filters" Value="filter" ValueChanged="v => filter = v" Label="Show" />
+    </Actions>
+    <ChildContent>
+        @if (items is null)
+        {
+            <div class="gb-skel" style="height:240px"></div>
+        }
+        else if (Shown.Count == 0)
+        {
+            <EmptyState Icon="@Icons.Material.Outlined.History" Title="Nothing yet">
+                Deploys, settings changes, updates, starts, stops and crashes show here as they happen. Docker's own events are kept for 7 days.
+            </EmptyState>
+        }
+        else
+        {
+            <ActivityTimeline Items="Shown" ShowKind="true">
+                <Extra Context="item">
+                    @if (item.DeploymentId is int id && View.Git?.Deployments.FirstOrDefault(d => d.Id == id) is { } dep)
+                    {
+                        <div class="gb-row" style="margin-top:6px;flex-wrap:wrap">
+                            <DeployPill Deployment="dep" />
+                            @if (dep.CommitSha is not null)
+                            {
+                                <span class="gb-mono gb-t3" style="font-size:12px">@dep.ShortSha</span>
+                            }
+                            <span class="gb-t3" style="font-size:12px">@Format.Trigger(dep.Trigger) · took @Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Href="@($"apps/{dep.AppId}/deployments/{dep.Id}")" Icon="@Icons.Material.Outlined.Article">Log</Btn>
+                            @if (CanRollBackTo(dep, View.Row?.CurrentImage, kept))
+                            {
+                                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Undo" OnClick="() => RollbackAsync(dep)" Disabled="busy">Roll back to this</Btn>
+                            }
+                        </div>
+                    }
+                </Extra>
+            </ActivityTimeline>
+        }
+    </ChildContent>
+    <Foot>
+        @if (View.Summary.Source == AppSource.Git)
+        {
+            <span>The images from the last 3 successful deploys are kept for rolling back.</span>
+        }
+        else
+        {
+            <span>Docker's events are kept for 7 days; Gitberth's own entries stay.</span>
+        }
+    </Foot>
+</SectionCard>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IReadOnlyList<ActivityItem>? items;
+    // A Git app's build images still on this host: only their deploys can be rolled back to.
+    private IReadOnlySet<string> kept = new HashSet<string>();
+    private string filter = "all";
+    private bool busy;
+    private string? loadedFor;
+
+    /// <summary>
+    /// Roll back to this is offered on an earlier successful deploy whose image is still on this host. The others' images
+    /// went (only the last few are kept), and a deploy can't build an older commit, so nothing is offered for them.
+    /// </summary>
+    public static bool CanRollBackTo(Deployment dep, string? current, IReadOnlySet<string> kept) =>
+        dep.Status == DeployStatus.Succeeded && dep.ImageTag is { } image && image != current && kept.Contains(image);
+
+    private IReadOnlyList<SegOption<string>> Filters =>
+    [
+        new("all", "All"),
+        .. View.Summary.Source == AppSource.Git ? [new SegOption<string>("deploys", "Deploys")] : Array.Empty<SegOption<string>>(),
+        new("changes", "Changes"),
+        new("docker", "Starts and stops"),
+    ];
+
+    private IReadOnlyList<ActivityItem> Shown => (items ?? []).Where(i => filter switch
+    {
+        "deploys" => i.Kind == ActivityKind.Deploy,
+        "changes" => i.Kind is ActivityKind.Settings or ActivityKind.Live or ActivityKind.Change or ActivityKind.Recreated or ActivityKind.RecreatedOutside
+            or ActivityKind.Updated or ActivityKind.UpdateFound or ActivityKind.RolledBack or ActivityKind.Created or ActivityKind.Adopted,
+        "docker" => i.Kind is ActivityKind.Started or ActivityKind.Stopped or ActivityKind.Restarted or ActivityKind.Event,
+        _ => true,
+    }).ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{View.Summary.Key}|{View.Summary.ContainerId}|{View.Summary.State}|{View.Git?.Deployments.FirstOrDefault()?.Status}";
+        if (key == loadedFor) return;
+        loadedFor = key;
+        try { items = await Activity.ForAsync(View.Summary.Container, View.Summary.AppId, 200); }
+        catch (Exception ex)
+        {
+            items = [];
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        if (View.Summary.Source == AppSource.Git && View.Summary.AppId is int appId)
+        {
+            try { kept = await Actions.RollbackImagesAsync(appId); }
+            catch (Exception) { kept = new HashSet<string>(); }
+        }
+    }
+
+    private async Task RollbackAsync(Deployment to)
+    {
+        if (View.Summary.AppId is not int appId) return;
+        if (await Dialogs.ShowMessageBoxAsync($"Roll back to #{to.Id}?",
+                $"The container restarts from the image built from {to.ShortSha}. New commits still deploy automatically.", yesText: "Roll back", cancelText: "Cancel") != true) return;
+        busy = true;
+        try
+        {
+            var deploymentId = await Actions.RollbackAsync(appId, to.Id);
+            Nav.NavigateTo($"apps/{appId}/deployments/{deploymentId}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

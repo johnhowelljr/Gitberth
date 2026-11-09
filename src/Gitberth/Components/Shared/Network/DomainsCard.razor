@@ -1,0 +1,412 @@
+@inject DomainService Domains
+@inject AppService Apps
+@inject AppCatalog Catalog
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@*
+    An app's domains, routed through the Cloudflare Tunnel on the host the way Vercel routes a project's domains, for any
+    app: one that Gitberth hasn't kept a record of yet gets one with its first domain. They go to the web port. When that's
+    Internal and cloudflared runs on the host's network, the tunnel can only reach it through a host port, so adding a
+    domain publishes the web port on the host only first, and the button says so.
+*@
+<section class="gb-card @Class" aria-labelledby="gb-domains-title">
+    <div class="gb-card-head">
+        <div class="gb-card-title" id="gb-domains-title">
+            <SvgIcon Icon="@Icons.Material.Outlined.Public" />Domains
+            <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Through the Cloudflare tunnel</span>
+        </div>
+        <div class="gb-card-actions">
+            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="LoadAsync" Disabled="@(busy || AppId is null)">Check again</Btn>
+        </div>
+    </div>
+    @if (AppId is not null && overview is null)
+    {
+        <div class="gb-card-body"><div class="gb-skel" style="height:36px"></div></div>
+    }
+    else if (overview is { Enabled: false })
+    {
+        <div class="gb-card-body">
+            <EmptyState Small="true" Title="Domains are off" Icon="@Icons.Material.Outlined.Public">
+                Gitberth leaves Cloudflare alone. <a href="settings">Turn them on in Settings</a> to give @AppName a domain here.
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        @if (overview is { TokenSaved: false })
+        {
+            <div class="gb-card-body" style="padding-bottom:0">
+                <Banner Tone="info" Title="No Cloudflare token yet">Gitberth routes domains through your tunnel once it has one. <a href="settings">Add one in Settings</a>.</Banner>
+            </div>
+        }
+        else if (overview?.Problem is { } problem)
+        {
+            <div class="gb-card-body" style="padding-bottom:0"><Banner Tone="warn" Title="The tunnel needs a look">@problem</Banner></div>
+        }
+        @if (overview is null || overview.Domains.Count == 0)
+        {
+            <div class="gb-card-body">
+                <EmptyState Small="true" Title="No domains yet" Icon="@Icons.Material.Outlined.Language">
+                    Add one and Gitberth sends it to @AppName: every page, script and API on it.
+                </EmptyState>
+            </div>
+        }
+        else
+        {
+            var several = overview.Domains.Count > 1;
+            <div>
+                @foreach (var d in overview.Domains)
+                {
+                    <div class="gb-drow" @key="d.Hostname">
+                        <div style="min-width:0">
+                            <div class="gb-drow-host">
+                                <a href="@($"https://{d.Hostname}/")" target="_blank" rel="noopener">@d.Hostname</a>
+                                @if (several && d.Main)
+                                {
+                                    <span class="gb-tag gb-tag--accent">Main</span>
+                                }
+                            </div>
+                            <div class="gb-drow-sub">
+                                @d.Summary
+                                @if (d.Warning is not null)
+                                {
+                                    <span style="color:#ffd98a"> @d.Warning</span>
+                                }
+                            </div>
+                        </div>
+                        <span class="gb-pill2 @(d.Working ? "gb-tone-good" : "gb-tone-warn")">
+                            @if (d.Working)
+                            {
+                                <i class="gb-st-dot gb-st-dot--running"></i>
+                            }
+                            else
+                            {
+                                <SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />
+                            }
+                            @(d.Working ? "Live" : "Not working")
+                        </span>
+                        <div class="gb-drow-acts d-acts">
+                            @if (d.Fix == DomainFix.Sync)
+                            {
+                                <Btn Size="BtnSize.Sm" OnClick="FixAsync" Disabled="busy">Fix<span class="gb-sr"> @d.Hostname</span></Btn>
+                            }
+                            else if (d.Fix == DomainFix.PointDnsHere)
+                            {
+                                <Btn Size="BtnSize.Sm" OnClick="() => PointHereAsync(d.Hostname)" Disabled="busy">Point it here<span class="gb-sr">: @d.Hostname</span></Btn>
+                            }
+                            else if (d.Fix == DomainFix.ServeAllPaths)
+                            {
+                                <Btn Size="BtnSize.Sm" OnClick="() => ServeAllPathsAsync(d.Hostname)" Disabled="busy">Serve every path<span class="gb-sr"> on @d.Hostname</span></Btn>
+                            }
+                            @if (several && !d.Main)
+                            {
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeMainAsync(d.Hostname)" Disabled="busy">Make main<span class="gb-sr">: @d.Hostname</span></Btn>
+                            }
+                            <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.OpenInNew" Href="@($"https://{d.Hostname}/")" Target="_blank" Label="@($"Open {d.Hostname}")" />
+                            <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveAsync(d.Hostname)" Disabled="busy" Label="@($"Remove {d.Hostname}")" />
+                        </div>
+                    </div>
+                }
+            </div>
+            @if (several)
+            {
+                <div class="gb-card-body" style="padding-top:4px;padding-bottom:12px">
+                    <p class="gb-help">The main domain is the address the app is told it has, like on Vercel: <code>VERCEL_URL</code> and <code>AUTH_URL</code> for apps that use Auth.js.</p>
+                </div>
+            }
+        }
+        @if (notes.Count > 0)
+        {
+            <ul class="gb-dnotes">
+                @foreach (var note in notes)
+                {
+                    <li style="@(note.Problem ? "color:#ffd98a" : null)">@note.Text</li>
+                }
+            </ul>
+        }
+        <div class="gb-card-foot" style="flex-direction:column;align-items:stretch;gap:8px">
+            <div class="gb-dadd">
+                <input class="gb-input gb-input--sm gb-input--mono" placeholder="app.example.com" aria-label="New domain" value="@newDomain"
+                       @oninput="e => newDomain = e.Value?.ToString()" @onkeydown="OnKeyDown" disabled="@(busy || !CanAdd)" />
+                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="@(!CanAdd || string.IsNullOrWhiteSpace(newDomain))" Busy="busy">
+                    @(PublishFirst ? "Add domain and publish" : "Add domain")
+                </Btn>
+            </div>
+            @if (web is null)
+            {
+                <p class="gb-help">Mark a web port in Ports first: domains go to the web port.</p>
+            }
+            else if (PublishFirst)
+            {
+                <p class="gb-help">
+                    The tunnel reaches apps through a host port, so port @web.ContainerPort is also published as Host only
+                    (@(previewPort is int port ? $"127.0.0.1:{port}" : "on a free host port")), and @(!FromRepo ? $"{AppName} is recreated once, after you confirm the change" : Running ? $"{AppName} restarts once" : $"{AppName} takes it when it starts").
+                    The LAN still can't reach it.@(Deploying ? " A deploy is running: add it when it finishes." : "")
+                </p>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    /// <summary>The app's record; null while Gitberth keeps none for it (its first domain makes one).</summary>
+    [Parameter] public int? AppId { get; set; }
+    /// <summary>The app's key (its container's name), for making its record with the first domain.</summary>
+    [Parameter, EditorRequired] public string Key { get; set; } = "";
+    /// <summary>The app's name, for "kanban restarts once".</summary>
+    [Parameter, EditorRequired] public string AppName { get; set; } = "";
+    /// <summary>The app's ports, the web port marked: its domains go to that one.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<PortMapping> Ports { get; set; } = [];
+    /// <summary>The app's container runs: publishing the web port restarts it once, rather than waiting for it to start.</summary>
+    [Parameter] public bool Running { get; set; }
+    /// <summary>A deploy of the app is under way: publishing the web port waits for it.</summary>
+    [Parameter] public bool Deploying { get; set; }
+    /// <summary>
+    /// It's deployed from a repo: publishing the web port is saved and made live by a deploy without a build. Any other
+    /// app's ports are its container's, so publishing goes through the change dialog first.
+    /// </summary>
+    [Parameter] public bool FromRepo { get; set; }
+    /// <summary>Raised after domains change (or the web port was published for one), so the page reads the app again.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>Raised with the domains as they're read, so the page's diagram draws them.</summary>
+    [Parameter] public EventCallback<DomainsOverview> OnLoaded { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private DomainsOverview? overview;
+    private int? loadedFor;
+    private string? newDomain;
+    private bool busy;
+    private IReadOnlyList<DomainNote> notes = [];
+    private PortMapping? web;
+    // Adding a domain said the tunnel can't reach the web port as it is, whatever the overview found.
+    private bool needsHost;
+    private int? previewPort;
+    private string previewFor = "";
+
+    // Adding a domain publishes the web port on the host only first: it's Internal, and cloudflared reaches apps by host port.
+    private bool PublishFirst => web is { Access: PortAccess.Internal } && (needsHost || overview?.Tunnel is { HostNetwork: true });
+
+    // A domain can be added now: there's a web port for it, and nothing restarts the app while a deploy runs.
+    private bool CanAdd => !busy && web is not null && !(PublishFirst && Deploying) && overview?.Enabled != false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        web = PortRules.WebOf(Ports);
+        if (loadedFor != AppId || (AppId is null && overview is null))
+        {
+            loadedFor = AppId;
+            (overview, notes, needsHost) = (null, [], false);
+            await LoadAsync();
+        }
+        await PreviewAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (AppId is not int appId)
+        {
+            // No record yet, so no domains; whether domains are on, and whether there's a token, are the host's, as for any app.
+            overview = await NoRecordAsync();
+            return;
+        }
+        busy = true;
+        try
+        {
+            var loaded = await Domains.GetOverviewAsync(appId);
+            if (appId != AppId) return;
+            overview = loaded;
+            await OnLoaded.InvokeAsync(loaded);
+        }
+        catch (Exception ex)
+        {
+            overview = new DomainsOverview(true, null, ex.Message, []);
+        }
+        finally
+        {
+            busy = false;
+        }
+        await PreviewAsync();
+    }
+
+    // An app with no record has no domains; the card still says what the host's setting and token make of it.
+    private async Task<DomainsOverview> NoRecordAsync()
+    {
+        try
+        {
+            if (!await Domains.EnabledAsync()) return new DomainsOverview(false, null, null, [], Enabled: false);
+            return new DomainsOverview(await Domains.TokenSavedAsync(), null, null, []);
+        }
+        catch (Exception ex)
+        {
+            return new DomainsOverview(true, null, ex.Message, []);
+        }
+    }
+
+    // The host port publishing the web port would take, as the line before the button says it. Read only when it'd be used.
+    private async Task PreviewAsync()
+    {
+        var key = $"{AppId}|{web?.ContainerPort}|{PublishFirst}|{string.Join(',', Ports.Select(p => p.HostPort))}";
+        if (key == previewFor) return;
+        previewFor = key;
+        previewPort = null;
+        if (!PublishFirst || web is null) return;
+        try
+        {
+            var others = Ports.Where(p => p != web && p.HostPort is not null).Select(p => p.HostPort!.Value).ToList();
+            previewPort = await Apps.SuggestHostPortAsync(web.ContainerPort, "tcp", AppId, others);
+        }
+        catch (Exception)
+        {
+            // Docker couldn't be read: the line says "a free host port", and adding picks one when it can.
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && CanAdd && !string.IsNullOrWhiteSpace(newDomain)) await AddAsync();
+    }
+
+    // The app's record, made now for an app Gitberth kept none for (domains belong to a record).
+    private async Task<int> RecordAsync() => AppId ?? (await Catalog.AdoptAsync(Key)).Id;
+
+    private Task AddAsync() => RunAsync(async () =>
+    {
+        var hostname = DomainNames.Normalize(newDomain);
+        var appId = await RecordAsync();
+        if (PublishFirst)
+        {
+            var published = await Domains.AddAndPublishAsync(appId, newDomain!);
+            if (published.Error is not null)
+            {
+                Snackbar.Add(published.Error, Severity.Error);
+                return null;
+            }
+            if (published.Plan is { } plan) return await PublishThenAddAsync(appId, hostname!, plan, published.HostPort);
+            newDomain = null;
+            needsHost = false;
+            if (published.HostPort is int port)
+                Snackbar.Add(published.DeploymentId is null
+                    ? $"Added {hostname}. Port {web?.ContainerPort} is published as Host only (127.0.0.1:{port}), and the route follows."
+                    : $"Added {hostname}. Port {web?.ContainerPort} is published as Host only (127.0.0.1:{port}): {AppName} restarts once, and the route follows.", Severity.Success);
+            return published.Report;
+        }
+        var added = await Domains.AddAsync(appId, newDomain!);
+        if (added.NeedsHostBinding)
+        {
+            // The tunnel turned out to reach apps only by host port: the button now publishes the web port first.
+            needsHost = true;
+            Snackbar.Add(added.Error!, Severity.Warning);
+            return null;
+        }
+        if (added.Error is not null)
+        {
+            Snackbar.Add(added.Error, Severity.Error);
+            return null;
+        }
+        newDomain = null;
+        return added.Report;
+    }, DomainNames.Normalize(newDomain));
+
+    // An app that isn't deployed from a repo: its web port is published by a change to its container, confirmed in the
+    // change dialog like any other. The domain is added once that change has published the port, and only then said to be.
+    private async Task<SyncReport?> PublishThenAddAsync(int appId, string hostname, SettingsPlan plan, int? port)
+    {
+        var dialog = await Dialogs.ShowAsync<ChangeDialog>(null, new DialogParameters<ChangeDialog>
+        {
+            { x => x.Plan, plan },
+            { x => x.Title, AppName },
+            { x => x.Running, Running },
+            { x => x.Heading, $"Publish port {web?.ContainerPort} for {hostname}?" },
+            { x => x.ApplyText, Running ? "Recreate and add the domain" : "Recreate it stopped and add the domain" },
+        }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        // Cancelled, or Compose's file to change: nothing changed, and the domain wasn't added.
+        if (await dialog.Result is not { Canceled: false, Data: SettingsOutcome outcome }) return null;
+        if (outcome.Job is not { } job)
+        {
+            Snackbar.Add($"{hostname} wasn't added: {outcome.Message}", Severity.Error);
+            return null;
+        }
+        // The change may still be running (the dialog can be closed while it does): the domain waits for it.
+        var added = await Domains.AddWhenPublishedAsync(appId, hostname, job.Completion);
+        if (added.Error is not null)
+        {
+            Snackbar.Add(added.Error, Severity.Error);
+            return null;
+        }
+        newDomain = null;
+        needsHost = false;
+        var at = $"Port {web?.ContainerPort} is published as Host only{(port is int p ? $" (127.0.0.1:{p})" : "")}";
+        var stopped = (await job.Completion).Outcome == PortChangeOutcome.WaitsForStart;
+        Snackbar.Add(stopped ? $"Added {hostname}. {at}. {AppName} is stopped, so nothing answers there yet: once it runs, Fix on the domain routes it."
+            : added.Report.Notes.Any(n => n.Problem) ? $"Added {hostname}. {at}, but its route isn't written yet: see the note under the list."
+            : $"Added {hostname}. {at}, and the tunnel sends {hostname} there.", Severity.Success);
+        return added.Report;
+    }
+
+    private Task FixAsync() => RunAsync(async () => await Domains.SyncAsync());
+
+    private Task MakeMainAsync(string hostname) => RunAsync(async () =>
+    {
+        if (await Domains.SetMainAsync(AppId!.Value, hostname) is { } error) Snackbar.Add(error, Severity.Error);
+        else Snackbar.Add($"{hostname} is the main domain now. The app gets it as its address with its next build.", Severity.Success);
+        return null;
+    });
+
+    private async Task ServeAllPathsAsync(string hostname)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            $"Serve every path on {hostname}?",
+            $"Right now the tunnel only sends some addresses on {hostname} to this app. After this, every page, script, API and admin path of the app answers there, the way Vercel serves a domain.",
+            yesText: "Serve every path", cancelText: "Cancel");
+        if (confirmed == true) await RunAsync(async () => await Domains.ServeAllPathsAsync(AppId!.Value, hostname));
+    }
+
+    private async Task PointHereAsync(string hostname)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            $"Point {hostname} at your tunnel?",
+            $"Gitberth replaces {hostname}'s DNS records in Cloudflare with one that sends it to your tunnel. Whatever it points at now stops getting its visitors.",
+            yesText: "Point it here", cancelText: "Cancel");
+        if (confirmed == true) await RunAsync(async () => await Domains.PointDnsHereAsync(AppId!.Value, hostname));
+    }
+
+    private async Task RemoveAsync(string hostname)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            $"Remove {hostname}?",
+            "Gitberth takes its route out of your Cloudflare Tunnel, and removes its DNS record if Gitberth added it. A record you made yourself stays. The app keeps running.",
+            yesText: "Remove", cancelText: "Cancel");
+        if (confirmed == true) await RunAsync(async () => await Domains.RemoveAsync(AppId!.Value, hostname), hostname);
+    }
+
+    /// <param name="hostname">The domain the action is about: its notes belong here even once it's gone from the list.</param>
+    private async Task RunAsync(Func<Task<SyncReport?>> action, string? hostname = null)
+    {
+        // The page keeps this card when it moves to another app; results for the old one aren't shown there.
+        var key = Key;
+        busy = true;
+        try
+        {
+            var report = await action();
+            if (key != Key) return;
+            if (AppId is int appId)
+            {
+                var loaded = await Domains.GetOverviewAsync(appId);
+                // A sync covers every app's domains; this card shows what concerns this app's.
+                if (report is not null) notes = report.For([.. loaded.Domains.Select(d => d.Hostname), .. hostname is null ? [] : new[] { hostname }]).Notes;
+                overview = loaded;
+                await OnLoaded.InvokeAsync(loaded);
+            }
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

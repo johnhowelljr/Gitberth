@@ -1,0 +1,121 @@
+@*
+    New app's "What will run" (new-app-configure.html): the app as it will be, following every edit: its identity, how
+    it'll be reached (the Network tab's diagram, top to bottom, drawn for its network mode), where its data lives, and the
+    docker run it amounts to.
+*@
+<section class="gb-card gb-preview" aria-labelledby="gb-prev-title">
+    <div class="gb-card-head">
+        <div class="gb-card-title" id="gb-prev-title"><SvgIcon Icon="@Icons.Material.Outlined.Visibility" />What will run</div>
+        @if (Live)
+        {
+            <div class="gb-card-actions"><span class="gb-pill2 gb-tone-good"><i class="gb-st-dot gb-st-dot--running"></i>Updates as you type</span></div>
+        }
+    </div>
+    <div class="gb-card-body gb-stack" style="gap:14px">
+        <div class="gb-row gb-row--wrap" style="gap:12px;flex-wrap:nowrap">
+            <AppLogo Image="@Form.Image" Name="@Form.Name" Size="44" />
+            <div style="min-width:0">
+                <div class="gb-h3 gb-ellipsis">@(Form.Name.Trim().Length > 0 ? Form.Name.Trim() : "New app")</div>
+                <div class="gb-row gb-row--wrap" style="gap:6px;margin-top:4px"><SourceBadge Source="Form.Source" /><span class="gb-mono gb-t3 gb-ellipsis" style="font-size:12px">@Form.Image</span></div>
+            </div>
+        </div>
+        <ReachDiagram Model="Reach" Legend="false" />
+        <dl class="gb-read" style="grid-template-columns:96px minmax(0,1fr)">
+            @if (NewAppText.NetworkModeText(Form.NetworkMode) is { } mode)
+            {
+                <dt>Network</dt>
+                <dd>@mode</dd>
+            }
+            <dt>Addresses</dt>
+            <dd class="gb-mono">@(Addresses.Count == 0 ? NoAddress : string.Join("  ", Addresses))</dd>
+            <dt>Data</dt>
+            <dd class="gb-mono">@(Data.Count == 0 ? "in the container only" : string.Join(", ", Data))</dd>
+            @* How long its own start takes isn't known here, so only what comes first is said. *@
+            <dt>Starts</dt>
+            <dd>@(Form.OnHost ? "when it's created" : "after the pull") <span class="gb-t3">· @(Form.OnHost ? "no pull needed" : "the image is pulled first")</span></dd>
+        </dl>
+        @if (ShowRun)
+        {
+            <CodeBlock Title="docker run" Code="@DockerRun" Icon="@Icons.Material.Outlined.Terminal" />
+        }
+    </div>
+    @if (Footer is not null)
+    {
+        <div class="gb-card-foot" style="flex-direction:column;align-items:stretch;gap:10px">@Footer</div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public NewAppForm Form { get; set; } = default!;
+    [Parameter, EditorRequired] public string Slug { get; set; } = "";
+    [Parameter, EditorRequired] public string LanHost { get; set; } = "";
+    [Parameter] public string Shared { get; set; } = "gitberth";
+    /// <summary>Who's on the shared network, for the diagram's network node.</summary>
+    [Parameter] public IReadOnlyList<string> SharedMembers { get; set; } = [];
+    [Parameter] public RenderFragment? Footer { get; set; }
+    /// <summary>The docker run it amounts to (off where the review shows the plan's own).</summary>
+    [Parameter] public bool ShowRun { get; set; } = true;
+    /// <summary>It follows every edit (Configure); off on the Create step, where nothing is edited.</summary>
+    [Parameter] public bool Live { get; set; } = true;
+
+    private ReachModel Reach
+    {
+        get
+        {
+            var draft = Form.ToDraft();
+            var mode = draft.Settings.NetworkMode;
+            // Host, none or another container's: no Docker networks of its own, so none are drawn.
+            IReadOnlyList<ReachNetwork> networks = mode.Length > 0 ? []
+                : [new ReachNetwork(Shared, SharedMembers, true), .. Form.ExtraNetworks.Where(n => n != Shared).Select(n => new ReachNetwork(n, [], false))];
+            return ReachModel.Build(new ReachInput
+            {
+                Name = Slug, Title = Form.Name.Trim().Length > 0 ? Form.Name.Trim() : "New app", Image = Form.Image,
+                State = AppState.NotCreated, StateText = "Not created yet", Running = true,
+                LanHost = LanHost, NetworkMode = mode, SharesWith = mode.StartsWith("container:", StringComparison.Ordinal) ? mode["container:".Length..] : null,
+                Ports = mode.Length > 0 ? [] : draft.Settings.Ports, WebPort = Form.Ports.WebPort,
+                Networks = networks, SharedNetwork = Shared, OwnLanAddress = mode.Length > 0 ? null : draft.LanAddress, CanPublish = false, CanJoin = false,
+            });
+        }
+    }
+
+    private string NoAddress => Form.NetworkMode switch
+    {
+        "host" => $"{LanHost}, on any port it opens",
+        "none" => "none: it has no network",
+        "" => "none: it serves nothing",
+        _ => "its other container's",
+    };
+
+    private List<string> Addresses
+    {
+        get
+        {
+            if (!Form.OnNetworks) return [];
+            var rules = Form.Ports.Rules();
+            var list = rules.Where(r => r.Published && r.HostPort is not null)
+                .Select(r => r.Access == PortAccess.HostOnly ? ContainerPorts.Address("127.0.0.1", r.HostPort!.Value) : ContainerPorts.Address(LanHost, r.HostPort!.Value))
+                .Distinct().Take(2).ToList();
+            if (rules.FirstOrDefault() is { } first) list.Add(ContainerPorts.Address(Slug, first.ContainerPort));
+            return list;
+        }
+    }
+
+    private List<string> Data => Form.Mounts.Where(m => m.Target.Length > 0)
+        .Select(m => m.Kind == MountKind.Tmpfs ? $"tmpfs → {m.Target}" : $"{m.Source} → {m.Target}").Take(3).ToList();
+
+    private string DockerRun
+    {
+        get
+        {
+            var draft = Form.ToDraft();
+            // As the creator joins them: none for host, none or another container's network; else the shared one with its name first.
+            var networks = new List<NetworkJoin>();
+            if (draft.Settings.NetworkMode.Length == 0)
+            {
+                networks.Add(new(Shared, [Slug]));
+                networks.AddRange(draft.ExtraNetworks.Where(n => n.Name.Length > 0 && n.Name != Shared));
+            }
+            return ContainerSettingsJson.DockerRun($"gb-{Slug}", draft.Settings, networks, draft.Options.SecretKeys);
+        }
+    }
+}

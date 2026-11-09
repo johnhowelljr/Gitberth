@@ -1,0 +1,59 @@
+@*
+    A form field's frame: the label (with "Changed" and a tag such as "image" after it), the control, then "was <old>"
+    with Undo while it's changed, a line of help, or what's wrong with it. The control itself is the page's own native
+    input with .gb-input (add .gb-input--changed while Changed).
+*@
+<div class="gb-field @(Changed ? "gb-field--changed" : null) @Class">
+    @if (Label is not null)
+    {
+        <label class="gb-label" for="@For">
+            @Label
+            @if (Tag is not null)
+            {
+                <span class="gb-default-tag">@Tag</span>
+            }
+            @if (Changed)
+            {
+                <span class="gb-changed-mark">Changed</span>
+            }
+        </label>
+    }
+    @ChildContent
+    @if (Error is not null)
+    {
+        <div class="gb-field-error" role="alert">@Error</div>
+    }
+    else if (Changed && Was is not null)
+    {
+        <div class="gb-was">
+            was <s>@Was</s>
+            @if (OnUndo.HasDelegate)
+            {
+                <button type="button" class="gb-iconbtn" style="width:22px;height:22px" title="Undo" aria-label="@($"Undo {Label}")" @onclick="OnUndo">
+                    <SvgIcon Icon="@Icons.Material.Outlined.Undo" Size="xs" />
+                </button>
+            }
+        </div>
+    }
+    else if (Help is not null || HelpContent is not null)
+    {
+        <div class="gb-help">@Help @HelpContent</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Label { get; set; }
+    /// <summary>The control's id, so the label points at it.</summary>
+    [Parameter] public string? For { get; set; }
+    /// <summary>A quiet tag after the label: "image" (the image's own value), "default".</summary>
+    [Parameter] public string? Tag { get; set; }
+    [Parameter] public bool Changed { get; set; }
+    /// <summary>The loaded value, shown struck through while it's changed.</summary>
+    [Parameter] public string? Was { get; set; }
+    [Parameter] public EventCallback OnUndo { get; set; }
+    [Parameter] public string? Help { get; set; }
+    [Parameter] public RenderFragment? HelpContent { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

@@ -1,0 +1,42 @@
+@if (Rows.Count > 0)
+{
+    <div class="gb-rows">
+        <div class="gb-edrow gb-edrow--vol gb-edrow-head">
+            <span>Volume name or host folder</span>
+            <span>Path in the container</span>
+            <span>Read-only</span>
+            <span></span>
+        </div>
+        @foreach (var row in Rows)
+        {
+            <div class="gb-edrow gb-edrow--vol" @key="row">
+                <MudTextField T="string" @bind-Value="row.Source" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="data  or  /srv/myapp"
+                              Class="gb-mono-input" HelperText="@Describe(row.Source)" />
+                <MudTextField T="string" @bind-Value="row.Target" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="/app/data" Class="gb-mono-input" />
+                <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.ReadOnly" Size="Size.Small" Color="Color.Primary" /></div>
+                <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="gb-edrow-delete" OnClick="() => Rows.Remove(row)" aria-label="Remove" />
+            </div>
+        }
+    </div>
+}
+else
+{
+    <div class="gb-placeholder">No volumes. Files the app writes inside its container are lost on every deploy.</div>
+}
+<div class="gb-actions-row">
+    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Rows.Add(new VolumeRow())">Add volume</MudButton>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<VolumeRow> Rows { get; set; } = [];
+    [Parameter] public string Slug { get; set; } = "app";
+
+    private string? Describe(string? source)
+    {
+        var s = source?.Trim();
+        if (string.IsNullOrEmpty(s)) return null;
+        return VolumeNames.IsBind(s)
+            ? "Folder on the host"
+            : $"Docker volume {VolumeNames.Resolve(Slug.Length == 0 ? "app" : Slug, s)}";
+    }
+}

@@ -1,0 +1,506 @@
+@implements IDisposable
+@inject AppSettingsService Settings
+@inject UpdateService Updates
+@inject PortChanger Changer
+@inject NavigationManager Nav
+
+@*
+    The one confirmation for every change to an app's container (apply-dialog.html), generalized from the port change
+    dialog: what changes (old struck through, new in green), what it keeps, what else is new, who notices; then the steps as
+    they run, how it ended, the failed container's last output and the way back. Port changes, settings changes, live-only
+    changes (its short form: no restart), updates and rollbacks all come through here with their SettingsPlan. A change runs
+    in the background: closing this leaves it running.
+*@
+<MudDialog Class="gb-cdlg" ContentClass="gb-cdlg-content">
+    <TitleContent>
+        <div class="gb-cdlg-head">
+            <span class="gb-cdlg-ic"><SvgIcon Icon="@HeadIcon" /></span>
+            <div style="min-width:0">
+                <div class="gb-cdlg-t">@HeadTitle</div>
+                @if (HeadSub is not null)
+                {
+                    <div class="gb-cdlg-s" role="status">@HeadSub</div>
+                }
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="gb-cdlg-body">
+            @if (job is null && outcome is null)
+            {
+                @Review()
+            }
+            else if (result is null && job is not null)
+            {
+                <div class="gb-progress" aria-hidden="true"><i style="width:@(ProgressPercent)%"></i></div>
+                <ChangeSteps Steps="job.Steps" Planned="Planned" />
+            }
+            else
+            {
+                @Result()
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <div class="gb-cdlg-foot">
+            @if (job is null && outcome is null)
+            {
+                <span class="gb-help">@FootLine</span>
+                <Btn Kind="BtnKind.Ghost" OnClick="Cancel" Disabled="starting">@(Form == ChangeForm.Compose ? "Close" : "Cancel")</Btn>
+                @if (Form != ChangeForm.Compose)
+                {
+                    <Btn Kind="BtnKind.Primary" Icon="@ChangeText.Icon(Form)" OnClick="StartAsync" Disabled="@(!CanStart)" Busy="starting">@(ApplyText ?? ChangeText.Button(Form, Name))</Btn>
+                }
+            }
+            else if (result is null && job is not null)
+            {
+                <span class="gb-help">You can close this; it carries on.</span>
+                <Btn OnClick="Close">Close</Btn>
+            }
+            else if (result is { Outcome: PortChangeOutcome.NeedsDecision } && original is null)
+            {
+                <Btn OnClick="Close" Disabled="starting">Close</Btn>
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Undo" OnClick="StartOriginalAsync" Busy="starting">Start the original</Btn>
+            }
+            else if (result is { Ok: false } || outcome is { Ok: false })
+            {
+                @if (result?.LastOutput is not null)
+                {
+                    <Btn Icon="@Icons.Material.Outlined.Terminal" OnClick="() => showOutput = !showOutput" aria-expanded="@(showOutput ? "true" : "false")">
+                        @(showOutput ? "Hide its last output" : "Its last output")
+                    </Btn>
+                }
+                <Btn Kind="BtnKind.Primary" OnClick="Close">Close</Btn>
+            }
+            else
+            {
+                @if (result is not null && Form != ChangeForm.Live)
+                {
+                    <Btn Icon="@Icons.Material.Outlined.Article" OnClick="GoToLogs">Logs</Btn>
+                }
+                <Btn Kind="BtnKind.Primary" OnClick="Close">Done</Btn>
+            }
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The change, worked out by AppSettingsService (or an update's plan wrapped in one).</summary>
+    [Parameter, EditorRequired] public SettingsPlan Plan { get; set; } = default!;
+    /// <summary>What the lines call the app: its title. Not given, the name its settings have (as the UI shows it), else the container's.</summary>
+    [Parameter] public string? Title { get; set; }
+    /// <summary>A title of the caller's own: "Publish postgres on the LAN?".</summary>
+    [Parameter] public string? Heading { get; set; }
+    /// <summary>A button of the caller's own: "Recreate and publish".</summary>
+    [Parameter] public string? ApplyText { get; set; }
+    /// <summary>The container runs: a stopped one is recreated stopped, and nothing goes offline.</summary>
+    [Parameter] public bool Running { get; set; } = true;
+    /// <summary>A change already under way (or over) to follow: the dialog opens on its steps, then how it ended.</summary>
+    [Parameter] public PortChangeJob? Job { get; set; }
+
+    private PortChangeJob? job;
+    private PortChangeResult? result, original;
+    private SettingsOutcome? outcome;
+    private string? startError;
+    private bool starting, showOutput, disposed;
+    private DateTime startedAt;
+    private Timer? ticker;
+
+    private ChangeForm Form => ChangeText.FormOf(Plan);
+    private PortChangePlan? Change => Plan.Change;
+    private string Name => NameOf(Plan, Title);
+
+    /// <summary>The app's name as every other page shows it: the one given, its settings' name, else its container's.</summary>
+    internal static string NameOf(SettingsPlan plan, string? title) =>
+        title is { Length: > 0 } ? title
+        : plan.Edit.LoadedOptions.Name is { Length: > 0 } name ? name
+        : plan.Change?.Container ?? plan.Key;
+    private IReadOnlyList<string> Planned => Change?.Steps ?? [];
+
+    private string HeadIcon => result is { Ok: false } ? Icons.Material.Outlined.Undo : ChangeText.Icon(Form);
+
+    private string HeadTitle =>
+        job is not null && result is null ? ChangeText.Running(Form, Name)
+        : result is not null || outcome is not null ? Form switch
+        {
+            ChangeForm.Update => $"Update of {Name}",
+            ChangeForm.Rollback => $"Rollback of {Name}",
+            _ => $"Changes to {Name}",
+        }
+        : Heading ?? ChangeText.Title(Form, Name, ChangeText.Count(Plan));
+
+    private string? HeadSub =>
+        job is not null && result is null ? ChangeText.Progress(job.Current, job.Steps.Count(s => s.State == StepState.Done), Math.Max(Planned.Count, job.Steps.FirstOrDefault()?.Count ?? 0), DateTime.UtcNow - startedAt)
+        : result is not null || outcome is not null ? null
+        : ChangeText.Sub(Form, Name, Running && Change?.Running != false);
+
+    private int ProgressPercent
+    {
+        get
+        {
+            var count = Math.Max(Planned.Count, job?.Steps.FirstOrDefault()?.Count ?? 0);
+            if (count == 0 || job is null) return 8;
+            var done = job.Steps.Count(s => s.State == StepState.Done);
+            return Math.Clamp((int)Math.Round(100.0 * (done + 0.5) / count), 4, 100);
+        }
+    }
+
+    private string FootLine =>
+        Form == ChangeForm.Compose ? "Gitberth can't apply this: Compose would undo it."
+        : Form == ChangeForm.Live ? "No restart: Docker changes it in place."
+        : Form == ChangeForm.Save ? Plan.Consequence ?? "Saved at once."
+        : $"Nothing changes until you press {(ApplyText ?? ChangeText.Button(Form, Name)).Split(' ')[0]}.";
+
+    private bool CanStart =>
+        !starting && Plan.Blocked is null && Plan.Problems.Count == 0 && Plan.ComposeSnippet is null && startError is null
+        && (Change is { } c ? c.Blocked is null && c.Verdict.Allowed && (c.CanApply || Plan.Lines.Count > 0 || Form is ChangeForm.Update or ChangeForm.Rollback) : Plan.Lines.Count > 0);
+
+    // The review: what changes, what it keeps, what's new on its own, who notices.
+    private RenderFragment Review() => @<text>
+        @if (startError is not null)
+        {
+            <Banner Tone="critical" Title="Nothing changed">@startError</Banner>
+        }
+        @if ((Plan.Blocked ?? Change?.Blocked) is { } blocked)
+        {
+            <Banner Tone="serious" Title="This can't be applied now">@blocked</Banner>
+        }
+        @if (Plan.Problems.Count > 0)
+        {
+            <Banner Tone="serious" Title="@(Plan.Problems.Count == 1 ? "One setting needs changing" : $"{Plan.Problems.Count} settings need changing")">
+                @string.Join(" ", Plan.Problems.Select(p => p.Message))
+            </Banner>
+        }
+        @if (ChangeRows.Count > 0)
+        {
+            <div class="gb-cdlg-sec">
+                <div class="gb-micro">What changes</div>
+                <div class="gb-diff">
+                    @foreach (var (label, before, after, how, items) in ChangeRows)
+                    {
+                        <div class="gb-diff-row">
+                            <div class="gb-diff-k">
+                                @label
+                                @if (how is not null)
+                                {
+                                    <div><span class="gb-tag @(how == "no restart" ? "gb-tag--good" : null)" style="margin-top:4px">@how</span></div>
+                                }
+                            </div>
+                            <div class="gb-diff-v">
+                                @if (items is (var gone, var added))
+                                {
+                                    @* A list (labels, extra hosts…): each item that goes or comes on its own, never joined into one value. *@
+                                    @foreach (var item in gone)
+                                    {
+                                        <span class="gb-d-del">@item</span>
+                                    }
+                                    @foreach (var item in added)
+                                    {
+                                        <span class="gb-d-add"><span class="gb-d-sign">+</span> @item</span>
+                                    }
+                                }
+                                else if (string.IsNullOrEmpty(before))
+                                {
+                                    <span class="gb-d-add"><span class="gb-d-sign">+</span> @after</span>
+                                }
+                                else if (string.IsNullOrEmpty(after))
+                                {
+                                    <span class="gb-d-del">@before</span><span class="gb-t3 gb-dhow">removed</span>
+                                }
+                                else
+                                {
+                                    <span class="gb-d-del">@before</span>
+                                    <SvgIcon Icon="@Icons.Material.Outlined.ArrowForward" Class="gb-d-arrow" Size="xs" />
+                                    <span class="gb-d-add">@after</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+        @if (Form == ChangeForm.Compose)
+        {
+            <div class="gb-cdlg-sec">
+                <div class="gb-micro">In its Compose file</div>
+                <CodeBlock Title="docker-compose.yml" Code="@Plan.ComposeSnippet" Icon="@Icons.Material.Outlined.Description" />
+                @if (Plan.ComposeCommand is { } command)
+                {
+                    <div class="gb-row gb-row--wrap" style="gap:8px;font-size:13px">
+                        <span class="gb-t3">Then on the host:</span>
+                        <AddressValue Text="@command" Copy="@command" />
+                    </div>
+                }
+            </div>
+        }
+        else if (Change is { } change && Form is not (ChangeForm.Live or ChangeForm.Save))
+        {
+            var keeps = ChangeText.Keeps(change.Keeps);
+            @if (keeps.Count > 0)
+            {
+                <div class="gb-cdlg-sec">
+                    <div class="gb-micro">What's kept</div>
+                    <div class="gb-keeps">
+                        @foreach (var k in keeps)
+                        {
+                            var (label, value, mono) = ChangeText.KeepWithValue(k, change.Container, Plan.Edit.Loaded, Plan.Edit.LoadedOptions.SecretKeys);
+                            <span class="gb-keep" title="@(value is null ? label : $"{label}: {value}")">
+                                <SvgIcon Icon="@Icons.Material.Outlined.Check" /><span>@label</span>
+                                @if (value is not null)
+                                {
+                                    <span class="gb-keep-v @(mono ? "gb-keep-v--mono" : null)">@value</span>
+                                }
+                            </span>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(change.AlsoChanges))
+                    {
+                        <p class="gb-help">New on its own: @Lower(change.AlsoChanges)</p>
+                    }
+                </div>
+            }
+        }
+        @if (Impact.Count > 0)
+        {
+            <div class="gb-cdlg-sec">
+                <div class="gb-micro">Impact</div>
+                <div class="gb-impact">
+                    @for (var i = 0; i < Impact.Count; i++)
+                    {
+                        var line = Impact[i];
+                        var (icon, tone) = ChangeText.ImpactLook(line);
+                        <div class="gb-impact-row gb-tone-@tone">
+                            <SvgIcon Icon="@icon" />
+                            <span style="@(i == 0 && tone == "warn" ? "font-weight:600" : null)">@line</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </text>;
+
+    private RenderFragment Result() => @<text>
+        @if (result is not null)
+        {
+            var (tone, icon, title) = result.Outcome switch
+            {
+                PortChangeOutcome.Done => ("good", Icons.Material.Outlined.Check, Form switch
+                {
+                    ChangeForm.Live => $"{Name} has its new settings",
+                    ChangeForm.Update => $"{Name} is updated",
+                    ChangeForm.Rollback => $"{Name} is back on its previous image",
+                    _ => $"{Name} is back",
+                }),
+                PortChangeOutcome.WaitsForStart => ("info", Icons.Material.Outlined.Check, $"Recreated: {Name} stays stopped"),
+                PortChangeOutcome.NothingChanged => ("neutral", Icons.Material.Outlined.Info, "Nothing changed"),
+                PortChangeOutcome.NeedsDecision => ("warn", Icons.Material.Outlined.WarningAmber, "Both containers are kept"),
+                _ => ("critical", Icons.Material.Outlined.Undo, $"Not applied: {Name} runs as before"),
+            };
+            <div class="gb-result gb-tone-@tone" role="status">
+                <span class="gb-result-mark"><SvgIcon Icon="@icon" /></span>
+                <div class="gb-result-title">@title</div>
+                <div class="gb-result-sub">@result.Message</div>
+                @if (original is not null)
+                {
+                    <div class="gb-result-sub">@original.Message</div>
+                }
+                @if (result.Ok && Facts.Count > 0)
+                {
+                    <dl class="gb-kv gb-cdlg-facts">
+                        @foreach (var (k, v) in Facts)
+                        {
+                            <dt>@k</dt>
+                            <dd class="gb-mono">@v</dd>
+                        }
+                    </dl>
+                }
+                @if (!result.Ok && result.Outcome == PortChangeOutcome.RolledBack)
+                {
+                    <div class="gb-cdlg-lines">
+                        <div class="gb-impact-row gb-tone-good"><SvgIcon Icon="@Icons.Material.Outlined.CheckCircle" /><span>The original container is back as it was.</span></div>
+                        <div class="gb-impact-row gb-tone-critical"><SvgIcon Icon="@Icons.Material.Outlined.EditNote" /><span>Your changes weren't applied: change them and try again.</span></div>
+                    </div>
+                }
+            </div>
+            @if (showOutput && result.LastOutput is { } output)
+            {
+                <pre class="gb-output">@output</pre>
+            }
+        }
+        else if (outcome is not null)
+        {
+            <div class="gb-result @(outcome.Ok ? "gb-tone-good" : "gb-tone-critical")" role="status">
+                <span class="gb-result-mark"><SvgIcon Icon="@(outcome.Ok ? Icons.Material.Outlined.Check : Icons.Material.Outlined.ErrorOutline)" /></span>
+                <div class="gb-result-title">@(outcome.Ok ? "Done" : "Not applied")</div>
+                <div class="gb-result-sub">@outcome.Message</div>
+            </div>
+        }
+    </text>;
+
+    // Every CHANGE line: each port's binding, then each setting (the ports' own line only when there are no port lines).
+    private List<(string Label, string Before, string After, string? How, (IReadOnlyList<string> Gone, IReadOnlyList<string> New)? Items)> ChangeRows
+    {
+        get
+        {
+            var rows = new List<(string, string, string, string?, (IReadOnlyList<string>, IReadOnlyList<string>)?)>();
+            if (Change is { } c)
+                foreach (var p in c.Changes)
+                    rows.Add(($"Port {p.Port}", p.Before, p.After, null, null));
+            var portLines = rows.Count > 0;
+            foreach (var l in Plan.Lines)
+            {
+                if (l.Field == SettingField.Ports && portLines) continue;
+                var how = l.How switch
+                {
+                    ApplyKind.Live when Form != ChangeForm.Live => "no restart",
+                    ApplyKind.Gitberth => "Gitberth",
+                    ApplyKind.Deploy => "deploy",
+                    ApplyKind.Rebuild => "build",
+                    _ => (string?)null,
+                };
+                rows.Add((l.Label, l.Before, l.After, how, ChangeText.ListChange(l.Field, Plan.Edit.Loaded, Plan.Edit.Wanted, Plan.Edit.WantedOptions.SecretKeys)));
+            }
+            return rows;
+        }
+    }
+
+    // The IMPACT lines, then what happens if the new container fails.
+    private List<string> Impact
+    {
+        get
+        {
+            var lines = new List<string>();
+            if (Change is { } c && Form != ChangeForm.Compose)
+            {
+                lines.AddRange(c.Impact);
+                if (!string.IsNullOrWhiteSpace(c.Footer) && Form != ChangeForm.Live) lines.Add(c.Footer);
+            }
+            return lines;
+        }
+    }
+
+    // After a change that worked: each setting as it is now.
+    private List<(string, string)> Facts =>
+        ChangeRows.Where(r => !string.IsNullOrEmpty(r.After)).Take(6).Select(r => (r.Label, r.After)).ToList();
+
+    private async Task StartAsync()
+    {
+        if (!CanStart) return;
+        starting = true;
+        try
+        {
+            if (Form is ChangeForm.Update or ChangeForm.Rollback && Change is { } change)
+            {
+                // C's Start records the image it ran before, for Roll back.
+                var started = Updates.Start(change);
+                // Another change of the same container came back: this one was never made, so it's never followed as done.
+                if (ChangeText.NotThisChange(started, change, Name) is { } refused)
+                {
+                    startError = refused;
+                    return;
+                }
+                outcome = new SettingsOutcome(true, $"{ChangeText.Running(Form, Name)}…", started);
+                Follow(started);
+                return;
+            }
+            outcome = await Settings.ApplyAsync(Plan, ApplyTiming.Now);
+            if (outcome.Job is { } other && ChangeText.NotThisChange(other, Change, Name) is { } notMine)
+                (startError, outcome) = (notMine, null);
+            else if (outcome.Job is { } running) Follow(running);
+            else if (!outcome.Ok && outcome.Problems is { Count: > 0 } problems)
+            {
+                startError = string.Join(" ", problems.Select(p => p.Message));
+                outcome = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            // The banner says nothing changed; this says why (a refusal such as "Gitberth is already changing postgres…").
+            (startError, outcome) = (ex.Message, null);
+        }
+        finally
+        {
+            starting = false;
+        }
+    }
+
+    private void Follow(PortChangeJob started)
+    {
+        job = started;
+        startedAt = DateTime.UtcNow;
+        job.Changed += Changed;
+        // The time under the title moves on between steps too.
+        ticker = new Timer(_ => Changed(), null, 500, 500);
+        _ = WaitAsync(started);
+    }
+
+    private async Task WaitAsync(PortChangeJob started)
+    {
+        var done = await started.Completion;
+        ticker?.Dispose();
+        if (disposed) return;
+        await InvokeAsync(() =>
+        {
+            result = done;
+            StateHasChanged();
+        });
+    }
+
+    // Raised on the change's own thread as each step starts and ends.
+    private void Changed()
+    {
+        if (!disposed) _ = InvokeAsync(StateHasChanged);
+    }
+
+    // [Start the original] after a failed rollback: the new container goes, and the original comes back as it was.
+    private async Task StartOriginalAsync()
+    {
+        starting = true;
+        try
+        {
+            original = await Changer.PutOriginalBackAsync(Change?.Container ?? Plan.Key);
+        }
+        catch (Exception ex)
+        {
+            original = new PortChangeResult(PortChangeOutcome.NeedsDecision, ex.Message);
+        }
+        finally
+        {
+            starting = false;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        if (Job is { } started)
+        {
+            outcome = new SettingsOutcome(true, "", started);
+            Follow(started);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void GoToLogs()
+    {
+        Close();
+        Nav.NavigateTo($"apps/{Uri.EscapeDataString(Plan.Key)}/logs");
+    }
+
+    // Something was started: the caller gets how it went so far (the job carries on); otherwise it's a cancel.
+    private void Close()
+    {
+        if (outcome is not null) MudDialog.Close(DialogResult.Ok(outcome));
+        else MudDialog.Cancel();
+    }
+
+    private static string Lower(string s) => s.Length == 0 ? s : char.ToLowerInvariant(s[0]) + s[1..];
+
+    public void Dispose()
+    {
+        disposed = true;
+        ticker?.Dispose();
+        if (job is not null) job.Changed -= Changed;
+    }
+}

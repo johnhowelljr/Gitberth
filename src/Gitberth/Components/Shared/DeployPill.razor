@@ -1,0 +1,29 @@
+<span class="gb-pill gb-pill--@Tone @(Deployment.IsActive ? "gb-pill--pulse" : "")">
+    <span class="gb-pill-dot"></span>@Label
+</span>
+
+@code {
+    [Parameter, EditorRequired] public Deployment Deployment { get; set; } = default!;
+
+    private string Label => Deployment.Status switch
+    {
+        DeployStatus.Queued => "Queued",
+        DeployStatus.Cloning => "Cloning",
+        DeployStatus.Building => "Building",
+        DeployStatus.Starting => "Starting",
+        DeployStatus.Succeeded => "Succeeded",
+        DeployStatus.Failed => "Failed",
+        DeployStatus.RolledBack => "Rolled back",
+        DeployStatus.Cancelled => "Cancelled",
+        _ => Deployment.Status.ToString(),
+    };
+
+    private string Tone => Deployment.Status switch
+    {
+        DeployStatus.Succeeded => "success",
+        DeployStatus.Failed => "danger",
+        DeployStatus.RolledBack => "warning",
+        DeployStatus.Cancelled => "secondary",
+        _ => "info",
+    };
+}

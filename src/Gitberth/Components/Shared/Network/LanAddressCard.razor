@@ -1,0 +1,279 @@
+@inject LanAddresses Lan
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@*
+    A container's own address on the LAN (own-lan-addresses.md, "Per container"), next to its ports on the host's address:
+    Off, Automatic (the next free address of the block in Settings) or Static (one typed), as three choice cards. Applying
+    is instant and restarts nothing; removing asks first. Every app goes through the same LanAddresses, which says when one
+    can't have an address: Gitberth itself, the host's network, another container's, a helper and the like.
+*@
+<section class="gb-card @Class" id="@Id" aria-labelledby="gb-lanaddr-title">
+    <div class="gb-card-head">
+        <div class="gb-card-title" id="gb-lanaddr-title" tabindex="-1" @ref="title">
+            <SvgIcon Icon="@Icons.Material.Outlined.Router" />Own LAN address
+            @if (view is { On: true, Refusal: null })
+            {
+                <span class="gb-tag @(view.Address is null ? null : "gb-tag--good")">@(view.Address is null ? "Off" : view.Automatic ? "Automatic" : "Static")</span>
+            }
+        </div>
+        @if (view?.Block is { } block)
+        {
+            <div class="gb-card-actions"><a class="gb-card-link" href="settings#own-lan">Block @block.Text ›</a></div>
+        }
+    </div>
+    <div class="gb-card-body gb-lanbox">
+        @if (view is null && error is null)
+        {
+            <div class="gb-skel" style="height:40px"></div>
+        }
+        else if (error is not null)
+        {
+            <EmptyState Small="true" Title="Docker didn't say" Icon="@Icons.Material.Outlined.Router">Whether @Title has its own address couldn't be read (@error.TrimEnd('.')).</EmptyState>
+        }
+        else if (view!.Refusal is { } refusal)
+        {
+            @* Whether or not the feature is on: turning it on wouldn't give this one an address, so it isn't offered. *@
+            <EmptyState Small="true" Title="No own address for this one" Icon="@Icons.Material.Outlined.Router">@refusal</EmptyState>
+        }
+        else if (!view.On)
+        {
+            <EmptyState Small="true" Title="Own LAN addresses are off" Icon="@Icons.Material.Outlined.Router">
+                A container can have its own IP on your LAN, as well as its ports on @LanHost. <a href="settings#own-lan">Set them up in Settings</a>.
+            </EmptyState>
+        }
+        else if (view.Address is { } address && !changing)
+        {
+            <div class="gb-lanhave">
+                <span class="gb-fn-ic gb-ac-lan"><SvgIcon Icon="@Icons.Material.Outlined.Router" /></span>
+                <div style="min-width:0">
+                    <div class="gb-row gb-row--wrap" style="gap:8px"><span class="gb-lanhave-ip">@address</span><CopyButton Value="@address" Label="@address" /></div>
+                    <div class="gb-help">@(view.Automatic ? "Automatic" : "Static") · @(view.Attached ? "kept when it's recreated" : IsApp ? "with its next deploy" : "when it next starts")</div>
+                </div>
+                @if (!ReadOnly)
+                {
+                    <div class="gb-row gb-row--wrap" style="margin-left:auto;gap:6px">
+                        <Btn Size="BtnSize.Sm" OnClick="Change" Disabled="@(busy || Busy is not null)">Change</Btn>
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Danger" OnClick="() => RemoveAsync(address)" Disabled="@(busy || Busy is not null)">Remove…</Btn>
+                    </div>
+                }
+            </div>
+            <p class="gb-help">It answers at @address on every port it listens on, as well as on its ports on @LanHost. Devices use the address itself: there's no name for it.</p>
+        }
+        else if (ReadOnly)
+        {
+            <p class="gb-help">No own address.</p>
+        }
+        else
+        {
+            <div class="gb-choices gb-lanchoices" role="radiogroup" aria-label="@($"Own address for {Title}")">
+                @Choice("off", "Off", $"Reached through {LanHost} and its host ports.")
+                @Choice("automatic", "Automatic", view.Block is { } b ? $"Next free address of {b.Text}, kept across restarts." : "The next free address of the block in Settings.")
+                <div class="gb-choice @(choice == "static" ? "on" : null)" role="radio" aria-checked="@(choice == "static" ? "true" : "false")" tabindex="0"
+                     @onclick="@(() => Choose("static"))" @onkeydown="@(e => KeyChoose(e, "static"))">
+                    <span class="gb-radio @(choice == "static" ? "on" : null)"></span>
+                    <div style="min-width:0;flex:1">
+                        <div class="gb-choice-title">Static</div>
+                        <div class="gb-choice-sub">@(view.Subnet is { } s ? $"Any free address on {s.Cidr}." : "Any free address of this host's network.")</div>
+                        <input class="gb-input gb-input--sm gb-input--mono" placeholder="@StaticPlaceholder" value="@typed" aria-label="@($"Static address for {Title}")"
+                               @oninput="e => typed = e.Value?.ToString()" @onclick:stopPropagation="true" @onfocus="@(() => Choose("static"))"
+                               disabled="@(busy || Busy is not null)" />
+                    </div>
+                </div>
+            </div>
+            <div class="gb-row gb-row--wrap" style="gap:10px">
+                <p class="gb-help gb-grow">
+                    With its own address @Title answers there on every port it listens on, as well as on its ports on @LanHost. The host and the Cloudflare
+                    tunnel can't reach it there@(Domains ? $", so its domains keep using its port on {LanHost}" : ""). Turning it on is instant and restarts nothing.
+                </p>
+                @if (changing)
+                {
+                    <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" OnClick="() => changing = false" Disabled="busy">Cancel</Btn>
+                }
+                @if (CanApply)
+                {
+                    <Btn Kind="BtnKind.Primary" Size="BtnSize.Sm" OnClick="ApplyAsync" Busy="busy" Disabled="@(Busy is not null)">@(choice == "off" ? "Remove…" : "Apply")</Btn>
+                }
+            </div>
+        }
+        @* Always there, so screen readers announce what the check after a change found, or why it can't change now. *@
+        <div role="status" class="gb-help" style="color:@(BusyLine is not null ? "#ffb3b9" : checkOk ? null : "#ffd98a")">@(BusyLine ?? check)</div>
+    </div>
+</section>
+
+@code {
+    /// <summary>The container's name; for an app, its container's (gb-&lt;slug&gt;), whether or not it has one yet.</summary>
+    [Parameter, EditorRequired] public string Container { get; set; } = "";
+    /// <summary>What lines name it by: the app's name, or the container's.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>The LAN address of this host, where its published ports are.</summary>
+    [Parameter, EditorRequired] public string LanHost { get; set; } = "";
+    /// <summary>A Git app: its address is saved for its deploys, which give it to the app's own container.</summary>
+    [Parameter] public bool IsApp { get; set; }
+    /// <summary>It has domains, which keep using its host port: the tunnel can't reach an own address.</summary>
+    [Parameter] public bool Domains { get; set; }
+    /// <summary>Shown without Change or Remove, like a deploy's temporary container.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>Anything that changes when the container does (its ID and state, say): the card reads its address again then.</summary>
+    [Parameter] public string? Refresh { get; set; }
+    /// <summary>Raised after its address changed, so the page reads its addresses and networks again.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>Raised with what the card read, so the page's diagram draws the same address.</summary>
+    [Parameter] public EventCallback<LanAddressView> OnLoaded { get; set; }
+    /// <summary>Why its address can't change right now ("Gitberth is already changing postgres. …"); null when it can.</summary>
+    [Parameter] public string? Busy { get; set; }
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private LanAddressView? view;
+    private string? error, loadedFor, typed, check;
+    private string choice = "off";
+    private bool busy, changing, checkOk = true, refocus;
+    private ElementReference title;
+
+    // Why nothing here can change now, where the card offers a change at all.
+    private string? BusyLine => !ReadOnly && view is { On: true, Refusal: null } ? Busy : null;
+
+    // Something to apply: an address where there's none (or another), or none where there's one.
+    private bool CanApply => choice switch
+    {
+        "automatic" => !(view?.Automatic == true && view.Address is not null),
+        "static" => !string.IsNullOrWhiteSpace(typed) && typed.Trim() != view?.Address,
+        _ => view?.Address is not null,
+    };
+
+    // 10.1.1.___ on a /24 or smaller network; the network itself on a bigger one.
+    private string StaticPlaceholder => view?.Subnet is { } subnet
+        ? subnet.Prefix >= 24 ? string.Join('.', LanAddresses.Text(subnet.Network).Split('.')[..3]) + ".___" : subnet.Cidr
+        : "10.1.1.___";
+
+    private RenderFragment Choice(string value, string name, string sub) => @<div class="gb-choice @(choice == value ? "on" : null)" role="radio"
+        aria-checked="@(choice == value ? "true" : "false")" tabindex="0" @onclick="() => Choose(value)" @onkeydown="e => KeyChoose(e, value)">
+        <span class="gb-radio @(choice == value ? "on" : null)"></span>
+        <div style="min-width:0">
+            <div class="gb-choice-title">@name</div>
+            <div class="gb-choice-sub">@sub</div>
+        </div>
+    </div>;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{Container}|{Refresh}";
+        if (key == loadedFor) return;
+        // Another container: nothing picked for the last one carries over.
+        if (loadedFor?.Split('|')[0] != Container) (view, error, typed, check, changing) = (null, null, null, null, false);
+        loadedFor = key;
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The button that had the focus (Apply, Remove…) went with the state it belonged to.
+        if (!refocus || busy) return;
+        refocus = false;
+        try
+        {
+            await title.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            // The page went meanwhile: there's nothing to focus.
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        // The page keeps this card when it moves to another container; what's read for the old one isn't shown there.
+        var container = Container;
+        try
+        {
+            var loaded = await Lan.ForAsync(container);
+            if (container != Container) return;
+            (view, error) = (loaded, null);
+            if (!changing) choice = loaded.Address is null ? "off" : loaded.Automatic ? "automatic" : "static";
+            await OnLoaded.InvokeAsync(loaded);
+        }
+        catch (Exception ex)
+        {
+            if (container == Container) error = ex.Message;
+        }
+    }
+
+    private void Choose(string value)
+    {
+        if (busy || Busy is not null) return;
+        choice = value;
+        if (value == "static" && string.IsNullOrWhiteSpace(typed) && view?.Address is { } address && !view.Automatic) typed = address;
+    }
+
+    private void KeyChoose(KeyboardEventArgs e, string value)
+    {
+        if (e.Key is " " or "Enter") Choose(value);
+    }
+
+    // [Change]: the choice comes back, set to what it has now.
+    private void Change()
+    {
+        changing = true;
+        choice = view?.Automatic == true ? "automatic" : "static";
+        typed = view?.Automatic == true ? null : view?.Address;
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (choice == "off")
+        {
+            if (view?.Address is { } address) await RemoveAsync(address);
+            return;
+        }
+        busy = true;
+        check = null;
+        try
+        {
+            var done = await Lan.GiveAsync(Container, choice == "static" ? typed?.Trim() : null);
+            if (!done.Ok)
+            {
+                Snackbar.Add(done.Error!, Severity.Error);
+                return;
+            }
+            Snackbar.Add(done.Done!, Severity.Success);
+            (check, checkOk, changing, refocus) = (done.Check, done.CheckOk, false, true);
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // Always asks: devices that use the address lose it at once.
+    private async Task RemoveAsync(string address)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync($"Remove {Title}'s own address?", $"Devices using {address} lose it.", yesText: "Remove", cancelText: "Cancel");
+        if (confirmed != true) return;
+        busy = true;
+        check = null;
+        try
+        {
+            var done = await Lan.RemoveAsync(Container);
+            Snackbar.Add(done.Error ?? done.Done!, done.Ok ? Severity.Success : Severity.Error);
+            if (!done.Ok) return;
+            (changing, typed, refocus) = (false, null, true);
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

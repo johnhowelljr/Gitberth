@@ -1,0 +1,38 @@
+@if (!App.AutoDeploy)
+{
+    <span class="gb-watch gb-watch--off"><MudIcon Icon="@Icons.Material.Outlined.SyncDisabled" Size="Size.Small" />Auto-deploy off</span>
+}
+else if (App.DesiredState == DesiredState.Stopped)
+{
+    <span class="gb-watch gb-watch--off"><MudIcon Icon="@Icons.Material.Outlined.SyncDisabled" Size="Size.Small" />Auto-deploy paused while stopped</span>
+}
+else
+{
+    <MudTooltip Text="@Tooltip" Placement="Placement.Bottom">
+        <span class="gb-watch @(Info?.Error is null ? "gb-watch--on" : "gb-watch--error")">
+            <MudIcon Icon="@(Info?.Error is null ? Icons.Material.Outlined.Sync : Icons.Material.Outlined.SyncProblem)" Size="Size.Small" />@Text
+        </span>
+    </MudTooltip>
+    <button type="button" class="gb-linkbtn" @onclick="OnCheckNow">Check now</button>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppDefinition App { get; set; } = default!;
+    [Parameter] public WatchInfo? Info { get; set; }
+    [Parameter] public int Interval { get; set; }
+    [Parameter] public EventCallback OnCheckNow { get; set; }
+
+    private string Text => Info switch
+    {
+        null => "Auto-deploy on",
+        { Error: not null } => "Can't check the repo",
+        _ => $"Auto-deploy on · checked {Format.Ago(Info.CheckedAt)}",
+    };
+
+    private string Tooltip => Info switch
+    {
+        { Error: { } error } => error,
+        { RemoteSha: { Length: >= 7 } sha } => $"Checks {App.Branch} every {Interval} s. The branch is at {sha[..7]}.",
+        _ => $"Checks {App.Branch} every {Interval} s for new commits.",
+    };
+}

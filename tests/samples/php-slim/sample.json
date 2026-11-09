@@ -1,0 +1,6 @@
+{
+  "kind": "Php",
+  "title": "PHP (Slim)",
+  "port": 8080,
+  "expect": "Hello from Slim"
+}

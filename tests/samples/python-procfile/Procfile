@@ -1,0 +1,2 @@
+release: python -c "print('Release step done')"
+web: gunicorn app:app --bind 0.0.0.0:$PORT

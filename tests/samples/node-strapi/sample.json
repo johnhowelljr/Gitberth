@@ -1,0 +1,16 @@
+{
+  "kind": "NodeServer",
+  "title": "Node.js server (Strapi)",
+  "port": 1337,
+  "path": "/api/hello",
+  "expect": "Hello from Strapi",
+  // Strapi refuses to start without its keys; these are throwaway values for the check.
+  "env": {
+    "APP_KEYS": "sampleKeyOne,sampleKeyTwo",
+    "API_TOKEN_SALT": "sample-api-token-salt",
+    "ADMIN_JWT_SECRET": "sample-admin-jwt-secret",
+    "TRANSFER_TOKEN_SALT": "sample-transfer-token-salt",
+    "ENCRYPTION_KEY": "sample-encryption-key",
+    "STRAPI_TELEMETRY_DISABLED": "true"
+  }
+}

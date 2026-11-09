@@ -1,0 +1,259 @@
+@page "/"
+@implements IDisposable
+@inject AppCatalog Catalog
+@inject ActivityLog Activity
+@inject AppActions Actions
+@inject ContainerService Containers
+@inject AddressBook Book
+@inject ContainerStatsCollector Stats
+@inject ImageService Images
+@inject IDbContextFactory<GitberthDb> Db
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>Dashboard · Gitberth</PageTitle>
+
+<PageHead Title="Dashboard" Lead="@($"Everything on {HostName}, at a glance. Every app is in Apps.")">
+    <Actions>
+        @if (checkedAt is { } at)
+        {
+            @* Says plainly when the figures stop being current, rather than leaving an old page looking live. *@
+            <span class="gb-pill2 @(refreshError is null ? "gb-tone-good" : "gb-tone-warn")" title="@(refreshError ?? "Read every 5 seconds")">
+                <i class="gb-st-dot @(refreshError is null ? "gb-st-dot--running" : null)"></i>@(refreshError is null ? "Live" : "Not updating") · @at.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)
+            </span>
+        }
+        <Btn Href="apps" Icon="@Icons.Material.Outlined.GridView">All apps</Btn>
+    </Actions>
+</PageHead>
+
+@if (list.DockerError is { } dockerError)
+{
+    <Banner Tone="critical" Title="Docker can't be read">@dockerError.TrimEnd('.'). Is /var/run/docker.sock mounted into the Gitberth container?</Banner>
+}
+
+<div class="gb-hoststrip gb-kpis2" role="group" aria-label="Key figures">
+    <a class="gb-hs" href="apps">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.GridView" />Apps</span>
+        <span class="gb-hs-v">@(loaded ? Running : "–") <small>running of @list.Apps.Count</small></span>
+        <Waffle States="@list.Apps.Select(a => a.State)" Sorted="true" Small="true" />
+    </a>
+    <a class="gb-hs" href="apps?show=attention">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />Needs attention</span>
+        <span class="gb-hs-v" style="@(Trouble.Count > 0 ? "color:#ffc49a" : null)">@(loaded ? Trouble.Count : "–") <small>@(Trouble.Count == 1 ? "app" : "apps")</small></span>
+        <span class="gb-hs-sub">@(Trouble.Count == 0 ? "All clear" : AppFacts.Names(Trouble.Select(a => a.Title).ToList(), 2))</span>
+    </a>
+    <div class="gb-hs">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.RocketLaunch" />Deploys</span>
+        <span class="gb-hs-v">@(loaded ? Deploys24h.ToString(CultureInfo.InvariantCulture) : "–") <small>in 24 hours</small></span>
+        <span class="gb-hs-sub">@(recent.Count > 0 ? $"Last: {recent[0].App}, {Format.Ago(recent[0].Item.At)}" : "None yet")</span>
+    </div>
+    <a class="gb-hs" href="apps?show=updates">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Updates</span>
+        <span class="gb-hs-v">@(loaded ? Updates.Count : "–") <small>available</small></span>
+        <span class="gb-hs-sub">@(Updates.Count == 0 ? "Everything's on its latest image" : AppFacts.Names(Updates.Select(a => a.Title).ToList(), 2))</span>
+    </a>
+</div>
+
+<div class="gb-split">
+    <div>
+        @if (Trouble.Count > 0)
+        {
+            <SectionCard Title="Needs attention" Icon="@Icons.Material.Outlined.WarningAmber" Flush="true">
+                <Actions><a class="gb-card-link" href="apps?show=attention">In Apps<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
+                <ChildContent>
+                    <div class="gb-alist" style="border:0;box-shadow:none;background:transparent">
+                        @foreach (var app in Trouble.Take(8))
+                        {
+                            @Row(app)
+                        }
+                    </div>
+                </ChildContent>
+            </SectionCard>
+        }
+
+        <SectionCard Title="Pinned" Icon="@Icons.Material.Outlined.PushPin" Flush="true" Sub="@(Pinned.Count > 0 ? $"{Pinned.Count} {(Pinned.Count == 1 ? "app" : "apps")}" : null)">
+            <Actions><a class="gb-card-link" href="apps">All @list.Apps.Count apps<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
+            <ChildContent>
+                @if (!loaded)
+                {
+                    <div style="padding:18px"><div class="gb-skel" style="height:112px"></div></div>
+                }
+                else if (Pinned.Count == 0)
+                {
+                    <EmptyState Icon="@Icons.Material.Outlined.PushPin" Title="Nothing pinned yet">
+                        <ChildContent>Pin the apps you open most from their Settings: they show here and in the menu.</ChildContent>
+                        <Actions><Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add">New app</Btn></Actions>
+                    </EmptyState>
+                }
+                else
+                {
+                    <div class="gb-alist" style="border:0;box-shadow:none;background:transparent">
+                        @foreach (var app in Pinned)
+                        {
+                            @Row(app)
+                        }
+                    </div>
+                }
+            </ChildContent>
+        </SectionCard>
+    </div>
+
+    <div>
+        <SectionCard Title="This host" Icon="@Icons.Material.Outlined.Dns" Sub="@(Stats.Current.Host is { } h ? $"{h.Cpus} CPUs · {AppFacts.Bytes(h.MemoryBytes)}" : null)">
+            <Actions><a class="gb-card-link" href="health">Health<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
+            <ChildContent>
+                <div class="gb-stack" style="gap:14px">
+                    <div>
+                        <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k">CPU</span><span class="gb-num" style="font-weight:600">@AppFacts.Percent(HostCpu) <span class="gb-t3" style="font-weight:400">of the host</span></span></div>
+                        <Sparkline Values="CpuHistory" Width="300" Height="30" Stretch="true" />
+                    </div>
+                    <div>
+                        <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k">Memory the apps use</span><span class="gb-num" style="font-weight:600">@AppFacts.Bytes(AppsMemory)</span></div>
+                        <Meter Fraction="@(Stats.Current.Host is { MemoryBytes: > 0 } host ? AppsMemory / host.MemoryBytes : null)" Large="true" />
+                    </div>
+                    @if (disk is { TotalBytes: > 0 } d)
+                    {
+                        <div>
+                            <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k">Disk</span><span class="gb-num" style="font-weight:600">@((d.FreeBytes / 1e9).ToString("0", CultureInfo.InvariantCulture)) GB free</span></div>
+                            <Meter Fraction="@((double)(d.TotalBytes - d.FreeBytes) / d.TotalBytes)" Large="true" />
+                        </div>
+                    }
+                </div>
+            </ChildContent>
+        </SectionCard>
+
+        <SectionCard Title="Recent deploys" Icon="@Icons.Material.Outlined.RocketLaunch" Sub="Every app">
+            <ChildContent>
+                @if (Deploys.Count == 0)
+                {
+                    <EmptyState Small="true" Title="No deploys yet">Every app's deploys show here: new apps, pushes, updates, rollbacks and changes that recreate a container.</EmptyState>
+                }
+                else
+                {
+                    <ActivityTimeline Items="Deploys" />
+                }
+            </ChildContent>
+        </SectionCard>
+    </div>
+</div>
+
+@code {
+    private AppList list = AppList.Empty;
+    private IReadOnlyList<RecentDeploy> recent = [];
+    private IReadOnlyDictionary<string, string> kinds = AppKinds.None;
+    private DiskSpace? disk;
+    private string lanHost = "";
+    private bool loaded;
+    private Timer? timer;
+    private DateTime? checkedAt;
+    private string? refreshError;
+    private string shownKey = "";
+    private int refreshing;
+
+    private string HostName => Stats.Current.Host?.Name is { Length: > 0 } name ? name : "this host";
+
+    private int Running => list.Apps.Count(a => a.Running);
+
+    private List<AppSummary> Trouble => list.Apps.Where(a => AppStatus.Of(a.State).Trouble).ToList();
+
+    private List<AppSummary> Updates => list.Apps.Where(a => a.Update is { Available: true }).ToList();
+
+    private List<AppSummary> Pinned => list.Apps.Where(a => a.Pinned).ToList();
+
+    private int Deploys24h => recent.Count(r => r.Item.At > DateTime.UtcNow.AddDays(-1));
+
+    // The last few deploys of every app, newest first. A link to an app that's gone is left out.
+    private IReadOnlyList<ActivityItem> Deploys => recent.Take(6)
+        .Select(r => r.Item with
+        {
+            Text = $"{r.App}: {r.Item.Text}",
+            Href = r.Key.Length > 0 && list.Apps.Any(a => a.Key == r.Key || a.Container == r.Key) ? r.Item.Href : null,
+        })
+        .ToList();
+
+    private double AppsMemory => list.Apps.Sum(a => (double)(a.MemoryBytes ?? 0));
+
+    private int Cpus => Math.Max(1, Stats.Current.Host?.Cpus ?? 1);
+
+    private double HostCpu => Stats.Current.Containers.Where(c => c.IsUp && c.Recent.Count > 0).Sum(c => c.Recent[^1].Cpu) / Cpus;
+
+    private IReadOnlyList<double> CpuHistory
+    {
+        get
+        {
+            var series = Stats.Current.Containers.Where(c => c.Recent.Count > 0).Select(c => c.Recent).ToList();
+            if (series.Count == 0) return [];
+            var length = Math.Min(60, series.Max(s => s.Count));
+            var sums = new double[length];
+            foreach (var s in series)
+                for (var i = 0; i < Math.Min(length, s.Count); i++)
+                    sums[length - 1 - i] += s[s.Count - 1 - i].Cpu / Cpus;
+            return sums;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { lanHost = await Book.LanHostAsync(Nav.BaseUri); }
+        catch (Exception) { lanHost = new Uri(Nav.BaseUri).Host; }
+        await RefreshAsync();
+        timer = new Timer(_ =>
+        {
+            // A slow Docker engine mustn't stack checks up.
+            if (Interlocked.Exchange(ref refreshing, 1) == 1) return;
+            _ = InvokeAsync(async () =>
+            {
+                try
+                {
+                    await RefreshAsync();
+                    if (ViewKey() != shownKey) StateHasChanged();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref refreshing, 0);
+                }
+            });
+        }, null, 5000, 5000);
+    }
+
+    protected override void OnAfterRender(bool firstRender) => shownKey = ViewKey();
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            list = await Catalog.ListAsync(lanHost);
+            recent = await Activity.RecentDeploysAsync(DateTime.UtcNow.AddDays(-30), 200);
+            refreshError = null;
+        }
+        catch (Exception ex)
+        {
+            // Keep the last figures on screen, marked as not current.
+            refreshError = ex.Message;
+        }
+        kinds = await AppKinds.LoadAsync(Db);
+        try { disk = Images.Disk(); }
+        catch (Exception) { disk = null; }
+        loaded = true;
+        checkedAt = DateTime.UtcNow;
+    }
+
+    private string ViewKey() => string.Join('|', DateTime.UtcNow.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture), refreshError, list.DockerError, Deploys24h,
+        string.Join(';', list.Apps.Select(a => $"{a.Key},{a.State},{a.StateText},{a.Pinned},{a.Update?.Available},{a.MemoryBytes / 1048576},{a.CpuPercent:0.0}")),
+        string.Join(';', recent.Take(6).Select(r => $"{r.Item.At.Ticks}:{r.Item.Tone}:{r.Item.Text}")));
+
+    private RenderFragment Row(AppSummary app)
+    {
+        var health = Stats.Current.Containers.FirstOrDefault(c => c.Name == app.Container);
+        return @<AppRow @key="app.Key" App="app" Compact="true" Kind="@kinds.GetValueOrDefault(app.Key)" Cpu="@(health?.Recent.Select(p => p.Cpu).ToList() ?? [])"
+                        MemoryLimit="@health?.MemoryLimit" HostMemory="@Stats.Current.Host?.MemoryBytes" OnAction="a => RunAsync(app, a)" />;
+    }
+
+    private async Task RunAsync(AppSummary app, ContainerAction action)
+    {
+        if (await AppCommands.RunAsync(app, action, Actions, Containers, Dialogs, Snackbar)) await RefreshAsync();
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

@@ -1,0 +1,578 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ContainerStatsCollector Stats
+
+@*
+    The Settings tab: every setting of every app, in sections, with a sticky index on the left (a dot by each section
+    with unsaved changes). Edits go into the page's draft; a changed field gets an accent border, "Changed" by its label
+    and "was …" with Undo under it; nothing applies until the apply bar's Review and apply. Fields an app never edits
+    (a Git app's image, Gitberth's own container) are shown read-only with the reason.
+*@
+@if (Draft is null || Options is null || Settings is null)
+{
+    @if (LoadError is not null)
+    {
+        <Banner Tone="critical" Title="Its settings couldn't be read">@LoadError</Banner>
+    }
+    else
+    {
+        <div class="gb-settings">
+            <div class="gb-skel" style="height:360px"></div>
+            <div class="gb-skel" style="height:520px;border-radius:12px"></div>
+        </div>
+    }
+}
+else
+{
+    var changed = Draft.ChangedFields();
+    var opt = Options.Changed();
+    var app = View.Summary;
+    var git = app.Source == AppSource.Git;
+    var image = Settings.Image;
+    var all = ReadOnlyAll;
+    <div class="gb-settings">
+        <nav class="gb-toc" aria-label="Settings sections">
+            @foreach (var (id, title, icon, dot) in Toc(changed, opt))
+            {
+                <a href="@($"{app.Href}/settings#{id}")" class="@(active == id ? "on" : null)" @onclick="() => GoAsync(id)" @onclick:preventDefault="true">
+                    <SvgIcon Icon="@icon" />@title
+                    @if (dot)
+                    {
+                        <span class="gb-dot" title="Unsaved changes"></span>
+                    }
+                </a>
+            }
+            <div class="gb-toc-sep"></div>
+            <a href="@($"{app.Href}/network")"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />Ports and networks<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" Size="sm" /></a>
+        </nav>
+
+        <div class="gb-secs">
+            @* Under 960 px the index above goes: a compact jump menu takes its place, pinned under the top bar. *@
+            <div class="gb-tocjump">
+                <SvgIcon Icon="@Icons.Material.Outlined.Toc" Size="sm" />
+                <label class="gb-sr" for="gb-tocjump-select">Go to a section</label>
+                <select id="gb-tocjump-select" class="gb-input gb-input--sm" value="@active" @onchange="JumpAsync">
+                    @foreach (var (id, title, _, dot) in Toc(changed, opt))
+                    {
+                        <option value="@id">@(dot ? $"{title} · changed" : title)</option>
+                    }
+                    <option value="network">Ports and networks ›</option>
+                </select>
+            </div>
+            @if (Notice is { } notice)
+            {
+                <div class="gb-ro-note"><SvgIcon Icon="@Icons.Material.Outlined.Info" Size="sm" /><span>@notice</span></div>
+            }
+
+            <SettingsSection Id="sec-general" Title="General" Icon="@Icons.Material.Outlined.Tune" Changed="@(opt.Any(o => o is "name" or "pinned" or "stats" or "health URL"))"
+                             Description="How it shows up in Gitberth. Nothing here restarts it.">
+                <div class="gb-fgrid">
+                    <Field Label="Name" For="set-name" Changed="@opt.Contains("name")" Was="@Options.Loaded.Name" OnUndo="() => Undo(() => Options.Name = Options.Loaded.Name)"
+                           Error="@Options.NameProblem" Help="@(app.Title == app.Container ? "What Gitberth calls it. The container keeps its name, so others still reach it by it." : $"The container is {app.Container}: others reach it by that name.")">
+                        <input id="set-name" class="gb-input @(opt.Contains("name") ? "gb-input--changed" : null)" @bind="Options.Name" @bind:event="oninput" @bind:after="Notify" />
+                    </Field>
+                    @if (git || View.AppAddresses?.WebPort is not null || app.Chips.Any(c => c.Kind == AddressChipKind.Open))
+                    {
+                        <Field Label="Health URL" For="set-health-url" Changed="@opt.Contains("health URL")" Was="@(Options.Loaded.HealthCheckPath ?? "none")"
+                               OnUndo="() => Undo(() => Options.HealthCheckPath = Options.Loaded.HealthCheckPath ?? string.Empty)"
+                               Help="Must answer before a new container takes over from the old one, after a deploy or a change.">
+                            <input id="set-health-url" class="gb-input gb-input--mono @(opt.Contains("health URL") ? "gb-input--changed" : null)" placeholder="/health"
+                                   @bind="Options.HealthCheckPath" @bind:event="oninput" @bind:after="Notify" />
+                        </Field>
+                    }
+                </div>
+                <div class="gb-fgrid">
+                    <SwitchRow Title="Pinned" Sub="Shown in the sidebar." Value="Options.Pinned" ValueChanged="v => Set(() => Options.Pinned = v)" Changed="@opt.Contains("pinned")" />
+                    <SwitchRow Title="Gather stats" Sub="CPU, memory and network every 5 s, kept 6 hours." Value="Options.GatherStats" ValueChanged="v => Set(() => Options.GatherStats = v)" Changed="@opt.Contains("stats")" />
+                </div>
+            </SettingsSection>
+
+            @if (git && Git is not null && View.Row is { } row)
+            {
+                <SettingsSection Id="sec-source" Title="Source" Icon="@Icons.Custom.Brands.GitHub" Changed="Git.Dirty"
+                                 Description="Where the code comes from and how it's built. A change of branch, folder or build needs a new build.">
+                    <div class="gb-ro-note">
+                        <SvgIcon Icon="@Icons.Custom.Brands.GitHub" Size="sm" />
+                        <span><a href="@row.RepoWebUrl" target="_blank" rel="noopener" class="gb-mono">@row.RepoFullName</a> · last detected <strong>@(row.DetectedSummary ?? "nothing yet")</strong>. Its image is built from the repository, so it isn't set here.</span>
+                    </div>
+                    <div class="gb-fgrid">
+                        <Field Label="Branch" For="set-branch" Changed="@(Git.Branch.Trim() != Git.Loaded.Branch)" Was="@Git.Loaded.Branch" OnUndo="() => Undo(() => Git.Branch = Git.Loaded.Branch)">
+                            <input id="set-branch" class="gb-input gb-input--mono @(Git.Branch.Trim() != Git.Loaded.Branch ? "gb-input--changed" : null)" @bind="Git.Branch" @bind:event="oninput" @bind:after="Notify" />
+                        </Field>
+                        <Field Label="Subfolder" For="set-sub" Changed="@((Git.Subdirectory.Trim('/') is { Length: > 0 } s ? s : null) != Git.Loaded.Subdirectory)" Was="@(Git.Loaded.Subdirectory ?? "the repository's root")"
+                               OnUndo="() => Undo(() => Git.Subdirectory = Git.Loaded.Subdirectory ?? string.Empty)" Help="Leave it empty for the repository's root.">
+                            <input id="set-sub" class="gb-input gb-input--mono" placeholder="Repository root" @bind="Git.Subdirectory" @bind:event="oninput" @bind:after="Notify" />
+                        </Field>
+                    </div>
+                    <div class="gb-fgrid">
+                        <SwitchRow Title="Deploy on push" Sub="A new commit on the branch deploys by itself." Value="Git.AutoDeploy" ValueChanged="v => Set(() => Git.AutoDeploy = v)"
+                                   Changed="@(Git.AutoDeploy != Git.Loaded.AutoDeploy)" />
+                        <SwitchRow Title="Vercel's variables" Sub="Tell the app where it runs and what was deployed (VERCEL_URL and friends)." Value="Git.VercelVariables"
+                                   ValueChanged="v => Set(() => Git.VercelVariables = v)" Changed="@(Git.VercelVariables != Git.Loaded.VercelVariables)" />
+                    </div>
+                    <Field Label="Build" Changed="@(Git.DockerfileMode != Git.Loaded.DockerfileMode)">
+                        <Seg T="DockerfileMode" Options="BuildOptions" Value="Git.DockerfileMode" ValueChanged="v => Set(() => Git.DockerfileMode = v)" Label="Build" />
+                    </Field>
+                    @if (Git.DockerfileMode == DockerfileMode.Custom)
+                    {
+                        <Field Label="Dockerfile" For="set-dockerfile" Changed="@((Git.CustomDockerfile.Length == 0 ? null : Git.CustomDockerfile) != Git.Loaded.CustomDockerfile)"
+                               Help="@($"Gitberth fills in the {DockerfileMarkers.BuildArgs} and {DockerfileMarkers.Volumes} lines.")">
+                            <textarea id="set-dockerfile" class="gb-input" rows="14" spellcheck="false" @bind="Git.CustomDockerfile" @bind:event="oninput" @bind:after="Notify"></textarea>
+                        </Field>
+                    }
+                    else if (row.DetectedKind?.StartsWith("DotNet", StringComparison.Ordinal) == true)
+                    {
+                        <Field Label="Project to run" For="set-project" Help="When the solution has several." Changed="@((Git.ProjectHint.Trim().Length == 0 ? null : Git.ProjectHint.Trim()) != Git.Loaded.ProjectHint)">
+                            <input id="set-project" class="gb-input gb-input--mono" placeholder="src/MyApp/MyApp.csproj" @bind="Git.ProjectHint" @bind:event="oninput" @bind:after="Notify" />
+                        </Field>
+                    }
+                </SettingsSection>
+            }
+            else
+            {
+                <SettingsSection Id="sec-source" Title="Image" Icon="@Icons.Material.Outlined.Layers" Changed="@(changed.Contains(SettingField.Image) || opt.Contains("updates"))"
+                                 Description="What it runs. A new tag or image is pulled before the app is recreated.">
+                    <div class="gb-ro-note" style="align-items:center">
+                        <AppLogo Image="@app.Image" Name="@app.Container" Size="26" />
+                        <span class="gb-grow">
+                            <strong>@SourceWords(app)</strong>@(OriginWords(app) is { } origin ? $" · {origin}" : "")
+                            <span style="display:block" class="gb-t3">
+                                @if (image is not null)
+                                {
+                                    <span>Image <span class="gb-mono">@ShortId(image.Id)</span>@(image.Created is { } created ? $", made {Format.Ago(created)}" : "")@(image.SizeBytes > 0 ? $", {AppFacts.Bytes(image.SizeBytes)}" : "").</span>
+                                    @if (image.Tags.Count > 1)
+                                    {
+                                        <span> Also tagged <span class="gb-mono">@string.Join(", ", image.Tags.Where(t => t != app.Image).Take(3))</span>.</span>
+                                    }
+                                }
+                            </span>
+                        </span>
+                    </div>
+                    <Field Label="Image" For="set-image" Changed="@changed.Contains(SettingField.Image)" Was="@Draft.Loaded.Image" OnUndo="() => Undo(Draft.UndoImage)"
+                           Help="A name and tag (postgres:18), or a digest. Changing it recreates the app on the new image; what the old image set is left behind.">
+                        <input id="set-image" class="gb-input gb-input--mono @(changed.Contains(SettingField.Image) ? "gb-input--changed" : null)" readonly="@RO(SettingField.Image)"
+                               @bind="Draft.Image" @bind:event="oninput" @bind:after="Notify" spellcheck="false" />
+                    </Field>
+                    @if (app.Role != ContainerRole.Self)
+                    {
+                        <Field Label="Updates" Changed="@opt.Contains("updates")">
+                            <div class="gb-choices" role="radiogroup" aria-label="Updates">
+                                @foreach (var (policy, title, sub) in UpdateChoices)
+                                {
+                                    var on = Options.Updates == policy;
+                                    var off = policy == UpdatePolicy.Auto && IsDatabase;
+                                    <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="gb-choice @(on ? "on" : null)" disabled="@off"
+                                            title="@(off ? "Never automatic for a database: a new version can change its data files." : null)" @onclick="() => Set(() => Options.Updates = policy)">
+                                        <span class="gb-radio @(on ? "on" : null)"></span>
+                                        <span><span class="gb-choice-title">@title</span><span class="gb-choice-sub" style="display:block">@(off ? "Never for a database." : sub)</span></span>
+                                    </button>
+                                }
+                            </div>
+                        </Field>
+                    }
+                </SettingsSection>
+            }
+
+            <SettingsSection Id="sec-command" Title="Command" Icon="@Icons.Material.Outlined.Terminal" Changed="@(changed.Overlaps([SettingField.Entrypoint, SettingField.Command, SettingField.WorkingDir, SettingField.User]))"
+                             Description="Leave a field empty to use the image's own value, shown greyed.">
+                <div class="gb-fgrid">
+                    <Field Label="Entrypoint" For="set-entry" Tag="@(Draft.Entrypoint.Length == 0 ? "image" : null)" Changed="@changed.Contains(SettingField.Entrypoint)"
+                           Was="@Show(Draft.Loaded.Entrypoint, image?.Entrypoint)" OnUndo="() => Undo(Draft.UndoCommand)">
+                        <input id="set-entry" class="gb-input gb-input--mono @(changed.Contains(SettingField.Entrypoint) ? "gb-input--changed" : null)" readonly="@RO(SettingField.Entrypoint)"
+                               placeholder="@ShellLine.Join(image?.Entrypoint ?? [])" @bind="Draft.Entrypoint" @bind:event="oninput" @bind:after="Notify" spellcheck="false" />
+                    </Field>
+                    <Field Label="Command" For="set-cmd" Tag="@(Draft.Command.Length == 0 ? "image" : null)" Changed="@changed.Contains(SettingField.Command)"
+                           Was="@Show(Draft.Loaded.Command, image?.Command)" OnUndo="() => Undo(Draft.UndoCommand)" Error="@Draft.CommandProblem">
+                        <input id="set-cmd" class="gb-input gb-input--mono @(changed.Contains(SettingField.Command) ? "gb-input--changed" : null) @(Draft.CommandProblem is null ? null : "gb-input--error")"
+                               readonly="@RO(SettingField.Command)" placeholder="@MaskedLine(image?.Command)" value="@Draft.CommandShown" @oninput="SetCommand" spellcheck="false" />
+                    </Field>
+                    <Field Label="Working directory" For="set-wd" Tag="@(Draft.WorkingDir.Length == 0 ? "image" : null)" Changed="@changed.Contains(SettingField.WorkingDir)"
+                           Was="@(Draft.Loaded.WorkingDir ?? image?.WorkingDir ?? "/")" OnUndo="() => Undo(() => Draft.WorkingDir = Draft.Loaded.WorkingDir ?? string.Empty)">
+                        <input id="set-wd" class="gb-input gb-input--mono @(changed.Contains(SettingField.WorkingDir) ? "gb-input--changed" : null)" readonly="@RO(SettingField.WorkingDir)"
+                               placeholder="@(image?.WorkingDir is { Length: > 0 } wd ? wd : "/")" @bind="Draft.WorkingDir" @bind:event="oninput" @bind:after="Notify" spellcheck="false" />
+                    </Field>
+                    <Field Label="User" For="set-user" Tag="@(Draft.User.Length == 0 ? "image" : null)" Changed="@changed.Contains(SettingField.User)"
+                           Was="@(Draft.Loaded.User ?? image?.User ?? "root")" OnUndo="() => Undo(() => Draft.User = Draft.Loaded.User ?? string.Empty)">
+                        <input id="set-user" class="gb-input gb-input--mono @(changed.Contains(SettingField.User) ? "gb-input--changed" : null)" readonly="@RO(SettingField.User)"
+                               placeholder="@(image?.User is { Length: > 0 } u ? u : "root")" @bind="Draft.User" @bind:event="oninput" @bind:after="Notify" spellcheck="false" />
+                    </Field>
+                </div>
+                @if (Draft.CommandHasSecrets)
+                {
+                    <p class="gb-help">Its command carries a secret, so it's shown masked. Edit around the @Security.Masking.Mask and the secret is kept; type over it to replace it.</p>
+                }
+            </SettingsSection>
+
+            <SettingsSection Id="sec-volumes" Title="Volumes" Icon="@Icons.Material.Outlined.Storage" Changed="@changed.Contains(SettingField.Mounts)"
+                             Description="Storage that outlives the container. Recreating never deletes a volume.">
+                @if (Draft.Mounts.Count == 0)
+                {
+                    <EmptyState Small="true" Title="No volumes">What it writes stays inside the container, and goes when it's recreated. Add a volume for data that must stay.</EmptyState>
+                }
+                else
+                {
+                    <div class="gb-envtbl" role="table" aria-label="Volumes">
+                        <div class="gb-envrow gb-envrow--head" role="row"><span role="columnheader">Volume or folder</span><span role="columnheader">Path in the container</span><span></span></div>
+                        @foreach (var m in Draft.Mounts)
+                        {
+                            var css = m.Removed ? "gb-envrow--gone" : m.IsNew ? "gb-envrow--new" : m.Changed ? "gb-envrow--changed" : null;
+                            <div class="gb-envrow @css" role="row" @key="m">
+                                <span class="gb-envkey" role="cell">
+                                    <SvgIcon Icon="@(m.Kind switch { MountKind.Bind => Icons.Material.Outlined.Folder, MountKind.Tmpfs => Icons.Material.Outlined.Memory, _ => Icons.Material.Outlined.Storage })" Size="sm" Class="gb-t3" />
+                                    @if (m.Kind == MountKind.Tmpfs)
+                                    {
+                                        <span class="gb-t2">Temporary, in memory</span>
+                                    }
+                                    else if (m.Original is { Anonymous: true })
+                                    {
+                                        <span title="@m.Source">@ShortId(m.Source)</span><span class="gb-default-tag">anonymous</span>
+                                    }
+                                    else
+                                    {
+                                        <input class="gb-input gb-input--mono" value="@m.Source" readonly="@(m.Removed || RO(SettingField.Mounts))" placeholder="@(m.Kind == MountKind.Bind ? "/srv/data" : "my-data")"
+                                               aria-label="@(m.Kind == MountKind.Bind ? "Host folder" : "Volume name")" @oninput="e => SetMount(() => m.Source = e.Value?.ToString() ?? string.Empty)" />
+                                        <span class="gb-default-tag">@(m.Kind == MountKind.Bind ? "host folder" : "volume")</span>
+                                    }
+                                </span>
+                                <span class="gb-envval" role="cell">
+                                    <input class="gb-input gb-input--mono" value="@m.Target" readonly="@(m.Removed || RO(SettingField.Mounts))" placeholder="/data" aria-label="Path in the container"
+                                           @oninput="e => SetMount(() => m.Target = e.Value?.ToString() ?? string.Empty)" />
+                                    <button type="button" class="gb-tag @(m.ReadOnly ? "gb-tag--warn" : null)" style="border:0;cursor:pointer" disabled="@(m.Removed || RO(SettingField.Mounts))"
+                                            title="Click to switch" @onclick="() => SetMount(() => m.ReadOnly = !m.ReadOnly)">@(m.ReadOnly ? "read-only" : "read and write")</button>
+                                </span>
+                                <span class="gb-envrow-actions" role="cell">
+                                    @if (m.Changed && !m.IsNew)
+                                    {
+                                        <button type="button" class="gb-iconbtn" title="Undo" aria-label="Undo" @onclick="() => SetMount(m.Undo)"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
+                                    }
+                                    @if (!m.Removed && !RO(SettingField.Mounts))
+                                    {
+                                        <button type="button" class="gb-iconbtn" title="Remove" aria-label="Remove this volume" @onclick="() => SetMount(() => Draft.RemoveMount(m))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                                    }
+                                </span>
+                            </div>
+                        }
+                    </div>
+                }
+                @if (!RO(SettingField.Mounts))
+                {
+                    <div class="gb-tbl-actions">
+                        <Btn Icon="@Icons.Material.Outlined.Add" OnClick="() => SetMount(() => Draft.AddMount(MountKind.Volume))">Named volume</Btn>
+                        <Btn Icon="@Icons.Material.Outlined.Folder" OnClick="() => SetMount(() => Draft.AddMount(MountKind.Bind))">Host folder</Btn>
+                        <Btn Kind="BtnKind.Ghost" OnClick="() => SetMount(() => Draft.AddMount(MountKind.Tmpfs))">Temporary (tmpfs)</Btn>
+                    </div>
+                }
+            </SettingsSection>
+
+            <SettingsSection Id="sec-restart" Title="Restart" Icon="@Icons.Material.Outlined.RestartAlt" Changed="@(changed.Contains(SettingField.RestartPolicy) || opt.Contains("scheduled restart"))"
+                             Description="What Docker does when it stops, and an optional restart on a schedule.">
+                <Field Label="When it stops" Changed="@changed.Contains(SettingField.RestartPolicy)" Was="@AppFacts.RestartWords(Draft.Loaded.Restart.Name)" OnUndo="() => Undo(Draft.UndoRestart)"
+                       Help="@RestartHelp(Draft.RestartPolicy)">
+                    <Seg T="string" Options="RestartOptions" Value="Draft.RestartPolicy" ValueChanged="v => Set(() => Draft.RestartPolicy = v)" Label="Restart policy" Disabled="@RO(SettingField.RestartPolicy)" />
+                </Field>
+                @if (Draft.RestartPolicy == "on-failure")
+                {
+                    <div class="gb-fgrid--3 gb-fgrid">
+                        <Field Label="Tries before it gives up" For="set-retries" Help="0 tries for ever.">
+                            <input id="set-retries" type="number" min="0" class="gb-input" @bind="Draft.MaximumRetryCount" @bind:event="oninput" @bind:after="Notify" />
+                        </Field>
+                    </div>
+                }
+                <Field Label="Scheduled restart" Changed="@opt.Contains("scheduled restart")"
+                       Help="@($"For an app that leaks memory, say. Counted from when it last started. {RestartScheduleDialog.WhatHappens(git)}")">
+                    <div class="gb-row" style="flex-wrap:wrap">
+                        <SwitchRow Title="@(Options.RestartOn ? "Every" : "Off")" Value="Options.RestartOn" ValueChanged="v => Set(() => Options.RestartOn = v)" />
+                        @if (Options.RestartOn)
+                        {
+                            <input type="number" min="1" class="gb-input" style="width:90px" aria-label="How many" @bind="Options.RestartAmount" @bind:event="oninput" @bind:after="Notify" />
+                            <select class="gb-input" style="width:auto" aria-label="Unit" @bind="Options.RestartUnit" @bind:after="Notify">
+                                <option value="@RestartUnit.Minutes">minutes</option>
+                                <option value="@RestartUnit.Hours">hours</option>
+                                <option value="@RestartUnit.Days">days</option>
+                            </select>
+                        }
+                    </div>
+                </Field>
+            </SettingsSection>
+
+            <SettingsSection Id="sec-resources" Title="Resources" Icon="@Icons.Material.Outlined.Speed" Changed="@(changed.Overlaps([SettingField.Memory, SettingField.Cpu, SettingField.PidsLimit, SettingField.ShmSize]))"
+                             Description="@ResourcesLine">
+                <ResourceFields Draft="Draft" ReadOnly="@(f => RO(f))" HostCpus="HostCpus" Changed="Changed" />
+            </SettingsSection>
+
+            <SettingsSection Id="sec-health" Title="Health check" Icon="@Icons.Material.Outlined.HealthAndSafety" Changed="@changed.Contains(SettingField.Health)" Description="@HealthLine">
+                <Field Label="Check" Changed="@changed.Contains(SettingField.Health)">
+                    <Seg T="HealthMode" Options="HealthOptions" Value="Draft.HealthMode" ValueChanged="v => Set(() => Draft.HealthMode = v)" Label="Health check" Disabled="@RO(SettingField.Health)" />
+                </Field>
+                @if (Draft.HealthMode == HealthMode.Custom)
+                {
+                    <Field Label="Command" For="set-hc" Help="Run by the shell inside the container: it passes when it exits with 0.">
+                        <input id="set-hc" class="gb-input gb-input--mono" placeholder="curl -fsS http://localhost:3000/health || exit 1" @bind="Draft.HealthCommand" @bind:event="oninput" @bind:after="Notify" spellcheck="false" />
+                    </Field>
+                    <div class="gb-fgrid gb-fgrid--4">
+                        @HealthNumber("Every", "s", () => Draft.HealthIntervalSeconds, v => Draft.HealthIntervalSeconds = v, "30")
+                        @HealthNumber("Timeout", "s", () => Draft.HealthTimeoutSeconds, v => Draft.HealthTimeoutSeconds = v, "30")
+                        @HealthNumber("Retries", "", () => Draft.HealthRetries, v => Draft.HealthRetries = v, "3")
+                        @HealthNumber("Grace period", "s", () => Draft.HealthStartPeriodSeconds, v => Draft.HealthStartPeriodSeconds = v, "0")
+                    </div>
+                }
+                else if (Draft.HealthMode == HealthMode.Image)
+                {
+                    <p class="gb-help">@(image?.Health.Test is { Count: > 1 } test ? $"The image's own: {ContainerSettingsDraft.HealthText(Security.Masking.Args(test))}" : "The image has no check of its own, so Docker reports no health.")</p>
+                }
+            </SettingsSection>
+
+            <SettingsLabels Draft="Draft" ReadOnly="@(f => RO(f))" Changed="Changed" />
+
+            <SettingsLogging Draft="Draft" ReadOnly="@(f => RO(f))" Changed="Changed" />
+
+            <SettingsAdvanced Draft="Draft" ReadOnly="@(f => RO(f))" Changed="Changed" ImageStopSignal="@image?.StopSignal" />
+
+            @if (app.Role != ContainerRole.Self)
+            {
+                <SettingsSection Id="sec-remove" Title="@($"Remove {app.Title}")" Icon="@Icons.Material.Outlined.Delete" Danger="true"
+                                 Description="@(git ? "Stops and removes the container and deletes its history. Its images and volumes go only if you tick them." : "Stops and removes the container. Its volumes stay unless you tick them in the next step.")">
+                    <div class="gb-row" style="justify-content:space-between;flex-wrap:wrap;gap:12px">
+                        <span class="gb-help">@RemoveLine</span>
+                        <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Delete" OnClick="OnRemove">Remove @app.Title…</Btn>
+                    </div>
+                </SettingsSection>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    [Parameter] public SettingsView? Settings { get; set; }
+    [Parameter] public ContainerSettingsDraft? Draft { get; set; }
+    [Parameter] public AppOptionsDraft? Options { get; set; }
+    [Parameter] public GitOptionsDraft? Git { get; set; }
+    [Parameter] public string? LoadError { get; set; }
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public EventCallback OnRemove { get; set; }
+
+    private string active = "sec-general";
+    private DotNetObjectReference<AppSettingsTab>? self;
+    private IJSObjectReference? watcher;
+    private bool watching;
+
+    private static IReadOnlyList<SegOption<string>> RestartOptions => AppFacts.RestartOptions;
+
+    private static IReadOnlyList<SegOption<HealthMode>> HealthOptions => AppFacts.HealthOptions;
+
+    private static readonly IReadOnlyList<SegOption<DockerfileMode>> BuildOptions =
+        [new(DockerfileMode.Auto, "Detect automatically"), new(DockerfileMode.Custom, "Custom Dockerfile")];
+
+    // The three policies, said for what an update is for this image: a newer image in its registry, or (a local image) a
+    // newer build of its tag on this host, which no registry is asked about.
+    private (UpdatePolicy, string, string)[] UpdateChoices => View.Summary.Origin == ImageOrigin.Local
+        ?
+        [
+            (UpdatePolicy.Off, "When I ask", "Nothing's checked until you ask."),
+            (UpdatePolicy.Notify, "Tell me", "A badge appears on the app when a newer build of its tag is on this host."),
+            (UpdatePolicy.Auto, "Automatically", "Recreates it on a newer build of its tag, in the hours set in Settings."),
+        ]
+        :
+        [
+            (UpdatePolicy.Off, "When I ask", "Nothing's checked until you ask, and no badge shows."),
+            (UpdatePolicy.Notify, "Tell me", "A badge appears on the app when its registry has a newer image."),
+            (UpdatePolicy.Auto, "Automatically", "Pulls and recreates it when the tag moves, in the hours set in Settings."),
+        ];
+
+    private bool ReadOnlyAll => Settings?.Access.ReadOnly.Count >= Enum.GetValues<SettingField>().Length;
+
+    private bool RO(SettingField field) => Settings?.Access.ReadOnly.Contains(field) == true;
+
+    private bool IsDatabase => View.Summary.Role == ContainerRole.Database || ConnectionDetails.EngineOf(View.Summary.Image) is not null;
+
+    private int HostCpus => Stats.Current.Host?.Cpus ?? Environment.ProcessorCount;
+
+    private string? Notice => Settings?.Access switch
+    {
+        { Compose: { } compose } when View.Summary.Role == ContainerRole.Self =>
+            $"Gitberth runs in this container, which Compose made (project {compose.Project}): its settings are shown as they are, and a change gives the lines for its Compose file.",
+        { Compose: { } compose } => $"Compose made this container (project {compose.Project}). Live settings change at once; anything that needs a recreate gives the lines for its Compose file instead of Apply.",
+        { Recreate: { } why } => why,
+        { ViaDeploy: true } => "A change here is saved, then made live by a deploy without a build; restart policy, memory and CPU change at once.",
+        _ => null,
+    };
+
+    private IEnumerable<(string Id, string Title, string Icon, bool Dot)> Toc(IReadOnlySet<SettingField> c, IReadOnlyList<string> o)
+    {
+        yield return ("sec-general", "General", Icons.Material.Outlined.Tune, o.Any(x => x is "name" or "pinned" or "stats" or "health URL"));
+        yield return View.Summary.Source == AppSource.Git
+            ? ("sec-source", "Source", Icons.Custom.Brands.GitHub, Git?.Dirty == true)
+            : ("sec-source", "Image", Icons.Material.Outlined.Layers, c.Contains(SettingField.Image) || o.Contains("updates"));
+        yield return ("sec-command", "Command", Icons.Material.Outlined.Terminal, c.Overlaps([SettingField.Entrypoint, SettingField.Command, SettingField.WorkingDir, SettingField.User]));
+        yield return ("sec-env", "Environment", Icons.Material.Outlined.Key, c.Contains(SettingField.Env));
+        yield return ("sec-volumes", "Volumes", Icons.Material.Outlined.Storage, c.Contains(SettingField.Mounts));
+        yield return ("sec-restart", "Restart", Icons.Material.Outlined.RestartAlt, c.Contains(SettingField.RestartPolicy) || o.Contains("scheduled restart"));
+        yield return ("sec-resources", "Resources", Icons.Material.Outlined.Speed, c.Overlaps([SettingField.Memory, SettingField.Cpu, SettingField.PidsLimit, SettingField.ShmSize]));
+        yield return ("sec-health", "Health check", Icons.Material.Outlined.HealthAndSafety, c.Contains(SettingField.Health));
+        yield return ("sec-labels", "Labels", Icons.Material.Outlined.Label, c.Contains(SettingField.Labels));
+        yield return ("sec-logging", "Logging", Icons.Material.Outlined.Article, c.Contains(SettingField.Logging));
+        yield return ("sec-advanced", "Advanced", Icons.Material.Outlined.Build, false);
+        if (View.Summary.Role != ContainerRole.Self) yield return ("sec-remove", "Remove", Icons.Material.Outlined.Delete, false);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (watching || Draft is null) return;
+        watching = true;
+        self = DotNetObjectReference.Create(this);
+        try
+        {
+            watcher = await JS.InvokeAsync<IJSObjectReference>("gitberth.watchSections", self,
+                Toc(new HashSet<SettingField>(), []).Select(t => t.Id).ToArray());
+            // A link to a section (#sec-health) lands on it.
+            var at = new Uri(Navigation.Uri).Fragment.TrimStart('#');
+            if (at.StartsWith("sec-", StringComparison.Ordinal)) await GoAsync(at);
+        }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    [JSInvokable]
+    public void SectionInView(string id)
+    {
+        // Right after a jump the section scrolled to is the one shown, whatever else the scroll passes on its way.
+        if (id == active || DateTime.UtcNow < holdUntil) return;
+        active = id;
+        StateHasChanged();
+    }
+
+    private DateTime holdUntil;
+
+    private async Task GoAsync(string id)
+    {
+        active = id;
+        holdUntil = DateTime.UtcNow.AddMilliseconds(1200);
+        // The Environment section lives on its own tab.
+        if (id == "sec-env")
+        {
+            Navigation.NavigateTo($"{View.Summary.Href}/environment");
+            return;
+        }
+        try { await JS.InvokeVoidAsync("gitberth.scrollToId", id); }
+        catch (JSException) { }
+    }
+
+    private Task Notify() => Changed.InvokeAsync();
+
+    private Task Set(Action change)
+    {
+        change();
+        return Changed.InvokeAsync();
+    }
+
+    private Task Undo(Action undo) => Set(undo);
+
+    private Task SetMount(Action change) => Set(change);
+
+    // The phone's jump menu: a section of this tab, or the Network tab.
+    private Task JumpAsync(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString() ?? "";
+        if (id == "network")
+        {
+            Navigation.NavigateTo($"{View.Summary.Href}/network");
+            return Task.CompletedTask;
+        }
+        return GoAsync(id);
+    }
+
+    // The command is shown masked while it carries a secret (cloudflared's --token); the draft gives the hidden words back.
+    private Task SetCommand(ChangeEventArgs e)
+    {
+        if (Draft is null) return Task.CompletedTask;
+        Draft.Command = e.Value?.ToString() ?? "";
+        return Changed.InvokeAsync();
+    }
+
+    private static string MaskedLine(IReadOnlyList<string>? words) => words is null ? "" : ShellLine.Join(Security.Masking.Args(words));
+
+    private static string Show(IReadOnlyList<string>? own, IReadOnlyList<string>? image) =>
+        own is not null ? MaskedLine(own) : image is { Count: > 0 } ? $"the image's ({MaskedLine(image)})" : "the image's";
+
+    private static string SourceWords(AppSummary app) => app.Source switch
+    {
+        AppSource.Registry => "From a registry",
+        AppSource.Local => "From a local image",
+        AppSource.Manual => "Made by hand",
+        _ => app.Origin == ImageOrigin.Registry ? "A registry image" : app.Origin == ImageOrigin.Local ? "A local image" : "An image",
+    };
+
+    private static string? OriginWords(AppSummary app) => app.Origin switch
+    {
+        ImageOrigin.Registry => "updates come from its registry",
+        ImageOrigin.Local => "no registry is known to have it, so its updates are newer builds of its tag on this host",
+        ImageOrigin.Pinned => "pinned to one image by digest",
+        _ => null,
+    };
+
+    private string ResourcesLine
+    {
+        get
+        {
+            var used = View.Summary.MemoryBytes is ulong m ? $" {View.Summary.Title} uses {AppFacts.Bytes(m)} now; the Health page has its last 6 hours." : "";
+            return "Limits stop one app from starving the others." + used;
+        }
+    }
+
+    private string HealthLine => View.Details?.Health is { } h
+        ? $"Docker runs this inside the container. It's {h} now."
+        : "Docker runs this inside the container and marks it healthy or not.";
+
+    private static string RestartHelp(string policy) => policy switch
+    {
+        "no" => "Never: it stays down after a crash or a host reboot until you start it.",
+        "on-failure" => "On failure: it comes back after a crash, but not after a reboot or if you stop it.",
+        "always" => "Always: it comes back after a crash or a reboot, and even after you stop it once Docker restarts.",
+        _ => "Unless stopped: it comes back after a crash or a host reboot, but stays down if you stop it.",
+    };
+
+    private string RemoveLine
+    {
+        get
+        {
+            var mounts = View.Details?.Mounts.Where(m => m.Type == "volume").Select(m => m.Name ?? m.Source).ToList() ?? [];
+            return mounts.Count == 0 ? "It has no volumes to keep." : $"{AppFacts.Names(mounts)} {(mounts.Count == 1 ? "stays" : "stay")} unless you tick {(mounts.Count == 1 ? "it" : "them")}.";
+        }
+    }
+
+    private static string ShortId(string id) => id.StartsWith("sha256:", StringComparison.Ordinal) ? id[7..19] : id.Length > 12 ? id[..12] : id;
+
+    // ---- Small field builders ----
+
+    private RenderFragment HealthNumber(string label, string unit, Func<int?> get, Action<int?> set, string placeholder) => __builder =>
+    {
+        <Field Label="@label">
+            <label class="gb-input gb-input--sm">
+                <input type="number" min="0" placeholder="@placeholder" aria-label="@label" value="@get()"
+                       @oninput="e => Set(() => set(int.TryParse(e.Value?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null))" />
+                @if (unit.Length > 0)
+                {
+                    <span class="gb-input-suffix">@unit</span>
+                }
+            </label>
+        </Field>
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (watcher is not null)
+            {
+                await watcher.InvokeVoidAsync("dispose");
+                await watcher.DisposeAsync();
+            }
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+        self?.Dispose();
+    }
+}

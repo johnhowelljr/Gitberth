@@ -1,0 +1,6 @@
+{
+  "kind": "Go",
+  "title": "Go (Echo)",
+  "port": 1323,
+  "expect": "Hello from Echo"
+}

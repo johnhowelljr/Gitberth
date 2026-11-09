@@ -1,0 +1,72 @@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.RestartAlt" />
+            <span>Restart @Title on a schedule</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            For a container that leaks memory, say. The time is counted from when the container last started, so a deploy or a restart by hand starts it again.
+            @WhatHappens(Recreated)
+        </MudText>
+        <div class="gb-form-grid gb-form-grid--2">
+            <MudSelect T="RestartChoice" @bind-Value="every" Label="Restart" Variant="Variant.Outlined" Margin="Margin.Dense">
+                @foreach (var choice in Enum.GetValues<RestartChoice>())
+                {
+                    <MudSelectItem T="RestartChoice" Value="choice">@RestartChoices.Label(choice)</MudSelectItem>
+                }
+            </MudSelect>
+            @if (every != RestartChoice.Never)
+            {
+                <MudNumericField T="int?" @bind-Value="amount" Label="@($"How many {every.ToString().ToLowerInvariant()}")" Min="1"
+                                 Variant="Variant.Outlined" Margin="Margin.Dense" />
+            }
+        </div>
+        @if (error is not null)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Error" Class="mt-2">@error</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    /// <param name="Every">Null for never.</param>
+    public sealed record Choice(RestartInterval? Every);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public RestartInterval? Current { get; set; }
+    /// <summary>
+    /// A Git app, which a scheduled restart recreates through a deploy (RestartScheduler). Every other app, and any other
+    /// container, gets docker restart.
+    /// </summary>
+    [Parameter] public bool Recreated { get; set; }
+
+    private RestartChoice every;
+    private int? amount;
+    private string? error;
+
+    /// <summary>What a scheduled restart does to it, as RestartScheduler does it: the Settings tab says it too.</summary>
+    public static string WhatHappens(bool recreated) => recreated
+        ? "Gitberth recreates the app from its current image with a deploy's checks, so a new container that doesn't start leaves the old one running. "
+          + "With a domain there's no downtime. While it has saved settings that aren't applied yet, it's restarted as it is instead, so they wait for you."
+        : "Gitberth restarts it with docker restart, so it's down for a few seconds.";
+
+    protected override void OnInitialized() => (every, amount) = RestartChoices.From(Current);
+
+    private void Save()
+    {
+        var model = new AppSettingsModel { RestartEvery = every, RestartAmount = amount };
+        if (model.RestartInterval is { } interval && RestartInterval.Problem(interval.Amount, interval.Unit) is { } problem)
+        {
+            error = problem;
+            return;
+        }
+        MudDialog.Close(DialogResult.Ok(new Choice(model.RestartInterval)));
+    }
+}

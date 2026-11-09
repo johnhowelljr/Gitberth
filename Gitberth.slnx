@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Gitberth/Gitberth.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Gitberth.Tests/Gitberth.Tests.csproj" />
+    <Project Path="tests/Gitberth.UiTests/Gitberth.UiTests.csproj" />
+  </Folder>
+</Solution>

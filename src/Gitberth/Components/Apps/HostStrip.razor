@@ -1,0 +1,93 @@
+@*
+    The host at a glance, above the Apps list and on the dashboard: the apps as a waffle with their counts, CPU with its
+    last few minutes, the memory the apps use against the host's, and the disk.
+*@
+<div class="gb-hoststrip @Class" role="group" aria-label="This host">
+    <a class="gb-hs" href="apps" title="Every app">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.GridView" />Apps</span>
+        <span class="gb-hs-v">@Running <small>running of @Apps.Count</small></span>
+        <Waffle States="@Apps.Select(a => a.State)" Sorted="true" />
+        <span class="gb-hs-sub">
+            <span class="gb-legend"><span class="gb-st gb-st--running"><i class="gb-st-dot"></i></span>@Running running</span>
+            <span class="gb-legend"><span class="gb-st gb-st--stopped"><i class="gb-st-dot"></i></span>@Stopped stopped</span>
+            @if (Trouble > 0)
+            {
+                <span class="gb-legend" style="color:#ffc49a"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" Size="xs" Class="gb-tone-serious" />@Trouble in trouble</span>
+            }
+        </span>
+    </a>
+    <a class="gb-hs" href="health" title="CPU on the Health page">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Speed" />CPU @(Host is { } h ? $"· {h.Cpus} cores" : "")</span>
+        <span class="gb-hs-v">@AppFacts.Percent(HostCpu) <small>of the host</small></span>
+        <Sparkline Values="@CpuHistory" Width="240" Height="26" Stretch="true" />
+        <span class="gb-hs-sub">@(Busiest is { Length: > 0 } busiest ? $"Busiest: {busiest}" : "Nothing busy")</span>
+    </a>
+    <a class="gb-hs" href="health" title="Memory on the Health page">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Memory" />Memory</span>
+        <span class="gb-hs-v">@Gib(AppsMemory) <small>@(Host is { } m ? $"of {Gib(m.MemoryBytes)} GiB" : "GiB")</small></span>
+        <Meter Fraction="@(Host is { MemoryBytes: > 0 } m2 ? AppsMemory / m2.MemoryBytes : null)" Large="true" Title="What the apps use of the host's memory" />
+        <span class="gb-hs-sub">What the apps use, read every 5 s</span>
+    </a>
+    <div class="gb-hs">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Storage" />Disk</span>
+        @if (Disk is { TotalBytes: > 0 } disk)
+        {
+            var used = disk.TotalBytes - disk.FreeBytes;
+            <span class="gb-hs-v">@Gb(used) <small>of @Gb(disk.TotalBytes) GB</small></span>
+            <Meter Fraction="@((double)used / disk.TotalBytes)" Large="true" Title="The host's disk in use" />
+            <span class="gb-hs-sub" style="@(disk.Low ? "color:#ffd98a" : null)">@Gb(disk.FreeBytes) GB free@(disk.TooLow ? ": too little to pull images" : disk.Low ? ": getting low" : "")</span>
+        }
+        else
+        {
+            <span class="gb-hs-v">–</span>
+            <span class="gb-hs-sub">Couldn't be read</span>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<AppSummary> Apps { get; set; } = [];
+    [Parameter] public HealthSnapshot Snapshot { get; set; } = HealthSnapshot.Empty;
+    [Parameter] public DiskSpace? Disk { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private DockerHostInfo? Host => Snapshot.Host;
+
+    private int Running => Apps.Count(a => a.Running);
+
+    private int Trouble => Apps.Count(a => AppStatus.Of(a.State).Trouble);
+
+    // Not running, for whatever reason: as the Apps list's Stopped filter counts them (those in trouble are among them).
+    private int Stopped => Apps.Count(a => AppFacts.Passes(a, StatusFilter.Stopped));
+
+    private double AppsMemory => Apps.Sum(a => (double)(a.MemoryBytes ?? 0));
+
+    private int Cpus => Math.Max(1, Host?.Cpus ?? 1);
+
+    // 100% is one core in the readings; the strip says it as a share of the whole host.
+    private double HostCpu => Snapshot.Containers.Where(c => c.IsUp && c.Recent.Count > 0).Sum(c => c.Recent[^1].Cpu) / Cpus;
+
+    // The host's CPU over the last readings: each container's points summed from the newest back.
+    private IReadOnlyList<double> CpuHistory
+    {
+        get
+        {
+            var series = Snapshot.Containers.Where(c => c.Recent.Count > 0).Select(c => c.Recent).ToList();
+            if (series.Count == 0) return [];
+            var length = Math.Min(SparkPath.Points, series.Max(s => s.Count));
+            var sums = new double[length];
+            foreach (var s in series)
+                for (var i = 0; i < Math.Min(length, s.Count); i++)
+                    sums[length - 1 - i] += s[s.Count - 1 - i].Cpu / Cpus;
+            return sums;
+        }
+    }
+
+    private string Busiest => string.Join(", ", Snapshot.Containers.Where(c => c.IsUp && c.Recent.Count > 0)
+        .OrderByDescending(c => c.Recent[^1].Cpu).Take(2).Where(c => c.Recent[^1].Cpu >= .5)
+        .Select(c => $"{Apps.FirstOrDefault(a => a.Container == c.Name)?.Title ?? c.Name} {AppFacts.Percent(c.Recent[^1].Cpu / Cpus)}"));
+
+    private static string Gib(double bytes) => (bytes / (1L << 30)).ToString(bytes >= 10L << 30 ? "0" : "0.0", CultureInfo.InvariantCulture);
+
+    private static string Gb(long bytes) => (bytes / 1e9).ToString("0", CultureInfo.InvariantCulture);
+}

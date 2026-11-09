@@ -1,0 +1,221 @@
+@*
+    "How it's reached" (design-system.md §10): every way into the container drawn as a path in its Access hue, light
+    travelling along the live ones, the paths that are off dashed with the one button that turns them on. The same
+    markup lays out left to right or top to bottom (a container query), so it works on a phone and in New app's preview.
+    A figure, with every path in words for screen readers.
+*@
+<section class="gb-stage @(Model.Stopped ? "gb-stage--stopped" : null) @Class" aria-label="@(Title ?? "How it's reached")">
+    @if (Title is not null)
+    {
+        <div class="gb-stage-head">
+            <div style="min-width:0">
+                <h2 class="gb-stage-title">@Title</h2>
+                @if (Sub is not null)
+                {
+                    <div class="gb-stage-sub">@Sub</div>
+                }
+            </div>
+            @if (Actions is not null)
+            {
+                <div class="gb-stage-actions">@Actions</div>
+            }
+        </div>
+    }
+    <figure class="gb-flow">
+        <figcaption class="gb-sr">@Model.Caption</figcaption>
+        <div class="gb-fg">
+            @foreach (var cell in ReachLayout.Place(Model))
+            {
+                var style = $"--d:{cell.Wide};--m:{cell.Narrow}";
+                switch (cell.Part)
+                {
+                    case "src":
+                        @Source(Model.ThroughHost[cell.Lane].Source, style)
+                        break;
+                    case "direct-src":
+                        @Source(Model.Direct[cell.Lane].Source, style)
+                        break;
+                    case "flow":
+                        {
+                            var lane = Model.ThroughHost[cell.Lane];
+                            @Flow(lane, lane.Source.Tone, style, lane.Via is null, up: false, cell.Lane)
+                        }
+                        break;
+                    case "via":
+                        {
+                            var via = Model.ThroughHost[cell.Lane].Via!;
+                            <div class="gb-fn gb-fn--via gb-ac-public" style="@style">
+                                <AppLogo Image="@via.Image" Name="@via.Sub" Size="26" />
+                                <div class="gb-fn-txt">
+                                    <div class="gb-fn-t">@via.Title</div>
+                                    <div class="gb-fn-s gb-mono">@via.Sub</div>
+                                </div>
+                            </div>
+                        }
+                        break;
+                    case "flow-via":
+                        {
+                            var lane = Model.ThroughHost[cell.Lane];
+                            @Flow(lane, ReachTone.Public, style, label: true, up: false, cell.Lane)
+                        }
+                        break;
+                    case "hp":
+                        {
+                            var hp = Model.HostPort!;
+                            <div class="gb-fn gb-fn--hp @ReachModel.ToneClass(hp.Tone) @(hp.Ghost ? "gb-fn--ghost" : null)" style="@style">
+                                <div class="gb-micro">Host port</div>
+                                <div class="gb-fn-port">@(hp.Port?.ToString(CultureInfo.InvariantCulture) ?? "None yet")</div>
+                                <div class="gb-fn-s">@hp.Sub</div>
+                            </div>
+                        }
+                        break;
+                    case "flow-hp":
+                        {
+                            var hp = Model.HostPort!;
+                            <div class="gb-fl @ReachModel.ToneClass(hp.Tone) @(hp.Ghost ? "gb-fl--ghost" : null)" style="@style"></div>
+                        }
+                        break;
+                    case "direct-flow":
+                        {
+                            var lane = Model.Direct[cell.Lane];
+                            @Flow(lane, lane.Source.Tone, style, label: true, up: true, cell.Lane + 1)
+                        }
+                        break;
+                    case "ctr":
+                        @Container(style)
+                        break;
+                }
+            }
+        </div>
+    </figure>
+    @if (Legend)
+    {
+        <div class="gb-stage-foot">
+            <span class="gb-lg gb-ac-public"><SvgIcon Icon="@Icons.Material.Outlined.Public" />Internet, through the tunnel</span>
+            <span class="gb-lg gb-ac-lan"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />LAN</span>
+            <span class="gb-lg gb-ac-host"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Host only</span>
+            <span class="gb-lg gb-ac-internal"><SvgIcon Icon="@Icons.Material.Outlined.Hub" />Internal, by name</span>
+            <span class="gb-grow"></span>
+            @if (FootNote is not null)
+            {
+                <span class="gb-t3">@FootNote</span>
+            }
+        </div>
+    }
+    @ChildContent
+</section>
+
+@code {
+    [Parameter, EditorRequired] public ReachModel Model { get; set; } = default!;
+    /// <summary>"How kanban is reached"; none in a compact preview.</summary>
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Sub { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+    /// <summary>The Access legend under the drawing.</summary>
+    [Parameter] public bool Legend { get; set; } = true;
+    /// <summary>On the legend's right: "Dashed paths are off · live, every 5 s".</summary>
+    [Parameter] public string? FootNote { get; set; }
+    /// <summary>A path's button: Publish on LAN, Turn on, Join gitberth. None: the buttons aren't drawn.</summary>
+    [Parameter] public EventCallback<ReachAction> OnAction { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    /// <summary>Under the drawing: what a Compose app or a stopped one needs said.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private RenderFragment Source(ReachSource s, string style) => @<text>
+        @if (s.Href is not null)
+        {
+            <a href="@s.Href" class="gb-fn gb-fn--src @ReachModel.ToneClass(s.Tone) @(s.Ghost ? "gb-fn--ghost" : null)" style="@style">@SourceInside(s)</a>
+        }
+        else
+        {
+            <div class="gb-fn gb-fn--src @ReachModel.ToneClass(s.Tone) @(s.Ghost ? "gb-fn--ghost" : null)" style="@style">@SourceInside(s)</div>
+        }
+    </text>;
+
+    private static RenderFragment SourceInside(ReachSource s) => @<text>
+        <span class="gb-fn-ic"><SvgIcon Icon="@s.Icon" /></span>
+        <div class="gb-fn-txt">
+            <div class="gb-fn-t">@s.Title</div>
+            @if (s.Sub is not null)
+            {
+                <div class="gb-fn-s @(s.MonoSub ? "gb-mono" : null)">@s.Sub</div>
+            }
+        </div>
+    </text>;
+
+    private RenderFragment Flow(ReachLane lane, ReachTone tone, string style, bool label, bool up, int index) => @<div
+        class="gb-fl @ReachModel.ToneClass(tone) @(lane.Ghost ? "gb-fl--ghost" : null) @(up ? "gb-fl--up" : null) @(index % 3 == 1 ? "gb-fl--d2" : index % 3 == 2 ? "gb-fl--d3" : null)"
+        style="@style">
+        @if (label && lane.Label is not null)
+        {
+            @if (lane.Ghost)
+            {
+                <span class="gb-fl-lab gb-fl-lab--sans">
+                    @lane.Label
+                    @if (lane.Action != ReachAction.None && OnAction.HasDelegate)
+                    {
+                        <Btn Size="BtnSize.Sm" OnClick="() => OnAction.InvokeAsync(lane.Action)" Disabled="Busy">@lane.ActionText</Btn>
+                    }
+                </span>
+            }
+            else
+            {
+                <span class="gb-fl-lab">@lane.Label</span>
+            }
+        }
+    </div>;
+
+    private RenderFragment Container(string style)
+    {
+        var c = Model.Container;
+        var hue = LogoCatalog.Resolve(c.Image, c.Title, c.Kind, c.Self).Color;
+        return @<div class="gb-fn gb-fn--ctr" style="@style;--hc:@hue">
+            <div class="gb-fn-ctr-id">
+                <AppLogo Image="@c.Image" Name="@c.Title" Kind="@c.Kind" Self="c.Self" Size="32" Dim="Model.Stopped" />
+                <div class="gb-fn-txt">
+                    <div class="gb-fn-t">@c.Title</div>
+                    <div class="gb-fn-s"><StatusLabel State="c.State" Text="@c.StateText" Since="c.Since" /></div>
+                </div>
+            </div>
+            @if (c.Note is not null && c.Sockets.Count == 0)
+            {
+                <div class="gb-fn-sock gb-fn-sock--faint"><SvgIcon Icon="@Icons.Material.Outlined.Info" /><span class="gb-t2" style="font-size:12.5px">@c.Note</span></div>
+            }
+            @if (c.Sockets.Count > 0)
+            {
+                <div class="gb-fn-socks">
+                    @foreach (var s in c.Sockets)
+                    {
+                        <div class="gb-fn-sock @(s.Published || s.Web ? null : "gb-fn-sock--faint")">
+                            <SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />
+                            <b>@s.Port.ToString(CultureInfo.InvariantCulture)</b><span class="gb-t3">/@s.Protocol</span>
+                            @if (s.Web)
+                            {
+                                <span class="gb-tag gb-tag--accent">Web</span>
+                            }
+                            else if (s.Service is not null)
+                            {
+                                <span class="gb-tag">@s.Service</span>
+                            }
+                        </div>
+                    }
+                    @if (c.MoreSockets > 0)
+                    {
+                        <div class="gb-fn-s" style="padding-left:2px">+@c.MoreSockets more @(c.MoreSockets == 1 ? "port" : "ports")</div>
+                    }
+                </div>
+            }
+            @if (c.Facts.Count > 0)
+            {
+                <dl class="gb-fn-kv">
+                    @foreach (var f in c.Facts)
+                    {
+                        <dt>@f.Key</dt>
+                        <dd class="@(f.Mono ? "gb-mono" : null)" title="@f.Value">@f.Value</dd>
+                    }
+                </dl>
+            }
+        </div>;
+    }
+}

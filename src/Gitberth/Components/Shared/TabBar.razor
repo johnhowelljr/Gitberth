@@ -1,0 +1,36 @@
+@* Tabs that are links, one route each (/apps/postgres/settings): the active one has the brand underline and a glow. *@
+<nav class="gb-tabbar @Class" aria-label="@Label">
+    @foreach (var tab in Tabs)
+    {
+        var on = tab.Key == Active;
+        <a class="gb-tabbar-item @(on ? "on" : null)" href="@tab.Href" aria-current="@(on ? "page" : null)">
+            @if (tab.Icon is not null)
+            {
+                <SvgIcon Icon="@tab.Icon" />
+            }
+            @if (tab.Short is { } brief)
+            {
+                <span class="gb-lbl-long">@tab.Text</span><span class="gb-lbl-short">@brief</span>
+            }
+            else
+            {
+                @tab.Text
+            }
+            @if (tab.Badge is int n and > 0)
+            {
+                <span class="gb-tab-badge" title="@($"{n} unsaved {(n == 1 ? "change" : "changes")}")">@n</span>
+            }
+            else if (tab.Dot)
+            {
+                <span class="gb-tab-badge gb-tab-badge--dot" title="Unsaved changes"></span>
+            }
+        </a>
+    }
+</nav>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<TabItem> Tabs { get; set; } = [];
+    [Parameter] public string? Active { get; set; }
+    [Parameter] public string Label { get; set; } = "Sections";
+    [Parameter] public string? Class { get; set; }
+}

@@ -1,0 +1,6 @@
+{
+  "kind": "Python",
+  "title": "aiohttp",
+  "port": 8080,
+  "expect": "Hello from aiohttp"
+}

@@ -1,0 +1,550 @@
+@page "/apps/new"
+@implements IDisposable
+@inject AppCreator Creator
+@inject ImageService Images
+@inject AppService Apps
+@inject NetworkService Networks
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@*
+    New app (new-app.html, new-app-configure.html): one wizard for every source, and every app it makes is a first-class
+    one. Source: a GitHub repository, a registry image, a local image, or by hand (a pasted docker run or Compose service, or
+    a blank form). Configure: the App page's settings in create mode, prefilled by the source, with "What will run"
+    following every edit. Create: the review (its name and container, the docker run, disk and pull, what happens), then
+    the pull and the engine's steps as they run, ending on the new app's page.
+*@
+<PageTitle>New app · Gitberth</PageTitle>
+
+<PageHead Title="@HeadTitle" Lead="@Lead">
+    <Crumbs>
+        <a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+        @if (step == NewAppStep.Source)
+        {
+            <span>New app</span>
+        }
+        else
+        {
+            <a href="apps/new" @onclick="BackToSource" @onclick:preventDefault="true">New app</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /><span>@(step == NewAppStep.Configure ? "Configure" : "Create")</span>
+        }
+    </Crumbs>
+</PageHead>
+
+<ol class="gb-stepper" aria-label="Steps">
+    @Stp(NewAppStep.Source, 1, step == NewAppStep.Source ? "Source" : $"Source · {SourceWord}")
+    <li class="gb-stp-line" aria-hidden="true"></li>
+    @Stp(NewAppStep.Configure, 2, "Configure")
+    <li class="gb-stp-line" aria-hidden="true"></li>
+    @Stp(NewAppStep.Create, 3, "Create")
+</ol>
+
+@if (step == NewAppStep.Source || source == NewAppSource.Git)
+{
+    <div class="gb-stack">
+        <div class="gb-srcgrid" role="radiogroup" aria-label="Where it comes from">
+            @foreach (var s in Enum.GetValues<NewAppSource>())
+            {
+                var (title, text, icon, tags) = NewAppSources.Of(s);
+                var on = s == source;
+                <button type="button" class="gb-srccard @(on ? "gb-srccard--on" : null)" role="radio" aria-checked="@(on ? "true" : "false")" @onclick="() => PickSource(s)">
+                    @if (on)
+                    {
+                        <span class="gb-srccard-check"><SvgIcon Icon="@Icons.Material.Outlined.Check" /></span>
+                    }
+                    <span class="gb-srccard-ic"><SvgIcon Icon="@icon" /></span>
+                    <span class="gb-srccard-t">@title</span>
+                    <span class="gb-srccard-d">@SourceText(s, text)</span>
+                    <span class="gb-srccard-f">
+                        @foreach (var t in tags)
+                        {
+                            <span class="gb-tag gb-tag--outline">@t</span>
+                        }
+                    </span>
+                </button>
+            }
+        </div>
+        @switch (source)
+        {
+            case NewAppSource.Git:
+                <GitSource PrefillUrl="@Url" OnStage="s => gitStage = s" />
+                break;
+            case NewAppSource.Registry:
+                <RegistrySource Initial="@Image" OnPicked="FromRegistryAsync" Busy="drafting" />
+                break;
+            case NewAppSource.Local:
+                <LocalSource OnPicked="FromLocalAsync" Busy="drafting" />
+                break;
+            default:
+                <HandSource @bind-Mode="hand" OnParsed="FromParsedAsync" OnBlank="FromBlankAsync" Busy="drafting" />
+                break;
+        }
+    </div>
+}
+else if (form is not null)
+{
+    <div class="gb-split">
+        <div>
+            @if (step == NewAppStep.Configure)
+            {
+                <ConfigureForm Form="form" Slug="@Slug" NameTaken="@plan?.NameTaken" LanHost="@lanHost" Shared="@Networks.Shared" Networks="networks"
+                               PortProblems="portProblems" OnChanged="FormChanged" OnNameChanged="_ => FormChanged()"
+                               OnCreateNetwork="CreateNetworkAsync" Creating="@creatingNetwork" />
+            }
+            else
+            {
+                @Review()
+            }
+        </div>
+        <div>
+            <CreatePreview Form="form" Slug="@Slug" LanHost="@lanHost" Shared="@Networks.Shared" SharedMembers="SharedMembers" ShowRun="@(step == NewAppStep.Configure)"
+                           Live="@(step == NewAppStep.Configure)">
+                <Footer>
+                    @if (step == NewAppStep.Configure)
+                    {
+                        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="ReviewAsync" Busy="planning" Class="gb-btn--block">Review and create</Btn>
+                        <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ArrowBack" OnClick="BackToSource">Back to the source</Btn>
+                    }
+                    else if (job is null)
+                    {
+                        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Disabled="@(plan is not { CanCreate: true })" Class="gb-btn--block">Create and start</Btn>
+                        <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ArrowBack" OnClick="() => step = NewAppStep.Configure">Change settings</Btn>
+                    }
+                </Footer>
+            </CreatePreview>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "from")] private string? From { get; set; }
+    [SupplyParameterFromQuery(Name = "url")] private string? Url { get; set; }
+    [SupplyParameterFromQuery(Name = "image")] private string? Image { get; set; }
+    /// <summary>An image to start from straight away (New app from an image on this host): ?use=postgres:18&source=local.</summary>
+    [SupplyParameterFromQuery(Name = "use")] private string? Use { get; set; }
+    [SupplyParameterFromQuery(Name = "source")] private string? SourceName { get; set; }
+
+    private NewAppSource source = NewAppSource.Registry;
+    private NewAppStep step = NewAppStep.Source;
+    private NewAppStep gitStage = NewAppStep.Source;
+    private HandMode hand = HandMode.DockerRun;
+    private NewAppForm? form;
+    private CreatePlan? plan;
+    private List<PortProblem> portProblems = [];
+    private IReadOnlyList<NetworkView> networks = [];
+    private string lanHost = "";
+    private bool drafting, planning, disposed;
+    private int planVersion;
+    private CancellationTokenSource? typing;
+    private CreateJob? job;
+    private CreateResult? result;
+    private bool showOutput;
+
+    private NewAppStep Shown => source == NewAppSource.Git ? gitStage : step;
+
+    private string Slug => plan?.Slug is { Length: > 0 } s && plan.Draft.Name == form?.Name.Trim() ? s : AppService.Slugify(form?.Name) is { Length: > 0 } slug ? slug : "app";
+
+    private string HeadTitle => Shown == NewAppStep.Source || form is null || source == NewAppSource.Git ? "New app" : $"New app from {form.Image}";
+
+    private string Lead => Shown switch
+    {
+        NewAppStep.Source => "Run anything on this host. Pick where it comes from; every setting can change before it starts, and after.",
+        NewAppStep.Configure when source == NewAppSource.Git => "Gitberth works out how to build it; check the settings and deploy.",
+        NewAppStep.Configure => "Filled in from the source. Check the parts that matter to you; the preview shows exactly what will run.",
+        _ => NewAppText.CreateLead(job is not null, result?.Ok, result?.Key is not null || result?.AppId is not null),
+    };
+
+    private string SourceWord => source switch
+    {
+        NewAppSource.Git => "GitHub",
+        NewAppSource.Registry => "Registry",
+        NewAppSource.Local => "Local image",
+        _ => hand == HandMode.Compose ? "Compose" : hand == HandMode.DockerRun ? "docker run" : "By hand",
+    };
+
+    private IReadOnlyList<string> SharedMembers =>
+        networks.FirstOrDefault(n => n.Network.Name == Networks.Shared)?.Members.Select(m => m.Title.Replace(" (app)", "")).Take(4).ToList() ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (From == "paste") (source, hand) = (NewAppSource.Hand, HandMode.DockerRun);
+        else if (!string.IsNullOrWhiteSpace(Url)) source = NewAppSource.Git;
+        else if (SourceName == "local") source = NewAppSource.Local;
+        lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));
+        try
+        {
+            networks = (await Networks.ListAsync()).Networks;
+            // Every image, as the Local image list's title counts them.
+            var images = await Images.ListLocalAsync();
+            localSummary = $"{images.Count} images, {NewAppText.Size(images.Sum(i => i.SizeBytes))}";
+        }
+        catch (Exception)
+        {
+            // Without the list, only the shared network is offered.
+        }
+        if (!string.IsNullOrWhiteSpace(Use) && ImageReference.Parse(Use) is not null)
+            await DraftAsync(() => Creator.DraftFromImageAsync(Use, source == NewAppSource.Local ? AppSource.Local : AppSource.Registry));
+    }
+
+    private RenderFragment Stp(NewAppStep which, int number, string text)
+    {
+        var state = which < Shown ? "done" : which == Shown ? "on" : null;
+        return @<li class="gb-stp @(state is null ? null : $"gb-stp--{state}")" aria-current="@(state == "on" ? "step" : null)">
+            <span class="gb-stp-n">@if (state == "done") { <SvgIcon Icon="@Icons.Material.Outlined.Check" /> } else { @number }</span>
+            <span class="gb-stp-t">@text</span>
+        </li>;
+    }
+
+    // The local card says how many images there are to pick from.
+    private string SourceText(NewAppSource s, string text) => s == NewAppSource.Local && localSummary is { } here ? $"{text[..^1]}: {here}." : text;
+
+    private string? localSummary;
+
+    private void PickSource(NewAppSource s)
+    {
+        if (s == source && step == NewAppStep.Source) return;
+        (source, step, form, plan, job, result) = (s, NewAppStep.Source, null, null, null, null);
+    }
+
+    private void BackToSource()
+    {
+        if (job is { Completion.IsCompleted: false }) return;
+        (step, plan, job, result) = (NewAppStep.Source, null, null, null);
+    }
+
+    // ---- From the source to Configure ----
+
+    private Task FromRegistryAsync((string Reference, int? RegistryId) picked) =>
+        DraftAsync(() => Creator.DraftFromImageAsync(picked.Reference, AppSource.Registry, picked.RegistryId));
+
+    private Task FromLocalAsync(string reference) => DraftAsync(() => Creator.DraftFromImageAsync(reference, AppSource.Local));
+
+    private Task FromBlankAsync(string reference) => DraftAsync(() => Creator.DraftFromImageAsync(reference, AppSource.Manual));
+
+    private Task FromParsedAsync(ParsedApp parsed) => DraftAsync(() => Creator.DraftFromParsedAsync(parsed), pasted: true);
+
+    private async Task DraftAsync(Func<Task<NewAppDraft>> make, bool pasted = false)
+    {
+        drafting = true;
+        try
+        {
+            var draft = await make();
+            // What the draft was made from: the host's image, or its registry's config before it's pulled.
+            var facts = draft.Facts;
+            try
+            {
+                facts ??= draft.Settings.Image.Length > 0 ? await Images.FactsAsync(draft.Settings.Image) : null;
+            }
+            catch (Exception)
+            {
+                // Not on this host: it's pulled when it's created.
+            }
+            form = NewAppForm.From(draft, facts, pasted);
+            (step, portProblems) = (NewAppStep.Configure, []);
+            await PlanAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Gitberth couldn't read it: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            drafting = false;
+        }
+    }
+
+    // ---- Configure ----
+
+    private async Task FormChanged()
+    {
+        if (form is not null && portProblems.Count > 0) portProblems = form.Ports.Problems();
+        typing?.Cancel();
+        var mine = typing = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(450, mine.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        await PlanAsync();
+    }
+
+    // The plan the preview, the name check and Create follow: worked out again after edits, a newer one winning.
+    private async Task PlanAsync()
+    {
+        if (form is null) return;
+        var mine = ++planVersion;
+        planning = true;
+        try
+        {
+            var planned = await Creator.PlanAsync(form.ToDraft());
+            if (mine == planVersion && !disposed) plan = planned;
+        }
+        catch (Exception ex)
+        {
+            if (mine == planVersion) Snackbar.Add($"Couldn't check the settings: {ex.Message}", Severity.Warning);
+        }
+        finally
+        {
+            if (mine == planVersion) planning = false;
+        }
+    }
+
+    // [Create it] on a network the source names that this host doesn't have: a plain bridge network, then the list and the plan again.
+    private async Task CreateNetworkAsync(string name)
+    {
+        if (creatingNetwork is not null) return;
+        creatingNetwork = name;
+        try
+        {
+            await Networks.CreateNetworkAsync(name);
+            Snackbar.Add($"Created the network {name}.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't create the network {name}: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            creatingNetwork = null;
+        }
+        try
+        {
+            networks = (await Networks.ListAsync()).Networks;
+        }
+        catch (Exception)
+        {
+            // The list stays as it was; the plan says what's still missing.
+        }
+        await PlanAsync();
+    }
+
+    private string? creatingNetwork;
+
+    // The networks the form names that this host doesn't have.
+    private IReadOnlyList<string> Missing => form?.Missing(networks.Select(n => n.Network.Name), Networks.Shared) ?? [];
+
+    private async Task ReviewAsync()
+    {
+        if (form is null) return;
+        portProblems = form.Ports.Problems();
+        if (portProblems.Count > 0)
+        {
+            Snackbar.Add(portProblems.Count == 1 ? portProblems[0].Message : "Some ports need changing: see Ports.", Severity.Warning);
+            return;
+        }
+        typing?.Cancel();
+        await PlanAsync();
+        if (plan is null) return;
+        step = NewAppStep.Create;
+    }
+
+    // ---- Create ----
+
+    private RenderFragment Review() => @<div class="gb-stack">
+        @if (plan is { } p)
+        {
+            <section class="gb-card gb-sec">
+                <div class="gb-sec-head">
+                    <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.FactCheck" /></span>
+                    <div style="min-width:0"><div class="gb-h3">Review</div><p>@NewAppText.Consequence(p.Container, FirstAddress(p), p.NeedsPull, p.NeedsPull ? form!.Image : null)</p></div>
+                </div>
+                <div class="gb-sec-body">
+                    <dl class="gb-read">
+                        <dt>Name</dt>
+                        <dd><span style="font-weight:600">@p.Draft.Name</span></dd>
+                        <dt>Container</dt>
+                        <dd><span class="gb-mono">@p.Container</span>@if (p.NameTaken is { } taken) { <span class="gb-tag gb-tag--warn">@taken</span> }</dd>
+                        @if (NewAppText.NetworkModeText(p.Draft.Settings.NetworkMode) is { } mode)
+                        {
+                            <dt>Network</dt>
+                            <dd><span>@mode:</span><span class="gb-t3">@(p.Draft.Settings.NetworkMode == "host" ? $"reached at {lanHost}, not by name" : "no name on a network")</span></dd>
+                        }
+                        else
+                        {
+                            <dt>Network name</dt>
+                            <dd><span class="gb-mono">@p.Slug on @Networks.Shared</span>@if (p.Networks.Count > 1) { <span class="gb-t3">and on @string.Join(", ", p.Networks.Skip(1).Select(n => n.Name))</span> }</dd>
+                        }
+                        <dt>Image</dt>
+                        <dd><span class="gb-mono">@p.Draft.Settings.Image</span><span class="gb-tag @(p.NeedsPull ? null : "gb-tag--good")">@(p.NeedsPull ? "Pulled first" : "On this host")</span></dd>
+                        <dt>Disk</dt>
+                        <dd>@NewAppText.Size(p.Disk.FreeBytes) free of @NewAppText.Size(p.Disk.TotalBytes)@if (p.Disk.TooLow && p.NeedsPull) { <span class="gb-tag gb-tag--critical">Too little to pull</span> } else if (p.Disk.Low) { <span class="gb-tag gb-tag--warn">Getting low</span> }</dd>
+                    </dl>
+                    @if (NewAppText.ReviewProblems(p.Problems, Missing) is { Count: > 0 } problems)
+                    {
+                        <Banner Tone="serious" Title="@(problems.Count == 1 ? "One setting needs changing" : $"{problems.Count} settings need changing")">
+                            <ChildContent>@string.Join(" ", problems)</ChildContent>
+                            <Actions><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Tune" OnClick="EditAsync">Change settings</Btn></Actions>
+                        </Banner>
+                    }
+                    @if (p.NeedsPull && p.Disk.TooLow)
+                    {
+                        <Banner Tone="critical" Title="Not enough disk to pull it">Only @NewAppText.Size(p.Disk.FreeBytes) free on Docker's disk. Free some space first.</Banner>
+                    }
+                    @foreach (var note in p.Notes)
+                    {
+                        <div class="gb-impact-row gb-tone-info"><SvgIcon Icon="@Icons.Material.Outlined.Info" /><span>@note</span></div>
+                    }
+                    <CodeBlock Title="The docker run it amounts to" Code="@p.DockerRun" Icon="@Icons.Material.Outlined.Terminal" />
+                </div>
+            </section>
+        }
+        @if (job is not null)
+        {
+            @Progress(job)
+        }
+    </div>;
+
+    private RenderFragment Progress(CreateJob running) => @<section class="gb-card gb-sec @(result is { Ok: false } ? "gb-sec--failed" : null)" aria-live="polite">
+        <div class="gb-sec-head">
+            <span class="gb-sec-icon"><SvgIcon Icon="@(result is { Ok: false } ? Icons.Material.Outlined.ErrorOutline : Icons.Material.Outlined.RocketLaunch)" /></span>
+            <div style="min-width:0">
+                <div class="gb-h3">@(result is null ? $"Creating {plan?.Container}" : result.Ok ? "Created" : $"{plan?.Container ?? "It"} wasn't created")</div>
+                <p>@(result is { Ok: false } failedNow ? Reason(failedNow) : result?.Message ?? PhaseText(running.Phase))</p>
+            </div>
+        </div>
+        <div class="gb-sec-body">
+            @if (running.Pull is { } pull)
+            {
+                var pr = pull.Progress;
+                var pct = pr.Total > 0 ? (int)(100.0 * pr.Current / pr.Total) : pr.Layers > 0 ? (int)(100.0 * pr.LayersDone / pr.Layers) : 5;
+                <div class="gb-pullbar">
+                    <div class="gb-pullbar-line"><span>Pulling @pull.Reference · @pr.Status</span><span class="gb-mono">@pr.LayersDone/@pr.Layers layers@(pr.Total > 0 ? $" · {NewAppText.Size(pr.Current)} of {NewAppText.Size(pr.Total)}" : "")</span></div>
+                    <div class="gb-progress"><i style="width:@(Math.Clamp(pct, 3, 100))%"></i></div>
+                </div>
+            }
+            @if (running.Engine is { } engine)
+            {
+                <ChangeSteps Steps="engine.Steps" Planned="engine.Plan.Steps" />
+            }
+            @if (result is { Ok: false } failed)
+            {
+                <div class="gb-impact-row @(failed.Key is null ? "gb-tone-good" : "gb-tone-warn")">
+                    <SvgIcon Icon="@(failed.Key is null ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.Inventory2)" />
+                    <span>@NewAppText.LeftBehind(plan?.Container ?? "its", failed.Key)</span>
+                </div>
+                @if (failed.LastOutput is { } output)
+                {
+                    <div><Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Terminal" OnClick="() => showOutput = !showOutput"
+                              aria-expanded="@(showOutput ? "true" : "false")">@(showOutput ? "Hide its last output" : "Its last output")</Btn></div>
+                    @if (showOutput)
+                    {
+                        <pre class="gb-output">@output</pre>
+                    }
+                }
+                <div class="gb-row gb-row--wrap gb-create-again">
+                    @if (failed.Key is { } key)
+                    {
+                        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.OpenInNew" Href="@($"apps/{Uri.EscapeDataString(key)}")">Open @key</Btn>
+                        <Btn Icon="@Icons.Material.Outlined.Tune" OnClick="EditAsync">Edit the settings</Btn>
+                    }
+                    else
+                    {
+                        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Replay" OnClick="TryAgainAsync" Busy="retrying">Try again</Btn>
+                        <Btn Icon="@Icons.Material.Outlined.Tune" OnClick="EditAsync">Edit the settings</Btn>
+                    }
+                </div>
+            }
+        </div>
+    </section>;
+
+    private string? FirstAddress(CreatePlan p) => NewAppText.FirstAddress(p.Draft.Settings.Ports, p.Draft.Options.WebPort, lanHost, p.Slug);
+
+    private static string PhaseText(string phase) => phase switch
+    {
+        "Pulling" => "Pulling the image…",
+        "Creating" => "Creating the container…",
+        "Starting" => "Starting it…",
+        "Checking" => "Checking it answers…",
+        "Done" => "Done.",
+        "Failed" => "It didn't start.",
+        _ => "Getting ready…",
+    };
+
+    // A failed create's reason, as the backend gave it, without repeating the container's name the title already says.
+    private string Reason(CreateResult failed)
+    {
+        var message = failed.Message;
+        if (plan?.Container is { } container && message.StartsWith($"{container} wasn't created: ", StringComparison.Ordinal))
+            message = message[$"{container} wasn't created: ".Length..];
+        // What was or wasn't left behind is said on its own line, from the result, so the reason doesn't claim it too.
+        if (message.StartsWith("Nothing was created: ", StringComparison.Ordinal)) message = message["Nothing was created: ".Length..];
+        return message.Length > 0 ? char.ToUpperInvariant(message[0]) + message[1..] : "It didn't start.";
+    }
+
+    private async Task CreateAsync()
+    {
+        if (plan is not { CanCreate: true } ready) return;
+        if (job is not null) job.Changed -= JobChanged;
+        try
+        {
+            job = Creator.Start(ready);
+            result = null;
+            showOutput = false;
+            job.Changed += JobChanged;
+            var done = await job.Completion;
+            if (disposed) return;
+            if (done.Ok && done.Key is { } key)
+            {
+                Nav.NavigateTo($"apps/{Uri.EscapeDataString(key)}");
+                return;
+            }
+            result = done;
+        }
+        catch (Exception ex)
+        {
+            result = new CreateResult(false, $"Gitberth couldn't start creating it: {ex.Message}", null, null, null);
+        }
+    }
+
+    // [Try again] after a failed create: the same settings and the same name, planned again (the failed create left
+    // nothing behind, so the name is free), then created, without leaving this step.
+    private async Task TryAgainAsync()
+    {
+        if (form is null || retrying) return;
+        retrying = true;
+        try
+        {
+            typing?.Cancel();
+            var name = plan?.Slug;
+            await PlanAsync();
+            if (plan is { CanCreate: true } && plan.Slug == name)
+            {
+                await CreateAsync();
+                return;
+            }
+            // Something changed meanwhile (the name was taken, so it'd get another; a port went): the review says what,
+            // and the job's card goes. Nothing is created under a name the owner didn't see.
+            if (job is not null) job.Changed -= JobChanged;
+            (job, result) = (null, null);
+        }
+        finally
+        {
+            retrying = false;
+        }
+    }
+
+    private bool retrying;
+
+    // [Edit the settings]: back to Configure with everything as it was, the failed create's card gone.
+    private Task EditAsync()
+    {
+        if (job is { Completion.IsCompleted: false }) return Task.CompletedTask;
+        if (job is not null) job.Changed -= JobChanged;
+        (step, job, result) = (NewAppStep.Configure, null, null);
+        return Task.CompletedTask;
+    }
+
+    private void JobChanged()
+    {
+        if (!disposed) _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        typing?.Cancel();
+        if (job is not null) job.Changed -= JobChanged;
+    }
+}

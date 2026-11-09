@@ -1,0 +1,6 @@
+{
+  "kind": "DotNetWorker",
+  "title": ".NET console app (net10.0)",
+  "port": null,
+  "worker": true
+}

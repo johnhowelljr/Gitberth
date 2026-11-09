@@ -1,0 +1,6 @@
+{
+  "kind": "NodeServer",
+  "title": "Node.js server (Express)",
+  "port": 3000,
+  "expect": "Hello from Express, laid out by express-generator"
+}

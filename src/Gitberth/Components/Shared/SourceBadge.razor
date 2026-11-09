@@ -1,0 +1,36 @@
+@* Where an app comes from: an icon and a word, grey on purpose (a fact, not a state), the same chip for every source. *@
+@if (Href is not null)
+{
+    <a class="gb-src @(Large ? "gb-src--lg" : null) @Class" href="@Href" target="_blank" rel="noopener" title="@Title"><SvgIcon Icon="@IconOf(Source)" />@WordOf(Source)</a>
+}
+else
+{
+    <span class="gb-src @(Large ? "gb-src--lg" : null) @Class" title="@Title"><SvgIcon Icon="@IconOf(Source)" />@WordOf(Source)</span>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppSource Source { get; set; }
+    /// <summary>Where it leads: a Git app's repository.</summary>
+    [Parameter] public string? Href { get; set; }
+    [Parameter] public bool Large { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    public static string WordOf(AppSource source) => source switch
+    {
+        AppSource.Git => "Git",
+        AppSource.Registry => "Registry",
+        AppSource.Local => "Local image",
+        AppSource.Manual => "By hand",
+        _ => "Existing",
+    };
+
+    public static string IconOf(AppSource source) => source switch
+    {
+        AppSource.Git => Icons.Custom.Brands.GitHub,
+        AppSource.Registry => Icons.Material.Outlined.CloudDownload,
+        AppSource.Local => Icons.Material.Outlined.Layers,
+        AppSource.Manual => Icons.Material.Outlined.EditNote,
+        _ => Icons.Material.Outlined.Inventory2,
+    };
+}

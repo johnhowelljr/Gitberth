@@ -1,0 +1,59 @@
+@*
+    An app's logo tile: its brand mark on a tile tinted with the brand's colour, a two-letter monogram for an image the
+    catalogue doesn't know, or Gitberth's own mark. Sizes: 20 (menu), 26 (dialogs), 32 (list rows), 44 (condensed
+    headers), 60 (the hero, with a glow of its own colour behind it). Decoration only: the name is always next to it.
+*@
+<span class="@Css" style="--lc:@choice.Color;--lg:@choice.Glyph" aria-hidden="true">
+    @if (choice.Gitberth)
+    {
+        <svg viewBox="0 0 32 32">
+            <g fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
+                <path d="M16 6.5 24.5 11v10L16 25.5 7.5 21V11z" />
+                <path d="M7.5 11 16 15.5 24.5 11M16 15.5v10" opacity=".55" />
+            </g>
+            <circle cx="16" cy="15.5" r="2.6" fill="#fff" />
+        </svg>
+    }
+    else if (choice.Mark is { } mark)
+    {
+        <svg viewBox="0 0 24 24"><path d="@mark.Path" /></svg>
+    }
+    else if (choice.Monogram is { } letters)
+    {
+        @letters
+    }
+    else
+    {
+        <SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" />
+    }
+</span>
+
+@code {
+    /// <summary>The image as Docker shows it (postgres:18); null when there's none.</summary>
+    [Parameter] public string? Image { get; set; }
+    /// <summary>The container's name or the app's title: its words pick a framework's mark when the image doesn't.</summary>
+    [Parameter] public string Name { get; set; } = "";
+    /// <summary>20, 26, 32, 44 or 60 px.</summary>
+    [Parameter] public int Size { get; set; } = 32;
+    /// <summary>A Git app's detected framework (AppDefinition.DetectedKind).</summary>
+    [Parameter] public string? Kind { get; set; }
+    /// <summary>Gitberth's own container.</summary>
+    [Parameter] public bool Self { get; set; }
+    /// <summary>Stopped: shown faded, so the eye skips it.</summary>
+    [Parameter] public bool Dim { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private LogoChoice choice = LogoCatalog.Resolve(null, null);
+
+    protected override void OnParametersSet() => choice = LogoCatalog.Resolve(Image, Name, Kind, Self);
+
+    private string Css => string.Join(' ', new[]
+    {
+        "gb-logo",
+        Size switch { <= 22 => "gb-logo--xs", <= 28 => "gb-logo--sm", <= 36 => null, <= 50 => "gb-logo--lg", _ => "gb-logo--xl" },
+        choice.Monogram is not null ? "gb-logo--mono" : null,
+        choice.Gitberth ? "gb-logo--gb" : null,
+        Dim ? "gb-logo--dim" : null,
+        Class,
+    }.Where(c => c is not null));
+}

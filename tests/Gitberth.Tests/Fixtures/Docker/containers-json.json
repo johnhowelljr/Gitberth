@@ -1,0 +1,589 @@
+[
+  {
+    "Id": "19b5a0b05faafa2426caf995c3e26cf14227c6a99b343811e355d892faea7607",
+    "Names": [
+      "/sample-index"
+    ],
+    "Image": "nginx:stable-alpine",
+    "ImageID": "sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:84ed8c0dd296c188bfc24ed506f46589e9285fb0b11cf3a04d91d524d3067e11",
+      "size": 2493,
+      "annotations": {
+        "com.docker.official-images.bashbrew.arch": "amd64",
+        "org.opencontainers.image.base.digest": "sha256:8f06fd647c6687eae0fd7bee8a43df66e61edb9f093bb0a9079d69cb355b879b",
+        "org.opencontainers.image.base.name": "nginx:1.30.6-alpine-slim",
+        "org.opencontainers.image.created": "2026-10-21T23:23:52Z",
+        "org.opencontainers.image.revision": "4b9f658be76820b24e4ef4605413a5c08707a512",
+        "org.opencontainers.image.source": "https://github.com/nginx/docker-nginx.git#4b9f658be76820b24e4ef4605413a5c08707a512:stable/alpine",
+        "org.opencontainers.image.url": "https://hub.docker.com/_/nginx",
+        "org.opencontainers.image.version": "1.30.6-alpine"
+      },
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "/docker-entrypoint.sh nginx -g 'daemon off;'",
+    "Created": 1793834878,
+    "Ports": [],
+    "Labels": {
+      "gitberth.sample": "index",
+      "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "State": "exited",
+    "Status": "Exited (0) 7 hours ago",
+    "HostConfig": {
+      "NetworkMode": "bridge"
+    },
+    "Health": {
+      "Status": "none",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "1cf99cac118bdba3bffd645cc027366c14b2ad259b688a5b7b1b2c5687f1b726",
+          "EndpointID": "",
+          "Gateway": "",
+          "IPAddress": "",
+          "MacAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": []
+  },
+  {
+    "Id": "a9d6a097c277d8d6e22008c5840c055094e6978623d01aa09eabcd0d9f79d508",
+    "Names": [
+      "/sample-bun-hono"
+    ],
+    "Image": "gitberth-sample-bun-hono",
+    "ImageID": "sha256:bd93b8516967564d0d9d8b47a46735802bf89efc9be1f04a7bae5b215729dc3b",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:bd8f3ff61921b20cafae6179520971f6c465cebf8b751dc4253e34ccb69dfd44",
+      "size": 2187,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "/usr/local/bin/docker-entrypoint.sh bun run src/index.ts",
+    "Created": 1793833973,
+    "Ports": [],
+    "Labels": {
+      "gitberth.sample": "bun-hono",
+      "org.opencontainers.image.created": "2026-10-22T10:15:16.829Z",
+      "org.opencontainers.image.description": "Incredibly fast JavaScript runtime, bundler, test runner, and package manager \u2013 all in one",
+      "org.opencontainers.image.licenses": "NOASSERTION",
+      "org.opencontainers.image.revision": "38afee6c84fcf48c0edb2466aa4b27d287a59c30",
+      "org.opencontainers.image.source": "https://github.com/oven-sh/bun",
+      "org.opencontainers.image.title": "bun",
+      "org.opencontainers.image.url": "https://github.com/oven-sh/bun",
+      "org.opencontainers.image.version": "1.4.4"
+    },
+    "State": "exited",
+    "Status": "Exited (137) 7 hours ago",
+    "HostConfig": {
+      "NetworkMode": "bridge"
+    },
+    "Health": {
+      "Status": "none",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "1cf99cac118bdba3bffd645cc027366c14b2ad259b688a5b7b1b2c5687f1b726",
+          "EndpointID": "",
+          "Gateway": "",
+          "IPAddress": "",
+          "MacAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": []
+  },
+  {
+    "Id": "fa8af48f1cd8a7668a54135b4ba020247cabca3cba9e98156df488bbc1d3e548",
+    "Names": [
+      "/sample-bun-elysia"
+    ],
+    "Image": "gitberth-sample-bun-elysia",
+    "ImageID": "sha256:d25010d42fe9107f0e105f8259b331e7a331d84251ea998f3dd178a7771fb261",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:f65edbf537177682f5cf2efccb9dc00034d4bcabd795a7dca3dced9a503c8435",
+      "size": 2186,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "/usr/local/bin/docker-entrypoint.sh bun run src/index.ts",
+    "Created": 1793833969,
+    "Ports": [],
+    "Labels": {
+      "gitberth.sample": "bun-elysia",
+      "org.opencontainers.image.created": "2026-10-22T10:15:16.829Z",
+      "org.opencontainers.image.description": "Incredibly fast JavaScript runtime, bundler, test runner, and package manager \u2013 all in one",
+      "org.opencontainers.image.licenses": "NOASSERTION",
+      "org.opencontainers.image.revision": "38afee6c84fcf48c0edb2466aa4b27d287a59c30",
+      "org.opencontainers.image.source": "https://github.com/oven-sh/bun",
+      "org.opencontainers.image.title": "bun",
+      "org.opencontainers.image.url": "https://github.com/oven-sh/bun",
+      "org.opencontainers.image.version": "1.4.4"
+    },
+    "State": "exited",
+    "Status": "Exited (137) 7 hours ago",
+    "HostConfig": {
+      "NetworkMode": "bridge"
+    },
+    "Health": {
+      "Status": "none",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "bridge": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "1cf99cac118bdba3bffd645cc027366c14b2ad259b688a5b7b1b2c5687f1b726",
+          "EndpointID": "",
+          "Gateway": "",
+          "IPAddress": "",
+          "MacAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": []
+  },
+  {
+    "Id": "27c0957a4ff72d2df7e55f5dbf571e53255a4e66074addeb688a1b5adbde2f6e",
+    "Names": [
+      "/gb-kanban"
+    ],
+    "Image": "gitberth/kanban:425df8a",
+    "ImageID": "sha256:1fe9fbd57aac2e17c7c2cf98cb0e4aa595abddf0a72d007f84128ec9f61f985c",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:8cc71e12f3defe7971fb36511447a1b300b761bb4ea3ff1b28e937622c31e518",
+      "size": 2198,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "docker-entrypoint.sh npm start",
+    "Created": 1793833629,
+    "Ports": [
+      {
+        "IP": "0.0.0.0",
+        "PrivatePort": 3000,
+        "PublicPort": 3001,
+        "Type": "tcp"
+      },
+      {
+        "IP": "::",
+        "PrivatePort": 3000,
+        "PublicPort": 3001,
+        "Type": "tcp"
+      }
+    ],
+    "Labels": {
+      "gitberth.app": "kanban",
+      "gitberth.authjs": "true",
+      "gitberth.commit": "425df8a3bf544b854e44a0aedae1468fbf9f9ef8",
+      "gitberth.crons": "[{\"path\":\"/api/cron/onecode-cleanup\",\"schedule\":\"0 6 * * *\"}]",
+      "gitberth.deployment": "14",
+      "gitberth.env-prefix": "NEXT_PUBLIC_",
+      "gitberth.managed": "true",
+      "gitberth.port": "3000",
+      "gitberth.traits": "1",
+      "gitberth.trigger": "Manual"
+    },
+    "State": "running",
+    "Status": "Up 11 hours",
+    "HostConfig": {
+      "NetworkMode": "gitberth"
+    },
+    "Health": {
+      "Status": "none",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "gitberth": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+          "EndpointID": "5183935133b5b501a370db4d0981755ac9b23c60d4dca1ce55b9a294dc637d3d",
+          "Gateway": "172.21.0.1",
+          "IPAddress": "172.21.0.2",
+          "MacAddress": "f6:33:ad:f5:b7:4f",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": []
+  },
+  {
+    "Id": "79d00d03308354e1ae107645e2617e470f568eff54466cb2f655494189b4cfa2",
+    "Names": [
+      "/gb-orb"
+    ],
+    "Image": "gitberth/orb:1d2948c",
+    "ImageID": "sha256:d5b908aeb4f8a92b6c9b56dca6bb3a5c585914424efaf045dd96755ea1a5e425",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:f86402a00182cc5cf3de663332c19ceb17af35c0af1e1855c58685fa8d810468",
+      "size": 2189,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "/docker-entrypoint.sh nginx -g 'daemon off;'",
+    "Created": 1793833294,
+    "Ports": [
+      {
+        "IP": "0.0.0.0",
+        "PrivatePort": 80,
+        "PublicPort": 3000,
+        "Type": "tcp"
+      },
+      {
+        "IP": "::",
+        "PrivatePort": 80,
+        "PublicPort": 3000,
+        "Type": "tcp"
+      }
+    ],
+    "Labels": {
+      "gitberth.app": "orb",
+      "gitberth.commit": "1d2948cc693a6d766f2145dc07e52dc2c8f718ae",
+      "gitberth.deployment": "13",
+      "gitberth.managed": "true",
+      "gitberth.port": "80",
+      "gitberth.traits": "1",
+      "gitberth.trigger": "Manual",
+      "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "State": "running",
+    "Status": "Up 12 hours",
+    "HostConfig": {
+      "NetworkMode": "gitberth"
+    },
+    "Health": {
+      "Status": "none",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "gitberth": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+          "EndpointID": "f2a77c49eb1d9e64f54fed09abe72bdab89f826e1bb22f9c252dc677e3fd4ba5",
+          "Gateway": "172.21.0.1",
+          "IPAddress": "172.21.0.3",
+          "MacAddress": "a6:06:c4:31:e3:83",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": []
+  },
+  {
+    "Id": "455b8ea31b6d686dbf8c70b3b35d65f4f0633c59d43a45d446b77b7b041976ce",
+    "Names": [
+      "/gitberth"
+    ],
+    "Image": "gitberth:local",
+    "ImageID": "sha256:0c1a38670237d7bc11ee185585ec1309b54599d259ccd7930e81c2114472b125",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:a23726ff8dbcf87a2eefb03993c8826af2c7e523aeb15a8c4898392d7149ed23",
+      "size": 2397,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "dotnet Gitberth.dll",
+    "Created": 1793833212,
+    "Ports": [
+      {
+        "IP": "0.0.0.0",
+        "PrivatePort": 8080,
+        "PublicPort": 8080,
+        "Type": "tcp"
+      },
+      {
+        "IP": "::",
+        "PrivatePort": 8080,
+        "PublicPort": 8080,
+        "Type": "tcp"
+      }
+    ],
+    "Labels": {
+      "com.docker.compose.config-hash": "a3233e1b1ce0125e02b238b096adb219459b71805318343efac890914620f82e",
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "",
+      "com.docker.compose.image": "sha256:a23726ff8dbcf87a2eefb03993c8826af2c7e523aeb15a8c4898392d7149ed23",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "gitberth",
+      "com.docker.compose.project.config_files": "/opt/gitberth/docker-compose.yml",
+      "com.docker.compose.project.working_dir": "/opt/gitberth",
+      "com.docker.compose.service": "gitberth",
+      "com.docker.compose.version": "5.6.1",
+      "org.opencontainers.image.version": "24.04"
+    },
+    "State": "running",
+    "Status": "Up 11 hours",
+    "HostConfig": {
+      "NetworkMode": "gitberth_default"
+    },
+    "Health": {
+      "Status": "none",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "gitberth": {
+          "IPAMConfig": {},
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+          "EndpointID": "ba92f062546e521dec6e1323868ff7e340a2ea2ec92ea8fe4c1624352994cb60",
+          "Gateway": "172.21.0.1",
+          "IPAddress": "172.21.0.5",
+          "MacAddress": "36:df:50:08:02:9e",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        },
+        "gitberth_default": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "9b91ba9769833320ef812519543ee1c0073b7a041ec46ef26e517ee924659c14",
+          "EndpointID": "50f13a0798805e9609abe1487365301051a24aea5bb3bab7bebc08e3adfd422f",
+          "Gateway": "172.19.0.1",
+          "IPAddress": "172.19.0.2",
+          "MacAddress": "ae:a2:60:31:b6:49",
+          "IPPrefixLen": 16,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "gitberth_gitberth-data",
+        "Source": "/var/lib/docker/volumes/gitberth_gitberth-data/_data",
+        "Destination": "/data",
+        "Driver": "local",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": ""
+      },
+      {
+        "Type": "bind",
+        "Source": "/var/run/docker.sock",
+        "Destination": "/var/run/docker.sock",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      }
+    ]
+  },
+  {
+    "Id": "0ebf31bbcd0757dab8ce5e88612810632828061d60c481b87b242f53a32b7150",
+    "Names": [
+      "/postgres"
+    ],
+    "Image": "postgres:18",
+    "ImageID": "sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+      "digest": "sha256:f4b419e350fd98d4a8429603295208976dea4c8fb8326d818d346d3e29f1db6f",
+      "size": 3439,
+      "annotations": {
+        "com.docker.official-images.bashbrew.arch": "amd64",
+        "org.opencontainers.image.base.digest": "sha256:1e1a22175fbf1b32157ddaf0219e1db4e5401fab2b94ed285add64d18587cd2d",
+        "org.opencontainers.image.base.name": "debian:trixie-slim",
+        "org.opencontainers.image.created": "2026-10-28T01:30:07Z",
+        "org.opencontainers.image.revision": "e00e1bd34ec5c8a8e7ad89b273b3d42efaf6d5bc",
+        "org.opencontainers.image.source": "https://github.com/docker-library/postgres.git#e00e1bd34ec5c8a8e7ad89b273b3d42efaf6d5bc:18/trixie",
+        "org.opencontainers.image.url": "https://hub.docker.com/_/postgres",
+        "org.opencontainers.image.version": "18.6"
+      },
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "docker-entrypoint.sh postgres",
+    "Created": 1793653397,
+    "Ports": [],
+    "Labels": {},
+    "State": "exited",
+    "Status": "Exited (128) 7 hours ago",
+    "HostConfig": {
+      "NetworkMode": "gitdock"
+    },
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "gitberth": {
+          "IPAMConfig": {},
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": -1,
+          "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+          "EndpointID": "",
+          "Gateway": "",
+          "IPAddress": "",
+          "MacAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": [
+      {
+        "Type": "volume",
+        "Name": "postgres-data",
+        "Source": "/var/lib/docker/volumes/postgres-data/_data",
+        "Destination": "/var/lib/postgresql",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      }
+    ]
+  },
+  {
+    "Id": "b9a6f8ee255aa5cc34a1708c6acd1637d507c539ff9aacda0e4927af2c6e405a",
+    "Names": [
+      "/cloudflare-tunnel"
+    ],
+    "Image": "cloudflare/cloudflared:latest",
+    "ImageID": "sha256:4955524aeaa379e154023d5a027c250f7b35041a2e7e950cf13f144bc9b9c5ba",
+    "ImageManifestDescriptor": {
+      "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+      "digest": "sha256:32f933aa6fe1f69c5885b93f3c92cc3f60cca8f0530868bc3bc2cc446114a385",
+      "size": 3829,
+      "platform": {
+        "architecture": "amd64",
+        "os": "linux"
+      }
+    },
+    "Command": "cloudflared tunnel --no-autoupdate run --token REDACTED",
+    "Created": 1793385481,
+    "Ports": [],
+    "Labels": {
+      "CI_BUILD_DATE": "2026-10-30 17:18:24.520034",
+      "CI_DOCKER_FROM": "gcr.io/distroless/base-debian13:nonroot-amd64@sha256:91475ae1743239ff0810c39688162aaf4bb0b7a12f126b893e8cbc07ace242ee",
+      "CI_DOCKER_VERSION": "{\"Platform\": {\"Name\": \"Docker Engine - Community\"}, \"Version\": \"29.5.3\", \"ApiVersion\": \"1.54\", \"MinAPIVersion\": \"1.40\", \"Os\": \"linux\", \"Arch\": \"amd64\", \"Components\": [{\"Name\": \"Engine\", \"Version\": \"29.5.3\", \"Details\": {\"ApiVersion\": \"1.54\", \"Arch\": \"amd64\", \"BuildTime\": \"2026-06-03T18:00:10.000000000+00:00\", \"Experimental\": \"false\", \"GitCommit\": \"285b471\", \"GoVersion\": \"go1.26.4\", \"KernelVersion\": \"6.18.57-cloudflare-2026.10.12\", \"MinAPIVersion\": \"1.40\", \"Module\": \"github.com/moby/moby/v2\", \"ModuleVersion\": \"v2.0.0+unknown\", \"Os\": \"linux\"}}, {\"Name\": \"containerd\", \"Version\": \"v2.4.2\", \"Details\": {\"GitCommit\": \"b7a25261e029d68978bbf290df0a62fc819b3c51\"}}, {\"Name\": \"runc\", \"Version\": \"1.5.2\", \"Details\": {\"GitCommit\": \"v1.5.2-0-g29dd3dc2\"}}, {\"Name\": \"docker-init\", \"Version\": \"0.19.0\", \"Details\": {\"GitCommit\": \"de40ad0\"}}], \"GitCommit\": \"285b471\", \"GoVersion\": \"go1.26.4\", \"KernelVersion\": \"6.18.57-cloudflare-2026.10.12\", \"BuildTime\": \"2026-06-03T18:00:10.000000000+00:00\"}",
+      "CI_GIT_COMMIT": "872b241f94871665c1c157adefcf90c11f0ead96",
+      "CI_GIT_REMOTE": "https://gitlab.cfdata.org/cloudflare/tun/cloudflared.git",
+      "CI_TEAMCITY_BUILDCONF": "",
+      "CI_TEAMCITY_BUILD_NUMBER": "",
+      "IMAGE_TYPE": "distroless",
+      "org.opencontainers.image.source": "https://github.com/cloudflare/cloudflared"
+    },
+    "State": "running",
+    "Status": "Up 5 days",
+    "HostConfig": {
+      "NetworkMode": "host"
+    },
+    "Health": {
+      "Status": "none",
+      "FailingStreak": 0
+    },
+    "NetworkSettings": {
+      "Networks": {
+        "host": {
+          "IPAMConfig": null,
+          "Links": null,
+          "Aliases": null,
+          "DriverOpts": null,
+          "GwPriority": 0,
+          "NetworkID": "472387872afa0351b2f6ff25cdb1c49aa44516116e5d6d96f4d2332b375f037c",
+          "EndpointID": "aa7b86a4afb25b5bf3501fedccb0f13b94075914be0e86e001466809a77b8fbf",
+          "Gateway": "",
+          "IPAddress": "",
+          "MacAddress": "",
+          "IPPrefixLen": 0,
+          "IPv6Gateway": "",
+          "GlobalIPv6Address": "",
+          "GlobalIPv6PrefixLen": 0,
+          "DNSNames": null
+        }
+      }
+    },
+    "Mounts": []
+  }
+]

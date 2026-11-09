@@ -1,0 +1,259 @@
+{
+  "Id": "79d00d03308354e1ae107645e2617e470f568eff54466cb2f655494189b4cfa2",
+  "Created": "2026-11-04T23:01:34.960776003Z",
+  "Path": "/docker-entrypoint.sh",
+  "Args": [
+    "nginx",
+    "-g",
+    "daemon off;"
+  ],
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 1340627,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-04T23:01:35.015714829Z",
+    "FinishedAt": "0001-01-01T00:00:00Z"
+  },
+  "Image": "sha256:d5b908aeb4f8a92b6c9b56dca6bb3a5c585914424efaf045dd96755ea1a5e425",
+  "ResolvConfPath": "/var/lib/docker/containers/79d00d03308354e1ae107645e2617e470f568eff54466cb2f655494189b4cfa2/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/79d00d03308354e1ae107645e2617e470f568eff54466cb2f655494189b4cfa2/hostname",
+  "HostsPath": "/var/lib/docker/containers/79d00d03308354e1ae107645e2617e470f568eff54466cb2f655494189b4cfa2/hosts",
+  "LogPath": "",
+  "Name": "/gb-orb",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "journald",
+      "Config": {}
+    },
+    "NetworkMode": "gitberth",
+    "PortBindings": {
+      "80/tcp": [
+        {
+          "HostIp": "",
+          "HostPort": "3000"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 0,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 0,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [],
+  "Config": {
+    "Hostname": "79d00d033083",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "ExposedPorts": {
+      "80/tcp": {}
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "VERCEL_ENV=production",
+      "VERCEL_TARGET_ENV=production",
+      "VERCEL_URL=REDACTED",
+      "VERCEL_BRANCH_URL=REDACTED",
+      "VERCEL_PROJECT_PRODUCTION_URL=REDACTED",
+      "VERCEL_GIT_PROVIDER=github",
+      "VERCEL_GIT_REPO_OWNER=octocat",
+      "VERCEL_GIT_COMMIT_REF=main",
+      "VERCEL_GIT_REPO_SLUG=orb",
+      "VERCEL_GIT_COMMIT_SHA=1d2948cc693a6d766f2145dc07e52dc2c8f718ae",
+      "VERCEL_GIT_COMMIT_MESSAGE=Update index.html",
+      "VERCEL_GIT_COMMIT_AUTHOR_NAME=REDACTED",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "NGINX_VERSION=1.30.6",
+      "PKG_RELEASE=1",
+      "DYNPKG_RELEASE=1",
+      "NJS_VERSION=1.0.2",
+      "NJS_RELEASE=1",
+      "ACME_VERSION=0.4.1"
+    ],
+    "Cmd": [
+      "nginx",
+      "-g",
+      "daemon off;"
+    ],
+    "Image": "gitberth/orb:1d2948c",
+    "Volumes": null,
+    "WorkingDir": "/",
+    "Entrypoint": [
+      "/docker-entrypoint.sh"
+    ],
+    "Labels": {
+      "gitberth.app": "orb",
+      "gitberth.commit": "1d2948cc693a6d766f2145dc07e52dc2c8f718ae",
+      "gitberth.deployment": "13",
+      "gitberth.managed": "true",
+      "gitberth.port": "80",
+      "gitberth.traits": "1",
+      "gitberth.trigger": "Manual",
+      "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "StopSignal": "SIGQUIT"
+  },
+  "NetworkSettings": {
+    "SandboxID": "8e348f9b69b7a72707fdc8922033d4759ca13c6c8ff2946fccc955a45e40a503",
+    "SandboxKey": "/var/run/docker/netns/8e348f9b69b7",
+    "Ports": {
+      "80/tcp": [
+        {
+          "HostIp": "0.0.0.0",
+          "HostPort": "3000"
+        },
+        {
+          "HostIp": "::",
+          "HostPort": "3000"
+        }
+      ]
+    },
+    "Networks": {
+      "gitberth": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": [
+          "orb"
+        ],
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+        "EndpointID": "f2a77c49eb1d9e64f54fed09abe72bdab89f826e1bb22f9c252dc677e3fd4ba5",
+        "Gateway": "172.21.0.1",
+        "IPAddress": "172.21.0.3",
+        "MacAddress": "a6:06:c4:31:e3:83",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "gb-orb",
+          "orb",
+          "79d00d033083"
+        ]
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:f86402a00182cc5cf3de663332c19ceb17af35c0af1e1855c58685fa8d810468",
+    "size": 2189,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

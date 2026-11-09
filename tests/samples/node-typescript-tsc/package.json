@@ -1,0 +1,14 @@
+{
+  "name": "gitberth-sample-typescript-tsc",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^6.0.2"
+  }
+}

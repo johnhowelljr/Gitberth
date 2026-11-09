@@ -1,0 +1,24 @@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<div class="gb-code">
+    <div class="gb-code-bar">
+        <span class="gb-code-title"><MudIcon Icon="@Icon" Size="Size.Small" />@Title</span>
+        <MudTooltip Text="Copy">
+            <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="Copy" />
+        </MudTooltip>
+    </div>
+    <pre>@Code</pre>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Code { get; set; } = "";
+    [Parameter] public string Icon { get; set; } = Icons.Material.Outlined.Code;
+
+    private async Task CopyAsync()
+    {
+        var copied = await JS.InvokeAsync<bool>("gitberth.copy", Code);
+        Snackbar.Add(copied ? "Copied to the clipboard" : "Your browser blocked copying", copied ? Severity.Success : Severity.Warning);
+    }
+}

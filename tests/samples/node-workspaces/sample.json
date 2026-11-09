@@ -1,0 +1,7 @@
+{
+  "kind": "NodeServer",
+  "title": "Node.js server",
+  "port": 3000,
+  "appDir": "apps/web",
+  "expect": "Hello from an app in an npm workspace"
+}

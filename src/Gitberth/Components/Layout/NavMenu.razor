@@ -1,0 +1,118 @@
+﻿@implements IDisposable
+@inject AppCatalog Catalog
+@inject AddressBook Book
+@inject ContainerStatsCollector Stats
+@inject NavigationManager Nav
+@inject IDbContextFactory<GitberthDb> Db
+
+<a href="" class="gb-brand"><Logo Size="28" /><span>Gitberth</span></a>
+
+@* The host every app runs on: its name, its LAN address, and whether Gitberth can read Docker. *@
+<a href="health" class="gb-hostcard" title="@(Stats.Current.Error is { } error ? $"Docker can't be read: {error}" : "The host's health")">
+    <span class="gb-hostcard-icon"><SvgIcon Icon="@Icons.Material.Outlined.Dns" /></span>
+    <span style="min-width:0">
+        <span class="gb-hostcard-name gb-ellipsis" style="display:block">@HostName</span>
+        <span class="gb-hostcard-sub">@lanHost</span>
+    </span>
+    <StatusDot State="@(Stats.Current.Error is null ? AppState.Running : AppState.Dead)" />
+</a>
+
+<nav aria-label="Pages" style="display:flex;flex-direction:column;gap:2px">
+    <NavLink class="gb-nav-item" href="" Match="NavLinkMatch.All"><SvgIcon Icon="@Icons.Material.Outlined.SpaceDashboard" />Dashboard</NavLink>
+    <NavLink class="gb-nav-item" href="apps" Match="NavLinkMatch.Prefix">
+        <SvgIcon Icon="@Icons.Material.Outlined.GridView" />Apps
+        @if (list.Apps.Count > 0)
+        {
+            <span class="gb-nav-count" title="@($"{Running} running of {list.Apps.Count}")">@Running</span>
+        }
+    </NavLink>
+    <NavLink class="gb-nav-item" href="network" Match="NavLinkMatch.Prefix"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />Network</NavLink>
+    <NavLink class="gb-nav-item" href="health" Match="NavLinkMatch.Prefix"><SvgIcon Icon="@Icons.Material.Outlined.MonitorHeart" />Health</NavLink>
+</nav>
+
+<div class="gb-nav-sec">Pinned <SvgIcon Icon="@Icons.Material.Outlined.PushPin" /></div>
+<nav aria-label="Pinned apps" style="display:flex;flex-direction:column;gap:1px">
+    @foreach (var app in Pinned)
+    {
+        <NavLink class="gb-nav-app" href="@app.Href" Match="NavLinkMatch.Prefix" title="@app.Title">
+            <AppLogo Image="@app.Image" Name="@app.Container" Size="20" Self="@(app.Role == ContainerRole.Self)" Kind="@Kinds.GetValueOrDefault(app.Key)" Dim="@(!app.Running)" />
+            <span>@app.Title</span>
+            <StatusDot State="app.State" />
+        </NavLink>
+    }
+    @if (loaded && !Pinned.Any())
+    {
+        <div class="gb-nav-empty">Pin an app in its Settings to keep it here.</div>
+    }
+</nav>
+
+<div class="gb-side-bottom">
+    <NavLink class="gb-nav-item" href="settings" Match="NavLinkMatch.Prefix"><SvgIcon Icon="@Icons.Material.Outlined.Settings" />Settings</NavLink>
+    <div class="gb-side-foot">Gitberth @Version@(Stats.Current.Host is { } host ? $" · Docker {host.ServerVersion}" : "")</div>
+</div>
+
+@code {
+    private static readonly string Version = $"v{AppVersion.Number}";
+    private AppList list = AppList.Empty;
+    private string lanHost = "";
+    private bool loaded;
+    private Timer? timer;
+    private int refreshing;
+
+    // Git apps' detected framework, for their logo.
+    private IReadOnlyDictionary<string, string> Kinds = AppKinds.None;
+
+    private int Running => list.Apps.Count(a => a.Running);
+
+    private IEnumerable<AppSummary> Pinned => list.Apps.Where(a => a.Pinned).Take(12);
+
+    private string HostName => Stats.Current.Host?.Name is { Length: > 0 } name ? name : "This host";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        Catalog.Changed += OnCatalogChanged;
+        try { lanHost = await Book.LanHostAsync(Nav.BaseUri); }
+        catch (Exception) { lanHost = new Uri(Nav.BaseUri).Host; }
+        await LoadAsync();
+        // The states in the menu follow the containers; they don't need to be to the second.
+        timer = new Timer(_ => Refresh(), null, 15000, 15000);
+    }
+
+    private async Task LoadAsync()
+    {
+        try { list = await Catalog.ListAsync(lanHost); }
+        catch (Exception) { /* the last list stays; the pages say what's wrong with Docker */ }
+        Kinds = await AppKinds.LoadAsync(Db);
+        loaded = true;
+    }
+
+    private void Refresh()
+    {
+        if (Interlocked.Exchange(ref refreshing, 1) == 1) return;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await LoadAsync();
+                StateHasChanged();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref refreshing, 0);
+            }
+        });
+    }
+
+    // Pinning, renaming or creating an app always says so (AppCatalog.Changed) or ends in a navigation.
+    private void OnCatalogChanged() => Refresh();
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => Refresh();
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        Catalog.Changed -= OnCatalogChanged;
+        timer?.Dispose();
+    }
+}

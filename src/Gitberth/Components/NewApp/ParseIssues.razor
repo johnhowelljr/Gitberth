@@ -1,0 +1,41 @@
+@*
+    What reading a pasted docker run or Compose service found (architecture.md 3.5, 3.6): Errors block creating until
+    they're fixed, Dropped are what the paste had that the app won't (each with why), Notes say how Gitberth read it.
+*@
+@if (view.Errors.Count + view.Dropped.Count + view.Notes.Count > 0)
+{
+    <div class="gb-issues">
+        @Group(ParseSeverity.Error, view.Errors, "critical", Icons.Material.Outlined.ErrorOutline)
+        @Group(ParseSeverity.Dropped, view.Dropped, "warn", Icons.Material.Outlined.RemoveCircleOutline)
+        @Group(ParseSeverity.Note, view.Notes, "info", Icons.Material.Outlined.Info)
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ParseIssue> Issues { get; set; } = [];
+
+    private ParseIssueView view = ParseIssueView.Of([]);
+
+    protected override void OnParametersSet() => view = ParseIssueView.Of(Issues);
+
+    private static RenderFragment Group(ParseSeverity severity, IReadOnlyList<ParseIssue> items, string tone, string icon) => @<text>
+        @if (items.Count > 0)
+        {
+            <div class="gb-issue-group gb-tone-@tone" role="@(severity == ParseSeverity.Error ? "alert" : null)">
+                <div class="gb-issue-group-t"><SvgIcon Icon="@icon" />@ParseIssueView.Heading(severity, items.Count)</div>
+                <ul>
+                    @foreach (var i in items)
+                    {
+                        <li>
+                            @if (i.Fragment is not null)
+                            {
+                                <code>@i.Fragment</code><span>: </span>
+                            }
+                            @ParseIssueView.TextOf(i)
+                        </li>
+                    }
+                </ul>
+            </div>
+        }
+    </text>;
+}

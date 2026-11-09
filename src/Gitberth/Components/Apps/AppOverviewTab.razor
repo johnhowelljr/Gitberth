@@ -1,0 +1,385 @@
+@inject ActivityLog Activity
+@inject HealthSettings HealthSettings
+@inject DomainService Domains
+
+@*
+    The Overview: how it's reached, an hour of CPU and memory, what the container is, and on the side what happened to it
+    lately, its update and its scheduled jobs. The same cards for every source; only the facts differ.
+*@
+<div class="gb-split">
+    <div>
+        <SectionCard Title="Addresses" Icon="@Icons.Material.Outlined.Link" Flush="true">
+            <Actions>
+                @if (Connectable)
+                {
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Link" OnClick="OnConnect">Connect</Btn>
+                }
+                <a class="gb-card-link" href="@($"{App.Href}/network")">Network<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
+            </Actions>
+            <ChildContent>
+                @if (AddressRows.Count == 0)
+                {
+                    <div style="padding:14px 18px">
+                        <EmptyState Small="true" Title="@(View.Addresses?.HostNetwork == true ? "On the host's own network" : "No ports")">
+                            @(View.Addresses?.HostNetwork == true
+                                ? $"{App.Title} listens straight on {HostIp}, on whatever ports its program opens."
+                                : "Nothing to open or connect to. That's normal for a worker.")
+                        </EmptyState>
+                    </div>
+                }
+                @foreach (var a in AddressRows)
+                {
+                    <div class="gb-feed-row gb-addrrow">
+                        <AccessTag Kind="a.Kind" />
+                        <span class="gb-row" style="min-width:0;flex-wrap:wrap">
+                            <AddressValue Text="@a.Text" Href="@a.Href" Copy="@a.Copy" ShowCopy="@(a.Kind != AddressKind.Domain)" Live="a.Live" />
+                            @if (a.Kind == AddressKind.Domain && a.Note == "Main")
+                            {
+                                <span class="gb-tag gb-tag--accent">Main</span>
+                            }
+                            @if (a.Kind == AddressKind.Domain && a.Live)
+                            {
+                                <span class="gb-pill2 gb-tone-good" style="height:22px"><i class="gb-st-dot gb-st-dot--running"></i>Live</span>
+                            }
+                        </span>
+                        <span class="gb-addrrow-note">@NoteOf(a)</span>
+                    </div>
+                }
+            </ChildContent>
+        </SectionCard>
+
+        <SectionCard Title="Resources" Icon="@Icons.Material.Outlined.Speed" Sub="@(longView ? "Last 6 hours · every 30 s" : "Last hour · every 5 s")">
+            <Actions>
+                <Seg T="bool" Options="WindowOptions" Value="longView" ValueChanged="v => longView = v" Label="Time range" />
+            </Actions>
+            <ChildContent>
+                @if (!HealthSettings.IsGathered(App.Container))
+                {
+                    <EmptyState Small="true" Title="Stats aren't gathered for it">
+                        <ChildContent>Gitberth reads its CPU and memory every 5 seconds once Gather stats is on.</ChildContent>
+                        <Actions><Btn Size="BtnSize.Sm" Href="@($"{App.Href}/settings#sec-general")" Icon="@Icons.Material.Outlined.Tune">Turn it on in Settings</Btn></Actions>
+                    </EmptyState>
+                }
+                else if (Health is null || (Points.Count == 0 && !App.Running))
+                {
+                    <EmptyState Small="true" Title="@(App.Running ? "No readings yet" : "Not running")">
+                        @(App.Running ? "Gitberth reads CPU and memory every 5 seconds once stats are gathered for it." : $"{App.Title} has no readings while it's stopped.")
+                    </EmptyState>
+                }
+                else
+                {
+                    var times = Points.Select(p => p.Time).ToList();
+                    var window = longView ? TimeSpan.FromHours(6) : TimeSpan.FromHours(1);
+                    var gap = longView ? TimeSpan.FromSeconds(90) : TimeSpan.FromSeconds(15);
+                    <div class="gb-grid-2">
+                        <TimeChart @key="@($"cpu-{longView}")" Title="CPU" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
+                                   Series="@([new ChartSeries("CPU", 1, Points.Select(p => (double?)p.Cpu).ToArray())])" Current="[Points.LastOrDefault().Cpu]"
+                                   ValueFormat="Format.Cpu" Floor="5" Area="true" Marks="Health.Marks" Down="Health.Down" MarkLabels="true" />
+                        <TimeChart @key="@($"memory-{longView}")" Title="Memory" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
+                                   Series="@([new ChartSeries("Memory", 2, Points.Select(p => p.Memory).ToArray())])"
+                                   Current="[Health.MemoryBytes is { } bytes ? (double)bytes : null]" ValueNote="@(Health.MemoryLimit is ulong limit and > 0 && limit < (HostMemory ?? ulong.MaxValue) ? $"of {Format.Memory(limit)}" : "no limit")"
+                                   ValueFormat="Format.Memory" Floor="@(64.0 * 1024 * 1024)" BinaryAxis="true" Area="true" Marks="Health.Marks" Down="Health.Down" />
+                    </div>
+                }
+            </ChildContent>
+            <Foot>
+                @if (Health?.Down.Count > 0)
+                {
+                    <span><SvgIcon Icon="@Icons.Material.Outlined.Schedule" Size="xs" /> Down for @Format.Duration(Health.Down[^1].From, Health.Down[^1].To) at @Format.Clock(Health.Down[^1].From)</span>
+                }
+                <a class="gb-card-link" style="margin-left:auto" href="@($"health#hc-title-{App.Container}")">Open in Health<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
+            </Foot>
+        </SectionCard>
+
+        <SectionCard Title="Container" Icon="@Icons.Material.Outlined.ViewInAr">
+            <Actions>
+                <a class="gb-card-link" href="@($"{App.Href}/settings")">Edit in Settings<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
+            </Actions>
+            <ChildContent>
+                @if (View.Details is not { } d)
+                {
+                    <EmptyState Small="true" Title="No container">
+                        @(App.Source == AppSource.Git ? "It's created by its first deploy." : "Gitberth has its settings: Start creates it.")
+                    </EmptyState>
+                }
+                else
+                {
+                    <dl class="gb-kv">
+                        <dt>Image</dt>
+                        <dd>
+                            @* The app's own name for its image: after a roll back, the tag it follows rather than Docker's digest. *@
+                            <span class="gb-mono">@(App.TagMoved ? App.Image : d.Image)</span><span class="gb-t3 gb-mono" title="@d.ImageId">@ShortId(d.ImageId)</span>
+                            @if (App.TagMoved)
+                            {
+                                <span class="gb-t3" title="@TagMovedNote(App.Image)">the tag has moved on</span>
+                            }
+                        </dd>
+                        <dt>Command</dt>
+                        <dd>
+                            <span class="gb-mono" style="overflow-wrap:anywhere">@Command(d)</span>
+                            @if (Settings is { Container: { Command: null, Entrypoint: null } })
+                            {
+                                <span class="gb-default-tag">from the image</span>
+                            }
+                        </dd>
+                        @if (d.WorkingDir is { Length: > 0 } dir)
+                        {
+                            <dt>Working directory</dt>
+                            <dd><span class="gb-mono">@dir</span></dd>
+                        }
+                        @if (d.User is { Length: > 0 } user)
+                        {
+                            <dt>User</dt>
+                            <dd><span class="gb-mono">@user</span></dd>
+                        }
+                        <dt>Restart policy</dt>
+                        <dd>@AppFacts.RestartWords(d.RestartPolicy)@(d.RestartCount > 0 ? $" · restarted {d.RestartCount} times" : "")</dd>
+                        <dt>Health check</dt>
+                        <dd>
+                            @if (d.Health is { } health)
+                            {
+                                <span>@(char.ToUpperInvariant(health[0]) + health[1..])</span>
+                                @if (Settings?.Container.Health.Test is { Count: > 1 } test)
+                                {
+                                    <span class="gb-mono gb-t3">@ContainerSettingsDraft.HealthText(Security.Masking.Args(test))</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="gb-t2">None.</span><a href="@($"{App.Href}/settings#sec-health")">Add one</a>
+                            }
+                        </dd>
+                        <dt>Limits</dt>
+                        <dd>@Limits(d)</dd>
+                        <dt>Environment</dt>
+                        <dd>@d.Env.Count @(d.Env.Count == 1 ? "variable" : "variables")<a href="@($"{App.Href}/environment")">Edit</a></dd>
+                        <dt>Volumes</dt>
+                        <dd>
+                            @if (d.Mounts.Count == 0)
+                            {
+                                <span class="gb-t2">None: what it writes goes with the container.</span>
+                            }
+                            @foreach (var m in d.Mounts)
+                            {
+                                <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;width:100%">
+                                    <span class="gb-mono">@(m.Type == "volume" ? m.Name ?? m.Source : m.Source)</span>
+                                    <SvgIcon Icon="@Icons.Material.Outlined.ArrowForward" Size="xs" Class="gb-t3" />
+                                    <span class="gb-mono">@m.Destination</span>
+                                    <span class="gb-tag">@(m.Type == "volume" ? "volume" : m.Type == "bind" ? "host folder" : m.Type)@(m.ReadOnly ? " · read-only" : "")</span>
+                                </span>
+                            }
+                        </dd>
+                        <dt>Networks</dt>
+                        <dd>
+                            @{ var ownMode = d.NetworkMode is "host" or "none" || d.NetworkMode.StartsWith("container:", StringComparison.Ordinal); }
+                            @if (ownMode)
+                            {
+                                <span class="gb-mono">@d.NetworkMode</span>
+                            }
+                            @* The network mode of a container on a network is that network's name (bridge, gitberth): it's listed. *@
+                            @foreach (var n in d.Networks.Where(n => !ownMode || n.Name != d.NetworkMode))
+                            {
+                                <span class="gb-tag">@n.Name@(n.IpAddress is { Length: > 0 } ip ? $" · {ip}" : "")</span>
+                            }
+                        </dd>
+                        @if (d.Created is { } created)
+                        {
+                            <dt>Created</dt>
+                            <dd>@Format.Local(created)<span class="gb-t3">@Format.Ago(created)</span></dd>
+                        }
+                        <dt>Container ID</dt>
+                        <dd><span class="gb-mono" title="@d.Id">@ShortId(d.Id)</span><CopyButton Value="@d.Id" Label="the container ID" /></dd>
+                    </dl>
+                }
+            </ChildContent>
+        </SectionCard>
+    </div>
+
+    <div>
+        <SectionCard Title="Recent activity" Icon="@Icons.Material.Outlined.History">
+            <Actions><a class="gb-card-link" href="@($"{App.Href}/activity")">All<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
+            <ChildContent>
+                @if (activity is null)
+                {
+                    <div class="gb-skel" style="height:120px"></div>
+                }
+                else if (activity.Count == 0)
+                {
+                    <EmptyState Small="true" Title="Nothing yet">Starts, stops, deploys and changes show here as they happen.</EmptyState>
+                }
+                else
+                {
+                    <ActivityTimeline Items="activity.Take(6).ToList()" />
+                }
+            </ChildContent>
+        </SectionCard>
+
+        @if (App.Source != AppSource.Git && App.Role != ContainerRole.Self && Update is { } update)
+        {
+            <SectionCard Title="Updates" Icon="@Icons.Material.Outlined.CloudDownload">
+                <ChildContent>
+                    <div class="gb-stack" style="gap:10px">
+                        <div class="gb-row">
+                            @if (update.Available)
+                            {
+                                <span class="gb-pill2 gb-tone-accent"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Update available</span>
+                            }
+                            else
+                            {
+                                <span class="gb-t2" style="font-size:13px">@UpdateLine(update)</span>
+                            }
+                        </div>
+                        @if (update.Error is { } error)
+                        {
+                            <div class="gb-help" style="color:#ffd98a">@error</div>
+                        }
+                        else if (update.Origin == ImageOrigin.Local)
+                        {
+                            <div class="gb-help">@(BuiltHere(App) ? "Gitberth watches the tag for a newer build. No registry is asked." : "No registry is known to have it: Check now asks its registry.")</div>
+                        }
+                        @if (View.Row?.UpdatePolicy == UpdatePolicy.Off && update.Origin is ImageOrigin.Registry or ImageOrigin.Local)
+                        {
+                            <div class="gb-help">Set to When I ask: Gitberth checks it only when you press Check now, and shows no badge for it.</div>
+                        }
+                        @if (update.Tracked is { } tracked)
+                        {
+                            <dl class="gb-kv" style="grid-template-columns:90px minmax(0,1fr);font-size:12.5px">
+                                <dt>Follows</dt><dd><span class="gb-mono">@tracked</span></dd>
+                                @if (update.RunningDigest is { } running)
+                                {
+                                    <dt>Running</dt><dd><span class="gb-mono">@Digest(running)</span></dd>
+                                }
+                                @if (update.LatestDigest is { } latest)
+                                {
+                                    <dt>Latest</dt><dd><span class="gb-mono">@Digest(latest)</span></dd>
+                                }
+                            </dl>
+                        }
+                        @if (update.CheckedAt is { } at)
+                        {
+                            <div class="gb-help">Checked @Format.Ago(at)</div>
+                        }
+                    </div>
+                </ChildContent>
+                <Foot>
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Sync" OnClick="OnCheck" Busy="Checking">Check now</Btn>
+                    @if (update.Previous is { } previous)
+                    {
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Undo" OnClick="OnRollBack" Disabled="Busy"
+                             Title="Recreates it on the image it ran before its last update. Its data stays in its volumes.">Roll back to @previous</Btn>
+                    }
+                </Foot>
+            </SectionCard>
+        }
+
+        @if (App.Source == AppSource.Git && App.AppId is int appId)
+        {
+            <ScheduledJobsCard AppId="appId" />
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    [Parameter] public ContainerHealth? Health { get; set; }
+    [Parameter] public SettingsView? Settings { get; set; }
+    [Parameter] public EventCallback OnConnect { get; set; }
+    /// <summary>The host's memory: Docker reports it as the limit of a container that has none.</summary>
+    [Parameter] public ulong? HostMemory { get; set; }
+    /// <summary>
+    /// Its update status, as the page keeps it: read again after the header's Check for update, an update or a rollback,
+    /// and whenever its container changes. Null for none (a Git app, Gitberth itself).
+    /// </summary>
+    [Parameter] public UpdateStatus? Update { get; set; }
+    /// <summary>Check now is under way.</summary>
+    [Parameter] public bool Checking { get; set; }
+    /// <summary>Something else is under way on the page: Roll back waits.</summary>
+    [Parameter] public bool Busy { get; set; }
+    /// <summary>Check now: the page asks the registry, and the card follows.</summary>
+    [Parameter] public EventCallback OnCheck { get; set; }
+    /// <summary>Roll back: the page opens the change dialog for it, as for an update.</summary>
+    [Parameter] public EventCallback OnRollBack { get; set; }
+
+    private IReadOnlyList<ActivityItem>? activity;
+    private bool longView;
+    private string? loadedFor;
+    // Whether domains are on in Settings and Cloudflare has a token: why a running app's domain doesn't answer.
+    private bool domainsOn = true, tokenSaved = true;
+
+    private AppSummary App => View.Summary;
+
+    private static readonly IReadOnlyList<SegOption<bool>> WindowOptions = [new(false, "1 h"), new(true, "6 h")];
+
+    private IReadOnlyList<StatsPoint> Points => Health is null ? [] : longView ? Health.History : Health.Recent;
+
+    private bool Connectable => App.Running && (App.Role == ContainerRole.Database || ConnectionDetails.EngineOf(App.Image) is not null);
+
+    private string HostIp => View.Addresses?.Addresses.FirstOrDefault(a => a.Kind == AddressKind.Lan)?.Text.Split(':')[0] ?? "the host's addresses";
+
+    // Domains first, then LAN, own LAN, host only and internal; each address once.
+    private List<Address> AddressRows => (View.AppAddresses?.Addresses ?? View.Addresses?.Addresses ?? [])
+        .OrderBy(a => a.Kind switch { AddressKind.Domain => 0, AddressKind.Lan => 1, AddressKind.OwnLan => 2, AddressKind.HostOnly => 3, _ => 4 })
+        .DistinctBy(a => (a.Kind, a.Text)).ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The activity is read when the app or its container changes, not on every refresh (the page keeps the update status).
+        var key = $"{App.Key}|{App.ContainerId}|{App.State}|{View.Git?.Deployments.FirstOrDefault()?.Status}|{View.LatestChange?.Outcome}";
+        if (key == loadedFor) return;
+        loadedFor = key;
+        try { activity = await Activity.ForAsync(App.Container, App.AppId, 20); }
+        catch (Exception) { activity = []; }
+        if (AddressRows.Any(a => a.Kind == AddressKind.Domain))
+        {
+            try { (domainsOn, tokenSaved) = (await Domains.EnabledAsync(), await Domains.TokenSavedAsync()); }
+            catch (Exception) { (domainsOn, tokenSaved) = (true, true); }
+        }
+    }
+
+    private string? NoteOf(Address a) => a.Kind switch
+    {
+        AddressKind.Internal => View.Addresses?.Network is { } network ? $"from containers on {network}" : "from containers on its networks",
+        AddressKind.HostOnly => "from this host only",
+        _ when a.Note is { } note && note != "Main" => note,
+        _ when !a.Live && !App.Running => "answers when it starts",
+        // It runs, so it isn't the start it waits for: why it doesn't answer.
+        AddressKind.Domain when !a.Live => !domainsOn ? "domains are off in Settings"
+            : !tokenSaved ? "no Cloudflare token in Settings"
+            : "the tunnel can't reach its web port",
+        _ when !a.Live => "doesn't answer now",
+        _ => null,
+    };
+
+    /// <summary>
+    /// A local image built here (by Gitberth or the sample checker): no registry is ever asked about it, so its only
+    /// update is a newer build of its tag on this host.
+    /// </summary>
+    public static bool BuiltHere(AppSummary app) =>
+        app.Origin == ImageOrigin.Local && ImageReference.Parse(app.Image) is { } reference && ImageOrigins.NeverAsked(reference);
+
+    /// <summary>What "the tag has moved on" means, on the image an app runs.</summary>
+    public static string TagMovedNote(string image) =>
+        $"{image} names another image on this host now (it was pulled or built again). This container still runs the one it was created from.";
+
+    /// <summary>An update check's line: a local image that's up to date runs the newest build of its tag here.</summary>
+    public static string UpdateLine(UpdateStatus s) =>
+        s is { Origin: ImageOrigin.Local, Available: false, Error: null, Tracked: not null } && s.Text.StartsWith("Up to date", StringComparison.Ordinal)
+            ? "Up to date: it runs the newest build of its tag on this host."
+            : s.Text;
+
+    private static string Command(ContainerDetails d) =>
+        string.Join(' ', Security.Masking.Args([.. d.Entrypoint, .. d.Cmd]).Select(a => a.Contains(' ') ? $"\"{a}\"" : a)) is { Length: > 0 } c ? c : "The image's own";
+
+    private static string Limits(ContainerDetails d) =>
+        (d.MemoryLimit > 0, d.Cpus > 0) switch
+        {
+            (true, true) => $"{Format.Memory(d.MemoryLimit)} of memory, {d.Cpus.ToString("0.##", CultureInfo.InvariantCulture)} CPUs",
+            (true, false) => $"{Format.Memory(d.MemoryLimit)} of memory",
+            (false, true) => $"{d.Cpus.ToString("0.##", CultureInfo.InvariantCulture)} CPUs",
+            _ => "None",
+        };
+
+    private static string ShortId(string id) => id.StartsWith("sha256:", StringComparison.Ordinal) ? id[7..19] : id.Length > 12 ? id[..12] : id;
+
+    private static string Digest(string digest) => digest.StartsWith("sha256:", StringComparison.Ordinal) && digest.Length > 19 ? digest[..19] + "…" : digest;
+}

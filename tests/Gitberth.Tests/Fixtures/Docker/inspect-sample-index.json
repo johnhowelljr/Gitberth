@@ -1,0 +1,234 @@
+{
+  "Id": "19b5a0b05faafa2426caf995c3e26cf14227c6a99b343811e355d892faea7607",
+  "Created": "2026-11-04T23:27:58.86305895Z",
+  "Path": "/docker-entrypoint.sh",
+  "Args": [
+    "nginx",
+    "-g",
+    "daemon off;"
+  ],
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-04T23:27:58.945054997Z",
+    "FinishedAt": "2026-11-05T03:27:47.929664549Z"
+  },
+  "Image": "sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949",
+  "ResolvConfPath": "/var/lib/docker/containers/19b5a0b05faafa2426caf995c3e26cf14227c6a99b343811e355d892faea7607/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/19b5a0b05faafa2426caf995c3e26cf14227c6a99b343811e355d892faea7607/hostname",
+  "HostsPath": "/var/lib/docker/containers/19b5a0b05faafa2426caf995c3e26cf14227c6a99b343811e355d892faea7607/hosts",
+  "LogPath": "",
+  "Name": "/sample-index",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "journald",
+      "Config": {}
+    },
+    "NetworkMode": "bridge",
+    "PortBindings": {
+      "80/tcp": [
+        {
+          "HostIp": "0.0.0.0",
+          "HostPort": "9100"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 67108864,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 134217728,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [],
+  "Config": {
+    "Hostname": "19b5a0b05faa",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "ExposedPorts": {
+      "80/tcp": {}
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "NGINX_VERSION=1.30.6",
+      "PKG_RELEASE=1",
+      "DYNPKG_RELEASE=1",
+      "NJS_VERSION=1.0.2",
+      "NJS_RELEASE=1",
+      "ACME_VERSION=0.4.1"
+    ],
+    "Cmd": [
+      "nginx",
+      "-g",
+      "daemon off;"
+    ],
+    "Image": "nginx:stable-alpine",
+    "Volumes": null,
+    "WorkingDir": "/",
+    "Entrypoint": [
+      "/docker-entrypoint.sh"
+    ],
+    "Labels": {
+      "gitberth.sample": "index",
+      "maintainer": "NGINX Docker Maintainers <docker-maint@nginx.com>"
+    },
+    "StopSignal": "SIGQUIT"
+  },
+  "NetworkSettings": {
+    "SandboxID": "",
+    "SandboxKey": "",
+    "Ports": {},
+    "Networks": {
+      "bridge": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "1cf99cac118bdba3bffd645cc027366c14b2ad259b688a5b7b1b2c5687f1b726",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": null
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:84ed8c0dd296c188bfc24ed506f46589e9285fb0b11cf3a04d91d524d3067e11",
+    "size": 2493,
+    "annotations": {
+      "com.docker.official-images.bashbrew.arch": "amd64",
+      "org.opencontainers.image.base.digest": "sha256:8f06fd647c6687eae0fd7bee8a43df66e61edb9f093bb0a9079d69cb355b879b",
+      "org.opencontainers.image.base.name": "nginx:1.30.6-alpine-slim",
+      "org.opencontainers.image.created": "2026-10-21T23:23:52Z",
+      "org.opencontainers.image.revision": "4b9f658be76820b24e4ef4605413a5c08707a512",
+      "org.opencontainers.image.source": "https://github.com/nginx/docker-nginx.git#4b9f658be76820b24e4ef4605413a5c08707a512:stable/alpine",
+      "org.opencontainers.image.url": "https://hub.docker.com/_/nginx",
+      "org.opencontainers.image.version": "1.30.6-alpine"
+    },
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

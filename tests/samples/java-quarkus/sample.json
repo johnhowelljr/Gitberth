@@ -1,0 +1,6 @@
+{
+  "kind": "Java",
+  "title": "Java (Quarkus)",
+  "port": 8080,
+  "expect": "Hello from Quarkus"
+}

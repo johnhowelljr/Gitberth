@@ -1,0 +1,186 @@
+@using Gitberth.Health
+@inject IJSRuntime JS
+
+@*
+    A small time-series chart over a fixed window. Blazor renders the frame (title, keys, ticks, gridlines) and hands
+    the points to gitberth.js, which draws the lines, the marks (deploys, restarts, stops) and the hover tooltip. The
+    browser keeps what it has been sent, so after the first render only new points go over the wire, and the marks only
+    when they change.
+*@
+<div class="gb-chart">
+    <div class="gb-chart-head">
+        <span class="gb-chart-title">@Title</span>
+        <span class="gb-chart-keys">
+            @for (var k = 0; k < Series.Count; k++)
+            {
+                var s = Series[k];
+                <span class="gb-chart-key gb-series--@s.Slot">
+                    @if (Series.Count > 1)
+                    {
+                        <span class="gb-key"></span>@s.Name
+                    }
+                    <strong>@Latest(k)</strong>
+                    @if (k == Series.Count - 1 && ValueNote is not null)
+                    {
+                        <span class="gb-chart-key-note">@ValueNote</span>
+                    }
+                </span>
+            }
+        </span>
+    </div>
+    <div class="gb-chart-body">
+        <div class="gb-chart-y" aria-hidden="true">
+            <span style="top: 0">@ValueFormat(axisMax)</span>
+            <span style="top: 50%">@ValueFormat(axisMax / 2)</span>
+            <span style="top: 100%">0</span>
+        </div>
+        @* A slider over the samples, so screen readers pass the arrow keys through and read out each step (gitberth.js sets its value). *@
+        <div class="gb-chart-plot" @ref="plot" tabindex="0" role="slider" aria-label="@ariaLabel">
+            <svg class="gb-chart-grid" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <line x1="0" y1="0" x2="100" y2="0" />
+                <line x1="0" y1="50" x2="100" y2="50" />
+                <line class="gb-chart-base" x1="0" y1="100" x2="100" y2="100" />
+            </svg>
+            @* Blazor renders this empty and never touches it again; gitberth.js draws the lines, marks, end dots and tooltip in it. *@
+            <div class="gb-chart-canvas"></div>
+            @if (inWindow.Length == 0)
+            {
+                <div class="gb-chart-empty">@EmptyText</div>
+            }
+        </div>
+    </div>
+    @if (ShowTimeAxis)
+    {
+        <div class="gb-chart-x" aria-hidden="true">
+            <span>@Ago(Window)</span>
+            <span>@Ago(Window / 2)</span>
+            <span>now</span>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>What the chart is about (a container name), for screen readers.</summary>
+    [Parameter] public string? Subject { get; set; }
+    [Parameter, EditorRequired] public IReadOnlyList<DateTime> Times { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlyList<ChartSeries> Series { get; set; } = [];
+    [Parameter, EditorRequired] public Func<double, string> ValueFormat { get; set; } = v => v.ToString(CultureInfo.InvariantCulture);
+    /// <summary>The right edge of the chart (UTC); the window ends here.</summary>
+    [Parameter, EditorRequired] public DateTime End { get; set; }
+    [Parameter] public TimeSpan Window { get; set; } = TimeSpan.FromHours(1);
+    /// <summary>Neighbouring points further apart than this aren't joined.</summary>
+    [Parameter] public TimeSpan MaxGap { get; set; } = TimeSpan.FromSeconds(15);
+    /// <summary>The lowest the top of the y-axis goes, so an idle container's noise doesn't fill the chart.</summary>
+    [Parameter] public double Floor { get; set; } = 1;
+    /// <summary>Bytes: the axis tops out at round binary sizes (200 MiB, 1 GiB) rather than powers of ten.</summary>
+    [Parameter] public bool BinaryAxis { get; set; }
+    /// <summary>A light wash under the line, for single-series charts.</summary>
+    [Parameter] public bool Area { get; set; }
+    [Parameter] public bool ShowTimeAxis { get; set; } = true;
+    [Parameter] public string EmptyText { get; set; } = "No data yet";
+    /// <summary>
+    /// The latest reading of each series, for the keys, when it isn't the last point: the points are averages, say, or
+    /// the container has stopped (null shows a dash). Without it the keys show the last point.
+    /// </summary>
+    [Parameter] public IReadOnlyList<double?>? Current { get; set; }
+    /// <summary>Muted words after the last key's value, like "of 1 GiB limit".</summary>
+    [Parameter] public string? ValueNote { get; set; }
+    /// <summary>Deploys, restarts and stops, drawn as lines across the chart.</summary>
+    [Parameter] public IReadOnlyList<ChartMark> Marks { get; set; } = [];
+    /// <summary>When the container was down, shaded.</summary>
+    [Parameter] public IReadOnlyList<DownSpan> Down { get; set; } = [];
+    /// <summary>Name the marks on the chart; one chart of a card does, so the others only draw the lines.</summary>
+    [Parameter] public bool MarkLabels { get; set; }
+
+    private ElementReference plot;
+    private int[] inWindow = [];
+    private double axisMax = 1;
+    private string ariaLabel = "";
+
+    // What the browser already has, so later renders only send what's new.
+    private bool synced;
+    private DateTime sentThrough, sentEnd;
+    private double sentMax;
+    private string? sentMarks;
+
+    private sealed record ChartKey(string Name, int Slot);
+
+    // Marks and Down are null when the browser has them already.
+    private sealed record ChartMeta(long End, double Window, double Gap, double Max, bool Area, ChartKey[] Series,
+        object[][]? Marks, object?[][]? Down, bool Labels);
+
+    protected override void OnParametersSet()
+    {
+        var start = End - Window;
+        inWindow = Enumerable.Range(0, Times.Count).Where(i => Times[i] >= start && Times[i] <= End).ToArray();
+        var max = Series.SelectMany(s => inWindow.Select(i => s.Values[i] ?? 0)).DefaultIfEmpty(0).Max();
+        axisMax = BinaryAxis ? ChartMath.NiceMaxBytes(max, Floor) : ChartMath.NiceMax(max, Floor);
+        // Fixed, so screen readers don't re-announce a focused chart on every sample; the legend carries the latest values.
+        ariaLabel = $"{Title}{(Subject is null ? "" : $" for {Subject}")} over the last {Span(Window)}. Use the arrow keys to step through the readings.";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var fresh = synced ? inWindow.Where(i => Times[i] > sentThrough).ToArray() : inWindow;
+        var marksKey = MarksKey();
+        var marksChanged = !synced || marksKey != sentMarks;
+        if (synced && fresh.Length == 0 && End == sentEnd && axisMax == sentMax && !marksChanged) return;
+
+        // Capture everything now: the next sample can re-render this component with new parameters during the await.
+        var through = fresh.Length > 0 ? Times[fresh[^1]] : sentThrough;
+        var (end, max) = (End, axisMax);
+        var meta = new ChartMeta(UnixMs(end), Window.TotalMilliseconds, MaxGap.TotalMilliseconds, max, Area,
+            Series.Select(s => new ChartKey(s.Name, s.Slot)).ToArray(),
+            marksChanged ? Marks.Select(MarkPoint).ToArray() : null,
+            marksChanged ? Down.Select(d => DownPoint(d, end)).ToArray() : null,
+            MarkLabels);
+        var points = fresh.Select(Point).ToArray();
+        try
+        {
+            await JS.InvokeVoidAsync(synced ? "gitberth.chart.push" : "gitberth.chart.set", plot, meta, points);
+            synced = true;
+            if (through > sentThrough) sentThrough = through;
+            (sentEnd, sentMax, sentMarks) = (end, max, marksKey);
+        }
+        catch (JSDisconnectedException)
+        {
+            // The page is gone.
+        }
+        catch (Exception)
+        {
+            // Unknown what arrived, and an exception here would end the whole circuit: send everything again next time.
+            synced = false;
+        }
+    }
+
+    // [time (ms since 1970), time label, values, formatted values]: one value per series, already formatted for the tooltip.
+    private object[] Point(int i) =>
+    [
+        UnixMs(Times[i]),
+        Format.Clock(Times[i]),
+        Series.Select(s => s.Values[i] is { } v ? Math.Round(v, 3) : (double?)null).ToArray(),
+        Series.Select(s => s.Values[i] is { } v ? ValueFormat(v) : null).ToArray(),
+    ];
+
+    // [time (ms), label, detail, tone, time label].
+    private static object[] MarkPoint(ChartMark m) =>
+        [UnixMs(m.Time), m.Label, m.Detail, m.Tone.ToString().ToLowerInvariant(), Format.Clock(m.Time)];
+
+    // [from (ms), to (ms)], with no end while it lasts, so it doesn't change on every sample.
+    private static object?[] DownPoint(DownSpan d, DateTime end) => [UnixMs(d.From), d.To >= end ? null : UnixMs(d.To)];
+
+    private string MarksKey() =>
+        string.Join(',', Marks.Select(m => m.Time.Ticks)) + "|" + string.Join(',', Down.Select(d => $"{d.From.Ticks}-{(d.To >= End ? "" : d.To.Ticks)}"));
+
+    private string Latest(int k) =>
+        Current is { } current ? (k < current.Count && current[k] is { } now ? ValueFormat(now) : "–")
+        : Series[k].Values.Count > 0 && Series[k].Values[^1] is { } v ? ValueFormat(v) : "–";
+
+    private static long UnixMs(DateTime utc) => (long)(utc - DateTime.UnixEpoch).TotalMilliseconds;
+
+    private static string Ago(TimeSpan span) => span.TotalMinutes >= 120 ? $"{span.TotalHours:0} h ago" : $"{span.TotalMinutes:0} min ago";
+
+    private static string Span(TimeSpan span) =>
+        span.TotalMinutes >= 120 ? $"{span.TotalHours:0} hours" : span == TimeSpan.FromHours(1) ? "hour" : $"{span.TotalMinutes:0} minutes";
+}

@@ -1,0 +1,22 @@
+@* Who reaches an address: the Access hue, its icon and its word, never colour alone. *@
+<span class="gb-acc @Look.Class @Class" title="@Title"><SvgIcon Icon="@Look.Icon" />@(Text ?? Look.Word)</span>
+
+@code {
+    [Parameter, EditorRequired] public AddressKind Kind { get; set; }
+    /// <summary>Other words than the kind's own ("Domain" rather than "Internet").</summary>
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private (string Class, string Icon, string Word) Look => Of(Kind);
+
+    /// <summary>The CSS class (gb-ac-*), icon and word for an address kind.</summary>
+    public static (string Class, string Icon, string Word) Of(AddressKind kind) => kind switch
+    {
+        AddressKind.Domain => ("gb-ac-public", Icons.Material.Outlined.Public, "Domain"),
+        AddressKind.Lan => ("gb-ac-lan", Icons.Material.Outlined.Lan, "LAN"),
+        AddressKind.HostOnly => ("gb-ac-host", Icons.Material.Filled.Lock, "Host only"),
+        AddressKind.OwnLan => ("gb-ac-lan", Icons.Material.Outlined.Router, "Own LAN"),
+        _ => ("gb-ac-internal", Icons.Material.Outlined.Hub, "Internal"),
+    };
+}

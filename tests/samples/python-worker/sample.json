@@ -1,0 +1,6 @@
+{
+  "kind": "Python",
+  "title": "Python worker",
+  "port": null,
+  "worker": true
+}

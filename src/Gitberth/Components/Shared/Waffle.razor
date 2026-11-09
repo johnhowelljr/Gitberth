@@ -1,0 +1,19 @@
+@* One square per app: filled green running, a hollow ring stopped, an orange rounded-top square in trouble. The counts are always written next to it. *@
+<span class="gb-waffle @(Small ? "gb-waffle--sm" : null) @Class" aria-hidden="true">
+    @foreach (var state in Ordered)
+    {
+        <i class="@AppStatus.WaffleClass(state)"></i>
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired] public IEnumerable<AppState> States { get; set; } = [];
+    [Parameter] public bool Small { get; set; }
+    /// <summary>Errors first, then running, then stopped, so a glance finds trouble; false keeps the list's order.</summary>
+    [Parameter] public bool Sorted { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private IEnumerable<AppState> Ordered => Sorted
+        ? States.OrderBy(s => AppStatus.WaffleClass(s) switch { "gb-w-err" => 0, "" => 1, _ => 2 })
+        : States;
+}

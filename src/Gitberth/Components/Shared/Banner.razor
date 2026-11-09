@@ -1,0 +1,42 @@
+@* A tone-tinted card with an icon tile, a title, one line and at most two actions. Only for things that need a decision. *@
+<div class="gb-banner gb-tone-@Tone @Class" role="@(Tone is "serious" or "critical" ? "alert" : "status")">
+    <span class="gb-banner-icon"><SvgIcon Icon="@(Icon ?? DefaultIcon)" /></span>
+    <div class="gb-grow">
+        <div class="gb-banner-title">@Title</div>
+        @if (ChildContent is not null)
+        {
+            <div class="gb-banner-sub">@ChildContent</div>
+        }
+    </div>
+    @Aside
+    @if (Actions is not null)
+    {
+        <div class="gb-banner-actions">@Actions</div>
+    }
+    @if (OnDismiss.HasDelegate)
+    {
+        <button type="button" class="gb-iconbtn" aria-label="Dismiss" title="Dismiss" @onclick="OnDismiss"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+    }
+</div>
+
+@code {
+    /// <summary>good, warn, serious, critical, info or accent.</summary>
+    [Parameter] public string Tone { get; set; } = "info";
+    [Parameter] public string? Icon { get; set; }
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>The one line under the title.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>Between the text and the actions: logos of the apps it's about, say.</summary>
+    [Parameter] public RenderFragment? Aside { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public EventCallback OnDismiss { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private string DefaultIcon => Tone switch
+    {
+        "serious" or "warn" => Icons.Material.Outlined.WarningAmber,
+        "critical" => Icons.Material.Outlined.ErrorOutline,
+        "good" => Icons.Material.Outlined.CheckCircle,
+        _ => Icons.Material.Outlined.Info,
+    };
+}

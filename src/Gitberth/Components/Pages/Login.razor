@@ -1,0 +1,69 @@
+@page "/login"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@using Gitberth.Security
+@inject AdminAuthService Auth
+@inject NavigationManager Nav
+
+<PageTitle>Sign in · Gitberth</PageTitle>
+
+<div class="gb-auth-wrap">
+    <div class="gb-auth-card">
+        <div class="gb-auth-brand"><Logo Size="36" /><span>Gitberth</span></div>
+        <h1>Sign in</h1>
+        <p class="gb-auth-sub">Deployments on <strong>@HttpContext.Request.Host.Host</strong></p>
+        @if (error is not null)
+        {
+            <div class="gb-auth-error" role="alert">@error</div>
+        }
+        <EditForm Model="Input" method="post" OnValidSubmit="SignInAsync" FormName="login" class="gb-auth-form">
+            <div class="gb-field">
+                <label for="username">Username</label>
+                <InputText id="username" class="gb-input" @bind-Value="Input.Username" autocomplete="username" />
+            </div>
+            <div class="gb-field">
+                <label for="password">Password</label>
+                <InputText id="password" type="password" class="gb-input" @bind-Value="Input.Password" autocomplete="current-password" autofocus />
+            </div>
+            <button type="submit" class="gb-btn-primary">Sign in</button>
+        </EditForm>
+    </div>
+    <p class="gb-auth-foot">Self-hosted · git → Docker</p>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromForm] private LoginInput Input { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "ReturnUrl")] private string? ReturnUrl { get; set; }
+
+    private string? error;
+
+    protected override void OnInitialized() => Input ??= new LoginInput();
+
+    private async Task SignInAsync()
+    {
+        var client = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var (ok, message) = await Auth.ValidateAsync(Input.Username, Input.Password, client);
+        if (!ok)
+        {
+            error = message;
+            return;
+        }
+        // Stamped with the password as it is now: changing it signs this browser out too, unless it's the one that changed it.
+        await HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, await Auth.PrincipalAsync(), new AuthenticationProperties { IsPersistent = true });
+        Nav.NavigateTo(IsLocalUrl(ReturnUrl) ? ReturnUrl! : "/");
+    }
+
+    private static bool IsLocalUrl(string? url) =>
+        !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//", StringComparison.Ordinal) && !url.StartsWith("/\\", StringComparison.Ordinal);
+
+    public sealed class LoginInput
+    {
+        public string Username { get; set; } = AdminAuthService.UserName;
+        public string Password { get; set; } = "";
+    }
+}

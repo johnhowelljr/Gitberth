@@ -1,0 +1,8 @@
+{
+  "name": "gitberth-sample-workspaces",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}

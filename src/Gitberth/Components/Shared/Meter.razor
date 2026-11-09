@@ -1,0 +1,21 @@
+@* A 4 px bar: memory against its limit, or a dashed track when there's no limit (the fill is then its share of the host). *@
+<span class="gb-meter @(Large ? "gb-meter--lg" : null) @(Limited ? null : "gb-meter--nolimit") @ToneClass @Class" title="@Title" role="img" aria-label="@Title">
+    @if (Fraction is double f)
+    {
+        <i style="width:@((Math.Clamp(f, 0, 1) * 100).ToString("0.#", CultureInfo.InvariantCulture))%"></i>
+    }
+</span>
+
+@code {
+    /// <summary>How full, 0 to 1; null draws the track only.</summary>
+    [Parameter] public double? Fraction { get; set; }
+    /// <summary>Measured against a limit; false draws the dashed no-limit track.</summary>
+    [Parameter] public bool Limited { get; set; } = true;
+    /// <summary>Full width, 6 px tall (the host strip).</summary>
+    [Parameter] public bool Large { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    // Past 80% of a limit it warns, past 95% it's critical; without a limit it never does.
+    private string? ToneClass => !Limited || Fraction is not double f ? null : f >= .95 ? "gb-meter--crit" : f >= .8 ? "gb-meter--warn" : null;
+}

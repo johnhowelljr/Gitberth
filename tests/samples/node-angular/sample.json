@@ -1,0 +1,6 @@
+{
+  "kind": "NodeSpa",
+  "title": "Angular",
+  "port": 80,
+  "expect": "Hello from Angular"
+}

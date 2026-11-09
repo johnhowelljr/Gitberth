@@ -1,0 +1,8 @@
+{
+  // The page is drawn by JavaScript, which loads the layout from /_dash-layout.
+  "kind": "Python",
+  "title": "Dash",
+  "port": 8050,
+  "path": "/_dash-layout",
+  "expect": "Hello from Dash"
+}

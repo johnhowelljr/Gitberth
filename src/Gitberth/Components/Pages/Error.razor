@@ -1,0 +1,28 @@
+﻿@page "/Error"
+@layout EmptyLayout
+@attribute [AllowAnonymous]
+@attribute [ExcludeFromInteractiveRouting]
+@using System.Diagnostics
+
+<PageTitle>Error · Gitberth</PageTitle>
+
+<div class="gb-auth-wrap">
+    <div class="gb-auth-card">
+        <div class="gb-auth-brand"><Logo Size="36" /><span>Gitberth</span></div>
+        <h1>Something went wrong</h1>
+        <p class="gb-auth-sub">Gitberth hit an unexpected error. The details are in its log (<code>docker compose logs gitberth</code>).</p>
+        @if (RequestId is not null)
+        {
+            <p class="gb-auth-sub">Request ID: <code>@RequestId</code></p>
+        }
+        <a class="gb-btn-primary gb-btn-link" href="">Back to Gitberth</a>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    protected override void OnInitialized() => RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

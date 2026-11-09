@@ -1,0 +1,714 @@
+@page "/network"
+@implements IDisposable
+@inject HostPortMap Map
+@inject NetworkService Networks
+@inject AddressBook Book
+@inject ContainerStatsCollector Stats
+@inject AppCatalog Catalog
+@inject IDbContextFactory<GitberthDb> Db
+@inject NavigationManager Nav
+
+<PageTitle>Network · Gitberth</PageTitle>
+
+@*
+    The host's network at a glance: a strip of its figures (its LAN address, the host ports in use, Docker's networks,
+    Docker), every host port with who holds it (a container, whoever made it, or the host itself) and where it goes, a
+    check for any port, and Docker's networks with who's on each. Every container links to its page. Read every 15 s.
+*@
+<PageHead Title="Network" Lead="Every port held on this host and who holds it, and the networks containers find each other on.">
+    <Actions>
+        @if (view is not null)
+        {
+            <span class="gb-pill2 @(error is null ? "gb-tone-good" : "gb-tone-warn")">
+                <i class="gb-st-dot @(error is null ? "gb-st-dot--running" : null)"></i>@(error is null ? "Live" : "Not updating") · @Format.Clock(view.ReadAt)
+            </span>
+        }
+    </Actions>
+</PageHead>
+
+@if (error is not null)
+{
+    <Banner Tone="critical" Title="Docker can't be read" Class="gb-np-banner">@error.TrimEnd('.'). The page tries again every 15 seconds.</Banner>
+}
+
+<div class="gb-hoststrip gb-kpis2 gb-np-strip" role="group" aria-label="This host's network">
+    <a class="gb-hs" href="settings#network" title="Every LAN address and connection string Gitberth shows uses it. Change it in Settings.">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />LAN address</span>
+        <span class="gb-hs-v gb-np-strip-mono">@(lanHost.Length > 0 ? lanHost : "–")</span>
+        <span class="gb-hs-sub">Every LAN address here starts with it</span>
+    </a>
+    <div class="gb-hs">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Host ports</span>
+        @if (view is null)
+        {
+            <span class="gb-hs-v">–</span>
+            <span class="gb-hs-sub">Reading…</span>
+        }
+        else
+        {
+            var (lan, hostOnly) = NetworkPageView.Reach(rows);
+            <span class="gb-hs-v">@NetworkPageView.InUse(rows) <small>in use</small></span>
+            <span class="gb-hs-sub">@lan on the LAN · @hostOnly host only</span>
+        }
+    </div>
+    <div class="gb-hs">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks</span>
+        @if (!networksLoaded)
+        {
+            <span class="gb-hs-v">–</span>
+            <span class="gb-hs-sub">Reading…</span>
+        }
+        else
+        {
+            var shared = overview.Networks.FirstOrDefault(n => n.Shared);
+            <span class="gb-hs-v">@overview.Networks.Count <small>@(overview.Networks.Count == 1 ? "network" : "networks")</small></span>
+            <span class="gb-hs-sub">
+                @if (shared is null)
+                {
+                    <span><span class="gb-mono">@Networks.Shared</span> isn't made yet</span>
+                }
+                else
+                {
+                    <span>@shared.Members.Count on <span class="gb-mono">@Networks.Shared</span>, the shared one</span>
+                }
+            </span>
+        }
+    </div>
+    <div class="gb-hs">
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" />Docker</span>
+        <span class="gb-hs-v">@(Stats.Current.Host?.ServerVersion is { Length: > 0 } version ? version : "–")</span>
+        <span class="gb-hs-sub">@(Stats.Current.Host is { } host ? $"The engine on {host.Name}" : "The engine's version")</span>
+    </div>
+</div>
+
+<section class="gb-card gb-np-card" aria-labelledby="np-ports-t">
+    <div class="gb-card-head gb-np-head">
+        <div class="gb-card-title" id="np-ports-t">
+            <SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Host ports
+            <span class="gb-card-sub gb-np-sub">Who holds each port, and where it goes</span>
+        </div>
+        @if (view is not null)
+        {
+            <div class="gb-card-actions">
+                <Seg T="HostPortGroup" Options="@GroupOptions(NetworkPageView.Counts(rows))" Value="group" ValueChanged="v => group = v" Label="Which host ports to show" />
+            </div>
+        }
+    </div>
+    <div class="gb-np-tools">
+        <label class="gb-input gb-np-check">
+            <SvgIcon Icon="@Icons.Material.Outlined.ManageSearch" />
+            <input value="@check" @oninput="CheckTyped" placeholder="Check a port: 5433 or 53/udp" aria-label="Check a port" spellcheck="false" autocomplete="off" />
+            @if (!string.IsNullOrEmpty(check))
+            {
+                <button type="button" class="gb-iconbtn" aria-label="Clear" title="Clear" @onclick="ClearCheck"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+            }
+        </label>
+        @* Always there, so screen readers announce each answer as its text changes. *@
+        <span class="gb-np-answer @AnswerTone" role="status">
+            @if (answer is not null)
+            {
+                <SvgIcon Icon="@AnswerIcon" />
+                <span>
+                    @(checkLink is null ? answer : answer + " ")
+                    @if (checkLink is { } link)
+                    {
+                        <a href="@link.Href" class="gb-np-answer-link">Open @link.Name<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
+                    }
+                </span>
+            }
+        </span>
+    </div>
+    @if (view is null)
+    {
+        <div class="gb-card-body gb-stack" style="gap:10px">
+            <div class="gb-skel" style="height:44px"></div>
+            <div class="gb-skel" style="height:44px"></div>
+            <div class="gb-skel" style="height:44px"></div>
+        </div>
+    }
+    else if (Shown().Count == 0)
+    {
+        <div class="gb-card-body">
+            <EmptyState Small="true" Icon="@Icons.Material.Outlined.SettingsEthernet" Title="@(group == HostPortGroup.All ? "Nothing holds a host port" : "Nothing in this group")">
+                @(group == HostPortGroup.All ? "No container publishes a port and nothing on the host listens on one." : "Show all host ports to see the rest.")
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="gb-np-list" role="table" aria-label="Host ports">
+            <div class="gb-np-row gb-np-row--head" role="row">
+                <span class="gb-np-c-port" role="columnheader">Host port</span>
+                <span class="gb-np-c-who" role="columnheader">Held by</span>
+                <span class="gb-np-meta">
+                    <span class="gb-np-c-acc" role="columnheader">Access</span>
+                    <span class="gb-np-c-to" role="columnheader">Goes to</span>
+                    <span class="gb-np-c-note" role="columnheader">Notes</span>
+                </span>
+                <span class="gb-np-c-act" role="columnheader"><span class="gb-sr">Open</span></span>
+            </div>
+            @foreach (var row in Shown())
+            {
+                if (row.Folded)
+                {
+                    var key = NetworkPageView.FoldKey(row);
+                    var isOpen = unfolded.Contains(key);
+                    var (count, pattern, stopped) = NetworkPageView.Fold(row);
+                    <div class="gb-np-row gb-np-row--fold @(isOpen ? "open" : null)" role="row" @key="key">
+                        <span class="gb-np-c-port" role="cell">@Port(row)</span>
+                        <span class="gb-np-c-who" role="cell">
+                            <button type="button" class="gb-np-who gb-np-foldbtn" aria-expanded="@(isOpen ? "true" : "false")" @onclick="() => ToggleFold(key)"
+                                    aria-label="@($"{(isOpen ? "Hide" : "Show")} the {count} whose names start with {row.Prefix}")">
+                                <span class="gb-np-stack gb-np-stack--deck" aria-hidden="true">
+                                    @foreach (var name in row.Uses.Select(u => u.Container ?? u.Who).Distinct(StringComparer.Ordinal).Take(2))
+                                    {
+                                        @Logo(name, name, 20, false)
+                                    }
+                                </span>
+                                <span class="gb-np-whotext">
+                                    <span class="gb-np-name">@count</span>
+                                    <span class="gb-np-whosub">Named <span class="gb-mono">@pattern</span></span>
+                                </span>
+                            </button>
+                        </span>
+                        <span class="gb-np-meta">
+                            <span class="gb-np-c-acc" role="cell">@Access(row.Uses)</span>
+                            <span class="gb-np-c-to" role="cell">@GoesTo(row.Uses)</span>
+                            <span class="gb-np-c-note" role="cell">
+                                @if (stopped > 0)
+                                {
+                                    <span class="gb-tag">@stopped stopped</span>
+                                }
+                            </span>
+                        </span>
+                        <span class="gb-np-c-act" role="cell">
+                            <button type="button" class="gb-iconbtn gb-np-chev @(isOpen ? "open" : null)" aria-hidden="true" tabindex="-1" @onclick="() => ToggleFold(key)"><SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" /></button>
+                        </span>
+                    </div>
+                    @if (isOpen)
+                    {
+                        var every = everyFold.Contains(key) || row.Uses.Count <= MemberShortlist;
+                        <div class="gb-np-sublist" role="rowgroup" aria-label="@($"The {count} named {pattern}")">
+                            @foreach (var u in every ? row.Uses : row.Uses.Take(MemberShortlist))
+                            {
+                                @UseRow(row with { Uses = [u], Prefix = null }, true)
+                            }
+                            @if (!every)
+                            {
+                                <div class="gb-np-mmore" role="row">
+                                    <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.ExpandMore" OnClick="() => everyFold.Add(key)">Show all @row.Uses.Count</Btn>
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+                else
+                {
+                    @UseRow(row, false)
+                }
+            }
+        </div>
+    }
+    @if (view is not null)
+    {
+        <div class="gb-card-foot gb-np-foot">
+            <SvgIcon Icon="@(view.Scan.Error is null ? Icons.Material.Outlined.Schedule : Icons.Material.Outlined.WarningAmber)" Class="@(view.Scan.Error is null ? null : "gb-np-warnic")" />
+            <span>@NetworkPageView.Footer(view, Format.Clock(view.ReadAt))</span>
+        </div>
+    }
+</section>
+
+<section class="gb-card gb-np-card gb-mt" aria-labelledby="np-nets-t">
+    <div class="gb-card-head gb-np-head">
+        <div class="gb-card-title" id="np-nets-t">
+            <SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks
+            <span class="gb-card-sub gb-np-sub">Where containers find each other by name</span>
+        </div>
+        @if (overview.Networks.Count > 0)
+        {
+            <span class="gb-card-hint">@overview.Networks.Count @(overview.Networks.Count == 1 ? "network" : "networks")</span>
+        }
+    </div>
+    @if (!networksLoaded)
+    {
+        <div class="gb-card-body gb-stack" style="gap:10px">
+            <div class="gb-skel" style="height:52px"></div>
+            <div class="gb-skel" style="height:52px"></div>
+        </div>
+    }
+    else if (overview.Error is { } networksError)
+    {
+        <div class="gb-card-body">
+            <EmptyState Small="true" Icon="@Icons.Material.Outlined.Hub" Title="Docker's networks couldn't be read">@networksError.TrimEnd('.'). The page tries again every 15 seconds.</EmptyState>
+        </div>
+    }
+    else if (overview.Networks.Count == 0)
+    {
+        <div class="gb-card-body">
+            <EmptyState Small="true" Icon="@Icons.Material.Outlined.Hub" Title="No networks">Docker lists none, not even its own.</EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="gb-np-nets" role="list" aria-label="Docker's networks">
+            <div class="gb-np-net gb-np-net--head" aria-hidden="true">
+                <span class="gb-np-n-name">Network</span><span class="gb-np-n-driver">Driver</span><span class="gb-np-n-subnet">Subnet</span><span class="gb-np-n-members">On it</span><span></span>
+            </div>
+            @foreach (var n in overview.Networks)
+            {
+                var name = n.Network.Name;
+                var isOpen = open.Contains(name);
+                <div class="gb-np-netitem @(isOpen ? "open" : null)" role="listitem" @key="name">
+                    @if (n.Expandable)
+                    {
+                        <button type="button" class="gb-np-net" aria-expanded="@(isOpen ? "true" : "false")" @onclick="() => ToggleNetworkAsync(name)"
+                                aria-label="@($"{name}: {NetworkPageView.MemberCount(n.Members.Count)}. {(isOpen ? "Hide" : "Show")} who's on it")">
+                            @NetworkCells(n, true, isOpen)
+                        </button>
+                    }
+                    else
+                    {
+                        <div class="gb-np-net gb-np-net--still">@NetworkCells(n, false, false)</div>
+                    }
+                    @if (isOpen)
+                    {
+                        @Members(n, members.GetValueOrDefault(name) ?? n.Members)
+                    }
+                </div>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    private HostPortView? view;
+    private List<HostPortRow> rows = [];
+    private NetworkOverview overview = NetworkOverview.Empty;
+    private bool networksLoaded;
+    private string? error;
+    private string lanHost = "";
+    private HostPortGroup group = HostPortGroup.All;
+    private string? check, answer;
+    private bool? checkFree;
+    private (string Name, string Href)? checkLink;
+    private CancellationTokenSource? typing;
+    // Folded runs shown in full, and networks opened to their members (with names, read when opened).
+    private readonly HashSet<string> unfolded = new(StringComparer.Ordinal);
+    private readonly HashSet<string> open = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IReadOnlyList<NetworkMember>> members = new(StringComparer.Ordinal);
+    // Networks and folded runs whose every member shows, past the first dozen.
+    private readonly HashSet<string> everyMember = new(StringComparer.Ordinal);
+    private readonly HashSet<string> everyFold = new(StringComparer.Ordinal);
+    private const int MemberShortlist = 12;
+    // Every app as the Apps list has it, by its container, for its logo and the name it goes by; and Git apps' frameworks.
+    private Dictionary<string, AppSummary> apps = new(StringComparer.Ordinal);
+    private IReadOnlyDictionary<string, string> kinds = AppKinds.None;
+    private Timer? timer;
+    private string shownKey = "";
+    private int refreshing;
+    private bool disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        lanHost = await Book.LanHostAsync(Nav.BaseUri);
+        await RefreshAsync();
+        // The map keeps its reading for 15 seconds and reads again after a container starts or stops.
+        timer = new Timer(_ =>
+        {
+            if (Interlocked.Exchange(ref refreshing, 1) == 1) return;
+            _ = InvokeAsync(async () =>
+            {
+                try
+                {
+                    if (disposed) return;
+                    await RefreshAsync();
+                    if (ViewKey() != shownKey) StateHasChanged();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref refreshing, 0);
+                }
+            });
+        }, null, 15_000, 15_000);
+    }
+
+    protected override void OnAfterRender(bool firstRender) => shownKey = ViewKey();
+
+    // Never throws: what can't be read says so on the page, and the next refresh tries again. The host-port map, the
+    // networks and the apps (for their logos and names) are read at once, so the page fills in one go.
+    private async Task RefreshAsync()
+    {
+        await Task.WhenAll(PortsAsync(), NetworksAsync(), AppsAsync());
+        if (NetworkPageView.ParseCheck(check) is { } wanted) await AnswerAsync(wanted.Port, wanted.Protocol);
+    }
+
+    private async Task PortsAsync()
+    {
+        try
+        {
+            view = await Map.GetViewAsync();
+            rows = HostPortMap.Fold(HostPortMap.Listed(view.Uses, view.Scan.Random));
+            error = null;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+    }
+
+    private async Task NetworksAsync()
+    {
+        try
+        {
+            overview = await Networks.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            overview = new NetworkOverview([], ex.Message);
+        }
+        foreach (var name in open.ToList())
+            members[name] = await MembersAsync(name);
+        networksLoaded = true;
+    }
+
+    private async Task AppsAsync()
+    {
+        try
+        {
+            apps = (await Catalog.ListAsync(lanHost)).Apps.GroupBy(a => a.Container, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        }
+        catch (Exception)
+        {
+            // The last list stays: the logos and names only lose their app's look.
+        }
+        kinds = await AppKinds.LoadAsync(Db);
+    }
+
+    // A container's logo as the Apps list draws it: its image, a Git app's framework, Gitberth's own mark; by name otherwise.
+    private RenderFragment Logo(string? container, string name, int size, bool dim, bool self = false) => __builder =>
+    {
+        var app = container is null ? null : apps.GetValueOrDefault(container);
+        <AppLogo Image="@app?.Image" Name="@(container ?? name)" Kind="@(container is null ? null : kinds.GetValueOrDefault(container))"
+                 Self="@(self || app?.Role == ContainerRole.Self)" Dim="dim" Size="size" />
+    };
+
+    private string? TitleOf(string? container) => container is not null && apps.TryGetValue(container, out var app) ? app.Title : null;
+
+    private string ViewKey() => string.Join('|', error, group, answer, checkLink?.Href, view?.ReadAt.ToString("O", CultureInfo.InvariantCulture),
+        string.Join(';', rows.Select(r => $"{r.Port}-{r.LastPort}/{r.Protocol}:{string.Join(',', r.Uses.Select(u => $"{u.Who}{u.State}{u.HostIp}{u.Note}"))}")),
+        string.Join(';', overview.Networks.Select(n => $"{n.Network.Name}:{string.Join(',', n.Members.Select(m => $"{m.Container}{m.Running}{m.IpAddress}"))}")),
+        string.Join(';', members.Select(m => $"{m.Key}:{string.Join(',', m.Value.Select(x => string.Join(' ', x.Names)))}")),
+        string.Join(';', apps.Values.Select(a => $"{a.Container}={a.Title}{a.Image}")), kinds.Count);
+
+    private List<HostPortRow> Shown() => rows.Where(r => NetworkPageView.InGroup(r, group)).ToList();
+
+    private static IReadOnlyList<SegOption<HostPortGroup>> GroupOptions((int All, int Containers, int Host) counts) =>
+    [
+        new(HostPortGroup.All, "All", Count: counts.All),
+        new(HostPortGroup.Containers, "Containers", Icon: Icons.Material.Outlined.ViewInAr, Count: counts.Containers),
+        new(HostPortGroup.Host, "The host", Icon: Icons.Material.Outlined.Dns, Count: counts.Host),
+    ];
+
+    // ---- Check a port ----
+
+    private string? AnswerTone => checkFree switch { true => "gb-tone-good", false => "gb-tone-warn", _ => null };
+
+    private string AnswerIcon => checkFree switch
+    {
+        true => Icons.Material.Outlined.CheckCircle,
+        false => Icons.Material.Outlined.Info,
+        _ => Icons.Material.Outlined.ErrorOutline,
+    };
+
+    private async Task CheckTyped(ChangeEventArgs e)
+    {
+        check = e.Value?.ToString();
+        typing?.Cancel();
+        var mine = typing = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(300, mine.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(check))
+        {
+            (answer, checkFree, checkLink) = (null, null, null);
+            return;
+        }
+        if (NetworkPageView.ParseCheck(check) is { } wanted) await AnswerAsync(wanted.Port, wanted.Protocol);
+        else (answer, checkFree, checkLink) = (NetworkPageView.NotAPort, null, null);
+    }
+
+    private void ClearCheck()
+    {
+        typing?.Cancel();
+        (check, answer, checkFree, checkLink) = (null, null, null, null);
+    }
+
+    private async Task AnswerAsync(int port, string protocol)
+    {
+        try
+        {
+            var result = await Map.CheckAsync(port, protocol);
+            answer = result.Sentence;
+            checkFree = result.Free;
+            checkLink = result.Owner is { Link: { } href } owner && owner.Kind is not HostPortUser.Route
+                ? (NetworkPageView.Holder(owner, TitleOf(owner.Container)).Name, href)
+                : null;
+        }
+        catch (Exception ex)
+        {
+            (answer, checkFree, checkLink) = ($"Couldn't check it: {ex.Message}", null, null);
+        }
+    }
+
+    // ---- Folds and networks ----
+
+    private void ToggleFold(string key)
+    {
+        if (unfolded.Remove(key)) everyFold.Remove(key);
+        else unfolded.Add(key);
+    }
+
+    private async Task ToggleNetworkAsync(string name)
+    {
+        if (open.Remove(name))
+        {
+            members.Remove(name);
+            everyMember.Remove(name);
+            return;
+        }
+        open.Add(name);
+        members[name] = await MembersAsync(name);
+    }
+
+    // An opened network's members with their names; as listed, without names, when they can't be read.
+    private async Task<IReadOnlyList<NetworkMember>> MembersAsync(string name)
+    {
+        try
+        {
+            return await Networks.MembersAsync(name);
+        }
+        catch (Exception)
+        {
+            return overview.Networks.FirstOrDefault(n => n.Network.Name == name)?.Members ?? [];
+        }
+    }
+
+    // ---- Pieces ----
+
+    private static RenderFragment Port(HostPortRow row) =>
+        @<span class="gb-np-port"><b>@NetworkPageView.PortText(row)</b><small>/@row.Protocol</small></span>;
+
+    private static RenderFragment Access(IEnumerable<HostPortUse> uses) => NetworkPageView.Access(uses) is { } access
+        ? @<AccessTag Kind="access.Kind" Text="@access.Word" Title="@(access.Word == "Mixed" ? "Some on every address, some on one" : null)" />
+        : @<span class="gb-np-none">–</span>;
+
+    private static RenderFragment GoesTo(IReadOnlyList<HostPortUse> uses) => NetworkPageView.GoesTo(uses) is { } to
+        ? @<span class="gb-np-to"><SvgIcon Icon="@Icons.Material.Outlined.ArrowForward" /><span class="@(to == "Several ports" ? null : "gb-mono")">@to</span></span>
+        : @<span class="gb-np-none">–</span>;
+
+    private RenderFragment UseRow(HostPortRow row, bool sub)
+    {
+        var u = row.First;
+        var who = NetworkPageView.Holder(u, TitleOf(u.Container));
+        return @<div class="gb-np-row @(sub ? "gb-np-row--sub" : null) @(who.Down ? "gb-np-row--down" : null)" role="row" @key="@($"{u.Port}/{u.Protocol}/{u.Who}/{u.State}")">
+            <span class="gb-np-c-port" role="cell">@Port(row)</span>
+            <span class="gb-np-c-who" role="cell">
+                @if (who.Link is { } link)
+                {
+                    <a class="gb-np-who" href="@link" title="@(u.Kind == HostPortUser.Route ? "Open the app this domain is for" : $"Open {who.Name}")">@Who(who, u)</a>
+                }
+                else
+                {
+                    <span class="gb-np-who">@Who(who, u)</span>
+                }
+            </span>
+            <span class="gb-np-meta">
+                <span class="gb-np-c-acc" role="cell">@Access(row.Uses)</span>
+                <span class="gb-np-c-to" role="cell">@GoesTo(row.Uses)</span>
+                <span class="gb-np-c-note" role="cell">
+                    @foreach (var note in NetworkPageView.Notes(u))
+                    {
+                        <span class="gb-tag @TagClass(note.Tone)" title="@note.Title">@note.Text</span>
+                    }
+                </span>
+            </span>
+            <span class="gb-np-c-act" role="cell">
+                @if (who.Link is { } go)
+                {
+                    <a class="gb-iconbtn" href="@go" tabindex="-1" aria-hidden="true"><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
+                }
+            </span>
+        </div>;
+    }
+
+    private RenderFragment Who(PortHolder who, HostPortUse u) => @<text>
+        @if (who.Icon is { } icon)
+        {
+            <span class="gb-np-ic" aria-hidden="true"><SvgIcon Icon="@icon" /></span>
+        }
+        else
+        {
+            @Logo(who.Container, who.Name, 26, who.Down, who.Self)
+        }
+        <span class="gb-np-whotext">
+            <span class="gb-np-name @(u.Kind == HostPortUser.Route ? "gb-mono" : null)">@who.Name</span>
+            @if (who.Sub is { } sub)
+            {
+                <span class="gb-np-whosub @(sub == who.Container || sub.StartsWith("A deploy's", StringComparison.Ordinal) ? "gb-mono" : null)">@sub</span>
+            }
+        </span>
+    </text>;
+
+    private static string? TagClass(string tone) => tone switch
+    {
+        "good" => "gb-tag--good",
+        "warn" => "gb-tag--warn",
+        "accent" => "gb-tag--accent",
+        "info" => "gb-tag--outline",
+        _ => null,
+    };
+
+    private RenderFragment NetworkCells(NetworkView n, bool expandable, bool isOpen) => @<text>
+        <span class="gb-np-n-name">
+            <span class="gb-np-ic @(n.Shared ? "gb-np-ic--accent" : null)" aria-hidden="true"><SvgIcon Icon="@NetIcon(n)" /></span>
+            <span class="gb-np-whotext">
+                <span class="gb-np-nameline">
+                    <span class="gb-np-name gb-mono">@n.Network.Name</span>
+                    @foreach (var tag in NetworkPageView.Tags(n))
+                    {
+                        <span class="gb-tag @(tag == "Shared network" ? "gb-tag--accent" : "gb-tag--outline")">@tag</span>
+                    }
+                </span>
+                @if (NetworkPageView.NoteOf(n) is { } note)
+                {
+                    <span class="gb-np-whosub">@note</span>
+                }
+            </span>
+        </span>
+        <span class="gb-np-n-driver" title="Driver">@n.Network.Driver</span>
+        <span class="gb-np-n-subnet" title="Subnet"><span class="gb-mono">@(n.Network.Subnets.Count == 0 ? "no subnet" : string.Join(", ", n.Network.Subnets))</span></span>
+        <span class="gb-np-n-members">
+            @if (n.Members.Count > 0)
+            {
+                <span class="gb-np-stack" aria-hidden="true">
+                    @foreach (var m in n.Members.Take(4))
+                    {
+                        @Logo(m.Container, m.Container, 20, !m.Running, NetworkPageView.Member(m).Tag == "Gitberth")
+                    }
+                </span>
+            }
+            <span class="@(n.Members.Count == 0 ? "gb-t3" : null)">@NetworkPageView.MemberCount(n.Members.Count)</span>
+        </span>
+        <span class="gb-np-c-act">
+            @if (expandable)
+            {
+                <span class="gb-np-chev @(isOpen ? "open" : null)" aria-hidden="true"><SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" /></span>
+            }
+        </span>
+    </text>;
+
+    private static string NetIcon(NetworkView n) => n.Network.Name switch
+    {
+        "host" => Icons.Material.Outlined.Dns,
+        "none" => Icons.Material.Outlined.Block,
+        LanAddresses.Network => Icons.Material.Outlined.Router,
+        _ => Icons.Material.Outlined.Hub,
+    };
+
+    // A network's members, the first dozen until "Show all". Docker's default bridge has no names, so it has no Names column.
+    private RenderFragment Members(NetworkView n, IReadOnlyList<NetworkMember> list)
+    {
+        var names = n.Network.Name != "bridge";
+        var all = everyMember.Contains(n.Network.Name) || list.Count <= MemberShortlist;
+        var shown = all ? list : list.Take(MemberShortlist).ToList();
+        return @<div class="gb-np-members @(names ? null : "gb-np-members--nonames")" role="table" aria-label="@($"Who's on {n.Network.Name}")">
+            @if (!names)
+            {
+                <div class="gb-np-mnote"><SvgIcon Icon="@Icons.Material.Outlined.Info" />Docker's default bridge gives no names: containers on it reach each other only by IP address, which changes when one is recreated.</div>
+            }
+            <div class="gb-np-mrow gb-np-mrow--head" role="row">
+                <span role="columnheader">Container</span>
+                @if (names)
+                {
+                    <span role="columnheader">Names here</span>
+                }
+                <span role="columnheader">IP address</span>
+            </div>
+            @foreach (var m in shown)
+            {
+                var look = NetworkPageView.Member(m);
+                // The name the Apps list gives it, which an app renamed in Gitberth goes by.
+                if (look.Tag is null && TitleOf(m.Container) is { } title) look = look with { Name = title };
+                <div class="gb-np-mrow @(m.Running ? null : "gb-np-row--down")" role="row" @key="m.Container">
+                    <span class="gb-np-m-who" role="cell">
+                        @if (m.Link is not null)
+                        {
+                            <a class="gb-np-who" href="@m.Link" title="@($"Open {look.Name}")">@MemberWho(m, look)</a>
+                        }
+                        else
+                        {
+                            <span class="gb-np-who">@MemberWho(m, look)</span>
+                        }
+                    </span>
+                    @if (names)
+                    {
+                        <span class="gb-np-m-names" role="cell">
+                            @if (m.Names.Count > 0)
+                            {
+                                @foreach (var alias in m.Names)
+                                {
+                                    <code class="gb-np-chip">@alias</code>
+                                }
+                            }
+                            else
+                            {
+                                <span class="gb-t3">–</span>
+                            }
+                        </span>
+                    }
+                    <span class="gb-np-m-ip" role="cell" title="@NetworkPageView.AddressHint(n.Network.Name)">
+                        @if (m.IpAddress is { } ip)
+                        {
+                            <span class="gb-mono">@ip</span>
+                        }
+                        else
+                        {
+                            <span class="gb-t3">@(m.Running ? "–" : "When it starts")</span>
+                        }
+                    </span>
+                </div>
+            }
+            @if (!all)
+            {
+                <div class="gb-np-mmore">
+                    <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.ExpandMore" OnClick="() => everyMember.Add(n.Network.Name)">Show all @list.Count</Btn>
+                </div>
+            }
+        </div>;
+    }
+
+    private RenderFragment MemberWho(NetworkMember m, MemberLook look) => @<text>
+        @Logo(m.Container, m.Container, 20, !m.Running, look.Tag == "Gitberth")
+        <span class="gb-np-name">@look.Name</span>
+        @if (look.Tag is { } tag)
+        {
+            <span class="gb-tag gb-tag--outline">@tag</span>
+        }
+        @if (!m.Running)
+        {
+            <span class="gb-tag">Stopped</span>
+        }
+    </text>;
+
+    public void Dispose()
+    {
+        disposed = true;
+        typing?.Cancel();
+        timer?.Dispose();
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "kind": "NodeServer",
+  "title": "Node.js server (hapi)",
+  "port": 3000,
+  "expect": "Hello from hapi"
+}

@@ -1,0 +1,7 @@
+{
+  "kind": "NodeServer",
+  "title": "Node.js server",
+  "port": 3000,
+  "appDir": "website",
+  "expect": "Hello from a monorepo app built from the repo root"
+}

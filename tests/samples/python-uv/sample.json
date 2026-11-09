@@ -1,0 +1,7 @@
+{
+  // No uv.lock: uv can't be run here to make one, so uv sync resolves the dependencies in the build. uv.lock itself is covered by the unit tests.
+  "kind": "Python",
+  "title": "Flask",
+  "port": 8000,
+  "expect": "Hello from Flask, installed with uv"
+}

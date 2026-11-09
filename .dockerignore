@@ -1,0 +1,12 @@
+.git
+.vs
+.vscode
+.idea
+.env
+**/bin
+**/obj
+**/App_Data
+**/*.db
+**/*.db-shm
+**/*.db-wal
+tests

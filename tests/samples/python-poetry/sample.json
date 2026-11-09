@@ -1,0 +1,7 @@
+{
+  // No poetry.lock: Poetry can't be run here to make one, so poetry install resolves the dependencies in the build. poetry.lock itself is covered by the unit tests.
+  "kind": "Python",
+  "title": "FastAPI",
+  "port": 8000,
+  "expect": "Hello from FastAPI, installed with Poetry"
+}

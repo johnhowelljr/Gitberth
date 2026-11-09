@@ -1,0 +1,75 @@
+@*
+    An app's resource limits as fields: memory, CPUs, shared memory, CPU priority and the process limit. The Settings tab's
+    Resources section and New app's "Restart & resources" (create mode: no "Changed" marks) both use it.
+*@
+<div class="gb-fgrid">
+    <Field Label="Memory limit" Changed="@Is(SettingField.Memory)" Was="@MemoryWords(Draft.Loaded.Resources.MemoryBytes)" OnUndo="() => Set(Draft.UndoMemory)"
+           Help="@(Draft.Memory is null ? "Empty: no limit." : null)">
+        <label class="gb-input @(Is(SettingField.Memory) ? "gb-input--changed" : null)">
+            <input type="number" min="0" step="any" placeholder="No limit" aria-label="Memory limit" readonly="@RO(SettingField.Memory)"
+                   @bind="Draft.Memory" @bind:event="oninput" @bind:after="Notify" />
+            <select class="gb-input-suffix" style="background:transparent;border:0;color:inherit;font:inherit;cursor:pointer" aria-label="Unit" @bind="Draft.MemoryUnit" @bind:after="Notify">
+                <option value="@MemoryUnit.MiB">MiB</option>
+                <option value="@MemoryUnit.GiB">GiB</option>
+            </select>
+        </label>
+    </Field>
+    <Field Label="CPU limit" Changed="@Is(SettingField.Cpu)" Was="@CpuWords(Draft.Loaded.Resources.Cpus)" OnUndo="() => Set(Draft.UndoCpu)"
+           Help="@(Draft.Cpus is null ? "Empty: it may use every core." : null)">
+        <label class="gb-input @(Is(SettingField.Cpu) ? "gb-input--changed" : null)">
+            <input type="number" min="0" step="0.25" placeholder="No limit" aria-label="CPU limit" readonly="@RO(SettingField.Cpu)"
+                   @bind="Draft.Cpus" @bind:event="oninput" @bind:after="Notify" />
+            <span class="gb-input-suffix">of @HostCpus CPUs</span>
+        </label>
+    </Field>
+    <Field Label="Shared memory" Changed="@Is(SettingField.ShmSize)" Help="/dev/shm. Databases and browsers use it.">
+        <label class="gb-input @(Is(SettingField.ShmSize) ? "gb-input--changed" : null)">
+            <input type="number" min="0" placeholder="64" aria-label="Shared memory" readonly="@RO(SettingField.ShmSize)" @bind="Draft.ShmMiB" @bind:event="oninput" @bind:after="Notify" />
+            <span class="gb-input-suffix">MiB</span>
+        </label>
+    </Field>
+    <Field Label="CPU priority" Help="Only matters when the host is busy.">
+        <select class="gb-input" aria-label="CPU priority" disabled="@RO(SettingField.Cpu)" value="@PriorityOf(Draft.CpuShares)" @onchange="SetPriority">
+            <option value="low">Low</option>
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+        </select>
+    </Field>
+    <Field Label="Process limit" Changed="@Is(SettingField.PidsLimit)" Help="How many processes it may run; empty for no limit.">
+        <input type="number" min="-1" class="gb-input @(Is(SettingField.PidsLimit) ? "gb-input--changed" : null)" placeholder="No limit" aria-label="Process limit"
+               readonly="@RO(SettingField.PidsLimit)" @bind="Draft.PidsLimit" @bind:event="oninput" @bind:after="Notify" />
+    </Field>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ContainerSettingsDraft Draft { get; set; } = default!;
+    /// <summary>The fields this app never edits; null: every field can change.</summary>
+    [Parameter] public Func<SettingField, bool>? ReadOnly { get; set; }
+    /// <summary>New app's Configure: no "Changed" marks.</summary>
+    [Parameter] public bool Create { get; set; }
+    /// <summary>Raised after every edit.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+    /// <summary>The host's CPUs, for "of 8 CPUs".</summary>
+    [Parameter] public int HostCpus { get; set; } = Environment.ProcessorCount;
+
+    private bool RO(SettingField field) => ReadOnly?.Invoke(field) == true;
+
+    private bool Is(SettingField field) => !Create && Draft.ChangedFields().Contains(field);
+
+    private Task Notify() => Changed.InvokeAsync();
+
+    private Task Set(Action change)
+    {
+        change();
+        return Changed.InvokeAsync();
+    }
+
+    private static string MemoryWords(long? bytes) => bytes is long b and > 0 ? AppFacts.Bytes(b) : "No limit";
+
+    private static string CpuWords(double? cpus) => cpus is double c and > 0 ? $"{c.ToString("0.##", CultureInfo.InvariantCulture)} CPUs" : "No limit";
+
+    /// <summary>The CPU priority a CPU-shares value reads as: Docker's 1024 (or none) is normal.</summary>
+    public static string PriorityOf(long? shares) => shares switch { null or 0 or 1024 => "normal", < 1024 => "low", _ => "high" };
+
+    private Task SetPriority(ChangeEventArgs e) => Set(() => Draft.CpuShares = e.Value?.ToString() switch { "low" => 512, "high" => 2048, _ => null });
+}

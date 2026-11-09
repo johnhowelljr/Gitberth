@@ -1,0 +1,6 @@
+{
+  "kind": "NodeSpa",
+  "title": "React (Create React App)",
+  "port": 80,
+  "expect": "Hello from Create React App"
+}

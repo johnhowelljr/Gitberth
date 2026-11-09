@@ -1,0 +1,37 @@
+@* An app's state as a shape and a word, with how long it's been that way (AppStatus). The hero's dot breathes; a row's doesn't. *@
+<span class="gb-st @look.Modifier @(Hero ? "gb-st--hero" : null) @Class" title="@Title">
+    @if (look.Icon is { } icon)
+    {
+        <SvgIcon Icon="@icon" />
+    }
+    else
+    {
+        <i class="gb-st-dot"></i>
+    }
+    @look.Word
+    @if (Since is { } since)
+    {
+        <span class="gb-st-time">@(Hero ? AppStatus.Long(DateTime.UtcNow - since) : AppStatus.Short(DateTime.UtcNow - since))</span>
+    }
+    else if (Detail is not null)
+    {
+        <span class="gb-st-time">@Detail</span>
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired] public AppState State { get; set; }
+    /// <summary>The catalog's words for it (StateText), used where they say more than the state does: "Exited (2)".</summary>
+    [Parameter] public string? Text { get; set; }
+    /// <summary>Since when (UTC): shown as 2d in a row, "for 2 days" in the hero.</summary>
+    [Parameter] public DateTime? Since { get; set; }
+    /// <summary>Faint words after it when there's no time: "3 checks failed".</summary>
+    [Parameter] public string? Detail { get; set; }
+    [Parameter] public bool Hero { get; set; }
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private StatusLook look = AppStatus.Of(AppState.Unknown);
+
+    protected override void OnParametersSet() => look = AppStatus.Of(State, Text);
+}

@@ -1,0 +1,6 @@
+{
+  "kind": "NextJs",
+  "title": "Next.js (standalone)",
+  "port": 3000,
+  "expect": "Hello from Next.js, standalone"
+}

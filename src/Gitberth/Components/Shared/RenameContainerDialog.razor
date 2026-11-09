@@ -1,0 +1,56 @@
+@using Gitberth.Health
+
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.DriveFileRenameOutline" />
+            <span>Rename @Current</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            @if (IsApp)
+            {
+                <text>The app's name, everywhere in Gitberth, as in its Settings. The container stays <code>@Container</code>, so nothing is redeployed.</text>
+            }
+            else
+            {
+                <text>What Gitberth calls this container, to tell it apart. The container itself stays <code>@Container</code>. Leave it empty to show that name again.</text>
+            }
+        </MudText>
+        <MudTextField T="string" @bind-Value="title" Label="@(IsApp ? "Name" : "Title")" Placeholder="@(IsApp ? null : Container)" Immediate="true"
+                      Variant="Variant.Outlined" Margin="Margin.Dense" MaxLength="ContainerTitles.MaxLength" AutoFocus="true"
+                      OnKeyDown="KeyDownAsync" Error="@(error is not null)" ErrorText="@error" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The container's own name.</summary>
+    [Parameter] public string Container { get; set; } = "";
+    /// <summary>What the page calls it now: the app's name, its title, or the container's name.</summary>
+    [Parameter] public string Current { get; set; } = "";
+    /// <summary>A Gitberth app, whose name is renamed; any other container gets a title.</summary>
+    [Parameter] public bool IsApp { get; set; }
+
+    private string? title;
+    private string? error;
+
+    protected override void OnInitialized() => title = IsApp || Current != Container ? Current : "";
+
+    private Task KeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Save();
+        return Task.CompletedTask;
+    }
+
+    private void Save()
+    {
+        error = IsApp ? AppService.NameProblem(title) : ContainerTitles.Problem(title);
+        if (error is null) MudDialog.Close(DialogResult.Ok(title?.Trim() ?? ""));
+    }
+}

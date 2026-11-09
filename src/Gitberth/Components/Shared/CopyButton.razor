@@ -1,0 +1,32 @@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+@* A small copy button beside a value; it ticks for a moment once copied (plain-HTTP LAN addresses included, gitberth.copy). *@
+<button type="button" class="gb-copybtn @(done ? "gb-copybtn--done" : null) @Class" title="@(done ? "Copied" : "Copy")" aria-label="@($"Copy {Label ?? Value}")" @onclick="CopyAsync">
+    <SvgIcon Icon="@(done ? Icons.Material.Outlined.Check : Icons.Material.Outlined.ContentCopy)" />
+</button>
+
+@code {
+    [Parameter, EditorRequired] public string Value { get; set; } = "";
+    /// <summary>What screen readers call the value, when the value itself would read badly (a masked password, say).</summary>
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private bool done;
+
+    private async Task CopyAsync()
+    {
+        bool copied;
+        try { copied = await JS.InvokeAsync<bool>("gitberth.copy", Value); }
+        catch (JSException) { copied = false; }
+        if (!copied)
+        {
+            Snackbar.Add("Your browser blocked copying", Severity.Warning);
+            return;
+        }
+        done = true;
+        StateHasChanged();
+        await Task.Delay(1400);
+        done = false;
+    }
+}

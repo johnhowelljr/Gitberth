@@ -1,0 +1,131 @@
+@inject AppCatalog Catalog
+@inject AddressBook Book
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IDbContextFactory<GitberthDb> Db
+
+@*
+    The top bar's search (Ctrl K): apps by name, image, port or address, as you type. Enter opens the highlighted one,
+    or the Apps list filtered by what was typed. On a phone it's an icon that opens into the bar.
+*@
+<div class="gb-search @(open ? "open" : null)">
+    <label class="gb-cmdk" @onclick="OpenAsync">
+        <SvgIcon Icon="@Icons.Material.Outlined.Search" />
+        <input id="gb-search-input" type="search" placeholder="Search apps, images, ports, addresses…" autocomplete="off" spellcheck="false"
+               role="combobox" aria-expanded="@(Showing ? "true" : "false")" aria-controls="gb-search-results" aria-label="Search apps"
+               aria-activedescendant="@(Showing && hits.Count > 0 ? $"gb-hit-{selected}" : null)"
+               value="@query" @oninput="OnInput" @onfocus="OnFocusAsync" @onblur="OnBlur" @onkeydown="OnKeyAsync" />
+        <span class="gb-kbd">Ctrl K</span>
+    </label>
+    @if (Showing)
+    {
+        <div class="gb-search-pop" id="gb-search-results" role="listbox" @onmousedown:preventDefault="true">
+            @if (hits.Count == 0)
+            {
+                <div class="gb-search-empty">No app matches “@query.Trim()”.</div>
+            }
+            @for (var i = 0; i < hits.Count; i++)
+            {
+                var hit = hits[i];
+                var index = i;
+                <a id="@($"gb-hit-{index}")" role="option" aria-selected="@(index == selected ? "true" : "false")" href="@hit.Href"
+                   class="gb-search-hit @(index == selected ? "gb-search-hit--on" : null)" @onclick="Close" @onmouseover="() => selected = index">
+                    <AppLogo Image="@hit.Image" Name="@hit.Container" Size="26" Self="@(hit.Role == ContainerRole.Self)" Kind="@kinds.GetValueOrDefault(hit.Key)" Dim="@(!hit.Running)" />
+                    <span class="gb-grow" style="display:flex;flex-direction:column;min-width:0">
+                        <span class="gb-search-hit-t">@hit.Title</span>
+                        <span class="gb-search-hit-s">@hit.Image</span>
+                    </span>
+                    <StatusLabel State="hit.State" Text="@hit.StateText" />
+                </a>
+            }
+            <div class="gb-search-foot">Enter opens it · <a href="@($"apps?q={Uri.EscapeDataString(query.Trim())}")" @onclick="Close">All matches in Apps</a></div>
+        </div>
+    }
+</div>
+
+@code {
+    private string query = "";
+    private bool open, focused;
+    private int selected;
+    private List<AppSummary> hits = [];
+    private AppList list = AppList.Empty;
+    private DateTime loadedAt = DateTime.MinValue;
+    private IReadOnlyDictionary<string, string> kinds = AppKinds.None;
+
+    private bool Showing => focused && query.Trim().Length > 0;
+
+    private async Task OpenAsync()
+    {
+        if (open) return;
+        open = true;
+        try { await JS.InvokeVoidAsync("gitberth.focusIn", "gb-search-input"); }
+        catch (JSException) { }
+    }
+
+    private async Task OnFocusAsync()
+    {
+        focused = true;
+        // The list is read when the search is used, and again if it's older than 10 seconds.
+        if (DateTime.UtcNow - loadedAt > TimeSpan.FromSeconds(10))
+        {
+            try
+            {
+                list = await Catalog.ListAsync(await Book.LanHostAsync(Nav.BaseUri));
+                kinds = await AppKinds.LoadAsync(Db);
+                loadedAt = DateTime.UtcNow;
+            }
+            catch (Exception) { /* searching what was read last */ }
+            Find();
+        }
+    }
+
+    private void OnBlur()
+    {
+        focused = false;
+        if (query.Length == 0) open = false;
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        query = e.Value?.ToString() ?? "";
+        Find();
+    }
+
+    private void Find()
+    {
+        hits = AppSearch.Filter(list.Apps, query).Take(8).ToList();
+        selected = 0;
+    }
+
+    private async Task OnKeyAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown" when hits.Count > 0:
+                selected = (selected + 1) % hits.Count;
+                break;
+            case "ArrowUp" when hits.Count > 0:
+                selected = (selected - 1 + hits.Count) % hits.Count;
+                break;
+            case "Enter":
+                var target = hits.Count > 0 ? hits[Math.Clamp(selected, 0, hits.Count - 1)].Href : $"apps?q={Uri.EscapeDataString(query.Trim())}";
+                Close();
+                Nav.NavigateTo(target);
+                await Task.CompletedTask;
+                break;
+            case "Escape":
+                Close();
+                try { await JS.InvokeVoidAsync("gitberth.blur", "gb-search-input"); }
+                catch (JSException) { }
+                break;
+        }
+    }
+
+    private void Close()
+    {
+        query = "";
+        hits = [];
+        open = false;
+        focused = false;
+    }
+}

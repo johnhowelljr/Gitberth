@@ -1,0 +1,364 @@
+@inject NetworkService Networks
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@*
+    The networks a container is on (5.7): the names containers there call it, its address there, who else is on it, and
+    what Gitberth knows each network as. Joining is instant and asks nothing; leaving always asks first. Every app goes
+    through the same NetworkService, which says what each may change: a Git app's joins are saved for its deploys, any
+    other app's are kept, which the card spells out. Own LAN addresses (gitberth-lan) have a card of their own.
+*@
+<section class="gb-card @Class" aria-labelledby="gb-networks-title">
+    <div class="gb-card-head">
+        <div class="gb-card-title" id="gb-networks-title" tabindex="-1" @ref="title">
+            <SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks
+            <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Names other containers use</span>
+        </div>
+    </div>
+    @if (view is null && error is null)
+    {
+        <div class="gb-card-body"><div class="gb-skel" style="height:40px"></div></div>
+    }
+    else if (error is not null)
+    {
+        <div class="gb-card-body"><EmptyState Small="true" Title="Docker didn't say" Icon="@Icons.Material.Outlined.Hub">Which networks @Title is on couldn't be read (@error.TrimEnd('.')).</EmptyState></div>
+    }
+    else if (view!.Networks.Count == 0 && view.Note is { } mode)
+    {
+        @* The host's network, another container's, or none: there are no Docker networks of its own. *@
+        <div class="gb-card-body"><EmptyState Small="true" Title="No networks of its own" Icon="@Icons.Material.Outlined.Hub">@mode</EmptyState></div>
+    }
+    else
+    {
+        @if (view.Networks.Count == 0)
+        {
+            <div class="gb-card-body">
+                <EmptyState Small="true" Title="On no network" Icon="@Icons.Material.Outlined.Hub">
+                    @(IsApp ? $"{Title} has no container now. Its next deploy puts it on {Networks.Shared}." : $"{Title} isn't on any network.")
+                </EmptyState>
+            </div>
+        }
+        else
+        {
+            <div>
+                @foreach (var n in view.Networks.Where(n => n.Network != LanAddresses.Network))
+                {
+                    <div class="gb-nrow" @key="n.Network">
+                        <div style="min-width:0">
+                            <div class="gb-row gb-row--wrap" style="gap:8px">
+                                <span class="gb-nrow-name">@n.Network</span>
+                                @if (n.Network == Networks.Shared)
+                                {
+                                    <span class="gb-tag gb-tag--outline">Shared network</span>
+                                }
+                                @if (n.Note is { } netNote && netNote != "Shared network")
+                                {
+                                    <span class="gb-tag">
+                                        @if (netNote.StartsWith("Required", StringComparison.Ordinal))
+                                        {
+                                            <SvgIcon Icon="@Icons.Material.Outlined.Lock" />
+                                        }
+                                        @netNote.Replace("Shared network · ", "")
+                                    </span>
+                                }
+                                @if (!n.Attached)
+                                {
+                                    <span class="gb-tag gb-tag--warn">@(IsApp ? "Joins with the next deploy" : "Joins again when it starts")</span>
+                                }
+                            </div>
+                            <dl class="gb-kv">
+                                <dt>Names</dt>
+                                <dd>
+                                    @if (n.Names.Count > 0)
+                                    {
+                                        @foreach (var name in n.Names)
+                                        {
+                                            <code>@name</code>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="gb-t3">none: Docker's default bridge gives no names</span>
+                                    }
+                                </dd>
+                                @if (n.IpAddress is { } ip)
+                                {
+                                    <dt>IP address</dt>
+                                    <dd><span class="gb-mono gb-t2" title="Changes when the container is recreated. Use the name.">@ip</span><span class="gb-t3" style="font-size:12px">changes on recreate; use the name</span></dd>
+                                }
+                                @if (members.TryGetValue(n.Network, out var others) && others.Count > 0)
+                                {
+                                    <dt>Also here</dt>
+                                    <dd>
+                                        <span class="gb-alsohere">
+                                            @foreach (var m in others.Take(4))
+                                            {
+                                                <span title="@m.Container">
+                                                    <AppLogo Name="@m.Container" Size="20" Dim="@(!m.Running)" Self="@(m.Container == "gitberth")" />
+                                                    @if (m.Link is not null)
+                                                    {
+                                                        <a href="@($"apps/{Uri.EscapeDataString(m.Container)}")">@Plain(m.Title)</a>
+                                                    }
+                                                    else
+                                                    {
+                                                        @Plain(m.Title)
+                                                    }
+                                                </span>
+                                            }
+                                            @if (others.Count > 4)
+                                            {
+                                                <span class="gb-t3">+@(others.Count - 4) more</span>
+                                            }
+                                        </span>
+                                    </dd>
+                                }
+                            </dl>
+                            @if (n.LeaveRefusal is { } refusal && n.Network != Networks.Shared && !ReadOnly)
+                            {
+                                <p class="gb-help" style="margin-top:6px">@refusal</p>
+                            }
+                        </div>
+                        <div>
+                            @if (n.LeaveRefusal is null && !ReadOnly)
+                            {
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => LeaveAsync(n)" Disabled="@(busy || Busy is not null)">Leave…<span class="gb-sr"> @n.Network</span></Btn>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        <div class="gb-card-foot" style="flex-direction:column;align-items:stretch;gap:8px">
+            @if (view.Note is { } note)
+            {
+                <p class="gb-help">@note</p>
+            }
+            @if (!IsApp && view.Networks.Where(n => n.Kept).Select(n => n.Network).ToList() is { Count: > 0 } kept)
+            {
+                @* What "kept" means, in words rather than a tooltip a keyboard couldn't reach. *@
+                <p class="gb-help">Kept: if @Title is recreated (docker run, compose up, an image update), Gitberth joins it to @Words(kept) again when it starts. Leave here to stop that.</p>
+            }
+            @if (CanJoin)
+            {
+                <div class="gb-njoin">
+                    <select class="gb-input gb-input--sm" aria-label="Join a network" value="@(join ?? "")" @onchange="e => PickAsync(e.Value?.ToString())" disabled="@(busy || Busy is not null)">
+                        <option value="">Join a network…</option>
+                        @foreach (var n in Joinable)
+                        {
+                            <option value="@n">@(n == Networks.Shared ? $"{n} (shared network)" : n)</option>
+                        }
+                    </select>
+                    <input class="gb-input gb-input--sm gb-input--mono gb-input--alias" placeholder="extra name" aria-label="Extra name (optional)" value="@alias"
+                           @onchange="e => SetAliasAsync(e.Value?.ToString())" disabled="@(busy || Busy is not null || join is null)" />
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="JoinAsync" Disabled="@(busy || Busy is not null || join is null || plan?.Refusal is not null)">Join</Btn>
+                </div>
+            }
+            @* Always there, so screen readers announce what joining would do as soon as a network is picked. *@
+            <div role="status" class="gb-netplan" style="color:@(Busy is not null || plan?.Refusal is not null ? "#ffb3b9" : "#ffd98a")">@(Busy ?? plan?.Refusal ?? plan?.Taken)</div>
+        </div>
+    }
+</section>
+
+@code {
+    /// <summary>The container's name; for an app, its container's (gb-&lt;slug&gt;), whether or not it has one yet.</summary>
+    [Parameter, EditorRequired] public string Container { get; set; } = "";
+    /// <summary>What lines name it by: the app's name, or the container's.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>A Git app: what it joins is saved for its deploys, rather than kept for when it's recreated.</summary>
+    [Parameter] public bool IsApp { get; set; }
+    /// <summary>Shown without Join or Leave, like a deploy's temporary container.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>Anything that changes when the container does (its ID and state, say): the card reads its networks again then.</summary>
+    [Parameter] public string? Refresh { get; set; }
+    /// <summary>Raised after it joined or left a network.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>Raised with what the card read, so the page's diagram draws the same networks.</summary>
+    [Parameter] public EventCallback<(ContainerNetworks Networks, IReadOnlyDictionary<string, IReadOnlyList<NetworkMember>> Members)> OnLoaded { get; set; }
+    /// <summary>Why it can't join or leave right now ("Gitberth is already changing postgres. …"); null when it can.</summary>
+    [Parameter] public string? Busy { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private ContainerNetworks? view;
+    private Dictionary<string, IReadOnlyList<NetworkMember>> members = [];
+    private string? error;
+    private string? loadedFor;
+    private string? join, alias;
+    private JoinPlan? plan;
+    private bool busy;
+    private ElementReference title;
+    // Leaving took away the row whose Leave… had the focus: the card's title takes it once it's drawn again.
+    private bool refocus;
+
+    // Join shows: its networks were read, it can join networks here, and there's one it isn't on.
+    private bool CanJoin => !ReadOnly && error is null && view is { Note: null } && Joinable.Count > 0;
+
+    // The networks it can join here: every one NetworkService offers but own LAN addresses', which come from the LAN
+    // address card alone, with the address it picks.
+    private List<string> Joinable => view?.Joinable.Where(n => n != LanAddresses.Network).ToList() ?? [];
+
+    // A member's title as the card shows it: the app marker is the logo's job.
+    private static string Plain(string title) => title.Replace(" (app)", "", StringComparison.Ordinal);
+
+    // "gitberth", "gitberth and db_default".
+    private static string Words(IReadOnlyList<string> items) =>
+        items.Count <= 1 ? string.Concat(items) : string.Join(", ", items.Take(items.Count - 1)) + " and " + items[^1];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!refocus || busy) return;
+        refocus = false;
+        try
+        {
+            await title.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException)
+        {
+            // The page went meanwhile: there's nothing to focus.
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{Container}|{Refresh}";
+        if (key == loadedFor) return;
+        // Another container: nothing picked for the last one carries over.
+        if (loadedFor?.Split('|')[0] != Container) (view, error, join, alias, plan, members) = (null, null, null, null, null, []);
+        loadedFor = key;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        // The page keeps this card when it moves to another app; what's read for the old one isn't shown there.
+        var container = Container;
+        try
+        {
+            var loaded = await Networks.NetworksOfAsync(container);
+            if (container != Container) return;
+            (view, error) = (loaded, null);
+            if (join is not null && !Joinable.Contains(join)) (join, plan) = (null, null);
+            var found = new Dictionary<string, IReadOnlyList<NetworkMember>>();
+            foreach (var n in loaded.Networks.Where(n => n.Attached && n.Network != LanAddresses.Network))
+            {
+                try
+                {
+                    found[n.Network] = (await Networks.MembersAsync(n.Network)).Where(m => m.Container != container).ToList();
+                }
+                catch (Exception)
+                {
+                    // Who else is there is a nicety: the row shows without it.
+                }
+            }
+            if (container != Container) return;
+            members = found;
+            await OnLoaded.InvokeAsync((loaded, members));
+        }
+        catch (Exception ex)
+        {
+            if (container == Container) error = ex.Message;
+        }
+    }
+
+    private async Task PickAsync(string? network)
+    {
+        (join, plan) = (string.IsNullOrEmpty(network) ? null : network, null);
+        await PlanAsync();
+    }
+
+    private async Task SetAliasAsync(string? value)
+    {
+        alias = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        if (join is not null) await PlanAsync();
+    }
+
+    // What joining would do: a name it would share there, or why it can't. Changes nothing.
+    private async Task PlanAsync()
+    {
+        if (join is null) return;
+        var (network, name) = (join, alias);
+        var planned = await Networks.PlanJoinAsync(Container, network, name);
+        if ((network, name) == (join, alias)) plan = planned;
+    }
+
+    private async Task JoinAsync()
+    {
+        if (join is null) return;
+        busy = true;
+        try
+        {
+            var done = await Networks.JoinAsync(Container, join, alias);
+            if (!done.Ok)
+            {
+                Snackbar.Add(done.Error!, Severity.Error);
+                return;
+            }
+            Snackbar.Add(done.Done!, Severity.Success);
+            if (done.Warning is not null) Snackbar.Add(done.Warning, Severity.Warning);
+            (join, alias, plan) = (null, null, null);
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task LeaveAsync(NetworkAttachment network)
+    {
+        busy = true;
+        try
+        {
+            var leave = await Networks.PlanLeaveAsync(Container, network.Network);
+            if (leave.Refusal is not null)
+            {
+                Snackbar.Add(leave.Refusal, Severity.Error);
+                return;
+            }
+            // Leaving gitberth-lan takes its own address away: the LAN address card's question.
+            var confirmed = leave.OwnAddress is { } own
+                ? await Dialogs.ShowMessageBoxAsync($"Remove {Title}'s own address?", $"Devices using {own} lose it.", yesText: "Remove", cancelText: "Cancel")
+                : await Dialogs.ShowMessageBoxAsync($"Leave {network.Network}?", LeaveText(network, leave), yesText: "Leave network", cancelText: "Cancel");
+            if (confirmed != true) return;
+            var done = await Networks.LeaveAsync(Container, network.Network);
+            Snackbar.Add(done.Error ?? done.Done!, done.Ok ? Severity.Success : Severity.Error);
+            await LoadAsync();
+            refocus = done.Ok;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // What leaving does, in the order it matters: who loses the name, where the published ports go, and what stays.
+    private string LeaveText(NetworkAttachment network, LeavePlan leave)
+    {
+        if (!network.Attached)
+            return IsApp ? $"{Title} isn't on {network.Network} now, and its next deploys leave it off too." : $"Gitberth stops joining {Title} to {network.Network} when it starts.";
+        var lines = new List<string> { $"Containers on {network.Network} stop reaching {Title} by name." };
+        // Who loses the name (5.7): PlanLeaveAsync lists the running containers there whose settings use it; null when Docker didn't say.
+        if (leave.Users is { Count: > 0 } users)
+        {
+            var who = users.Count == 1 ? users[0] : string.Join(", ", users.SkipLast(1)) + " and " + users[^1];
+            lines.Add(users.Count == 1 ? $"{who} uses it and loses it now." : $"{who} use it and lose it now.");
+        }
+        else if (leave.Users is not null)
+        {
+            lines.Add($"Nothing on {network.Network} names {Title} in its settings.");
+        }
+        if (leave.PortsMoveTo is { } to) lines.Add($"Its published ports move to {to}: a moment of failed connections.");
+        if (leave.OnlyNetwork) lines.Add("It's its only network: its published ports stop answering until it joins another.");
+        lines.Add(IsApp ? $"{Title} keeps running, and its next deploys leave it off {network.Network}." : $"{Title} keeps running.");
+        return string.Join(" ", lines);
+    }
+}

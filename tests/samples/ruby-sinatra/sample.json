@@ -1,0 +1,6 @@
+{
+  "kind": "Ruby",
+  "title": "Ruby (Sinatra)",
+  "port": 9292,
+  "expect": "Hello from Sinatra"
+}

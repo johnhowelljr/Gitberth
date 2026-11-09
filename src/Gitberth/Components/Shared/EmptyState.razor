@@ -1,0 +1,29 @@
+@*
+    What's missing, in plain words: a tile with the icon of what isn't there, a title, one sentence of why or what to do,
+    and the one action that fixes it. Small ones inside a card use a dashed border instead of the tile.
+*@
+<div class="gb-empty @(Small ? "gb-empty--small" : null) @Class">
+    @if (!Small)
+    {
+        <div class="gb-empty-art"><SvgIcon Icon="@Icon" /></div>
+    }
+    <div class="gb-empty-title">@Title</div>
+    @if (ChildContent is not null)
+    {
+        <p>@ChildContent</p>
+    }
+    @if (Actions is not null)
+    {
+        <div class="gb-empty-actions">@Actions</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Icon { get; set; } = Icons.Material.Outlined.Inbox;
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+    /// <summary>Inside a card: a dashed box, no tile.</summary>
+    [Parameter] public bool Small { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

@@ -1,0 +1,35 @@
+@implements IDisposable
+@inject DockerCli Docker
+
+<MudTooltip Text="@tooltip" Placement="Placement.Bottom">
+    <span class="gb-engine @(ok ? "gb-engine--ok" : "gb-engine--down")">
+        <span class="gb-engine-dot"></span>@label
+    </span>
+</MudTooltip>
+
+@code {
+    private bool ok = true;
+    private string label = "Docker";
+    private string tooltip = "Checking the Docker engine…";
+    private Timer? timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        timer = new Timer(_ => InvokeAsync(async () =>
+        {
+            await RefreshAsync();
+            StateHasChanged();
+        }), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+    }
+
+    private async Task RefreshAsync()
+    {
+        var info = await Docker.GetInfoAsync();
+        ok = info.ServerVersion is not null;
+        label = ok ? $"Docker {info.ServerVersion}" : "Docker offline";
+        tooltip = ok ? $"Engine {info.ServerVersion}, CLI {info.ClientVersion}" : info.Error ?? "The Docker engine isn't reachable.";
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

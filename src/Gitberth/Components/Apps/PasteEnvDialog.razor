@@ -1,0 +1,24 @@
+@* Paste a .env file: each KEY=value line sets that variable. Comments and blank lines are skipped. *@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">Paste a .env file</div>
+        <div class="gb-dialog-sub">Each KEY=value line sets that variable, replacing one of the same name. Nothing changes until you apply.</div>
+    </TitleContent>
+    <DialogContent>
+        <textarea class="gb-input" rows="10" spellcheck="false" placeholder="DATABASE_URL=postgres://app:secret@postgres/app&#10;TZ=Europe/London"
+                  @bind="text" @bind:event="oninput" aria-label=".env contents" style="min-height:200px"></textarea>
+        <div class="gb-help" style="margin-top:8px">@Lines @(Lines == 1 ? "variable" : "variables") found.</div>
+    </DialogContent>
+    <DialogActions>
+        <Btn Kind="BtnKind.Ghost" OnClick="() => MudDialog.Cancel()">Cancel</Btn>
+        <Btn Kind="BtnKind.Primary" OnClick="() => MudDialog.Close(DialogResult.Ok(text))" Disabled="@(Lines == 0)">Add @Lines</Btn>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private string text = "";
+
+    private int Lines => text.Replace("\r", "").Split('\n').Count(l => l.Trim() is { Length: > 0 } t && !t.StartsWith('#') && t.IndexOf('=') > 0);
+}

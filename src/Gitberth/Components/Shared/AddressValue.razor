@@ -1,0 +1,43 @@
+@*
+    An address, in mono: a web address is a link with the open icon after it, any other gets a copy button. A key
+    (LAN, INTERNAL) can go before it. One that doesn't answer now (the app is stopped) is grey and not a link.
+*@
+<span class="gb-row gb-addrv-wrap @Class" style="gap:6px;min-width:0">
+    @if (Key is not null)
+    {
+        <span class="gb-addrv-k">@Key</span>
+    }
+    @if (Href is not null && Live)
+    {
+        <a class="gb-addrv @(Big ? "gb-addrv--big" : null)" href="@Href" target="_blank" rel="noopener" title="@Title">
+            <span>@Text</span><SvgIcon Icon="@Icons.Material.Outlined.OpenInNew" />
+        </a>
+    }
+    else
+    {
+        <span class="gb-addrv @(Big ? "gb-addrv--big" : null) @(Live ? null : "gb-addrv--off")" title="@(Live ? Title : "Answers when it starts")"><span>@Text</span></span>
+    }
+    @if (Copy is not null && (Href is null || ShowCopy))
+    {
+        <CopyButton Value="@Copy" Label="@Text" />
+    }
+</span>
+
+@code {
+    /// <summary>What's shown: app.example.com, 10.1.1.80:3001, postgres:5432.</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+    /// <summary>Where opening it goes; null for an address that's only copied.</summary>
+    [Parameter] public string? Href { get; set; }
+    /// <summary>What the copy button copies; null for no button.</summary>
+    [Parameter] public string? Copy { get; set; }
+    /// <summary>A micro-caps key before it: LAN, INTERNAL.</summary>
+    [Parameter] public string? Key { get; set; }
+    /// <summary>The hero's main address: bigger and brighter.</summary>
+    [Parameter] public bool Big { get; set; }
+    /// <summary>A copy button on a link too.</summary>
+    [Parameter] public bool ShowCopy { get; set; }
+    /// <summary>It answers there now; false greys it and drops the link.</summary>
+    [Parameter] public bool Live { get; set; } = true;
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

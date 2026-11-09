@@ -1,0 +1,39 @@
+@inject RestartSchedules Restarts
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@* A container's scheduled restart, on the Health page: what it is now, and a click to change it. *@
+<MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.RestartAlt" OnClick="EditAsync" Class="gb-restart-btn"
+           aria-label="@($"Scheduled restart of {Title}: {Label}. Change it")">@Label</MudButton>
+
+@code {
+    [Parameter, EditorRequired] public string Container { get; set; } = "";
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>A Git app, which a scheduled restart recreates through a deploy; anything else gets docker restart.</summary>
+    [Parameter] public bool Recreated { get; set; }
+
+    private string Label => Restarts.For(Container) is { } every ? "Restarts " + every : "No scheduled restart";
+
+    private async Task EditAsync()
+    {
+        var dialog = await Dialogs.ShowAsync<RestartScheduleDialog>(null, new DialogParameters<RestartScheduleDialog>
+        {
+            { d => d.Title, Title },
+            { d => d.Current, Restarts.For(Container) },
+            { d => d.Recreated, Recreated },
+        }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not RestartScheduleDialog.Choice choice) return;
+        try
+        {
+            await Restarts.SetAsync(Container, choice.Every);
+            Snackbar.Add(choice.Every is { } every
+                ? $"{Title} restarts {every}, counted from when it last started."
+                : $"{Title} isn't restarted on a schedule any more.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

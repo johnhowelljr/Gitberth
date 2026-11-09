@@ -1,0 +1,6 @@
+{
+  "kind": "Ruby",
+  "title": "Ruby (Rack)",
+  "port": 9292,
+  "expect": "Hello from Rack"
+}

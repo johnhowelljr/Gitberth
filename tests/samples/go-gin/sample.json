@@ -1,0 +1,6 @@
+{
+  "kind": "Go",
+  "title": "Go (Gin)",
+  "port": 8080,
+  "expect": "Hello from Gin"
+}

@@ -1,0 +1,291 @@
+{
+  "Id": "455b8ea31b6d686dbf8c70b3b35d65f4f0633c59d43a45d446b77b7b041976ce",
+  "Created": "2026-11-04T23:00:12.503411101Z",
+  "Path": "dotnet",
+  "Args": [
+    "Gitberth.dll"
+  ],
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 1407424,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-04T23:53:26.2495718Z",
+    "FinishedAt": "2026-11-04T23:53:26.054717102Z"
+  },
+  "Image": "sha256:0c1a38670237d7bc11ee185585ec1309b54599d259ccd7930e81c2114472b125",
+  "ResolvConfPath": "/var/lib/docker/containers/455b8ea31b6d686dbf8c70b3b35d65f4f0633c59d43a45d446b77b7b041976ce/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/455b8ea31b6d686dbf8c70b3b35d65f4f0633c59d43a45d446b77b7b041976ce/hostname",
+  "HostsPath": "/var/lib/docker/containers/455b8ea31b6d686dbf8c70b3b35d65f4f0633c59d43a45d446b77b7b041976ce/hosts",
+  "LogPath": "",
+  "Name": "/gitberth",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": [
+      "/var/run/docker.sock:/var/run/docker.sock:rw",
+      "gitberth_gitberth-data:/data:rw"
+    ],
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "journald",
+      "Config": {}
+    },
+    "NetworkMode": "gitberth_default",
+    "PortBindings": {
+      "8080/tcp": [
+        {
+          "HostIp": "",
+          "HostPort": "8080"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": null,
+    "DnsSearch": null,
+    "ExtraHosts": [],
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 0,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": null,
+    "BlkioDeviceReadBps": null,
+    "BlkioDeviceWriteBps": null,
+    "BlkioDeviceReadIOps": null,
+    "BlkioDeviceWriteIOps": null,
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": null,
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 0,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "gitberth_gitberth-data",
+      "Source": "/var/lib/docker/volumes/gitberth_gitberth-data/_data",
+      "Destination": "/data",
+      "Driver": "local",
+      "Mode": "rw",
+      "RW": true,
+      "Propagation": ""
+    },
+    {
+      "Type": "bind",
+      "Source": "/var/run/docker.sock",
+      "Destination": "/var/run/docker.sock",
+      "Mode": "rw",
+      "RW": true,
+      "Propagation": "rprivate"
+    }
+  ],
+  "Config": {
+    "Hostname": "455b8ea31b6d",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": true,
+    "AttachStderr": true,
+    "ExposedPorts": {
+      "8080/tcp": {}
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "TZ=America/New_York",
+      "GITBERTH_ADMIN_PASSWORD=",
+      "GITBERTH_PUBLIC_HOST=10.1.1.80",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "APP_UID=1654",
+      "ASPNETCORE_HTTP_PORTS=8080",
+      "DOTNET_RUNNING_IN_CONTAINER=true",
+      "DOTNET_VERSION=10.0.14",
+      "ASPNET_VERSION=10.0.14",
+      "GITBERTH_DATA=/data"
+    ],
+    "Cmd": null,
+    "Image": "gitberth:local",
+    "Volumes": {
+      "/data": {}
+    },
+    "WorkingDir": "/app",
+    "Entrypoint": [
+      "dotnet",
+      "Gitberth.dll"
+    ],
+    "Labels": {
+      "com.docker.compose.config-hash": "a3233e1b1ce0125e02b238b096adb219459b71805318343efac890914620f82e",
+      "com.docker.compose.container-number": "1",
+      "com.docker.compose.depends_on": "",
+      "com.docker.compose.image": "sha256:a23726ff8dbcf87a2eefb03993c8826af2c7e523aeb15a8c4898392d7149ed23",
+      "com.docker.compose.oneoff": "False",
+      "com.docker.compose.project": "gitberth",
+      "com.docker.compose.project.config_files": "/opt/gitberth/docker-compose.yml",
+      "com.docker.compose.project.working_dir": "/opt/gitberth",
+      "com.docker.compose.service": "gitberth",
+      "com.docker.compose.version": "5.6.1",
+      "org.opencontainers.image.version": "24.04"
+    }
+  },
+  "NetworkSettings": {
+    "SandboxID": "0a929120cb6970c40e9b76fd9f495738d0b17f0d77306a4448ad93034e697c2e",
+    "SandboxKey": "/var/run/docker/netns/0a929120cb69",
+    "Ports": {
+      "8080/tcp": [
+        {
+          "HostIp": "0.0.0.0",
+          "HostPort": "8080"
+        },
+        {
+          "HostIp": "::",
+          "HostPort": "8080"
+        }
+      ]
+    },
+    "Networks": {
+      "gitberth": {
+        "IPAMConfig": {},
+        "Links": null,
+        "Aliases": [],
+        "DriverOpts": {},
+        "GwPriority": 0,
+        "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+        "EndpointID": "ba92f062546e521dec6e1323868ff7e340a2ea2ec92ea8fe4c1624352994cb60",
+        "Gateway": "172.21.0.1",
+        "IPAddress": "172.21.0.5",
+        "MacAddress": "36:df:50:08:02:9e",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "gitberth",
+          "455b8ea31b6d"
+        ]
+      },
+      "gitberth_default": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": [
+          "gitberth",
+          "gitberth"
+        ],
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "9b91ba9769833320ef812519543ee1c0073b7a041ec46ef26e517ee924659c14",
+        "EndpointID": "50f13a0798805e9609abe1487365301051a24aea5bb3bab7bebc08e3adfd422f",
+        "Gateway": "172.19.0.1",
+        "IPAddress": "172.19.0.2",
+        "MacAddress": "ae:a2:60:31:b6:49",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "gitberth",
+          "455b8ea31b6d"
+        ]
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:a23726ff8dbcf87a2eefb03993c8826af2c7e523aeb15a8c4898392d7149ed23",
+    "size": 2397,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

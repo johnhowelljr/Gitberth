@@ -1,0 +1,278 @@
+{
+  "Id": "27c0957a4ff72d2df7e55f5dbf571e53255a4e66074addeb688a1b5adbde2f6e",
+  "Created": "2026-11-04T23:07:09.402756175Z",
+  "Path": "docker-entrypoint.sh",
+  "Args": [
+    "npm",
+    "start"
+  ],
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 1343814,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-11-04T23:07:09.443169776Z",
+    "FinishedAt": "0001-01-01T00:00:00Z"
+  },
+  "Image": "sha256:1fe9fbd57aac2e17c7c2cf98cb0e4aa595abddf0a72d007f84128ec9f61f985c",
+  "ResolvConfPath": "/var/lib/docker/containers/27c0957a4ff72d2df7e55f5dbf571e53255a4e66074addeb688a1b5adbde2f6e/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/27c0957a4ff72d2df7e55f5dbf571e53255a4e66074addeb688a1b5adbde2f6e/hostname",
+  "HostsPath": "/var/lib/docker/containers/27c0957a4ff72d2df7e55f5dbf571e53255a4e66074addeb688a1b5adbde2f6e/hosts",
+  "LogPath": "",
+  "Name": "/gb-kanban",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "journald",
+      "Config": {}
+    },
+    "NetworkMode": "gitberth",
+    "PortBindings": {
+      "3000/tcp": [
+        {
+          "HostIp": "",
+          "HostPort": "3001"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 0,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 0,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [],
+  "Config": {
+    "Hostname": "27c0957a4ff7",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "ExposedPorts": {
+      "3000/tcp": {}
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "ADMIN_JWT_SECRET=REDACTED",
+      "VERCEL_PROJECT_PRODUCTION_URL=REDACTED",
+      "VERCEL_GIT_COMMIT_MESSAGE=Fix the settings search",
+      "NEXT_PUBLIC_VERCEL_TARGET_ENV=production",
+      "VERCEL_URL=REDACTED",
+      "VERCEL_GIT_COMMIT_REF=main",
+      "NEXT_PUBLIC_VERCEL_BRANCH_URL=REDACTED",
+      "NEXT_PUBLIC_VERCEL_GIT_COMMIT_MESSAGE=Fix the settings search",
+      "VERCEL_GIT_COMMIT_AUTHOR_NAME=REDACTED",
+      "NEXT_PUBLIC_VERCEL_URL=REDACTED",
+      "AUTH_TRUST_HOST=REDACTED",
+      "DATABASE_RUNTIME=pg",
+      "NEXTAUTH_SECRET=REDACTED",
+      "VERCEL_GIT_PROVIDER=github",
+      "DATABASE_URL=REDACTED",
+      "VERCEL_BRANCH_URL=REDACTED",
+      "VERCEL_GIT_REPO_OWNER=octocat",
+      "NEXT_PUBLIC_VERCEL_GIT_REPO_OWNER=octocat",
+      "NEXTAUTH_URL=REDACTED",
+      "VERCEL_GIT_COMMIT_SHA=425df8a3bf544b854e44a0aedae1468fbf9f9ef8",
+      "NEXT_PUBLIC_VERCEL_GIT_REPO_SLUG=kanban",
+      "NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA=425df8a3bf544b854e44a0aedae1468fbf9f9ef8",
+      "AUTH_SECRET=REDACTED",
+      "VERCEL_ENV=production",
+      "VERCEL_TARGET_ENV=production",
+      "VERCEL_GIT_REPO_SLUG=kanban",
+      "NEXT_PUBLIC_VERCEL_ENV=production",
+      "NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL=REDACTED",
+      "NEXT_PUBLIC_VERCEL_GIT_COMMIT_REF=main",
+      "NEXT_PUBLIC_VERCEL_GIT_COMMIT_AUTHOR_NAME=REDACTED",
+      "NEXT_PUBLIC_VERCEL_GIT_PROVIDER=github",
+      "AUTH_URL=REDACTED",
+      "PATH=/app/website/node_modules/.bin:/app/node_modules/.bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "NODE_VERSION=24.22.2",
+      "YARN_VERSION=1.22.22",
+      "NEXT_TELEMETRY_DISABLED=1",
+      "NODE_ENV=production",
+      "HOSTNAME=0.0.0.0",
+      "PORT=3000"
+    ],
+    "Cmd": [
+      "npm",
+      "start"
+    ],
+    "Image": "gitberth/kanban:425df8a",
+    "Volumes": null,
+    "WorkingDir": "/app/website",
+    "Entrypoint": [
+      "docker-entrypoint.sh"
+    ],
+    "Labels": {
+      "gitberth.app": "kanban",
+      "gitberth.authjs": "true",
+      "gitberth.commit": "425df8a3bf544b854e44a0aedae1468fbf9f9ef8",
+      "gitberth.crons": "[{\"path\":\"/api/cron/onecode-cleanup\",\"schedule\":\"0 6 * * *\"}]",
+      "gitberth.deployment": "14",
+      "gitberth.env-prefix": "NEXT_PUBLIC_",
+      "gitberth.managed": "true",
+      "gitberth.port": "3000",
+      "gitberth.traits": "1",
+      "gitberth.trigger": "Manual"
+    }
+  },
+  "NetworkSettings": {
+    "SandboxID": "7373e205dea4eecec1cc68c380e22b543cc5490bcffbe0cccf4d453ccb1c5e0c",
+    "SandboxKey": "/var/run/docker/netns/7373e205dea4",
+    "Ports": {
+      "3000/tcp": [
+        {
+          "HostIp": "0.0.0.0",
+          "HostPort": "3001"
+        },
+        {
+          "HostIp": "::",
+          "HostPort": "3001"
+        }
+      ]
+    },
+    "Networks": {
+      "gitberth": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": [
+          "kanban"
+        ],
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+        "EndpointID": "5183935133b5b501a370db4d0981755ac9b23c60d4dca1ce55b9a294dc637d3d",
+        "Gateway": "172.21.0.1",
+        "IPAddress": "172.21.0.2",
+        "MacAddress": "f6:33:ad:f5:b7:4f",
+        "IPPrefixLen": 16,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "gb-kanban",
+          "kanban",
+          "27c0957a4ff7"
+        ]
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:8cc71e12f3defe7971fb36511447a1b300b761bb4ea3ff1b28e937622c31e518",
+    "size": 2198,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

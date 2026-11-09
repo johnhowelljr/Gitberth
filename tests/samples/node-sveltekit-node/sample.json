@@ -1,0 +1,6 @@
+{
+  "kind": "SvelteKit",
+  "title": "SvelteKit (adapter-node)",
+  "port": 3000,
+  "expect": "Hello from SvelteKit"
+}

@@ -1,0 +1,6 @@
+{
+  "kind": "Nuxt",
+  "title": "Nuxt",
+  "port": 3000,
+  "expect": "Hello from Nuxt"
+}

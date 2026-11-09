@@ -1,0 +1,4 @@
+{
+  "installCommand": "cd .. && npm install && cd website && npm install",
+  "buildCommand": "cd .. && npm run build:shared && cd website && npm run build"
+}

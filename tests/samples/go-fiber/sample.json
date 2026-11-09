@@ -1,0 +1,6 @@
+{
+  "kind": "Go",
+  "title": "Go (Fiber)",
+  "port": 3000,
+  "expect": "Hello from Fiber"
+}

@@ -1,0 +1,57 @@
+@using Microsoft.AspNetCore.Http
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#090b10" />
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["fonts/fonts.css"]" />
+    <link rel="stylesheet" href="@Assets["_content/MudBlazor/MudBlazor.min.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    @* The Network tab's and New app's own styles (D2), on top of the design system. *@
+    <link rel="stylesheet" href="css/network-newapp.css" />
+    @* The Network page's own (host ports and Docker's networks). *@
+    <link rel="stylesheet" href="css/network-page.css" />
+    <link rel="stylesheet" href="@Assets["Gitberth.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/svg+xml" href="@Assets["favicon.svg"]" />
+    <HeadOutlet @rendermode="PageRenderMode" />
+</head>
+
+<body>
+    @if (PageRenderMode is not null)
+    {
+        @* Shown until the interactive app has rendered (gitberth.ready() fades it out). *@
+        <div id="gb-splash" class="gb-splash" aria-hidden="true">
+            <div class="gb-splash-content">
+                <Logo Size="72" Class="gb-splash-logo" />
+                <div class="gb-splash-name">Gitberth</div>
+                <div class="gb-splash-tag">From git push to running container</div>
+                <div class="gb-splash-progress"><span></span></div>
+                <div class="gb-splash-status" id="gb-splash-status">Connecting…</div>
+            </div>
+        </div>
+    }
+    <Routes @rendermode="PageRenderMode" />
+    @* Sign-out posts this form; it's rendered here (statically) so it always carries a valid antiforgery token. *@
+    <form id="gb-logout" method="post" action="logout" hidden>
+        <AntiforgeryToken />
+    </form>
+    <ReconnectModal />
+    <script src="@Assets["js/gitberth.js"]"></script>
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
+</body>
+
+</html>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // Every page is interactive except those marked [ExcludeFromInteractiveRouting] (sign-in, error).
+    private IComponentRenderMode? PageRenderMode => HttpContext.AcceptsInteractiveRouting() ? RenderModes.Server : null;
+}

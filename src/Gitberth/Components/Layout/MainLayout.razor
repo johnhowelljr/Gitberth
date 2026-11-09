@@ -1,0 +1,81 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<MudThemeProvider Theme="GitberthTheme.Theme" IsDarkMode="true" />
+<MudPopoverProvider />
+<MudDialogProvider MaxWidth="MaxWidth.Small" FullWidth="true" CloseOnEscapeKey="true" />
+<MudSnackbarProvider />
+
+@* The sidebar (236 px), then the sticky, translucent top bar over the page. Under 960 px the sidebar becomes a drawer. *@
+<div class="gb-shell">
+    <aside class="gb-side" aria-label="Main menu">
+        <NavMenu />
+    </aside>
+    <div class="gb-main">
+        <header class="gb-topbar">
+            <button type="button" class="gb-iconbtn gb-topbar-menu" aria-label="Open the menu" aria-expanded="@(drawerOpen ? "true" : "false")" @onclick="() => drawerOpen = true">
+                <SvgIcon Icon="@Icons.Material.Outlined.Menu" />
+            </button>
+            <a href="" class="gb-topbar-logo" aria-label="Gitberth, the dashboard"><Logo Size="26" /></a>
+            <TopSearch />
+            <div class="gb-topbar-right">
+                <DockerStatus />
+                <Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add" Label="New app">
+                    <span class="gb-lbl-long">New app</span><span class="gb-lbl-short">New</span>
+                </Btn>
+                <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="Account">
+                    <ActivatorContent>
+                        <button type="button" class="gb-avatar" title="admin" aria-label="Account" @onclick="context.ToggleAsync">A</button>
+                    </ActivatorContent>
+                    <ChildContent>
+                        <div class="gb-menu-header">
+                            <div class="gb-menu-title">admin</div>
+                            <div class="gb-menu-sub">Administrator</div>
+                        </div>
+                        <MudDivider />
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Settings" Href="settings">Settings</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Logout" OnClick="SignOutAsync">Sign out</MudMenuItem>
+                    </ChildContent>
+                </MudMenu>
+            </div>
+        </header>
+        <main class="gb-page" id="gb-page">
+            @Body
+        </main>
+    </div>
+</div>
+
+@if (drawerOpen)
+{
+    <div class="gb-scrim" @onclick="() => drawerOpen = false"></div>
+    <aside class="gb-side gb-side--drawer" aria-label="Main menu">
+        <NavMenu />
+    </aside>
+}
+
+@code {
+    private bool drawerOpen;
+
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { await JS.InvokeVoidAsync("gitberth.ready"); }
+        catch (JSDisconnectedException) { }
+    }
+
+    // Following a link in the drawer closes it.
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!drawerOpen) return;
+        drawerOpen = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SignOutAsync() => await JS.InvokeVoidAsync("gitberth.submitForm", "gb-logout");
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+}

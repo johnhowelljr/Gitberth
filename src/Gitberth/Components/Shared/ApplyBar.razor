@@ -1,0 +1,44 @@
+@*
+    The bar that sticks to the bottom of an editor while it has unsaved changes: how many, what applying does (the one
+    consequence line), and Discard and the primary action. Warn when Docker changed underneath, which disables applying.
+*@
+<div class="gb-applybar @(Warn ? "gb-applybar--warn" : null) @Class" role="region" aria-label="Unsaved changes">
+    <span class="gb-applybar-icon"><SvgIcon Icon="@(Icon ?? (Warn ? Icons.Material.Outlined.WarningAmber : Icons.Material.Outlined.Sync))" /></span>
+    <div class="gb-grow" role="status">
+        <div class="gb-applybar-title">@Title</div>
+        @if (Sub is not null || SubContent is not null)
+        {
+            <div class="gb-applybar-sub">@Sub @SubContent</div>
+        }
+    </div>
+    <div class="gb-applybar-actions">
+        @Extra
+        @if (OnDiscard.HasDelegate)
+        {
+            <Btn Kind="BtnKind.Ghost" OnClick="OnDiscard" Disabled="Busy">Discard</Btn>
+        }
+        @if (OnApply.HasDelegate)
+        {
+            <Btn Kind="BtnKind.Primary" OnClick="OnApply" Disabled="@(ApplyDisabled || Warn)" Busy="Busy" EndIcon="@Icons.Material.Outlined.ArrowForward">@ApplyText</Btn>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>"3 unsaved changes".</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>The consequence: "Applying recreates postgres: about 5 s offline."</summary>
+    [Parameter] public string? Sub { get; set; }
+    [Parameter] public RenderFragment? SubContent { get; set; }
+    [Parameter] public string ApplyText { get; set; } = "Review and apply";
+    [Parameter] public bool ApplyDisabled { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    /// <summary>Docker changed underneath: the bar says so, and Apply is off.</summary>
+    [Parameter] public bool Warn { get; set; }
+    [Parameter] public string? Icon { get; set; }
+    /// <summary>More buttons before Discard (Save for next deploy, Pull it).</summary>
+    [Parameter] public RenderFragment? Extra { get; set; }
+    [Parameter] public EventCallback OnDiscard { get; set; }
+    [Parameter] public EventCallback OnApply { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

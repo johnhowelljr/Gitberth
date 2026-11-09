@@ -1,0 +1,9 @@
+{
+  "kind": "Php",
+  "title": "PHP (Laravel)",
+  "port": 8080,
+  "expect": "Hello from Laravel",
+  "env": {
+    "APP_KEY": "base64:uqA6xfCieLR+LNdFufO8tRJlz/fy+2xfydsPoC7M1NM="
+  }
+}

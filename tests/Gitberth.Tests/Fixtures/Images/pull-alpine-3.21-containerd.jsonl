@@ -1,0 +1,9 @@
+{"status":"Pulling from library/alpine","id":"3.21"}
+{"status":"Pulling fs layer","progressDetail":{},"id":"871d48e9bf6b"}
+{"status":"Download complete","progressDetail":{"hidecounts":true},"id":"871d48e9bf6b"}
+{"status":"Download complete","progressDetail":{"hidecounts":true},"id":"3544a6103257"}
+{"status":"Extracting","progressDetail":{"current":1,"units":"s"},"id":"871d48e9bf6b"}
+{"status":"Download complete","progressDetail":{"hidecounts":true},"id":"55971c3da804"}
+{"status":"Pull complete","progressDetail":{"hidecounts":true},"id":"871d48e9bf6b"}
+{"status":"Digest: sha256:87a4361f6c819618a6bafa2ed5228714cb0bb22195d2b49c95eb26799990128a"}
+{"status":"Status: Downloaded newer image for alpine:3.21"}

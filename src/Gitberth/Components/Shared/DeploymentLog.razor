@@ -1,0 +1,67 @@
+@implements IDisposable
+@inject LiveLogHub Hub
+@inject GitberthOptions Options
+
+<LogView Lines="lines" Title="Build and deploy log" Height="@Height" EmptyText="Waiting for output…" />
+
+@code {
+    [Parameter, EditorRequired] public int DeploymentId { get; set; }
+    [Parameter] public string Height { get; set; } = "64vh";
+    [Parameter] public EventCallback OnCompleted { get; set; }
+
+    private const int MaxLines = 20000;
+    private readonly Lock gate = new();
+    private readonly List<string> buffer = [];
+    private List<string> lines = [];
+    private IDisposable? subscription;
+    private Timer? timer;
+    private volatile bool dirty;
+    private int loadedFor;
+
+    protected override void OnParametersSet()
+    {
+        if (loadedFor == DeploymentId) return;
+        loadedFor = DeploymentId;
+        Stop();
+        lock (gate) buffer.Clear();
+
+        var live = Hub.Get(DeploymentId);
+        if (live is not null)
+        {
+            subscription = live.Subscribe(
+                snapshot => { lock (gate) buffer.AddRange(snapshot); dirty = true; },
+                line => { lock (gate) buffer.Add(line); dirty = true; },
+                () => _ = InvokeAsync(async () =>
+                {
+                    Flush();
+                    StateHasChanged();
+                    await OnCompleted.InvokeAsync();
+                }));
+            timer = new Timer(_ => { if (dirty) _ = InvokeAsync(() => { Flush(); StateHasChanged(); }); }, null, 250, 250);
+        }
+        else
+        {
+            lock (gate) buffer.AddRange(DeployPaths.ReadTail(DeployPaths.LogFile(Options, DeploymentId), MaxLines));
+        }
+        Flush();
+    }
+
+    private void Flush()
+    {
+        lock (gate)
+        {
+            dirty = false;
+            lines = buffer.Count > MaxLines ? buffer.GetRange(buffer.Count - MaxLines, MaxLines) : [.. buffer];
+        }
+    }
+
+    private void Stop()
+    {
+        subscription?.Dispose();
+        subscription = null;
+        timer?.Dispose();
+        timer = null;
+    }
+
+    public void Dispose() => Stop();
+}

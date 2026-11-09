@@ -1,0 +1,915 @@
+@page "/settings"
+@using Gitberth.Security
+@inject SettingsService Settings
+@inject GitHubApi GitHub
+@inject DomainService Domains
+@inject AdminAuthService Auth
+@inject DockerCli Docker
+@inject GitClient Git
+@inject GitberthOptions Options
+@inject HostScanner Scanner
+@inject NetworkService Networks
+@inject LanAddresses Lan
+@inject RegistryService Registries
+@inject IDialogService Dialogs
+@inject WatchState Watch
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Settings · Gitberth</PageTitle>
+
+<PageHead Title="Settings" Lead="GitHub and registry access, domains, the network, updates, and this Gitberth installation.">
+    <Crumbs><a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /><span>Settings</span></Crumbs>
+</PageHead>
+
+<div class="gb-settings">
+    <nav class="gb-toc" aria-label="Sections">
+        @foreach (var (id, text, icon) in Toc)
+        {
+            <a href="@($"settings#{id}")"><SvgIcon Icon="@icon" />@text</a>
+        }
+    </nav>
+
+    <div class="gb-stack">
+        <section class="gb-card gb-sec" id="github" aria-labelledby="github-t">
+            @Head("github-t", Icons.Custom.Brands.GitHub, "GitHub access", "For private repositories, and the repo variables apps keep their environment in.")
+            <div class="gb-sec-body">
+                <div class="gb-row gb-row--wrap" style="gap:10px">
+                    @if (tokenSaved)
+                    {
+                        <span class="gb-pill2 gb-tone-good"><i class="gb-st-dot gb-st-dot--running"></i>Token saved</span>
+                        @if (login is not null)
+                        {
+                            <span class="gb-t2">for <strong>@login</strong></span>
+                        }
+                        @if (expires is not null)
+                        {
+                            <span class="@(ExpiresSoon ? "gb-tag gb-tag--warn" : "gb-t3")">expires @expires.Value.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)@(ExpiresSoon ? ": renew it soon" : "")</span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="gb-pill2 gb-tone-warn"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />No token</span>
+                        <span class="gb-t3">Private repositories can't be cloned yet.</span>
+                    }
+                </div>
+                <div class="gb-setrow">
+                    <Field Label="@(tokenSaved ? "Replace the token" : "Token")" For="gh-token">
+                        <input id="gh-token" type="password" class="gb-input gb-input--mono" placeholder="github_pat_…" value="@newToken" @oninput="e => newToken = e.Value?.ToString()" autocomplete="off" />
+                    </Field>
+                    <div class="gb-row gb-row--wrap">
+                        <Btn Kind="BtnKind.Primary" OnClick="SaveTokenAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(newToken)">@(tokenSaved ? "Replace token" : "Save token")</Btn>
+                        @if (tokenSaved)
+                        {
+                            <Btn Kind="BtnKind.Danger" OnClick="RemoveTokenAsync" Disabled="busy">Remove</Btn>
+                        }
+                    </div>
+                </div>
+                <p class="gb-help">
+                    A <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained personal access token</a>
+                    with <strong>Contents: Read-only</strong> and <strong>Variables: Read and write</strong> on the repositories you deploy, or a classic token
+                    with the <strong>repo</strong> scope. Gitberth never changes your code; it only reads and saves the repo's variables.
+                </p>
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="registries" aria-labelledby="registries-t">
+            @Head("registries-t", Icons.Material.Outlined.Key, "Registries", "Sign-ins for private images: used to pull them and to check them for updates.")
+            <div class="gb-sec-body">
+                @if (registries is null)
+                {
+                    <div class="gb-skel" style="height:48px"></div>
+                }
+                else if (registries.Count == 0)
+                {
+                    <EmptyState Small="true" Title="No registry sign-ins" Icon="@Icons.Material.Outlined.Key">Public images need none. Add one for a private image on ghcr.io, Docker Hub or your own registry.</EmptyState>
+                }
+                else
+                {
+                    <div class="gb-reglist">
+                        @foreach (var r in registries)
+                        {
+                            <div class="gb-regrow" @key="r.Id">
+                                <AppLogo Image="@RegistryLogo(r.Host)" Name="@r.Host" Size="26" />
+                                <div style="min-width:0">
+                                    <div class="gb-regrow-t">@r.Host</div>
+                                    <div class="gb-regrow-s">@r.Username · @RegistryState(r)</div>
+                                </div>
+                                <span class="r-when gb-t3" style="font-size:12px">added @r.CreatedAt.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveRegistryAsync(r)" Disabled="registryBusy">Remove</Btn>
+                            </div>
+                        }
+                    </div>
+                }
+                <div class="gb-regform">
+                    <Field Label="Registry" For="reg-host" Help="ghcr.io, docker.io, registry.lan:5000">
+                        <input id="reg-host" class="gb-input gb-input--mono" placeholder="ghcr.io" value="@regHost" @oninput="e => regHost = e.Value?.ToString()" autocomplete="off" spellcheck="false" />
+                    </Field>
+                    <Field Label="Username" For="reg-user">
+                        <input id="reg-user" class="gb-input gb-input--mono" value="@regUser" @oninput="e => regUser = e.Value?.ToString()" autocomplete="off" spellcheck="false" />
+                    </Field>
+                    <Field Label="Password or token" For="reg-secret" Help="Never shown again once it's saved.">
+                        <input id="reg-secret" type="password" class="gb-input gb-input--mono" value="@regSecret" @oninput="e => regSecret = e.Value?.ToString()" autocomplete="new-password" />
+                    </Field>
+                    <div class="gb-regform-go">
+                        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.VerifiedUser" OnClick="AddRegistryAsync" Busy="registryBusy"
+                             Disabled="@(string.IsNullOrWhiteSpace(regHost) || string.IsNullOrWhiteSpace(regUser) || string.IsNullOrWhiteSpace(regSecret))">Verify and save</Btn>
+                    </div>
+                </div>
+                @if (registryError is not null)
+                {
+                    <Banner Tone="critical" Title="Not saved">@registryError</Banner>
+                }
+                <p class="gb-help">Gitberth signs in once to check it works, then keeps it encrypted. For GitHub's registry use a token that can read packages.</p>
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="updates" aria-labelledby="updates-t">
+            @Head("updates-t", Icons.Material.Outlined.CloudDownload, "Updates", "How often images are checked for a newer version, and when apps may update on their own.")
+            <div class="gb-sec-body">
+                <div class="gb-fgrid">
+                    <Field Label="Check for updates every" For="upd-hours" Help="One request per image, however many apps use it. Docker Hub allows plenty at 6 hours." Error="@HoursProblem">
+                        <label class="gb-input"><input id="upd-hours" type="number" min="1" max="168" value="@checkHours" @onchange="e => checkHours = int.TryParse(e.Value?.ToString(), out var h) ? h : 0" /><span class="gb-input-suffix">hours</span></label>
+                    </Field>
+                    <Field Label="Automatic updates run between" Help="@WindowHelp" Error="@WindowProblem">
+                        <span class="gb-window">
+                            <input type="time" class="gb-input gb-input--mono" aria-label="From" value="@windowFrom" @onchange="e => windowFrom = e.Value?.ToString() ?? windowFrom" />
+                            <span class="gb-t3">and</span>
+                            <input type="time" class="gb-input gb-input--mono" aria-label="To" value="@windowTo" @onchange="e => windowTo = e.Value?.ToString() ?? windowTo" />
+                        </span>
+                    </Field>
+                </div>
+                <Field Label="New apps from an image">
+                    <Seg T="UpdatePolicy" Options="PolicyOptions" Value="defaultPolicy" ValueChanged="v => defaultPolicy = v" Label="Update policy for new apps" />
+                </Field>
+                <p class="gb-help">@PolicyHelp</p>
+                <div class="gb-row gb-row--wrap" style="justify-content:flex-end"><Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveUpdatesAsync" Disabled="@(busy || HoursProblem is not null || WindowProblem is not null)">Save</Btn></div>
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="domains" aria-labelledby="domains-t">
+            @Head("domains-t", Icons.Material.Outlined.Public, "Domains (Cloudflare)", "Optional: apps on their own domains through the Cloudflare Tunnel on the host, the way Vercel serves a project's.")
+            <div class="gb-sec-body">
+                <SwitchRow @key="switchKey" Title="Manage app domains through Cloudflare" Value="domainsEnabled" ValueChanged="SetDomainsEnabledAsync" Disabled="busy"
+                           Sub="@(domainsEnabled ? "Add a domain on an app's Network tab: Gitberth creates the tunnel route and the DNS record." : "Off: Gitberth doesn't contact Cloudflare or read your tunnel's settings, and your tunnel and DNS stay exactly as you set them.")" />
+                @if (!domainsEnabled)
+                {
+                    @if (cloudflareSaved)
+                    {
+                        <div class="gb-row gb-row--wrap">
+                            <span class="gb-tag">Token saved</span><span class="gb-t3">Not used while domains are off.</span>
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Danger" OnClick="RemoveCloudflareTokenAsync" Disabled="busy">Remove</Btn>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="gb-row gb-row--wrap" style="gap:10px">
+                        @if (cloudflareSaved)
+                        {
+                            <span class="gb-pill2 gb-tone-good"><i class="gb-st-dot gb-st-dot--running"></i>Token saved</span>
+                        }
+                        else
+                        {
+                            <span class="gb-pill2 gb-tone-warn"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />No token</span>
+                        }
+                        @if (tunnel is not null)
+                        {
+                            <span class="gb-t3">Tunnel <code>@tunnel.TunnelId[..8]</code> from the <code>@tunnel.ContainerName</code> container</span>
+                        }
+                        else if (tunnelProblem is not null)
+                        {
+                            <span class="gb-t3">@tunnelProblem</span>
+                        }
+                    </div>
+                    <div class="gb-setrow">
+                        <Field Label="@(cloudflareSaved ? "Replace the API token" : "Cloudflare API token")" For="cf-token">
+                            <input id="cf-token" type="password" class="gb-input gb-input--mono" value="@newCloudflareToken" @oninput="e => newCloudflareToken = e.Value?.ToString()" autocomplete="off" />
+                        </Field>
+                        <div class="gb-row gb-row--wrap">
+                            <Btn Kind="BtnKind.Primary" OnClick="SaveCloudflareTokenAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(newCloudflareToken)">@(cloudflareSaved ? "Replace token" : "Save token")</Btn>
+                            @if (cloudflareSaved)
+                            {
+                                <Btn Kind="BtnKind.Danger" OnClick="RemoveCloudflareTokenAsync" Disabled="busy">Remove</Btn>
+                            }
+                        </div>
+                    </div>
+                    <p class="gb-help">
+                        A <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare API token</a>: Create Token › Create Custom Token,
+                        with <strong>@CloudflareApi.Permissions</strong>, for your account and your domains' zones. Routes you already made in Cloudflare that go to an
+                        app become its domains.
+                    </p>
+                    @if (cloudflareNotes.Count > 0)
+                    {
+                        <ul class="gb-dnotes" style="padding-left:18px">
+                            @foreach (var note in cloudflareNotes)
+                            {
+                                <li style="@(note.Problem ? "color:#ffd98a" : null)">@note.Text</li>
+                            }
+                        </ul>
+                    }
+                }
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="network" aria-labelledby="network-t">
+            @Head("network-t", Icons.Material.Outlined.Lan, "Network", "How devices on your LAN reach containers.")
+            <div class="gb-sec-body">
+                <div class="gb-setrow">
+                    <Field Label="LAN address of this host" For="lan-host" Help="@LanHelp">
+                        <input id="lan-host" class="gb-input gb-input--mono" placeholder="@DefaultHost" value="@publicHost" @oninput="e => publicHost = e.Value?.ToString()" />
+                    </Field>
+                    <div style="padding-bottom:22px"><Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveNetworkAsync" Disabled="busy">Save</Btn></div>
+                </div>
+                @if (LanAddressCheck.Drifted(Configured, scan) is { } detected)
+                {
+                    <Banner Tone="warn" Title="@($"{Configured} isn't an address of this host any more")">
+                        <ChildContent>Detected: <code>@detected</code>.</ChildContent>
+                        <Actions><Btn Size="BtnSize.Sm" OnClick="() => UseDetectedAsync(detected)" Disabled="busy">Use it</Btn></Actions>
+                    </Banner>
+                }
+                <div>
+                    <div class="gb-label" style="margin-bottom:6px">Shared network</div>
+                    @if (sharedNetwork is { } shared)
+                    {
+                        <div class="gb-row gb-row--wrap"><code>@shared.Network.Name</code><span class="gb-t3">@string.Join(" · ", SharedFacts(shared))</span></div>
+                        <p class="gb-help" style="margin-top:4px">
+                            Containers on it reach every app by its network name@(SharedExamples(shared) is { } e ? $" ({e})" : ""). <a href="network">Open in Network ›</a>
+                        </p>
+                    }
+                    else
+                    {
+                        <div><code>@Options.Network</code></div>
+                        <p class="gb-help">@(networksError is null ? "Reading it from Docker…" : $"Docker didn't say what's on it ({networksError.TrimEnd('.')}).") <a href="network">Open in Network ›</a></p>
+                    }
+                </div>
+            </div>
+        </section>
+
+        @* Own LAN addresses: a block of addresses kept out of the router's DHCP range, off until it's turned on. *@
+        <section class="gb-card gb-sec" id="own-lan" aria-labelledby="ownlan-t">
+            <div class="gb-sec-head">
+                <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Router" /></span>
+                <div style="min-width:0">
+                    <div class="gb-h3 gb-row" id="ownlan-t">Own LAN addresses <span class="gb-tag @(lan?.On == true ? "gb-tag--good" : null)">@(lan?.On == true ? "On" : "Off")</span></div>
+                    <p>A container can have its own address on your network, as well as its ports on @HostShown. Docker can't use your router's DHCP, so automatic addresses come from a block you keep out of the router's DHCP range.</p>
+                </div>
+            </div>
+            <div class="gb-sec-body">
+                @if (lan is null)
+                {
+                    <p class="gb-help">@(lanError is null ? "Reading it from Docker…" : $"Docker didn't say ({lanError.TrimEnd('.')}).")</p>
+                }
+                else if (lan.On)
+                {
+                    <dl class="gb-kv">
+                        <dt>Block</dt>
+                        <dd><code>@lan.Block</code>@if (LanAddresses.ParseBlock(lan.Block) is { } on) { <span class="gb-t3">@on.Summary</span> }</dd>
+                        <dt>Containers</dt>
+                        <dd>
+                            @if (lan.Holders.Count == 0)
+                            {
+                                <span class="gb-t3">None has one yet. Give one an address on its Network tab.</span>
+                            }
+                            @foreach (var h in lan.Holders)
+                            {
+                                <span class="gb-tag gb-tag--outline"><a href="@h.Link">@h.Title</a> <code>@h.Address</code></span>
+                            }
+                        </dd>
+                    </dl>
+                    @Detected(lan.Subnet)
+                    <div><Btn Kind="BtnKind.Danger" OnClick="TurnLanOffAsync" Busy="lanBusy">Turn off…</Btn></div>
+                }
+                else
+                {
+                    @if (lan.Note is { } note)
+                    {
+                        <Banner Tone="warn" Title="Worth knowing">@note</Banner>
+                    }
+                    <div class="gb-setrow">
+                        <Field Label="Block" For="lan-block" Help="@BlockHelp" Error="@(BlockProblem is { Length: > 0 } p && !string.IsNullOrWhiteSpace(lanBlock) ? p : null)">
+                            <input id="lan-block" class="gb-input gb-input--mono" placeholder="@(BlockExample.Length > 0 ? BlockExample : LanBlockText.GenericExample)" value="@lanBlock"
+                                   @oninput="e => SetLanBlock(e.Value?.ToString())" disabled="@(lanBusy || lan.Problem is not null)" />
+                        </Field>
+                        <div style="padding-bottom:22px"><Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.AutoAwesome" OnClick="SuggestLanBlockAsync" Disabled="@(lanBusy || lan.Problem is not null)">Suggest a block</Btn></div>
+                    </div>
+                    @if (lan.Problem is { } problem)
+                    {
+                        <Banner Tone="warn" Title="Gitberth can't set this up yet">@problem</Banner>
+                    }
+                    else
+                    {
+                        @Detected(lan.Subnet)
+                    }
+                    @* Always there, so screen readers announce each result as it comes. *@
+                    <div role="status" class="gb-stack" style="gap:6px">
+                        @if (lanBusyText is not null)
+                        {
+                            <p class="gb-help">@lanBusyText</p>
+                        }
+                        else if (lanTest is { } test)
+                        {
+                            @if (test.Problem is { } why)
+                            {
+                                <div class="gb-impact-row gb-tone-critical"><SvgIcon Icon="@Icons.Material.Outlined.ErrorOutline" /><span>@why</span></div>
+                            }
+                            @foreach (var line in test.Lines)
+                            {
+                                <div class="gb-impact-row gb-tone-@(line.Ok ? "good" : "critical")"><SvgIcon Icon="@(line.Ok ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.ErrorOutline)" /><span>@line.Text</span></div>
+                            }
+                            @if (test.Note is { } done)
+                            {
+                                <p class="gb-help">@done</p>
+                            }
+                        }
+                    </div>
+                    <div class="gb-row gb-row--wrap">
+                        <Btn OnClick="TestLanAsync" Disabled="@(lanBusy || lan.Problem is not null || BlockProblem is not null)">Test</Btn>
+                        <Btn Kind="BtnKind.Primary" OnClick="TurnLanOnAsync" Busy="lanBusy" Disabled="@(lan.Problem is not null || BlockProblem is not null)">Turn on</Btn>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="deploys" aria-labelledby="deploys-t">
+            @Head("deploys-t", Icons.Material.Outlined.RocketLaunch, "Deploys", "How often Gitberth looks for new commits.")
+            <div class="gb-sec-body">
+                <div class="gb-setrow">
+                    <Field Label="Check for new commits every" For="watch-interval" Help="10 to 3600 seconds.">
+                        <label class="gb-input"><input id="watch-interval" type="number" min="10" max="3600" value="@interval" @onchange="e => interval = int.TryParse(e.Value?.ToString(), out var s) ? s : interval" /><span class="gb-input-suffix">seconds</span></label>
+                    </Field>
+                    <div style="padding-bottom:22px"><Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveDeploysAsync" Disabled="busy">Save</Btn></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="password" aria-labelledby="password-t">
+            @Head("password-t", Icons.Material.Outlined.Lock, "Admin password", "Sign in as admin. Use at least 10 characters. Changing it signs every other browser out.")
+            <div class="gb-sec-body">
+                <div class="gb-fgrid gb-fgrid--3">
+                    <Field Label="Current password" For="pw-now"><input id="pw-now" type="password" class="gb-input" value="@currentPassword" @oninput="e => currentPassword = e.Value?.ToString() ?? string.Empty" autocomplete="current-password" /></Field>
+                    <Field Label="New password" For="pw-new"><input id="pw-new" type="password" class="gb-input" value="@newPassword" @oninput="e => newPassword = e.Value?.ToString() ?? string.Empty" autocomplete="new-password" /></Field>
+                    <Field Label="New password again" For="pw-again"><input id="pw-again" type="password" class="gb-input" value="@repeatPassword" @oninput="e => repeatPassword = e.Value?.ToString() ?? string.Empty" autocomplete="new-password" /></Field>
+                </div>
+                <div class="gb-row gb-row--wrap" style="justify-content:flex-end"><Btn Icon="@Icons.Material.Outlined.Lock" OnClick="ChangePasswordAsync" Disabled="busy">Change password</Btn></div>
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="system" aria-labelledby="system-t">
+            @Head("system-t", Icons.Material.Outlined.Info, "System", "What this Gitberth installation is talking to.")
+            <div class="gb-sec-body">
+                <dl class="gb-kv">
+                    <dt>Docker engine</dt>
+                    <dd>
+                        @if (dockerInfo is null)
+                        {
+                            <span class="gb-t3">Checking…</span>
+                        }
+                        else if (dockerInfo.ServerVersion is null)
+                        {
+                            <span style="color:#ffb3b9">Not reachable: @dockerInfo.Error</span>
+                        }
+                        else
+                        {
+                            <span>@dockerInfo.ServerVersion <span class="gb-t3">(CLI @dockerInfo.ClientVersion)</span></span>
+                        }
+                    </dd>
+                    <dt>git</dt>
+                    <dd>@(gitVersion ?? "Not found")</dd>
+                    <dt>Data folder</dt>
+                    <dd><code>@Options.DataDir</code></dd>
+                    <dt>Version</dt>
+                    <dd>Gitberth @AppVersion.Display</dd>
+                </dl>
+            </div>
+        </section>
+    </div>
+</div>
+
+@code {
+    // The keys the update watcher and New app read.
+    private const string CheckHoursKey = UpdateWatcher.CheckHoursKey;
+    private const string AutoWindowKey = UpdateWatcher.AutoWindowKey;
+    private const string DefaultPolicyKey = UpdateWatcher.DefaultPolicyKey;
+
+    // The window is in Gitberth's own time zone (its TZ), which needn't be the host's.
+    private static string WindowHelp => $"Gitberth's time zone: {UpdateWatcher.ZoneName()} (set with TZ). Only apps set to update on their own, and never a database.";
+
+    // Each section by its title (Domains without its "(Cloudflare)").
+    internal static readonly (string Id, string Text, string Icon)[] Toc =
+    [
+        ("github", "GitHub access", Icons.Custom.Brands.GitHub),
+        ("registries", "Registries", Icons.Material.Outlined.Key),
+        ("updates", "Updates", Icons.Material.Outlined.CloudDownload),
+        ("domains", "Domains", Icons.Material.Outlined.Public),
+        ("network", "Network", Icons.Material.Outlined.Lan),
+        ("own-lan", "Own LAN addresses", Icons.Material.Outlined.Router),
+        ("deploys", "Deploys", Icons.Material.Outlined.RocketLaunch),
+        ("password", "Admin password", Icons.Material.Outlined.Lock),
+        ("system", "System", Icons.Material.Outlined.Info),
+    ];
+
+    private static readonly List<SegOption<UpdatePolicy>> PolicyOptions =
+    [
+        new(UpdatePolicy.Off, "When I ask", Icons.Material.Outlined.TouchApp),
+        new(UpdatePolicy.Notify, "Tell me", Icons.Material.Outlined.NotificationsNone),
+        new(UpdatePolicy.Auto, "Automatically", Icons.Material.Outlined.Autorenew),
+    ];
+
+    private bool busy, tokenSaved;
+    private string? login, newToken, publicHost;
+    private DateTimeOffset? expires;
+    private string browserHost = "";
+    // The host's network as read from its /proc: where its LAN address is detected.
+    private HostScan? scan;
+    // The LAN address as saved, which the drift check looks at rather than what's being typed.
+    private string? savedHost;
+    // The shared network as Docker has it, for the Network section.
+    private NetworkView? sharedNetwork;
+    private string? networksError;
+    // Docker's networks, which a block mustn't overlap.
+    private List<NetworkInfo> dockerNetworks = [];
+    // Own LAN addresses: as Docker and the host have them, the Block field, and the last test.
+    private LanState? lan;
+    private string? lanError, lanBlock, lanBusyText;
+    private LanTest? lanTest;
+    private bool lanBusy;
+    private int interval;
+    private string currentPassword = "", newPassword = "", repeatPassword = "";
+    private DockerInfo? dockerInfo;
+    private string? gitVersion;
+    private bool domainsEnabled, cloudflareSaved;
+    // Bumped when saving the switch fails, which re-creates it so it shows the saved state rather than the click.
+    private int switchKey;
+    private string? newCloudflareToken, tunnelProblem;
+    private TunnelInfo? tunnel;
+    private IReadOnlyList<DomainNote> cloudflareNotes = [];
+    // Registries: the saved sign-ins (never their secrets), and the one being added.
+    private IReadOnlyList<RegistryInfo>? registries;
+    private string? regHost, regUser, regSecret, registryError;
+    private bool registryBusy;
+    // Updates.
+    private int checkHours = 6;
+    private string windowFrom = "03:00", windowTo = "05:00";
+    private UpdatePolicy defaultPolicy = UpdatePolicy.Notify;
+
+    private bool ExpiresSoon => expires is not null && expires.Value < DateTimeOffset.UtcNow.AddDays(14);
+
+    // What an empty field means: GITBERTH_PUBLIC_HOST, else the detected address, else the address in the browser.
+    private string DefaultHost => Options.PublicHost ?? scan?.Address ?? browserHost;
+
+    // The address Gitberth is set to use: the saved one, else GITBERTH_PUBLIC_HOST.
+    private string? Configured => string.IsNullOrWhiteSpace(savedHost) ? Options.PublicHost : savedHost.Trim();
+
+    private const string LanUse = "Every LAN address and connection string Gitberth shows uses it. An IP, or a name your PC resolves.";
+
+    private string LanHelp => (scan switch
+    {
+        null => LanUse,
+        { Address: { } ip } => $"Detected: {ip}{(scan.Interface is { } nic ? $" on {nic}" : "")}. {LanUse}",
+        { Error: { } why } => $"Not detected ({Short(why)}). {LanUse}",
+        _ => $"Not detected. {LanUse}",
+    }) + (Options.PublicHost is { } variable ? $" Left empty, Gitberth uses GITBERTH_PUBLIC_HOST ({variable})." : "");
+
+    private string? HoursProblem => checkHours is < 1 or > 168 ? "Every 1 to 168 hours." : null;
+
+    private string? WindowProblem => TimeOnly.TryParse(windowFrom, CultureInfo.InvariantCulture, out var from) && TimeOnly.TryParse(windowTo, CultureInfo.InvariantCulture, out var to)
+        ? from == to ? "Give the window some length." : null
+        : "Pick both times.";
+
+    private string PolicyHelp => defaultPolicy switch
+    {
+        UpdatePolicy.Off => "New apps are only checked for updates when you ask; you can change it per app.",
+        UpdatePolicy.Auto => "New apps update on their own in the window above, and roll back if the new version fails. Never databases, Gitberth itself or Compose containers: those only tell you.",
+        _ => "New apps show an update badge when a newer image is out; you update them with one click.",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        browserHost = new Uri(Nav.BaseUri).Host;
+        await LoadAsync();
+        await LoadRegistriesAsync();
+        dockerInfo = await Docker.GetInfoAsync();
+        gitVersion = await Git.VersionAsync();
+        // The last scan, as every page's LAN address uses it; an old one is read again in the background.
+        scan = await Scanner.LatestAsync();
+        var networks = await Networks.ListAsync();
+        (sharedNetwork, networksError) = (networks.Networks.FirstOrDefault(n => n.Shared), networks.Error);
+        dockerNetworks = networks.Networks.Select(n => n.Network).ToList();
+        await LoadLanAsync();
+        // Only looked for while domains are on: off, Gitberth doesn't read the tunnel's container at all.
+        if (domainsEnabled) (tunnel, tunnelProblem) = await Domains.FindTunnelAsync();
+    }
+
+    private static RenderFragment Head(string id, string icon, string title, string sub) => @<div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@icon" /></span>
+        <div style="min-width:0"><div class="gb-h3" id="@id">@title</div><p>@sub</p></div>
+    </div>;
+
+    // The LAN address of this host as the section says it: the saved one, else what an empty field means.
+    private string HostShown => string.IsNullOrWhiteSpace(savedHost) ? DefaultHost : savedHost.Trim();
+
+    // "Detected: interface eth0 · network 10.1.1.0/24 · router 10.1.1.1".
+    private static RenderFragment Detected(LanSubnet? subnet) => @<text>
+        @if (subnet is not null)
+        {
+            <p class="gb-help">Detected: interface <code>@subnet.Interface</code> · network <code>@subnet.Cidr</code> · router <code>@subnet.RouterText</code></p>
+        }
+    </text>;
+
+    // The highest /28 that would be a block here, to show the format with; "" when the host's network can't be read.
+    private string BlockExample => lan?.Subnet is { } subnet ? LanAddresses.Example(subnet) : "";
+
+    // Why the block typed can't be one; null when it can, or nothing is typed.
+    private string? BlockProblem => lan?.Subnet is not { } subnet ? "" : LanAddresses.CheckBlock(lanBlock, subnet, dockerNetworks).Problem;
+
+    // "16 addresses, 10.1.1.224-10.1.1.239", or what's wrong with it, as it's typed; the format with an example when it's empty.
+    private string BlockHelp
+    {
+        get
+        {
+            var (summary, problem) = lan?.Subnet is { } subnet && !string.IsNullOrWhiteSpace(lanBlock) && LanAddresses.CheckBlock(lanBlock, subnet, dockerNetworks) is var (block, why)
+                ? (block?.Summary, why) : (null, null);
+            return LanBlockText.Help(lanBlock, BlockExample, summary, problem);
+        }
+    }
+
+    // Docker's answer when it isn't one (a proxy's HTML page): its first line.
+    private static string Short(string why) => why.Contains('<') ? why[..why.IndexOf('<')].Trim().TrimEnd(':') : why;
+
+    private static string Ago(DateTime at)
+    {
+        var days = (DateTime.UtcNow - at).TotalDays;
+        return days < 1 ? "today" : days < 2 ? "yesterday" : $"{(int)days} days ago";
+    }
+
+    /// <summary>
+    /// A saved sign-in as its row says it: one whose password can't be read any more (Gitberth's keys were lost) needs it
+    /// again, whenever it was last checked; the rest say when they signed in.
+    /// </summary>
+    internal static string RegistryState(RegistryInfo registry) =>
+        registry.NeedsSecret ? "needs its password again: enter it below"
+        : registry.VerifiedAt is { } at ? $"signed in {Ago(at)}"
+        : "saved";
+
+    private static string RegistryLogo(string host) => host switch
+    {
+        "docker.io" or "index.docker.io" or "registry-1.docker.io" => "docker",
+        "ghcr.io" => "github",
+        _ => host,
+    };
+
+    private async Task LoadRegistriesAsync()
+    {
+        try
+        {
+            registries = await Registries.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            (registries, registryError) = ([], ex.Message);
+        }
+    }
+
+    // Signs in once (POST /auth) and keeps the secret encrypted; the field is cleared whatever happens.
+    private async Task AddRegistryAsync()
+    {
+        registryBusy = true;
+        registryError = null;
+        try
+        {
+            // A registry that has a sign-in already gets this one in its place (verified first), so one whose password
+            // can't be read any more is fixed by entering it again.
+            var host = regHost!.Trim().ToLowerInvariant();
+            var existing = RegistryService.NormalizeHost(host) is { } normal ? registries?.FirstOrDefault(r => r.Host == normal)?.Id : null;
+            var saved = await Registries.SaveAsync(new RegistryInput(existing, host, regUser!.Trim(), regSecret!));
+            if (!saved.Ok)
+            {
+                registryError = saved.Message;
+                return;
+            }
+            (regHost, regUser) = (null, null);
+            Snackbar.Add(saved.Message, Severity.Success);
+            await LoadRegistriesAsync();
+        }
+        catch (Exception ex)
+        {
+            registryError = ex.Message;
+        }
+        finally
+        {
+            regSecret = null;
+            registryBusy = false;
+        }
+    }
+
+    private async Task RemoveRegistryAsync(RegistryInfo registry)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync($"Remove the sign-in for {registry.Host}?",
+            $"Apps on {registry.Host}'s private images can't be pulled or checked for updates until you add one again. Nothing that runs changes.",
+            yesText: "Remove", cancelText: "Cancel");
+        if (confirmed != true) return;
+        registryBusy = true;
+        try
+        {
+            await Registries.RemoveAsync(registry.Id);
+            Snackbar.Add($"Removed the sign-in for {registry.Host}.", Severity.Success);
+            await LoadRegistriesAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            registryBusy = false;
+        }
+    }
+
+    private async Task SaveUpdatesAsync()
+    {
+        if (HoursProblem is not null || WindowProblem is not null) return;
+        busy = true;
+        try
+        {
+            await Settings.SetAsync(CheckHoursKey, checkHours.ToString(CultureInfo.InvariantCulture));
+            await Settings.SetAsync(AutoWindowKey, $"{windowFrom}-{windowTo}");
+            await Settings.SetAsync(DefaultPolicyKey, defaultPolicy.ToString());
+            Snackbar.Add("Saved", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task LoadLanAsync()
+    {
+        try
+        {
+            (lan, lanError) = (await Lan.StateAsync(), null);
+            if (!lan.On && lanBlock is null) lanBlock = lan.Block;
+        }
+        catch (Exception ex)
+        {
+            (lan, lanError) = (null, ex.Message);
+        }
+    }
+
+    // A new block makes the last test's results stale.
+    private void SetLanBlock(string? value)
+    {
+        lanBlock = value;
+        lanTest = null;
+    }
+
+    private Task TestLanAsync() => RunLanAsync("Testing the block: a helper tries each address and the router…", async () => lanTest = await Lan.TestAsync(lanBlock));
+
+    private Task TurnLanOnAsync() => RunLanAsync("Turning on: Gitberth makes gitberth-lan and tests the block from it…", async () =>
+    {
+        lanTest = await Lan.TurnOnAsync(lanBlock);
+        if (lanTest.Passed) Snackbar.Add("Own LAN addresses are on. Give a container one on its Network tab.", Severity.Success);
+        await LoadLanAsync();
+    });
+
+    // The highest /28 where no device answers, in the Block field.
+    private Task SuggestLanBlockAsync() => RunLanAsync("Looking for a free block: a helper tries the network's highest addresses…", async () =>
+    {
+        var (block, problem) = await Lan.SuggestAsync();
+        if (block is null)
+        {
+            Snackbar.Add(problem ?? "No free block was found.", Severity.Warning);
+            return;
+        }
+        (lanBlock, lanTest) = (block.Text, null);
+        Snackbar.Add($"No device answers on {block.Range}. Test it, then turn it on.", Severity.Info);
+    });
+
+    // Turning off always asks: every container with an own address loses it.
+    private async Task TurnLanOffAsync()
+    {
+        if (lan is null) return;
+        var holders = lan.Holders;
+        var who = holders.Count == 0 ? $"No container has an own address. Gitberth removes {LanAddresses.Network}."
+            : $"{string.Join(", ", holders.Select(h => $"{h.Title} ({h.Address})"))} {(holders.Count == 1 ? "loses its own address" : "lose their own addresses")}, and devices using "
+              + $"{(holders.Count == 1 ? "it lose it" : "them lose them")}. Gitberth removes {LanAddresses.Network}.";
+        if (await Dialogs.ShowMessageBoxAsync("Turn off own LAN addresses?", who, yesText: "Turn off", cancelText: "Cancel") != true) return;
+        await RunLanAsync(null, async () =>
+        {
+            var error = await Lan.TurnOffAsync();
+            Snackbar.Add(error ?? "Own LAN addresses are off.", error is null ? Severity.Success : Severity.Error);
+            (lanTest, lanBlock) = (null, null);
+            await LoadLanAsync();
+        });
+    }
+
+    // One at a time, saying what runs meanwhile; Docker failing is said, and the section reads again.
+    private async Task RunLanAsync(string? doing, Func<Task> work)
+    {
+        (lanBusy, lanBusyText) = (true, doing);
+        try
+        {
+            await work();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            await LoadLanAsync();
+        }
+        finally
+        {
+            (lanBusy, lanBusyText) = (false, null);
+        }
+    }
+
+    // "bridge · 172.21.0.0/16 · 4 containers".
+    private static IEnumerable<string> SharedFacts(NetworkView shared) =>
+    [
+        shared.Network.Driver,
+        .. shared.Network.Subnets,
+        shared.Members.Count == 1 ? "1 container" : $"{shared.Members.Count} containers",
+    ];
+
+    // A name containers there use, for the line that says how they reach each other: an app's network name, or another container's own.
+    // Two apps on the shared network and the names they answer to there: one Gitberth made (kanban for gb-kanban), one it
+    // found running (postgres for postgres). Null when it has neither.
+    private static string? SharedExamples(NetworkView shared)
+    {
+        var made = shared.Members.FirstOrDefault(m => m.Link?.StartsWith("apps/", StringComparison.Ordinal) == true && m.Container.StartsWith("gb-", StringComparison.Ordinal))?.Container;
+        var found = shared.Members.FirstOrDefault(m => !m.Container.StartsWith("gb-", StringComparison.Ordinal) && m.Title == m.Container)?.Container;
+        var examples = new[] { made is null ? null : $"{made["gb-".Length..]} for {made}", found is null ? null : $"{found} for {found}" }.OfType<string>().ToList();
+        return examples.Count == 0 ? null : string.Join(", ", examples);
+    }
+
+    private async Task SetDomainsEnabledAsync(bool enabled)
+    {
+        busy = true;
+        try
+        {
+            var report = await Domains.SetEnabledAsync(enabled);
+            domainsEnabled = enabled;
+            cloudflareNotes = report.Notes;
+            (tunnel, tunnelProblem) = enabled ? await Domains.FindTunnelAsync() : (null, null);
+            var problem = report.Notes.Any(n => n.Problem);
+            Snackbar.Add(!enabled ? "Domains turned off. Your tunnel and DNS stay as they are."
+                : problem ? "Domains turned on. Some need attention; see below." : "Domains turned on.", problem ? Severity.Warning : Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            try
+            {
+                domainsEnabled = await Domains.EnabledAsync();
+            }
+            catch (Exception)
+            {
+                // Already reported above; the switch keeps the last state that was read.
+            }
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveCloudflareTokenAsync()
+    {
+        busy = true;
+        try
+        {
+            var (error, report, found) = await Domains.SaveTokenAsync(newCloudflareToken!.Trim());
+            (tunnel, tunnelProblem) = found is not null ? (found, null) : await Domains.FindTunnelAsync();
+            if (error is not null)
+            {
+                Snackbar.Add(error, Severity.Error);
+                return;
+            }
+            newCloudflareToken = null;
+            cloudflareSaved = true;
+            cloudflareNotes = report.Notes;
+            Snackbar.Add(report.Notes.Any(n => n.Problem) ? "Token saved. Some domains need attention; see below." : "Token saved. Domains are routed.",
+                report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RemoveCloudflareTokenAsync()
+    {
+        await Domains.RemoveTokenAsync();
+        cloudflareSaved = false;
+        cloudflareNotes = [];
+        Snackbar.Add("Cloudflare token removed. Routes already in your tunnel stay as they are.", Severity.Info);
+    }
+
+    private async Task LoadAsync()
+    {
+        tokenSaved = await Settings.GetAsync(SettingKeys.GitHubToken) is not null;
+        domainsEnabled = await Domains.EnabledAsync();
+        cloudflareSaved = await Domains.TokenSavedAsync();
+        login = await Settings.GetAsync(SettingKeys.GitHubLogin);
+        expires = DateTimeOffset.TryParse(await Settings.GetAsync(SettingKeys.GitHubTokenExpires), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var e) ? e : null;
+        publicHost = savedHost = await Settings.GetAsync(SettingKeys.PublicHost);
+        interval = await Settings.GetIntAsync(SettingKeys.WatchIntervalSeconds, RepoWatcher.DefaultIntervalSeconds);
+        checkHours = await Settings.GetIntAsync(CheckHoursKey, 6);
+        if (await Settings.GetAsync(AutoWindowKey) is { } window && window.Split('-') is [var from, var to]) (windowFrom, windowTo) = (from.Trim(), to.Trim());
+        defaultPolicy = await UpdateWatcher.DefaultPolicyAsync(Settings);
+    }
+
+    private async Task SaveTokenAsync()
+    {
+        busy = true;
+        try
+        {
+            var token = newToken!.Trim();
+            var check = await GitHub.CheckTokenAsync(token);
+            if (!check.Valid)
+            {
+                Snackbar.Add(check.Warning ?? "GitHub rejected the token.", Severity.Error);
+                return;
+            }
+            await Settings.SetSecretAsync(SettingKeys.GitHubToken, token);
+            await Settings.SetAsync(SettingKeys.GitHubLogin, check.Login);
+            await Settings.SetAsync(SettingKeys.GitHubTokenExpires, check.ExpiresAt?.ToString("O", CultureInfo.InvariantCulture));
+            newToken = null;
+            await LoadAsync();
+            Watch.CheckNow();
+            Snackbar.Add(check.Warning ?? $"Token saved{(check.Login is null ? "" : $" for {check.Login}")}", check.Warning is null ? Severity.Success : Severity.Warning);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RemoveTokenAsync()
+    {
+        await Settings.SetAsync(SettingKeys.GitHubToken, null);
+        await Settings.SetAsync(SettingKeys.GitHubLogin, null);
+        await Settings.SetAsync(SettingKeys.GitHubTokenExpires, null);
+        await LoadAsync();
+        Snackbar.Add("Token removed", Severity.Info);
+    }
+
+    private async Task SaveNetworkAsync()
+    {
+        savedHost = string.IsNullOrWhiteSpace(publicHost) ? null : publicHost.Trim();
+        await Settings.SetAsync(SettingKeys.PublicHost, savedHost);
+        Snackbar.Add("Saved", Severity.Success);
+    }
+
+    // The drift prompt's [Use it]: the detected address is saved, so GITBERTH_PUBLIC_HOST can't put the old one back.
+    private async Task UseDetectedAsync(string detected)
+    {
+        publicHost = savedHost = detected;
+        await Settings.SetAsync(SettingKeys.PublicHost, detected);
+        Snackbar.Add($"Saved. Every LAN address uses {detected} now.", Severity.Success);
+    }
+
+    private async Task SaveDeploysAsync()
+    {
+        if (interval is < 10 or > 3600)
+        {
+            Snackbar.Add("Check for new commits every 10 to 3600 seconds.", Severity.Error);
+            return;
+        }
+        await Settings.SetAsync(SettingKeys.WatchIntervalSeconds, interval.ToString(CultureInfo.InvariantCulture));
+        Watch.CheckNow();
+        Snackbar.Add("Saved", Severity.Success);
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        if (newPassword != repeatPassword)
+        {
+            Snackbar.Add("The new passwords don't match.", Severity.Error);
+            return;
+        }
+        var change = await Auth.ChangePasswordAsync(currentPassword, newPassword);
+        if (change.Error is { } error)
+        {
+            Snackbar.Add(error, Severity.Error);
+            return;
+        }
+        currentPassword = newPassword = repeatPassword = "";
+        // Every browser's sign-in ended with the old password; this one gets a new one at once, and comes back here.
+        Nav.NavigateTo($"account/renew?renewal={Uri.EscapeDataString(change.Renewal!)}", forceLoad: true);
+    }
+
+    // Back from the renewal after a password change (?password=changed).
+    [SupplyParameterFromQuery(Name = "password")] private string? PasswordQuery { get; set; }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender || PasswordQuery != "changed") return;
+        Snackbar.Add("Password changed. Every other browser is signed out.", Severity.Success);
+        Nav.NavigateTo("settings#password", replace: true);
+    }
+}

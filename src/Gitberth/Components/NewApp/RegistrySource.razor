@@ -1,0 +1,350 @@
+@implements IDisposable
+@inject ImageService Images
+@inject RegistryService Registries
+
+@*
+    New app › Registry image (new-app.html): search Docker Hub, or paste any reference (ghcr.io/owner/app:1.4, a private
+    registry's), or pick a popular one; then its tag, which credential to sign in with, and a check that it's there before
+    going on. Images already on this host say so: they need no pull.
+*@
+<div class="gb-split">
+    <section class="gb-card" aria-labelledby="gb-reg-title">
+        <div class="gb-card-head">
+            <div class="gb-card-title" id="gb-reg-title">
+                <SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Registry image
+                <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Docker Hub, ghcr.io, or any registry you add</span>
+            </div>
+        </div>
+        <div class="gb-card-body" style="padding-bottom:12px">
+            <label class="gb-input gb-searchbox @(term.Length > 0 ? "gb-input--focus" : null)">
+                <SvgIcon Icon="@Icons.Material.Outlined.Search" />
+                <input placeholder="Search Docker Hub, or paste an image like ghcr.io/owner/app:1.4" value="@term" @oninput="TypedAsync" @onkeydown="KeyAsync"
+                       aria-label="Image to search for" autocomplete="off" spellcheck="false" />
+                <span class="gb-kbd2">Enter</span>
+            </label>
+            <p class="gb-help" style="margin-top:8px">Or paste a full reference, like <span class="gb-mono">ghcr.io/owner/app:1.4</span>.@(searchError is null ? "" : $" {searchError}")</p>
+        </div>
+        @if (Rows.Count > 0)
+        {
+            <div class="gb-reslist" role="listbox" aria-label="Images">
+                @foreach (var r in Rows)
+                {
+                    var on = picked?.Name == r.Name;
+                    <div class="gb-resrow @(on ? "gb-resrow--on" : null)" role="option" aria-selected="@(on ? "true" : "false")" @key="r.Name">
+                        <AppLogo Image="@r.Name" Name="@r.Name" Size="32" />
+                        <div style="min-width:0">
+                            <div class="gb-resrow-t">@(on ? $"{r.Name}:{tag}" : r.Name)</div>
+                            <div class="gb-resrow-s">@r.Sub</div>
+                        </div>
+                        <div class="r-extra">
+                            @if (LocalHas(r.Name) is { } local)
+                            {
+                                <span class="gb-tag gb-tag--good"><SvgIcon Icon="@Icons.Material.Outlined.Check" />On this host: @local</span>
+                            }
+                            @if (r.Stars > 0)
+                            {
+                                <span class="gb-t3" style="font-size:12px" title="Stars on Docker Hub">★ @Stars(r.Stars)</span>
+                            }
+                        </div>
+                        @if (on)
+                        {
+                            <span class="gb-tag gb-tag--accent">Picked</span>
+                        }
+                        else
+                        {
+                            <Btn Size="BtnSize.Sm" OnClick="() => PickAsync(r.Name, r.Tag)">Use</Btn>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        else if (term.Trim().Length > 0 && !searching)
+        {
+            <div class="gb-card-body" style="padding-top:0">
+                <EmptyState Small="true" Title="@($"Nothing on Docker Hub matches \"{term.Trim()}\"")" Icon="@Icons.Material.Outlined.SearchOff">
+                    Paste the full reference to use an image from another registry.
+                </EmptyState>
+            </div>
+        }
+        @if (picked is not null)
+        {
+            <div class="gb-card-foot" style="flex-direction:column;align-items:stretch;gap:14px;color:inherit;font-size:13.5px">
+                <div class="gb-fgrid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
+                    <Field Label="Tag" For="gb-reg-tag" Help="@(tags.Count > 0 ? null : "latest unless you pick another; a digest (sha256:…) pins it.")">
+                        <input id="gb-reg-tag" class="gb-input gb-input--mono" value="@tag" list="gb-reg-tags" @onchange="SetTagAsync" spellcheck="false" />
+                        <datalist id="gb-reg-tags">
+                            @foreach (var t in tags)
+                            {
+                                <option value="@t"></option>
+                            }
+                        </datalist>
+                    </Field>
+                    <Field Label="Sign in with" For="gb-reg-cred" Help="@CredentialHelp">
+                        <select id="gb-reg-cred" class="gb-input" value="@(registryId?.ToString(CultureInfo.InvariantCulture) ?? "")" @onchange="SetCredential">
+                            <option value="">@(AutoCredential is { } auto ? $"Automatic: {auto.Username} on {auto.Host}" : "No credential (public image)")</option>
+                            @foreach (var c in credentials)
+                            {
+                                <option value="@c.Id">@c.Username on @c.Host</option>
+                            }
+                        </select>
+                    </Field>
+                </div>
+                @if (tags.Count > 0)
+                {
+                    <div class="gb-row gb-row--wrap" style="gap:6px">
+                        <span class="gb-t3" style="font-size:12px">Tags:</span>
+                        @foreach (var t in tags.Take(10))
+                        {
+                            <button type="button" class="gb-tag @(t == tag ? "gb-tag--accent" : "gb-tag--outline")" style="cursor:pointer;font-family:var(--gb-mono)" @onclick="() => SetTagAsync(t)">@t</button>
+                        }
+                    </div>
+                }
+                <div class="gb-row gb-row--wrap" style="gap:10px">
+                    <div role="status" class="gb-grow" style="min-width:0">
+                        @if (checking)
+                        {
+                            <span class="gb-t3">Asking @(ImageReference.Parse(Reference)?.Registry ?? "the registry") for @Reference…</span>
+                        }
+                        else if (LocalHas(picked.Name, tag) is not null)
+                        {
+                            <span class="gb-hpline gb-hpline--ok" style="font-size:13px"><SvgIcon Icon="@Icons.Material.Outlined.Check" Size="xs" />@Reference is on this host already: no pull.</span>
+                        }
+                        else if (remote is { Found: true } found)
+                        {
+                            <span class="gb-hpline gb-hpline--ok" style="font-size:13px">
+                                <SvgIcon Icon="@Icons.Material.Outlined.Check" Size="xs" />
+                                Found@(found.Platforms.Count > 0 ? $" · {found.Platforms.Count} platform{(found.Platforms.Count == 1 ? "" : "s")}" : "")@(found.Digest is { } digest ? $" · {Short(digest)}" : "") · pulled when it's created
+                            </span>
+                        }
+                        else if (remote is { } missing)
+                        {
+                            <span class="gb-hpline gb-hpline--@(missing.Unauthorized ? "bad" : "taken")" style="font-size:13px">
+                                <SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" Size="xs" />
+                                @(missing.Unauthorized ? $"{ImageReference.Parse(Reference)?.Registry} refused the sign-in: add a credential in Settings › Registries." : missing.Error ?? "Not found.")
+                            </span>
+                        }
+                    </div>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Sync" OnClick="CheckAsync" Busy="checking">Check</Btn>
+                    <Btn Kind="BtnKind.Primary" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="ContinueAsync" Busy="Busy" Disabled="@(ImageReference.Parse(Reference) is null)">Continue</Btn>
+                </div>
+            </div>
+        }
+    </section>
+    <section class="gb-card" aria-labelledby="gb-pop-title">
+        <div class="gb-card-head">
+            <div class="gb-card-title" id="gb-pop-title">
+                <SvgIcon Icon="@Icons.Material.Outlined.AutoAwesome" />Popular
+                <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Ports, volumes and checks filled in</span>
+            </div>
+        </div>
+        <div class="gb-card-body">
+            <div class="gb-tiles">
+                @foreach (var p in PopularImages.All)
+                {
+                    var (name, ptag) = Split(p.Reference);
+                    <button type="button" class="gb-tile" @onclick="() => PickAsync(name, ptag)">
+                        <AppLogo Image="@p.Reference" Name="@name" Size="26" />
+                        <div>
+                            <div class="gb-tile-t">@name</div>
+                            <div class="gb-tile-s">@p.What</div>
+                        </div>
+                    </button>
+                }
+            </div>
+        </div>
+    </section>
+</div>
+
+@code {
+    /// <summary>A search to start with (New app from mysql).</summary>
+    [Parameter] public string? Initial { get; set; }
+    /// <summary>The image chosen, and the credential to pull it with: the page drafts the app from it.</summary>
+    [Parameter] public EventCallback<(string Reference, int? RegistryId)> OnPicked { get; set; }
+    [Parameter] public bool Busy { get; set; }
+
+    private sealed record Row(string Name, string Sub, int Stars, string? Tag);
+
+    private string term = "";
+    private List<HubResult> results = [];
+    private string? searchError;
+    private bool searching, checking;
+    private CancellationTokenSource? typing;
+    private HashSet<string> local = new(StringComparer.Ordinal);
+    private IReadOnlyList<RegistryInfo> credentials = [];
+    private Row? picked;
+    private string tag = "latest";
+    private List<string> tags = [];
+    private int? registryId;
+    private RemoteImage? remote;
+
+    private string Reference => picked is null ? "" : tag.StartsWith("sha256:", StringComparison.Ordinal) ? $"{picked.Name}@{tag}" : $"{picked.Name}:{tag}";
+
+    // The rows: a pasted reference first, then Docker Hub's answers.
+    private List<Row> Rows
+    {
+        get
+        {
+            var rows = new List<Row>();
+            var t = term.Trim();
+            if (t.Length > 0 && (t.Contains('/') && t.Split('/')[0].Contains('.') || t.Contains(':') || t.Contains('@')) && ImageReference.Parse(t) is { } r)
+                rows.Add(new Row(r.IsDockerHub ? r.Repository.Replace("library/", "") : $"{r.Registry}/{r.Repository}",
+                    r.IsDockerHub ? "Docker Hub · as typed" : $"{r.Registry} · as typed", 0, r.Digest ?? r.Tag));
+            rows.AddRange(results.Where(h => rows.All(x => x.Name != h.Name))
+                .Select(h => new Row(h.Name, (h.Official ? "Docker Hub · official image" : "Docker Hub") + (h.Description.Length > 0 ? " · " + h.Description : ""), h.Stars, null)));
+            if (picked is not null && rows.All(x => x.Name != picked.Name)) rows.Insert(0, picked);
+            return rows;
+        }
+    }
+
+    private RegistryInfo? AutoCredential => picked is null || registryId is not null ? null
+        : ImageReference.Parse(Reference) is { } r ? credentials.FirstOrDefault(c => SameHost(c.Host, r.Registry)) : null;
+
+    private string CredentialHelp => registryId is not null ? "Used to pull it and to check for updates."
+        : AutoCredential is not null ? "Matched by the registry's host." : "Add one in Settings › Registries for a private image.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            foreach (var i in await Images.ListLocalAsync())
+                foreach (var t in i.Tags) local.Add(t);
+        }
+        catch (Exception)
+        {
+            // Without the list, nothing says "On this host": the check still finds it.
+        }
+        try
+        {
+            credentials = await Registries.ListAsync();
+        }
+        catch (Exception)
+        {
+            credentials = [];
+        }
+        if (!string.IsNullOrWhiteSpace(Initial))
+        {
+            term = Initial;
+            await SearchAsync();
+        }
+    }
+
+    private async Task TypedAsync(ChangeEventArgs e)
+    {
+        term = e.Value?.ToString() ?? "";
+        typing?.Cancel();
+        var mine = typing = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(350, mine.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        await SearchAsync();
+    }
+
+    private async Task KeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter") return;
+        typing?.Cancel();
+        await SearchAsync();
+        if (Rows.FirstOrDefault() is { } first && picked is null) await PickAsync(first.Name, first.Tag);
+    }
+
+    private async Task SearchAsync()
+    {
+        var t = term.Trim();
+        if (t.Length < 2 || t.Contains(':') || t.Contains('@'))
+        {
+            results = [];
+            return;
+        }
+        searching = true;
+        try
+        {
+            results = (await Images.SearchAsync(t)).ToList();
+            searchError = null;
+        }
+        catch (Exception ex)
+        {
+            (results, searchError) = ([], $"Docker Hub didn't answer: {ex.Message}");
+        }
+        finally
+        {
+            searching = false;
+        }
+    }
+
+    private async Task PickAsync(string name, string? withTag)
+    {
+        picked = Rows.FirstOrDefault(r => r.Name == name) ?? new Row(name, name.Contains('/') ? "Docker Hub" : "Docker Hub · official image", 0, withTag);
+        (tag, remote, tags, registryId) = (withTag ?? "latest", null, [], null);
+        if (ImageReference.Parse(Reference) is { } reference)
+        {
+            try
+            {
+                tags = (await Images.TagsAsync(reference)).ToList();
+            }
+            catch (Exception)
+            {
+                // Tags are a suggestion: the field takes any.
+            }
+        }
+    }
+
+    private Task SetTagAsync(ChangeEventArgs e) => SetTagAsync(e.Value?.ToString()?.Trim() ?? "");
+
+    private Task SetTagAsync(string value)
+    {
+        tag = value.Length == 0 ? "latest" : value;
+        remote = null;
+        return Task.CompletedTask;
+    }
+
+    private void SetCredential(ChangeEventArgs e) =>
+        (registryId, remote) = (int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var id) ? id : null, null);
+
+    private async Task CheckAsync()
+    {
+        checking = true;
+        try
+        {
+            remote = await Images.ResolveAsync(Reference, registryId ?? AutoCredential?.Id);
+        }
+        catch (Exception ex)
+        {
+            remote = new RemoteImage(false, null, [], ex.Message);
+        }
+        finally
+        {
+            checking = false;
+        }
+    }
+
+    private Task ContinueAsync() => OnPicked.InvokeAsync((Reference, registryId ?? AutoCredential?.Id));
+
+    // "redis:7-alpine" on this host, for the row of redis; null when no tag of it is here.
+    private string? LocalHas(string name, string? withTag = null) => withTag is not null
+        ? local.Contains($"{name}:{withTag}") ? $"{name}:{withTag}" : null
+        : local.FirstOrDefault(t => t.StartsWith(name + ":", StringComparison.Ordinal))?.Split(':')[^1] is { } found ? $"{name}:{found}" : null;
+
+    private static (string Name, string? Tag) Split(string reference)
+    {
+        var slash = reference.LastIndexOf('/');
+        var colon = reference.LastIndexOf(':');
+        return colon > slash ? (reference[..colon], reference[(colon + 1)..]) : (reference, null);
+    }
+
+    private static bool SameHost(string a, string b)
+    {
+        static string N(string h) => h is "index.docker.io" or "registry-1.docker.io" ? "docker.io" : h.ToLowerInvariant();
+        return N(a) == N(b);
+    }
+
+    private static string Stars(int n) => n >= 1000 ? (n / 1000.0).ToString("0.#", CultureInfo.InvariantCulture) + "k" : n.ToString(CultureInfo.InvariantCulture);
+
+    private static string Short(string digest) => digest.StartsWith("sha256:", StringComparison.Ordinal) ? digest[..19] + "…" : digest;
+
+    public void Dispose() => typing?.Cancel();
+}

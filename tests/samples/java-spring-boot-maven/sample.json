@@ -1,0 +1,6 @@
+{
+  "kind": "Java",
+  "title": "Java (Spring Boot)",
+  "port": 8081,
+  "expect": "Hello from Spring Boot"
+}

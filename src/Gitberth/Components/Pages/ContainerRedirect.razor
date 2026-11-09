@@ -1,0 +1,19 @@
+@page "/containers"
+@page "/containers/{Name}"
+@page "/containers/{Name}/{Tab}"
+@inject NavigationManager Nav
+
+@* The old Containers list and container pages: every container is an app now, at /apps and /apps/{name}. *@
+<PageTitle>Apps · Gitberth</PageTitle>
+
+@code {
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public string? Tab { get; set; }
+
+    protected override void OnParametersSet() => Nav.NavigateTo(Target(Name, Tab), replace: true);
+
+    /// <summary>Where an old container link goes: /containers to /apps, /containers/postgres/network to /apps/postgres/network.</summary>
+    public static string Target(string? name, string? tab) =>
+        name is null ? "apps"
+        : "apps/" + Uri.EscapeDataString(name) + (tab is null or "overview" ? "" : "/" + tab);
+}

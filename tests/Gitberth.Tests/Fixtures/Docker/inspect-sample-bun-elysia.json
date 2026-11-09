@@ -1,0 +1,229 @@
+{
+  "Id": "fa8af48f1cd8a7668a54135b4ba020247cabca3cba9e98156df488bbc1d3e548",
+  "Created": "2026-11-04T23:12:49.624620324Z",
+  "Path": "/usr/local/bin/docker-entrypoint.sh",
+  "Args": [
+    "bun",
+    "run",
+    "src/index.ts"
+  ],
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 137,
+    "Error": "",
+    "StartedAt": "2026-11-04T23:12:49.662015348Z",
+    "FinishedAt": "2026-11-05T03:27:07.564857337Z"
+  },
+  "Image": "sha256:d25010d42fe9107f0e105f8259b331e7a331d84251ea998f3dd178a7771fb261",
+  "ResolvConfPath": "/var/lib/docker/containers/fa8af48f1cd8a7668a54135b4ba020247cabca3cba9e98156df488bbc1d3e548/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/fa8af48f1cd8a7668a54135b4ba020247cabca3cba9e98156df488bbc1d3e548/hostname",
+  "HostsPath": "/var/lib/docker/containers/fa8af48f1cd8a7668a54135b4ba020247cabca3cba9e98156df488bbc1d3e548/hosts",
+  "LogPath": "",
+  "Name": "/sample-bun-elysia",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "journald",
+      "Config": {}
+    },
+    "NetworkMode": "bridge",
+    "PortBindings": {
+      "3000/tcp": [
+        {
+          "HostIp": "0.0.0.0",
+          "HostPort": "9101"
+        }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 1073741824,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 2147483648,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [],
+  "Config": {
+    "Hostname": "fa8af48f1cd8",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "ExposedPorts": {
+      "3000/tcp": {}
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bun-node-fallback-bin",
+      "BUN_RUNTIME_TRANSPILER_CACHE_PATH=0",
+      "BUN_INSTALL_BIN=/usr/local/bin",
+      "NODE_ENV=production",
+      "HOST=0.0.0.0",
+      "PORT=3000"
+    ],
+    "Cmd": [
+      "bun",
+      "run",
+      "src/index.ts"
+    ],
+    "Image": "gitberth-sample-bun-elysia",
+    "Volumes": null,
+    "WorkingDir": "/app",
+    "Entrypoint": [
+      "/usr/local/bin/docker-entrypoint.sh"
+    ],
+    "Labels": {
+      "gitberth.sample": "bun-elysia",
+      "org.opencontainers.image.created": "2026-10-22T10:15:16.829Z",
+      "org.opencontainers.image.description": "Incredibly fast JavaScript runtime, bundler, test runner, and package manager \u2013 all in one",
+      "org.opencontainers.image.licenses": "NOASSERTION",
+      "org.opencontainers.image.revision": "38afee6c84fcf48c0edb2466aa4b27d287a59c30",
+      "org.opencontainers.image.source": "https://github.com/oven-sh/bun",
+      "org.opencontainers.image.title": "bun",
+      "org.opencontainers.image.url": "https://github.com/oven-sh/bun",
+      "org.opencontainers.image.version": "1.4.4"
+    }
+  },
+  "NetworkSettings": {
+    "SandboxID": "",
+    "SandboxKey": "",
+    "Ports": {},
+    "Networks": {
+      "bridge": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "1cf99cac118bdba3bffd645cc027366c14b2ad259b688a5b7b1b2c5687f1b726",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": null
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:f65edbf537177682f5cf2efccb9dc00034d4bcabd795a7dca3dced9a503c8435",
+    "size": 2186,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

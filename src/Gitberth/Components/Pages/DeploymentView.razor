@@ -1,0 +1,147 @@
+@page "/apps/{AppId:int}/deployments/{DeploymentId:int}"
+@implements IDisposable
+@inject AppService Apps
+@inject AppActions Actions
+@inject AddressBook Book
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@if (dep is null)
+{
+    @if (notFound)
+    {
+        <div class="gb-card">
+            <EmptyState Icon="@Icons.Material.Outlined.SearchOff" Title="This deploy doesn't exist">
+                <ChildContent>It may belong to an app that was removed.</ChildContent>
+                <Actions><Btn Href="apps" Icon="@Icons.Material.Outlined.GridView">All apps</Btn></Actions>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="gb-skel" style="height:96px;margin-bottom:18px"></div>
+        <div class="gb-skel" style="height:420px;border-radius:12px"></div>
+    }
+}
+else
+{
+    <PageTitle>Deploy #@dep.Id · @(appName ?? "App") · Gitberth</PageTitle>
+
+    <PageHead Title="@($"Deploy #{dep.Id}")">
+        <Crumbs>
+            <a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+            <a href="@AppHref">@(appName ?? "App")</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+            <a href="@($"{AppHref}/activity")">Activity</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+            <span>Deploy #@dep.Id</span>
+        </Crumbs>
+        <ChildContent>
+            <div class="gb-hero-meta">
+                <DeployPill Deployment="dep" />
+                <span class="gb-tag">@Format.Trigger(dep.Trigger)</span>
+                @if (dep.CommitSha is not null)
+                {
+                    <span><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@dep.ShortSha</span><span class="gb-ellipsis" style="max-width:420px">@dep.CommitMessage@(dep.CommitAuthor is null ? "" : $" · {dep.CommitAuthor}")</span></span>
+                }
+                <span title="@Format.Local(dep.QueuedAt)"><SvgIcon Icon="@Icons.Material.Outlined.Schedule" />@Format.Ago(dep.QueuedAt)</span>
+                @if (dep.StartedAt is not null)
+                {
+                    <span><SvgIcon Icon="@Icons.Material.Outlined.Timer" />@Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
+                }
+                @if (dep.ImageTag is not null)
+                {
+                    <span><SvgIcon Icon="@Icons.Material.Outlined.Layers" /><span class="gb-mono">@dep.ImageTag</span></span>
+                }
+            </div>
+        </ChildContent>
+        <Actions>
+            @if (dep.IsActive)
+            {
+                <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Cancel" OnClick="Cancel">Cancel</Btn>
+            }
+            else if (dep.Status == DeployStatus.Succeeded && AddressBook.Primary(reached) is { } primary)
+            {
+                <Btn Kind="BtnKind.Primary" Href="@primary" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew">Open</Btn>
+            }
+            <Btn Href="@AppHref" Icon="@Icons.Material.Outlined.ArrowBack">Back to the app</Btn>
+        </Actions>
+    </PageHead>
+
+    @if (dep.Error is not null && !dep.IsActive)
+    {
+        <Banner Tone="@(dep.Status == DeployStatus.RolledBack ? "warn" : "critical")" Title="@(dep.Status == DeployStatus.RolledBack ? "Rolled back: the old version kept running" : "The deploy failed")">@dep.Error</Banner>
+    }
+    @if (dep.Status == DeployStatus.Succeeded && LiveAt() is { Count: > 0 } live)
+    {
+        <Banner Tone="good" Icon="@Icons.Material.Outlined.CheckCircle" Title="Live">
+            <span class="gb-row" style="flex-wrap:wrap;gap:6px 18px;margin-top:4px">
+                @foreach (var a in live)
+                {
+                    <AddressValue Key="@(a.Kind == AddressKind.Domain ? "Domain" : "LAN")" Text="@AppFacts.Shown(a.Text)" Href="@a.Href" Copy="@a.Copy" ShowCopy="@(a.Kind != AddressKind.Domain)" />
+                }
+            </span>
+        </Banner>
+    }
+    <DeploymentLog DeploymentId="DeploymentId" OnCompleted="ReloadAsync" />
+}
+
+@code {
+    [Parameter] public int AppId { get; set; }
+    [Parameter] public int DeploymentId { get; set; }
+
+    private Deployment? dep;
+    private string? appName;
+    private string? container;
+    private bool notFound;
+    // Where the app is reached, from AddressBook, as every other page shows it.
+    private AppAddresses reached = AppAddresses.None(0);
+    private Timer? timer;
+
+    // The app's page is keyed by its container's name, like every other app's.
+    private string AppHref => container is null ? $"apps/{AppId}" : "apps/" + Uri.EscapeDataString(container);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await ReloadAsync();
+        timer?.Dispose();
+        timer = new Timer(_ => InvokeAsync(async () =>
+        {
+            if (dep?.IsActive != true) return;
+            await ReloadAsync();
+            StateHasChanged();
+        }), null, 2000, 2000);
+    }
+
+    private async Task ReloadAsync()
+    {
+        var loaded = await Apps.GetDeploymentAsync(DeploymentId);
+        notFound = loaded is null || loaded.AppId != AppId;
+        dep = notFound ? null : loaded;
+        if (dep is null) return;
+        var app = await Apps.GetAsync(AppId);
+        appName = app?.Name;
+        container = app?.ContainerName;
+        // Live at and Open only show once the deploy is over (DeploymentLog reloads then): while it runs, every 2-second
+        // reload would read Docker's whole list for nothing.
+        if (app is not null && !dep.IsActive)
+        {
+            try
+            {
+                reached = await Book.ForAppAsync(app, await Book.LanHostAsync(Nav.BaseUri));
+            }
+            catch (Exception)
+            {
+                // Without Docker there's nothing to say about where it's live; the log still shows.
+                reached = AppAddresses.None(app.Id);
+            }
+        }
+    }
+
+    // The main domain while it's live, and the app's LAN addresses while it answers there: never a host-only one.
+    private List<Address> LiveAt() =>
+        [.. reached.Domains.Take(1).Where(a => a.Live), .. reached.Lan.Where(a => a.Live && a.HostPort is not null)];
+
+    private void Cancel() =>
+        Snackbar.Add(Actions.CancelDeploy(AppId) ? "Cancelling the deploy…" : "The deploy already finished.", Severity.Info);
+
+    public void Dispose() => timer?.Dispose();
+}

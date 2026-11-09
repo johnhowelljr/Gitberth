@@ -1,0 +1,6 @@
+{
+  "kind": "NodeServer",
+  "title": "Bun server (Hono)",
+  "port": 3000,
+  "expect": "Hello from Hono on Bun"
+}

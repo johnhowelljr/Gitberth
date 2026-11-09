@@ -1,0 +1,45 @@
+@*
+    The app page's hero: the one focal point. Logo (60 px with its glow), name at display size and its state, the source
+    line, the main addresses, the actions on the right, and a strip of six facts across the bottom. A faint glow in the
+    logo's colour and a dot grid sit behind it. The same for every source: only the facts differ.
+*@
+<section class="gb-hero @Class" style="--hc:@(Color ?? "#4c8dff")" aria-label="@Title">
+    <div>@Logo</div>
+    <div class="gb-hero-id">
+        <div class="gb-hero-name">
+            <h1 tabindex="-1">@Title</h1>
+            @Status
+        </div>
+        @if (SourceLine is not null)
+        {
+            <div class="gb-hero-meta">@SourceLine</div>
+        }
+        @if (Addresses is not null)
+        {
+            <div class="gb-hero-addrs">@Addresses</div>
+        }
+    </div>
+    <div class="gb-hero-actions">@Actions</div>
+    @if (Stats is not null)
+    {
+        <div class="gb-hero-stats">@Stats</div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>The logo: an AppLogo of Size 60.</summary>
+    [Parameter] public RenderFragment? Logo { get; set; }
+    /// <summary>The state after the name: a StatusLabel with Hero.</summary>
+    [Parameter] public RenderFragment? Status { get; set; }
+    /// <summary>The source line: badge, repository or image, branch, commit.</summary>
+    [Parameter] public RenderFragment? SourceLine { get; set; }
+    /// <summary>The main addresses: AddressValues.</summary>
+    [Parameter] public RenderFragment? Addresses { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+    /// <summary>Up to six HeroStats.</summary>
+    [Parameter] public RenderFragment? Stats { get; set; }
+    /// <summary>The glow's colour: the logo's (LogoChoice.Color).</summary>
+    [Parameter] public string? Color { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

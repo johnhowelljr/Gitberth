@@ -1,0 +1,177 @@
+@implements IDisposable
+@inject CronScheduler Crons
+@inject ISnackbar Snackbar
+
+@* The crons from the app's vercel.json, which Gitberth runs the way Vercel does. An app without any doesn't show it. *@
+@if (jobs is { Jobs.Count: > 0 })
+{
+    @* One job per row, its path and schedule over when it runs next and last: it fits the Overview's side column. *@
+    <SectionCard Title="Scheduled jobs" Icon="@Icons.Material.Outlined.Schedule" Sub="from vercel.json, in UTC" Flush="true">
+        @if (jobs.Problem is not null)
+        {
+            <div style="padding:14px 18px 0"><div class="gb-ro-note"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" Size="sm" /><span>@jobs.Problem</span></div></div>
+        }
+        @foreach (var job in jobs.Jobs)
+        {
+            var (tone, label) = Pill(job);
+            <div class="gb-feed-row" @key="(job.Path, job.Schedule)" style="align-items:start">
+                <div style="min-width:0;display:flex;flex-direction:column;gap:3px">
+                    <span class="gb-mono" style="font-size:13px;overflow-wrap:anywhere">@job.Path</span>
+                    <span class="gb-t3" style="font-size:12.5px"><span class="gb-mono">@job.Schedule</span>@(job.Description is null ? "" : $" · {job.Description}")</span>
+                    <span class="gb-t3" style="font-size:12px">
+                        <span title="@Exact(job.NextRun)">@NextRun(job)</span> · <span title="@Exact(job.RunningSince ?? job.Last?.StartedAt)">@LastRun(job)</span>
+                    </span>
+                </div>
+                <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
+                    <span class="@($"gb-pill gb-pill--{tone}{(job.RunningSince is null ? "" : " gb-pill--pulse")}")"><span class="gb-pill-dot"></span>@label</span>
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => RunNowAsync(job)"
+                         Disabled="@(jobs.Problem is not null || job.RunningSince is not null || waiting.Contains((job.Path, job.Schedule)))">Run now</Btn>
+                </div>
+            </div>
+        }
+    </SectionCard>
+}
+
+@code {
+    [Parameter, EditorRequired] public int AppId { get; set; }
+
+    private AppCronJobs? jobs;
+    private int loadedFor;
+    private Timer? timer;
+    // Jobs this page started with Run now and is waiting on.
+    private readonly HashSet<(string Path, string Schedule)> waiting = [];
+
+    protected override void OnInitialized()
+    {
+        Crons.Changed += OnChanged;
+        // Moves the next run along, and picks up a deploy that changed the jobs.
+        timer = new Timer(_ => Refresh(), null, 5000, 5000);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == AppId) return;
+        loadedFor = AppId;
+        jobs = null;
+        waiting.Clear();
+        await LoadAsync();
+    }
+
+    private void OnChanged(int appId)
+    {
+        if (appId == AppId) Refresh();
+    }
+
+    private void Refresh() => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadAsync()
+    {
+        // The page keeps this card when it moves to another app; what's loaded for the old one isn't shown there.
+        var appId = AppId;
+        try
+        {
+            var loaded = await Crons.GetAsync(appId);
+            if (appId == AppId) jobs = loaded;
+        }
+        catch (Exception)
+        {
+            // Keeps what it showed; the next refresh tries again.
+        }
+    }
+
+    private async Task RunNowAsync(CronJobStatus job)
+    {
+        var key = (job.Path, job.Schedule);
+        waiting.Add(key);
+        try
+        {
+            var run = await Crons.RunNowAsync(AppId, job.Path, job.Schedule);
+            Snackbar.Add(Summary(job.Path, run), Tone(run));
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            waiting.Remove(key);
+            await LoadAsync();
+        }
+    }
+
+    private static (string Tone, string Label) Pill(CronJobStatus job)
+    {
+        if (job.RunningSince is not null) return ("info", "Running");
+        return job.Last switch
+        {
+            null => ("secondary", "Not run yet"),
+            { Outcome: CronOutcome.Skipped } => ("secondary", "Skipped"),
+            { Outcome: CronOutcome.NotCalled } => ("warning", "Not called"),
+            { Outcome: CronOutcome.NoAnswer } => ("danger", "Failed"),
+            { Status: >= 200 and < 300 } run => ("success", $"{run.Status}"),
+            { Status: >= 300 and < 400 } run => ("warning", $"{run.Status}"),
+            var run => ("danger", $"{run.Status}"),
+        };
+    }
+
+    private static string NextRun(CronJobStatus job) =>
+        job.NextRun is { } next ? $"Next run {Utc(next)}{Local(next)}, {In(next)}" : "Never runs: no date matches its schedule";
+
+    private static string LastRun(CronJobStatus job)
+    {
+        if (job.RunningSince is { } since) return $"Started {Format.Ago(since)}, still running";
+        if (job.Last is not { } run) return "Hasn't run since Gitberth started";
+        var when = $"{(run.Manual ? "Run by hand" : "Last run")} {Format.Ago(run.StartedAt)}";
+        return run.Outcome == CronOutcome.Answered && run.Detail is null ? $"{when} · took {Took(run.Duration)}" : $"{when} · {run.Detail}";
+    }
+
+    private static string Summary(string path, CronRun run) => run.Outcome switch
+    {
+        CronOutcome.Answered when run.Detail is null => $"{path} answered {run.Status} in {Took(run.Duration)}.",
+        CronOutcome.Answered => $"{path} answered {run.Status}. {run.Detail}",
+        CronOutcome.Skipped => $"{path} is still running, so this run was skipped.",
+        CronOutcome.NotCalled => $"{path} wasn't called. {run.Detail}",
+        _ => $"{path} failed. {run.Detail}",
+    };
+
+    private static Severity Tone(CronRun run) =>
+        run.Succeeded ? Severity.Success
+        : run.Outcome is CronOutcome.Skipped or CronOutcome.NotCalled || run.Status is >= 300 and < 400 ? Severity.Warning
+        : Severity.Error;
+
+    private static string Utc(DateTime utc) => utc.ToString("ddd d MMM, HH:mm 'UTC'", CultureInfo.InvariantCulture);
+
+    // "Local" is the server's time zone (TZ in the compose file), which Gitberth shows its other times in. Left out when that's UTC.
+    private static string Local(DateTime utc)
+    {
+        if (TimeZoneInfo.Local.GetUtcOffset(utc) == TimeSpan.Zero) return "";
+        var local = utc.ToLocalTime();
+        return $" ({local.ToString(local.Date == utc.Date ? "HH:mm" : "ddd HH:mm", CultureInfo.InvariantCulture)} local)";
+    }
+
+    private static string? Exact(DateTime? utc) => utc is { } t ? Format.Local(t) : null;
+
+    private static string In(DateTime utc)
+    {
+        var d = utc - DateTime.UtcNow;
+        return d.TotalMinutes < 1 ? "in under a minute"
+            : d.TotalHours < 1 ? $"in {(int)Math.Ceiling(d.TotalMinutes)} min"
+            : d.TotalDays < 2 ? $"in {(int)d.TotalHours} h"
+            : $"in {(int)d.TotalDays} d";
+    }
+
+    private static string Took(TimeSpan d) =>
+        d.TotalSeconds < 1 ? $"{(int)d.TotalMilliseconds} ms"
+        : d.TotalMinutes < 1 ? $"{d.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)} s"
+        : $"{(int)d.TotalMinutes}m {d.Seconds}s";
+
+    public void Dispose()
+    {
+        Crons.Changed -= OnChanged;
+        timer?.Dispose();
+    }
+}

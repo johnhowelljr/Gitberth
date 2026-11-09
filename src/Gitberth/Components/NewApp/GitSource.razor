@@ -1,0 +1,509 @@
+@inject GitClient Git
+@inject ProjectAnalyzer Analyzer
+@inject AppService Apps
+@inject AppActions Actions
+@inject AppCatalog Catalog
+@inject RepoVariables RepoVars
+@inject SettingsService Settings
+@inject GitberthOptions Options
+@inject HostScanner Scanner
+@inject ContainerStatsCollector Stats
+@inject NavigationManager Nav
+
+@*
+    New app › GitHub repository (architecture.md 3.7): the repository, what Gitberth detected and how it'll build it, then
+    its settings and Create and deploy. The steps and the backend are the ones New app always had (AppService.CreateAsync,
+    then a deploy); they look like the rest of New app now.
+*@
+<div class="gb-stack">
+    <section class="gb-card gb-sec">
+        <div class="gb-sec-head">
+            <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Custom.Brands.GitHub" /></span>
+            <div style="min-width:0"><div class="gb-h3">GitHub repository</div><p>Any github.com URL works, including links to a branch or a folder. Other Git hosts aren't supported yet.</p></div>
+        </div>
+        <div class="gb-sec-body">
+            <div class="gb-row gb-row--wrap" style="flex-wrap:nowrap">
+                <label class="gb-input gb-grow">
+                    <SvgIcon Icon="@Icons.Custom.Brands.GitHub" />
+                    <input placeholder="https://github.com/you/your-app" value="@url" @oninput="e => url = e.Value?.ToString() ?? string.Empty" @onkeydown="OnUrlKeyDown"
+                           disabled="@Busy" aria-label="Repository URL" spellcheck="false" />
+                </label>
+                <Btn Kind="@(remote is null ? BtnKind.Primary : BtnKind.Secondary)" OnClick="CheckAsync" Busy="checking" Disabled="@(Busy || string.IsNullOrWhiteSpace(url))">Check</Btn>
+            </div>
+            @if (!hasToken)
+            {
+                <Banner Tone="info" Title="Public repositories only, for now">No GitHub token is saved yet. <a href="settings">Add one in Settings</a> for private ones.</Banner>
+            }
+            @if (error is not null)
+            {
+                <Banner Tone="critical" Title="Gitberth couldn't use it">@error</Banner>
+            }
+            @if (remote is not null)
+            {
+                <div class="gb-fgrid gb-fgrid--3">
+                    <Field Label="Branch" For="git-branch">
+                        <select id="git-branch" class="gb-input" value="@branch" @onchange="e => branch = e.Value?.ToString() ?? branch">
+                            @foreach (var b in remote.Branches)
+                            {
+                                <option value="@b.Name">@b.Name@(b.Name == remote.DefaultBranch ? "  (default)" : "")</option>
+                            }
+                        </select>
+                    </Field>
+                    <Field Label="Subfolder (optional)" For="git-sub">
+                        <input id="git-sub" class="gb-input gb-input--mono" placeholder="src/api" value="@subdir" @onchange="e => subdir = e.Value?.ToString()" />
+                    </Field>
+                    <div style="align-self:end"><Btn Icon="@Icons.Material.Outlined.Search" OnClick="() => AnalyzeAsync()" Busy="analyzing" Disabled="Busy">Analyze again</Btn></div>
+                </div>
+            }
+            @if (candidates.Count > 1)
+            {
+                <div>
+                    <div class="gb-label" style="margin-bottom:8px">This repo has @candidates.Count apps Gitberth can run. The most likely one is picked.</div>
+                    <div class="gb-choices" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))" role="radiogroup">
+                        @foreach (var c in candidates)
+                        {
+                            var on = Key(c) == SelectedKey;
+                            <button type="button" class="gb-choice @(on ? "on" : null)" role="radio" aria-checked="@(on ? "true" : "false")" disabled="@Busy" @onclick="() => OnCandidateChanged(Key(c))">
+                                <span class="gb-radio @(on ? "on" : null)"></span>
+                                <span style="min-width:0"><span class="gb-choice-title" style="display:block">@c.Title</span><span class="gb-choice-sub">@c.Detail</span></span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+            @if (analyzing)
+            {
+                <div class="gb-progress"><i style="width:60%"></i></div>
+            }
+        </div>
+    </section>
+
+    @if (detection is not null)
+    {
+        <section class="gb-card gb-sec">
+            <div class="gb-sec-head">
+                <span class="gb-sec-icon"><SvgIcon Icon="@(detection.CanBuild ? Icons.Material.Outlined.Layers : Icons.Material.Outlined.HelpOutline)" /></span>
+                <div style="min-width:0">
+                    <div class="gb-h3">How it will run: @detection.Title</div>
+                    <p>@(commit is not null ? $"At {commit.Sha[..7]} · {commit.Subject}" : "")</p>
+                </div>
+            </div>
+            <div class="gb-sec-body">
+                @if (detection.Evidence.Count > 0)
+                {
+                    <div class="gb-keeps">
+                        @foreach (var e in detection.Evidence)
+                        {
+                            <span class="gb-keep"><SvgIcon Icon="@Icons.Material.Outlined.Check" /><span>@e</span></span>
+                        }
+                    </div>
+                }
+                @foreach (var w in detection.Warnings)
+                {
+                    <Banner Tone="warn" Title="Worth knowing">@w</Banner>
+                }
+                @if (detection.ProjectCandidates.Count > 1 && candidates.Count <= 1)
+                {
+                    <Field Label="Project to run" For="git-proj">
+                        <select id="git-proj" class="gb-input gb-input--mono" value="@projectHint" @onchange="e => OnProjectChanged(e.Value?.ToString() ?? string.Empty)">
+                            @foreach (var p in detection.ProjectCandidates)
+                            {
+                                <option value="@p">@p</option>
+                            }
+                        </select>
+                    </Field>
+                }
+                <SwitchRow Title="Customize the Dockerfile" Sub="Stored with the app and used as it is on every deploy." Value="customize" ValueChanged="v => customize = v" />
+                @if (customize)
+                {
+                    <textarea class="gb-input gb-input--mono gb-paste" rows="16" spellcheck="false" value="@customDockerfile" @onchange="e => customDockerfile = e.Value?.ToString()"></textarea>
+                    <p class="gb-help">Gitberth fills in the <code>@DockerfileMarkers.BuildArgs</code> and <code>@DockerfileMarkers.Volumes</code> lines.</p>
+                }
+                else if (detection.Kind == ProjectKind.Dockerfile)
+                {
+                    <p class="gb-help">Gitberth builds with the repo's own <code>@detection.RepoDockerfile</code>.</p>
+                }
+                else if (detection.Dockerfile is not null)
+                {
+                    <CodeBlock Title="Generated Dockerfile" Code="@detection.Dockerfile" Icon="@Icons.Material.Outlined.Description" />
+                    <p class="gb-help">Generated again on every deploy, so a new Node or .NET version in the repo is picked up by itself.</p>
+                }
+            </div>
+        </section>
+
+        @if (detection.CanBuild || customize)
+        {
+            <section class="gb-card gb-sec">
+                <div class="gb-sec-head">
+                    <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Tune" /></span>
+                    <div style="min-width:0"><div class="gb-h3">Settings</div><p>Everything here can change later, in its Settings tab.</p></div>
+                </div>
+                <div class="gb-sec-body">
+                    <div class="gb-fgrid">
+                        <Field Label="Name" For="git-name" Help="@NameHelp">
+                            <input id="git-name" class="gb-input" value="@model.Name" @oninput="e => SetNameAsync(e.Value?.ToString())" />
+                        </Field>
+                        <Field Label="Health URL (optional)" For="git-health">
+                            <input id="git-health" class="gb-input gb-input--mono" placeholder="/health" value="@model.HealthCheckPath" @onchange="e => model.HealthCheckPath = e.Value?.ToString()" />
+                        </Field>
+                    </div>
+                    @* The restart policy in the words Settings and Configure give it. *@
+                    <Field Label="Restart">
+                        <Seg T="string" Options="AppFacts.RestartOptions" Value="model.RestartPolicy" ValueChanged="v => model.RestartPolicy = v" Label="Restart policy" />
+                    </Field>
+                    <SwitchRow Title="Deploy on push" Sub="A new commit on the branch deploys by itself." Value="model.AutoDeploy" ValueChanged="v => model.AutoDeploy = v" />
+                </div>
+                <div class="gb-sec-head" style="border-top:1px solid var(--gb-line-1)">
+                    <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" /></span>
+                    <div style="min-width:0"><div class="gb-h3">Ports</div><p>@(AfterDeploy() is { } after ? $"After the deploy: {after}." : "On the LAN by default, at a free host port.")</p></div>
+                    <div style="margin-left:auto"><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddPort">Add port</Btn></div>
+                </div>
+                <PortsTable Draft="ports" Name="@Slug" LanHost="@lanHost" LanIpv4Only="lanIpv4Only" Problems="portProblems" Disabled="@Busy" Marks="false" OnChanged="PortsChanged" />
+                <div class="gb-sec-body">
+                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />Environment variables</div>
+                    <EnvEditor Rows="model.Env" />
+                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Storage" Size="sm" />Volumes</div>
+                    <VolumesEditor Rows="model.Volumes" Slug="@Slug" />
+                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Speed" Size="sm" />Resources</div>
+                    @* The same fields as its Settings tab and Configure; CreateAsync stores them as Settings would. *@
+                    <ResourceFields Draft="resources" Create="true" HostCpus="HostCpus" />
+                    @if (errors.Count > 0)
+                    {
+                        <Banner Tone="critical" Title="Not created yet">@string.Join(" ", errors)</Banner>
+                    }
+                </div>
+                <div class="gb-card-foot" style="justify-content:flex-end;gap:10px">
+                    <span class="gb-help" style="margin-right:auto">Creates gb-@Slug, then builds and deploys it. The deploy's log shows every step.</span>
+                    <Btn Kind="BtnKind.Ghost" Href="apps">Cancel</Btn>
+                    <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="Busy">Create and deploy</Btn>
+                </div>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>A repository to start with (/apps/new?url=…).</summary>
+    [Parameter] public string? PrefillUrl { get; set; }
+    /// <summary>Where the Git flow is: Source until the repo is analyzed, Configure once it can be built.</summary>
+    [Parameter] public EventCallback<NewAppStep> OnStage { get; set; }
+
+    private string url = "";
+    private bool checking, analyzing, creating, customize;
+    private bool hasToken = true;
+    private string? error;
+    private GitHubRepoRef? repo;
+    private RemoteInfo? remote;
+    private string branch = "";
+    private string? subdir;
+    private string? projectHint;
+    private DetectionResult? detection;
+    private List<AppCandidate> candidates = [];
+    // What the detection shown was made from. The Subfolder field and Branch can be changed afterwards, so
+    // creating uses these, and analyzes again first if they no longer match what's typed.
+    private string? analyzedDir, analyzedHint, analyzedBranch;
+    private string? lastAnalyzedDir;
+    private CommitInfo? commit;
+    private string? customDockerfile;
+    private AppSettingsModel model = new();
+    // Its limits, in the Resources fields every other form has (memory in MiB or GiB, CPU limit, priority, processes, shared memory).
+    private ContainerSettingsDraft resources = ContainerSettingsDraft.From(new ContainerSettings());
+    private ContainerPortsDraft ports = ContainerPortsDraft.ForNew([], null);
+    private List<string> errors = [];
+    // What's wrong with the ports, under the field it concerns: shown once Create was tried, and following every change after.
+    private List<PortProblem> portProblems = [];
+    private bool triedCreate;
+    private string lanHost = "";
+    private bool lanIpv4Only;
+    // The name the app gets on the shared network, and the name it was worked out for.
+    private NetworkName? networkName;
+    private string? networkNameFor;
+
+    private bool Busy => checking || analyzing || creating;
+
+    private int HostCpus => Stats.Current.Host?.Cpus ?? Environment.ProcessorCount;
+
+    /// <summary>
+    /// The Resources fields onto the new app's model: its memory limit in whole MiB and CPU limit (what the form checks),
+    /// and every limit as settings, which <see cref="AppService.CreateAsync"/> stores as its Settings tab would.
+    /// </summary>
+    internal static void SetLimits(AppSettingsModel model, ContainerSettingsDraft resources)
+    {
+        var limits = resources.ToSettings();
+        model.Limits = limits;
+        model.MemoryLimitMb = GitAppSettings.MemoryMb(limits.Resources.MemoryBytes);
+        model.CpuLimit = limits.Resources.Cpus;
+    }
+
+    // The app's network name: its slug, with -2 added while that's taken on the shared network.
+    private string Slug => networkNameFor == model.Name && networkName is { } chosen ? chosen.Slug
+        : AppService.Slugify(model.Name) is { Length: > 0 } slug ? slug : "app";
+
+    private string? NameHelp => AppService.Slugify(model.Name).Length == 0 ? null
+        : networkNameFor == model.Name && networkName is { Taken: { } taken } ? $"Network name {Slug} ({taken}) · container gb-{Slug}"
+        : $"Network name {Slug} · container gb-{Slug}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        hasToken = await Settings.GetAsync(SettingKeys.GitHubToken) is not null;
+        if (!string.IsNullOrWhiteSpace(PrefillUrl)) url = PrefillUrl;
+        lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));
+        try
+        {
+            lanIpv4Only = (await Scanner.LatestAsync()).LanIpv4Only;
+        }
+        catch (Exception)
+        {
+            lanIpv4Only = false;
+        }
+        if (!string.IsNullOrWhiteSpace(PrefillUrl)) await CheckAsync();
+    }
+
+    private async Task SetNameAsync(string? name)
+    {
+        model.Name = name ?? "";
+        await ChooseNameAsync();
+    }
+
+    // Works out the network name for the name typed in, as creating the app will.
+    private async Task ChooseNameAsync()
+    {
+        var name = model.Name;
+        if (AppService.Slugify(name).Length == 0) return;
+        try
+        {
+            var chosen = await Apps.ChooseSlugAsync(name);
+            if (name == model.Name) (networkName, networkNameFor) = (chosen, name);
+        }
+        catch (Exception)
+        {
+            // Docker couldn't say which names are taken: the plain slug shows, and creating checks again.
+            if (name == model.Name) (networkName, networkNameFor) = (null, null);
+        }
+    }
+
+    private void AddPort() => ports.Rows.Add(ports.NewRow());
+
+    private void PortsChanged()
+    {
+        model.Ports = ports.ToPortRows().ToList();
+        if (triedCreate) portProblems = PortRules.Check(model.Ports, PortContext.None);
+    }
+
+    // The web port's address once the app is deployed: on the LAN, on the host only, or by name inside Docker.
+    private string? AfterDeploy() =>
+        ports.Web is { } web && ContainerPortAddress.Of(web, lanHost, Slug, named: true, database: false) is { } address
+            ? web.Access == PortAccess.Internal ? $"{address.Text} inside Docker" : $"{address.Text} {(web.Access == PortAccess.HostOnly ? "on the host only" : "on the LAN")}"
+            : null;
+
+    private async Task OnUrlKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !Busy && !string.IsNullOrWhiteSpace(url)) await CheckAsync();
+    }
+
+    private async Task CheckAsync()
+    {
+        error = null;
+        remote = null;
+        detection = null;
+        commit = null;
+        projectHint = null;
+        // A different repo: forget the name, limits, errors and analysis from the last one.
+        model.Name = "";
+        resources = ContainerSettingsDraft.From(new ContainerSettings());
+        (errors, portProblems, triedCreate) = ([], [], false);
+        analyzedDir = lastAnalyzedDir = null;
+        await OnStage.InvokeAsync(NewAppStep.Source);
+        if (!GitHubRepoRef.TryParse(url, out var parsed, out var parseError))
+        {
+            error = parseError;
+            return;
+        }
+        repo = parsed!;
+        checking = true;
+        try
+        {
+            remote = await Git.LsRemoteAsync(repo);
+            if (remote.Branches.Count == 0)
+            {
+                error = "This repository has no branches yet. Push a commit first.";
+                remote = null;
+                return;
+            }
+            branch = remote.DefaultBranch ?? remote.Branches[0].Name;
+            subdir = null;
+            if (repo.TreePath is not null && GitHubRepoRef.ResolveTreePath(repo.TreePath, remote.Branches.Select(b => b.Name)) is { } resolved)
+            {
+                branch = resolved.Branch;
+                subdir = resolved.Subdirectory;
+            }
+        }
+        catch (GitException ex)
+        {
+            error = ex.Message;
+            remote = null;
+            return;
+        }
+        finally
+        {
+            checking = false;
+        }
+        candidates = [];
+        await AnalyzeAsync(pickBest: true);
+    }
+
+    private async Task OnProjectChanged(string value)
+    {
+        projectHint = value;
+        await AnalyzeAsync(keepHint: true);
+    }
+
+    private static string Key(AppCandidate c) => $"{c.Dir}|{c.Hint}";
+
+    private string SelectedKey => analyzedDir is null ? "" : $"{analyzedDir}|{analyzedHint}";
+
+    private async Task OnCandidateChanged(string key)
+    {
+        if (candidates.FirstOrDefault(c => Key(c) == key) is not { } chosen) return;
+        subdir = chosen.Dir.Length == 0 ? null : chosen.Dir;
+        projectHint = chosen.Hint;
+        model.Name = "";
+        await AnalyzeAsync(keepHint: true);
+    }
+
+    /// <param name="pickBest">For a newly checked repo: start with the best of the apps found in it.</param>
+    /// <param name="keepHint">The hint was just chosen with the folder. Otherwise a hint from another folder is dropped.</param>
+    private async Task AnalyzeAsync(bool pickBest = false, bool keepHint = false)
+    {
+        if (repo is null) return;
+        error = null;
+        analyzing = true;
+        analyzedDir = null;
+        StateHasChanged();
+        var dir = Path.Combine(Options.WorkDir, "analyze-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            commit = await Git.CloneAsync(repo, branch, dir, null);
+            candidates = await Task.Run(() => Analyzer.FindApps(dir));
+            if (pickBest && string.IsNullOrEmpty(subdir) && candidates.Count > 0)
+            {
+                subdir = candidates[0].Dir.Length == 0 ? null : candidates[0].Dir;
+                projectHint = candidates[0].Hint;
+                keepHint = true;
+            }
+            if (ProjectAnalyzer.NormalizeDir(subdir) is not { } sub)
+            {
+                error = $"The subfolder '{subdir}' isn't inside the repo.";
+                detection = null;
+                return;
+            }
+            if (sub.Length > 0 && !Directory.Exists(Path.Combine(dir, sub.Replace('/', Path.DirectorySeparatorChar))))
+            {
+                error = $"The subfolder '{sub}' doesn't exist on {branch}.";
+                detection = null;
+                return;
+            }
+            // A .NET project or Dockerfile name picked for another folder means nothing here.
+            if (!keepHint && sub != lastAnalyzedDir) projectHint = null;
+            var hint = projectHint;
+            detection = await Task.Run(() => Analyzer.Analyze(dir, new AnalyzeOptions(hint, AppDir: sub)));
+            // Keeps a Dockerfile variant as the hint; for .NET, the project that was picked.
+            if (detection.SelectedProject is not null) projectHint = detection.SelectedProject;
+            customize = detection.Kind == ProjectKind.Unknown;
+            customDockerfile = detection.Dockerfile ?? DockerfileTemplates.Starter;
+            (analyzedDir, analyzedHint, analyzedBranch, lastAnalyzedDir) = (sub, projectHint, branch, sub);
+            await PrefillAsync(sub.Length == 0 ? null : sub);
+            await OnStage.InvokeAsync(NewAppStep.Configure);
+        }
+        catch (GitException ex)
+        {
+            error = ex.Message;
+            detection = null;
+        }
+        finally
+        {
+            analyzing = false;
+            DeployPaths.TryDeleteDirectory(dir);
+        }
+    }
+
+    private async Task PrefillAsync(string? sub)
+    {
+        var name = !string.IsNullOrWhiteSpace(model.Name) ? model.Name
+            : sub is null ? repo!.Repo
+            : $"{repo!.Repo}-{sub.Split('/')[^1]}";
+        model = new AppSettingsModel { Name = name, RestartPolicy = model.RestartPolicy, AutoDeploy = model.AutoDeploy };
+        (portProblems, triedCreate) = ([], false);
+        await ChooseNameAsync();
+        // On the LAN, at its own port when that's free (5.13).
+        var rules = new List<PortRule>();
+        if (detection!.ContainerPort is int port) rules.Add(new PortRule(port, "tcp", PortAccess.Lan, await SuggestHostPortAsync(port)));
+        ports = ContainerPortsDraft.ForNew(rules, detection.ContainerPort);
+        model.Ports = ports.ToPortRows().ToList();
+        // A value set here wins over the repo's GitHub variables, so an example value never shadows one the repo already has.
+        var inGitHub = (await RepoVars.GetAsync(repo!.Owner, repo.Repo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in detection.EnvSuggestions)
+        {
+            var shared = inGitHub.Contains(s.Key);
+            model.Env.Add(new EnvRow
+            {
+                Key = s.Key, Value = shared ? "" : s.Value, IsSecret = s.IsSecret, BuildTime = s.BuildTime,
+                Hint = shared ? "Set in the repo's GitHub variables" : s.Source,
+            });
+        }
+    }
+
+    // The detected port's host port: its own when free, else the next free one above it. Left empty when Docker can't be
+    // read; the field's check then says why, and the table is checked again on Create.
+    private async Task<int?> SuggestHostPortAsync(int port)
+    {
+        try
+        {
+            return await Apps.SuggestHostPortAsync(port, "tcp", null, []);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (repo is null) return;
+        // The branch or Subfolder was changed after the analysis: show what would really be built before creating it.
+        if (analyzedDir is null || ProjectAnalyzer.NormalizeDir(subdir) != analyzedDir || branch != analyzedBranch)
+        {
+            await AnalyzeAsync();
+            return;
+        }
+        model.Branch = analyzedBranch;
+        model.Subdirectory = analyzedDir.Length == 0 ? null : analyzedDir;
+        model.ProjectHint = analyzedHint;
+        model.DockerfileMode = customize ? DockerfileMode.Custom : DockerfileMode.Auto;
+        model.CustomDockerfile = customize ? customDockerfile : null;
+        model.Ports = ports.ToPortRows().ToList();
+        SetLimits(model, resources);
+        creating = true;
+        try
+        {
+            // The ports' problems show under their fields, the rest in the list.
+            triedCreate = true;
+            portProblems = await Apps.ValidatePortsAsync(null, model.Ports);
+            var all = await Apps.ValidateAsync(null, model);
+            errors = all.Where(e => portProblems.All(p => p.Message != e)).ToList();
+            if (errors.Count == 0 && portProblems.Count > 0) errors = ["Some ports need changing: see the Ports table."];
+            if (all.Count > 0 || portProblems.Count > 0) return;
+            var appId = await Apps.CreateAsync(repo, model, detection);
+            await Actions.DeployAsync(appId, DeployTrigger.Created);
+            Nav.NavigateTo($"apps/{Uri.EscapeDataString(await Catalog.KeyForIdAsync(appId) ?? $"gb-{Slug}")}");
+        }
+        catch (Exception ex)
+        {
+            errors = [ex.Message];
+        }
+        finally
+        {
+            creating = false;
+        }
+    }
+}

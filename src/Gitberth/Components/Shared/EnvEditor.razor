@@ -1,0 +1,77 @@
+@if (bulk)
+{
+    <MudTextField T="string" @bind-Value="bulkText" Variant="Variant.Outlined" Lines="8" Placeholder="KEY=value" Class="gb-mono-input"
+                  HelperText="Paste a .env file. New names are added; existing names get the new value." />
+    <div class="gb-actions-row">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" OnClick="MergeBulk">Add to the list</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => bulk = false">Cancel</MudButton>
+    </div>
+}
+else
+{
+    @if (Rows.Count > 0)
+    {
+        <div class="gb-rows">
+            <div class="gb-edrow gb-edrow--env gb-edrow-head">
+                <span>Name</span>
+                <span>Value</span>
+                <span title="Masked in the UI and in logs, encrypted at rest">Secret</span>
+                <span title="Also passed to the image build. Front ends need this for VITE_*, NEXT_PUBLIC_*, REACT_APP_* and similar.">Build-time</span>
+                <span></span>
+            </div>
+            @foreach (var row in Rows)
+            {
+                <div class="gb-edrow gb-edrow--env" @key="row">
+                    <MudTextField T="string" @bind-Value="row.Key" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="NAME" Class="gb-mono-input" />
+                    <MudTextField T="string" @bind-Value="row.Value" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="empty = not set"
+                                  Class="gb-mono-input" HelperText="@row.Hint"
+                                  InputType="@(row.IsSecret && !revealed.Contains(row) ? InputType.Password : InputType.Text)"
+                                  Adornment="@(row.IsSecret ? Adornment.End : Adornment.None)"
+                                  AdornmentIcon="@(revealed.Contains(row) ? Icons.Material.Outlined.VisibilityOff : Icons.Material.Outlined.Visibility)"
+                                  OnAdornmentClick="() => ToggleReveal(row)" />
+                    <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.IsSecret" Size="Size.Small" Color="Color.Primary" /></div>
+                    <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.BuildTime" Size="Size.Small" Color="Color.Primary" /></div>
+                    <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="gb-edrow-delete" OnClick="() => Rows.Remove(row)" aria-label="Remove" />
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="gb-placeholder">No environment variables yet.</div>
+    }
+    <div class="gb-actions-row">
+        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Rows.Add(new EnvRow())">Add variable</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.ContentPaste" OnClick="StartBulk">Paste .env</MudButton>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public List<EnvRow> Rows { get; set; } = [];
+
+    private readonly HashSet<EnvRow> revealed = [];
+    private bool bulk;
+    private string bulkText = "";
+
+    private void ToggleReveal(EnvRow row)
+    {
+        if (!revealed.Remove(row)) revealed.Add(row);
+    }
+
+    private void StartBulk()
+    {
+        bulkText = "";
+        bulk = true;
+    }
+
+    private void MergeBulk()
+    {
+        foreach (var (key, value) in DotEnv.Parse(bulkText))
+        {
+            var existing = Rows.FirstOrDefault(r => r.Key == key);
+            if (existing is not null) existing.Value = value;
+            else Rows.Add(new EnvRow { Key = key, Value = value, IsSecret = Security.Masking.IsSecretName(key), BuildTime = EnvRules.IsBuildTimePrefix(key) });
+        }
+        bulk = false;
+    }
+}

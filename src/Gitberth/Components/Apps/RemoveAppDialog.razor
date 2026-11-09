@@ -1,0 +1,63 @@
+@*
+    Removing an app that isn't a Git app: the container goes; its named volumes and its image only when ticked. Taking
+    volumes too needs the name typed in, since they may hold a database.
+*@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title"><span class="gb-banner-icon gb-tone-critical" style="width:30px;height:30px"><SvgIcon Icon="@Icons.Material.Outlined.Delete" /></span>Remove @Title?</div>
+        <div class="gb-dialog-sub">The container <span class="gb-mono">@Container</span> is stopped and deleted. That can't be undone.</div>
+    </TitleContent>
+    <DialogContent>
+        <div class="gb-stack" style="gap:12px">
+            @if (Warnings.Count > 0)
+            {
+                <div class="gb-impact">
+                    @foreach (var warning in Warnings)
+                    {
+                        <div class="gb-impact-row gb-tone-serious"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" /><span>@warning</span></div>
+                    }
+                </div>
+            }
+            @if (Volumes.Count > 0)
+            {
+                <button type="button" class="gb-choice @(volumes ? "on" : null)" @onclick="() => volumes = !volumes" role="checkbox" aria-checked="@(volumes ? "true" : "false")">
+                    <span class="gb-check @(volumes ? "on" : null)"></span>
+                    <span>
+                        <span class="gb-choice-title">Also delete its volumes</span>
+                        <span class="gb-choice-sub" style="display:block"><span class="gb-mono">@string.Join(", ", Volumes)</span>: their data is gone for good.</span>
+                    </span>
+                </button>
+            }
+            <button type="button" class="gb-choice @(image ? "on" : null)" @onclick="() => image = !image" role="checkbox" aria-checked="@(image ? "true" : "false")">
+                <span class="gb-check @(image ? "on" : null)"></span>
+                <span>
+                    <span class="gb-choice-title">Also delete its image</span>
+                    <span class="gb-choice-sub" style="display:block">When no other container uses it.</span>
+                </span>
+            </button>
+            @if (volumes)
+            {
+                <Field Label="@($"Type {Container} to delete its data too")" For="gb-remove-name">
+                    <input id="gb-remove-name" class="gb-input gb-input--mono" @bind="typed" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+                </Field>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <Btn Kind="BtnKind.Ghost" OnClick="() => MudDialog.Cancel()">Cancel</Btn>
+        <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Delete" OnClick="Confirm" Disabled="@(volumes && typed.Trim() != Container)">Remove @Title</Btn>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Container { get; set; } = "";
+    [Parameter] public IReadOnlyList<string> Volumes { get; set; } = [];
+    [Parameter] public IReadOnlyList<string> Warnings { get; set; } = [];
+
+    private bool volumes, image;
+    private string typed = "";
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(new RemoveOptions(volumes, image)));
+}

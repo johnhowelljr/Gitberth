@@ -1,0 +1,19 @@
+@* One fact in the hero's strip: a caption over a value, with a quieter word after it. *@
+<div class="gb-hero-stat" title="@Title">
+    <div class="gb-hero-stat-k">@Label</div>
+    <div class="gb-hero-stat-v">
+        @ChildContent
+        @if (Small is not null)
+        {
+            <small>@Small</small>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>The quieter words after the value: "since 22:48", "no limit".</summary>
+    [Parameter] public string? Small { get; set; }
+    [Parameter] public string? Title { get; set; }
+}

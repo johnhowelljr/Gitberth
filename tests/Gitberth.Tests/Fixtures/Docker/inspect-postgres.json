@@ -1,0 +1,284 @@
+{
+  "Id": "0ebf31bbcd0757dab8ce5e88612810632828061d60c481b87b242f53a32b7150",
+  "Created": "2026-11-02T21:03:17.709580599Z",
+  "Path": "docker-entrypoint.sh",
+  "Args": [
+    "postgres"
+  ],
+  "State": {
+    "Status": "exited",
+    "Running": false,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 0,
+    "ExitCode": 128,
+    "Error": "failed to set up container networking: could not find a network matching network mode gitdock: network gitdock not found",
+    "StartedAt": "2026-11-02T21:03:17.767708728Z",
+    "FinishedAt": "2026-11-05T03:26:49.652714917Z",
+    "Health": {
+      "Status": "unhealthy",
+      "FailingStreak": 0,
+      "Log": [
+        {
+          "Start": "2026-11-04T22:26:00.600371911-05:00",
+          "End": "2026-11-04T22:26:00.675276396-05:00",
+          "ExitCode": 0,
+          "Output": "/var/run/postgresql:5432 - accepting connections\n"
+        },
+        {
+          "Start": "2026-11-04T22:26:10.676642318-05:00",
+          "End": "2026-11-04T22:26:10.753244-05:00",
+          "ExitCode": 0,
+          "Output": "/var/run/postgresql:5432 - accepting connections\n"
+        },
+        {
+          "Start": "2026-11-04T22:26:20.754416761-05:00",
+          "End": "2026-11-04T22:26:20.829113443-05:00",
+          "ExitCode": 0,
+          "Output": "/var/run/postgresql:5432 - accepting connections\n"
+        },
+        {
+          "Start": "2026-11-04T22:26:30.829667904-05:00",
+          "End": "2026-11-04T22:26:30.902852885-05:00",
+          "ExitCode": 0,
+          "Output": "/var/run/postgresql:5432 - accepting connections\n"
+        },
+        {
+          "Start": "2026-11-04T22:26:40.903454466-05:00",
+          "End": "2026-11-04T22:26:40.980450766-05:00",
+          "ExitCode": 0,
+          "Output": "/var/run/postgresql:5432 - accepting connections\n"
+        }
+      ]
+    }
+  },
+  "Image": "sha256:3a4264520e121176619f54ff867d12774bc81e95e7b84db58d63bccdb6144b81",
+  "ResolvConfPath": "/var/lib/docker/containers/0ebf31bbcd0757dab8ce5e88612810632828061d60c481b87b242f53a32b7150/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/0ebf31bbcd0757dab8ce5e88612810632828061d60c481b87b242f53a32b7150/hostname",
+  "HostsPath": "/var/lib/docker/containers/0ebf31bbcd0757dab8ce5e88612810632828061d60c481b87b242f53a32b7150/hosts",
+  "LogPath": "",
+  "Name": "/postgres",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": [
+      "postgres-data:/var/lib/postgresql"
+    ],
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "journald",
+      "Config": {}
+    },
+    "NetworkMode": "gitdock",
+    "PortBindings": {},
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      0,
+      0
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 0,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 0,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [
+    {
+      "Type": "volume",
+      "Name": "postgres-data",
+      "Source": "/var/lib/docker/volumes/postgres-data/_data",
+      "Destination": "/var/lib/postgresql",
+      "Driver": "local",
+      "Mode": "z",
+      "RW": true,
+      "Propagation": ""
+    }
+  ],
+  "Config": {
+    "Hostname": "0ebf31bbcd07",
+    "Domainname": "",
+    "User": "",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "ExposedPorts": {
+      "5432/tcp": {}
+    },
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "POSTGRES_PASSWORD=REDACTED",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/18/bin",
+      "GOSU_VERSION=1.19",
+      "LANG=en_US.utf8",
+      "PG_MAJOR=18",
+      "PG_VERSION=18.6-1.pgdg13+2",
+      "PGDATA=/var/lib/postgresql/18/docker"
+    ],
+    "Cmd": [
+      "postgres"
+    ],
+    "Healthcheck": {
+      "Test": [
+        "CMD-SHELL",
+        "pg_isready -U postgres"
+      ],
+      "Interval": 10000000000,
+      "Retries": 5
+    },
+    "Image": "postgres:18",
+    "Volumes": {
+      "/var/lib/postgresql": {}
+    },
+    "WorkingDir": "",
+    "Entrypoint": [
+      "docker-entrypoint.sh"
+    ],
+    "Labels": {},
+    "StopSignal": "SIGINT"
+  },
+  "NetworkSettings": {
+    "SandboxID": "",
+    "SandboxKey": "",
+    "Ports": {},
+    "Networks": {
+      "gitberth": {
+        "IPAMConfig": {},
+        "Links": null,
+        "Aliases": [
+          "postgres"
+        ],
+        "DriverOpts": {},
+        "GwPriority": -1,
+        "NetworkID": "5999c46a0b4723b1944bc6037798fe423018dce0dd5e653a15b7f66f979694a9",
+        "EndpointID": "",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": [
+          "postgres",
+          "0ebf31bbcd07"
+        ]
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:f4b419e350fd98d4a8429603295208976dea4c8fb8326d818d346d3e29f1db6f",
+    "size": 3439,
+    "annotations": {
+      "com.docker.official-images.bashbrew.arch": "amd64",
+      "org.opencontainers.image.base.digest": "sha256:1e1a22175fbf1b32157ddaf0219e1db4e5401fab2b94ed285add64d18587cd2d",
+      "org.opencontainers.image.base.name": "debian:trixie-slim",
+      "org.opencontainers.image.created": "2026-10-28T01:30:07Z",
+      "org.opencontainers.image.revision": "e00e1bd34ec5c8a8e7ad89b273b3d42efaf6d5bc",
+      "org.opencontainers.image.source": "https://github.com/docker-library/postgres.git#e00e1bd34ec5c8a8e7ad89b273b3d42efaf6d5bc:18/trixie",
+      "org.opencontainers.image.url": "https://hub.docker.com/_/postgres",
+      "org.opencontainers.image.version": "18.6"
+    },
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

@@ -1,0 +1,75 @@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+<div class="gb-terminal" style="height: @Height">
+    <div class="gb-terminal-bar">
+        <MudIcon Icon="@Icons.Material.Outlined.Terminal" Size="Size.Small" />
+        <span class="gb-terminal-title">@Title</span>
+        @Toolbar
+        <span class="gb-spacer"></span>
+        <MudTooltip Text="@(wrap ? "Don't wrap long lines" : "Wrap long lines")">
+            <MudIconButton Icon="@Icons.Material.Outlined.WrapText" Size="Size.Small" Color="@(wrap ? Color.Primary : Color.Default)"
+                           OnClick="() => wrap = !wrap" aria-label="Toggle line wrap" />
+        </MudTooltip>
+        <MudTooltip Text="Copy the log">
+            <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="Copy the log" />
+        </MudTooltip>
+    </div>
+    <div class="gb-terminal-body @(wrap ? "gb-terminal-body--wrap" : "")" @ref="element">
+        @if (Lines.Count == 0)
+        {
+            <div class="gb-ln gb-ln--dim"><span class="gb-ln-text">@EmptyText</span></div>
+        }
+        else
+        {
+            var start = Math.Max(0, Lines.Count - MaxRendered);
+            if (start > 0)
+            {
+                <div class="gb-ln gb-ln--dim"><span class="gb-ln-text">… @start earlier lines aren't shown (copy the log to get everything)</span></div>
+            }
+            for (var i = start; i < Lines.Count; i++)
+            {
+                var line = LogLine.Parse(Lines[i]);
+                <div class="gb-ln gb-ln--@line.Kind" @key="i">
+                    <span class="gb-ln-no">@(i + 1)</span>
+                    @if (line.Time is not null)
+                    {
+                        <span class="gb-ln-ts">@line.Time</span>
+                    }
+                    <span class="gb-ln-text">@line.Text</span>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private const int MaxRendered = 3000;
+
+    [Parameter] public IReadOnlyList<string> Lines { get; set; } = [];
+    [Parameter] public string Title { get; set; } = "Log";
+    [Parameter] public string Height { get; set; } = "60vh";
+    [Parameter] public string EmptyText { get; set; } = "No output yet.";
+    [Parameter] public RenderFragment? Toolbar { get; set; }
+
+    private ElementReference element;
+    private bool wrap = true;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (firstRender) await JS.InvokeVoidAsync("gitberth.follow", element);
+            await JS.InvokeVoidAsync("gitberth.scrollToBottom", element);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        var copied = await JS.InvokeAsync<bool>("gitberth.copy", string.Join('\n', Lines));
+        Snackbar.Add(copied ? $"Copied {Lines.Count} lines" : "Your browser blocked copying", copied ? Severity.Success : Severity.Warning);
+    }
+}

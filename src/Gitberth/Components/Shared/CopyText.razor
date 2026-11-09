@@ -1,0 +1,33 @@
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+
+@* A value to type or paste somewhere else (an address, a connection string, a command), with a button that copies it, and one that opens it when it's a link. *@
+<span class="gb-copy">
+    <code class="gb-wrap">@Text</code>
+    @if (Href is not null)
+    {
+        <MudTooltip Text="Open">
+            <MudIconButton Href="@Href" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew" Size="Size.Small" aria-label="@($"Open {Label ?? Text}")" />
+        </MudTooltip>
+    }
+    <MudTooltip Text="Copy">
+        <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="@($"Copy {Label ?? Text}")" />
+    </MudTooltip>
+</span>
+
+@code {
+    /// <summary>What's shown, which may have a password hidden.</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+    /// <summary>What's copied, when it isn't what's shown: the connection string with its password, say.</summary>
+    [Parameter] public string? Value { get; set; }
+    /// <summary>What screen readers call it, when the text itself would read badly.</summary>
+    [Parameter] public string? Label { get; set; }
+    /// <summary>Where opening it goes, for an address that's a link; null for a value that's only copied.</summary>
+    [Parameter] public string? Href { get; set; }
+
+    private async Task CopyAsync()
+    {
+        var copied = await JS.InvokeAsync<bool>("gitberth.copy", Value ?? Text);
+        Snackbar.Add(copied ? "Copied to the clipboard" : "Your browser blocked copying", copied ? Severity.Success : Severity.Warning);
+    }
+}

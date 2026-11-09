@@ -1,0 +1,8 @@
+{
+  // The page is drawn by JavaScript, so the check asks Streamlit's health endpoint, which answers "ok".
+  "kind": "Python",
+  "title": "Streamlit",
+  "port": 8501,
+  "path": "/_stcore/health",
+  "expect": "ok"
+}

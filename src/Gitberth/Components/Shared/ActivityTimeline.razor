@@ -1,0 +1,88 @@
+@* What happened to an app, newest first: a tone-tinted mark per entry joined by a line, its words, and when. *@
+<ol class="gb-tl @Class">
+    @foreach (var item in Items)
+    {
+        var (icon, tone) = Look(item);
+        <li>
+            <span class="gb-tl-mark gb-tone-@tone"><SvgIcon Icon="@icon" /></span>
+            <div style="min-width:0">
+                <div class="gb-tl-title">
+                    @if (item.Href is not null)
+                    {
+                        <a href="@item.Href">@item.Text</a>
+                    }
+                    else
+                    {
+                        @item.Text
+                    }
+                </div>
+                @if (ShowKind && item.Kind != ActivityKind.Deploy)
+                {
+                    <div class="gb-tl-sub">@KindWords(item.Kind)</div>
+                }
+                @if (Extra is not null)
+                {
+                    @Extra(item)
+                }
+            </div>
+            <span class="gb-tl-time" title="@Format.Local(item.At)">@When(item.At)</span>
+        </li>
+    }
+</ol>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ActivityItem> Items { get; set; } = [];
+    /// <summary>More under an entry: a deploy's Roll back, say.</summary>
+    [Parameter] public RenderFragment<ActivityItem>? Extra { get; set; }
+    /// <summary>A quiet line under each entry naming its kind (Deploy, Docker…): for the full list, where kinds mix.</summary>
+    [Parameter] public bool ShowKind { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>The mark's icon and tone for an entry.</summary>
+    public static (string Icon, string Tone) Look(ActivityItem item) => (item.Kind switch
+    {
+        ActivityKind.Deploy => Icons.Material.Outlined.RocketLaunch,
+        ActivityKind.Created => Icons.Material.Outlined.Add,
+        ActivityKind.Adopted => Icons.Material.Outlined.Inventory2,
+        ActivityKind.Settings or ActivityKind.Change => Icons.Material.Outlined.Tune,
+        ActivityKind.Live => Icons.Material.Outlined.Speed,
+        ActivityKind.Recreated or ActivityKind.RecreatedOutside => Icons.Material.Outlined.Sync,
+        ActivityKind.Updated or ActivityKind.UpdateFound => Icons.Material.Outlined.CloudDownload,
+        ActivityKind.RolledBack => Icons.Material.Outlined.Undo,
+        ActivityKind.Started => Icons.Material.Outlined.PlayArrow,
+        ActivityKind.Stopped => Icons.Material.Outlined.Stop,
+        ActivityKind.Restarted => Icons.Material.Outlined.RestartAlt,
+        ActivityKind.Removed => Icons.Material.Outlined.Delete,
+        _ => item.Tone == ActivityTone.Danger ? Icons.Material.Outlined.ErrorOutline : Icons.Material.Outlined.Info,
+    }, item.Tone switch
+    {
+        ActivityTone.Good => "good",
+        ActivityTone.Warning => "warn",
+        ActivityTone.Danger => "critical",
+        _ => item.Kind is ActivityKind.Deploy or ActivityKind.Created or ActivityKind.Settings or ActivityKind.Change ? "accent" : "neutral",
+    });
+
+    public static string KindWords(ActivityKind kind) => kind switch
+    {
+        ActivityKind.Deploy => "Deploy",
+        ActivityKind.Created => "Created",
+        ActivityKind.Adopted => "Adopted",
+        ActivityKind.Settings => "Settings",
+        ActivityKind.Live => "Changed live, no restart",
+        ActivityKind.Recreated => "Recreated",
+        ActivityKind.RecreatedOutside => "Recreated outside Gitberth",
+        ActivityKind.Updated => "Update",
+        ActivityKind.UpdateFound => "Update found",
+        ActivityKind.RolledBack => "Rolled back",
+        ActivityKind.Change => "Change",
+        ActivityKind.Removed => "Removed",
+        _ => "Docker",
+    };
+
+    // Today's at their time, older ones by their day.
+    private static string When(DateTime utc)
+    {
+        var local = utc.ToLocalTime();
+        return local.Date == DateTime.Now.Date ? local.ToString("HH:mm", CultureInfo.InvariantCulture) : local.ToString("d MMM", CultureInfo.InvariantCulture);
+    }
+}

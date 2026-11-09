@@ -1,0 +1,46 @@
+@* A card: a head with an icon, a title, a quiet line and actions on the right; a body; an optional foot. *@
+<section class="gb-card @(Flush ? "gb-card--flush" : null) @Class" id="@Id" aria-labelledby="@(Id is null ? null : Id + "-title")">
+    @if (Title is not null || Head is not null)
+    {
+        <div class="gb-card-head">
+            <div class="gb-card-title" id="@(Id is null ? null : Id + "-title")">
+                @if (Icon is not null)
+                {
+                    <SvgIcon Icon="@Icon" />
+                }
+                @Title
+                @if (Sub is not null)
+                {
+                    <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">@Sub</span>
+                }
+            </div>
+            @Head
+            @if (Actions is not null)
+            {
+                <div class="gb-card-actions">@Actions</div>
+            }
+        </div>
+    }
+    <div class="gb-card-body">@ChildContent</div>
+    @if (Foot is not null)
+    {
+        <div class="gb-card-foot">@Foot</div>
+    }
+</section>
+
+@code {
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string? Icon { get; set; }
+    /// <summary>A quiet line after the title: "Last hour · every 5 s".</summary>
+    [Parameter] public string? Sub { get; set; }
+    /// <summary>More in the head, after the title (a toggle, a count).</summary>
+    [Parameter] public RenderFragment? Head { get; set; }
+    /// <summary>Right side of the head: buttons, or a link to another tab ("Network ›").</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public RenderFragment? Foot { get; set; }
+    /// <summary>No padding around the body: for rows that run edge to edge.</summary>
+    [Parameter] public bool Flush { get; set; }
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

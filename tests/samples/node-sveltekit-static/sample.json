@@ -1,0 +1,6 @@
+{
+  "kind": "NodeSpa",
+  "title": "SvelteKit (static)",
+  "port": 80,
+  "expect": "Hello from SvelteKit, prerendered"
+}

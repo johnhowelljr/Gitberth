@@ -1,0 +1,6 @@
+{
+  "kind": "NodeServer",
+  "title": "Node.js server",
+  "port": 3000,
+  "expect": "Hello from TypeScript, compiled by tsc"
+}

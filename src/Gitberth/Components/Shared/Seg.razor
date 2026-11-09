@@ -1,0 +1,37 @@
+@typeparam T
+@* A segmented control: a radio group of a few choices on an inset track; the chosen one is raised (or tinted in its Access colour). *@
+<div class="gb-seg @Class" role="radiogroup" aria-label="@Label">
+    @foreach (var option in Options)
+    {
+        var on = EqualityComparer<T>.Default.Equals(option.Value, Value);
+        <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="gb-seg-btn @(on ? "on" : null) @option.Class"
+                disabled="@(Disabled || option.Disabled)" title="@option.Title" @onclick="() => PickAsync(option.Value)">
+            @if (option.Icon is not null)
+            {
+                <SvgIcon Icon="@option.Icon" />
+            }
+            @option.Text
+            @if (option.Count is int n)
+            {
+                <span class="n">@n</span>
+            }
+        </button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<SegOption<T>> Options { get; set; } = [];
+    [Parameter] public T Value { get; set; } = default!;
+    [Parameter] public EventCallback<T> ValueChanged { get; set; }
+    /// <summary>What the group is, for screen readers: "Show", "Restart policy".</summary>
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private async Task PickAsync(T value)
+    {
+        if (EqualityComparer<T>.Default.Equals(value, Value)) return;
+        Value = value;
+        await ValueChanged.InvokeAsync(value);
+    }
+}

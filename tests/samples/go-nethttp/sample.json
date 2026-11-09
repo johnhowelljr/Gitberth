@@ -1,0 +1,6 @@
+{
+  "kind": "Go",
+  "title": "Go (net/http)",
+  "port": 8080,
+  "expect": "Hello from net/http"
+}

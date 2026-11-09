@@ -1,0 +1,18 @@
+{"status":"Pulling from library/postgres","id":"18"}
+{"status":"Already exists","progressDetail":{},"id":"8a628cdd7ccc"}
+{"status":"Pulling fs layer","progressDetail":{},"id":"b2c3d4e5f6a1"}
+{"status":"Pulling fs layer","progressDetail":{},"id":"c3d4e5f6a1b2"}
+{"status":"Waiting","progressDetail":{},"id":"c3d4e5f6a1b2"}
+{"status":"Downloading","progressDetail":{"current":1048576,"total":4194304},"progress":"[============>                                      ]  1.049MB/4.194MB","id":"b2c3d4e5f6a1"}
+{"status":"Downloading","progressDetail":{"current":4194304,"total":4194304},"progress":"[==================================================>]  4.194MB/4.194MB","id":"b2c3d4e5f6a1"}
+{"status":"Verifying Checksum","progressDetail":{},"id":"b2c3d4e5f6a1"}
+{"status":"Download complete","progressDetail":{},"id":"b2c3d4e5f6a1"}
+{"status":"Downloading","progressDetail":{"current":2097152,"total":8388608},"progress":"[============>                                      ]  2.097MB/8.389MB","id":"c3d4e5f6a1b2"}
+{"status":"Extracting","progressDetail":{"current":1048576,"total":4194304},"progress":"[============>                                      ]  1.049MB/4.194MB","id":"b2c3d4e5f6a1"}
+{"status":"Pull complete","progressDetail":{},"id":"b2c3d4e5f6a1"}
+{"status":"Downloading","progressDetail":{"current":8388608,"total":8388608},"progress":"[==================================================>]  8.389MB/8.389MB","id":"c3d4e5f6a1b2"}
+{"status":"Download complete","progressDetail":{},"id":"c3d4e5f6a1b2"}
+{"status":"Extracting","progressDetail":{"current":8388608,"total":8388608},"progress":"[==================================================>]  8.389MB/8.389MB","id":"c3d4e5f6a1b2"}
+{"status":"Pull complete","progressDetail":{},"id":"c3d4e5f6a1b2"}
+{"status":"Digest: sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"}
+{"status":"Status: Downloaded newer image for postgres:18"}

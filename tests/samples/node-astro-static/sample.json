@@ -1,0 +1,6 @@
+{
+  "kind": "NodeSpa",
+  "title": "Astro (static)",
+  "port": 80,
+  "expect": "Hello from Astro"
+}

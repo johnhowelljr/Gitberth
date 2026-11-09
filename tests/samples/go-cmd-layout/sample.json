@@ -1,0 +1,6 @@
+{
+  "kind": "Go",
+  "title": "Go (net/http)",
+  "port": 8080,
+  "expect": "Hello from a Go app in cmd/server, with its template read at run time"
+}

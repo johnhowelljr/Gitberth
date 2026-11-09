@@ -1,0 +1,220 @@
+{
+  "Id": "b9a6f8ee255aa5cc34a1708c6acd1637d507c539ff9aacda0e4927af2c6e405a",
+  "Created": "2026-10-30T18:38:01.536372496Z",
+  "Path": "cloudflared",
+  "Args": [
+    "tunnel",
+    "--no-autoupdate",
+    "run",
+    "--token",
+    "REDACTED"
+  ],
+  "State": {
+    "Status": "running",
+    "Running": true,
+    "Paused": false,
+    "Restarting": false,
+    "OOMKilled": false,
+    "Dead": false,
+    "Pid": 17490,
+    "ExitCode": 0,
+    "Error": "",
+    "StartedAt": "2026-10-30T18:38:01.589327106Z",
+    "FinishedAt": "0001-01-01T00:00:00Z"
+  },
+  "Image": "sha256:4955524aeaa379e154023d5a027c250f7b35041a2e7e950cf13f144bc9b9c5ba",
+  "ResolvConfPath": "/var/lib/docker/containers/b9a6f8ee255aa5cc34a1708c6acd1637d507c539ff9aacda0e4927af2c6e405a/resolv.conf",
+  "HostnamePath": "/var/lib/docker/containers/b9a6f8ee255aa5cc34a1708c6acd1637d507c539ff9aacda0e4927af2c6e405a/hostname",
+  "HostsPath": "/var/lib/docker/containers/b9a6f8ee255aa5cc34a1708c6acd1637d507c539ff9aacda0e4927af2c6e405a/hosts",
+  "LogPath": "",
+  "Name": "/cloudflare-tunnel",
+  "RestartCount": 0,
+  "Driver": "overlayfs",
+  "Platform": "linux",
+  "MountLabel": "",
+  "ProcessLabel": "",
+  "AppArmorProfile": "",
+  "ExecIDs": null,
+  "HostConfig": {
+    "Binds": null,
+    "ContainerIDFile": "",
+    "LogConfig": {
+      "Type": "journald",
+      "Config": {}
+    },
+    "NetworkMode": "host",
+    "PortBindings": {},
+    "RestartPolicy": {
+      "Name": "always",
+      "MaximumRetryCount": 0
+    },
+    "AutoRemove": false,
+    "VolumeDriver": "",
+    "VolumesFrom": null,
+    "ConsoleSize": [
+      65,
+      205
+    ],
+    "CapAdd": null,
+    "CapDrop": null,
+    "CgroupnsMode": "private",
+    "Dns": null,
+    "DnsOptions": [],
+    "DnsSearch": [],
+    "ExtraHosts": null,
+    "GroupAdd": null,
+    "IpcMode": "private",
+    "Cgroup": "",
+    "Links": null,
+    "OomScoreAdj": 0,
+    "PidMode": "",
+    "Privileged": false,
+    "PublishAllPorts": false,
+    "ReadonlyRootfs": false,
+    "SecurityOpt": null,
+    "UTSMode": "",
+    "UsernsMode": "",
+    "ShmSize": 67108864,
+    "Runtime": "runc",
+    "Isolation": "",
+    "CpuShares": 0,
+    "Memory": 0,
+    "NanoCpus": 0,
+    "CgroupParent": "",
+    "BlkioWeight": 0,
+    "BlkioWeightDevice": [],
+    "BlkioDeviceReadBps": [],
+    "BlkioDeviceWriteBps": [],
+    "BlkioDeviceReadIOps": [],
+    "BlkioDeviceWriteIOps": [],
+    "CpuPeriod": 0,
+    "CpuQuota": 0,
+    "CpuRealtimePeriod": 0,
+    "CpuRealtimeRuntime": 0,
+    "CpusetCpus": "",
+    "CpusetMems": "",
+    "Devices": [],
+    "DeviceCgroupRules": null,
+    "DeviceRequests": null,
+    "MemoryReservation": 0,
+    "MemorySwap": 0,
+    "MemorySwappiness": null,
+    "OomKillDisable": null,
+    "PidsLimit": null,
+    "Ulimits": null,
+    "CpuCount": 0,
+    "CpuPercent": 0,
+    "IOMaximumIOps": 0,
+    "IOMaximumBandwidth": 0,
+    "MaskedPaths": [
+      "/proc/acpi",
+      "/proc/asound",
+      "/proc/interrupts",
+      "/proc/kcore",
+      "/proc/keys",
+      "/proc/latency_stats",
+      "/proc/sched_debug",
+      "/proc/scsi",
+      "/proc/timer_list",
+      "/proc/timer_stats",
+      "/sys/devices/virtual/powercap",
+      "/sys/firmware",
+      "/sys/devices/system/cpu/cpu0/thermal_throttle",
+      "/sys/devices/system/cpu/cpu1/thermal_throttle",
+      "/sys/devices/system/cpu/cpu2/thermal_throttle",
+      "/sys/devices/system/cpu/cpu3/thermal_throttle",
+      "/sys/devices/system/cpu/cpu4/thermal_throttle",
+      "/sys/devices/system/cpu/cpu5/thermal_throttle",
+      "/sys/devices/system/cpu/cpu6/thermal_throttle",
+      "/sys/devices/system/cpu/cpu7/thermal_throttle"
+    ],
+    "ReadonlyPaths": [
+      "/proc/bus",
+      "/proc/fs",
+      "/proc/irq",
+      "/proc/sys",
+      "/proc/sysrq-trigger"
+    ]
+  },
+  "Storage": {
+    "RootFS": {
+      "Snapshot": {
+        "Name": "overlayfs"
+      }
+    }
+  },
+  "Mounts": [],
+  "Config": {
+    "Hostname": "docker",
+    "Domainname": "",
+    "User": "65532:65532",
+    "AttachStdin": false,
+    "AttachStdout": false,
+    "AttachStderr": false,
+    "Tty": false,
+    "OpenStdin": false,
+    "StdinOnce": false,
+    "Env": [
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+      "NO_AUTOUPDATE=true"
+    ],
+    "Cmd": [
+      "tunnel",
+      "--no-autoupdate",
+      "run",
+      "--token",
+      "REDACTED"
+    ],
+    "Image": "cloudflare/cloudflared:latest",
+    "Volumes": null,
+    "WorkingDir": "/home/nonroot",
+    "Entrypoint": [
+      "cloudflared"
+    ],
+    "Labels": {
+      "CI_BUILD_DATE": "2026-10-30 17:18:24.520034",
+      "CI_DOCKER_FROM": "gcr.io/distroless/base-debian13:nonroot-amd64@sha256:91475ae1743239ff0810c39688162aaf4bb0b7a12f126b893e8cbc07ace242ee",
+      "CI_DOCKER_VERSION": "{\"Platform\": {\"Name\": \"Docker Engine - Community\"}, \"Version\": \"29.5.3\", \"ApiVersion\": \"1.54\", \"MinAPIVersion\": \"1.40\", \"Os\": \"linux\", \"Arch\": \"amd64\", \"Components\": [{\"Name\": \"Engine\", \"Version\": \"29.5.3\", \"Details\": {\"ApiVersion\": \"1.54\", \"Arch\": \"amd64\", \"BuildTime\": \"2026-06-03T18:00:10.000000000+00:00\", \"Experimental\": \"false\", \"GitCommit\": \"285b471\", \"GoVersion\": \"go1.26.4\", \"KernelVersion\": \"6.18.57-cloudflare-2026.10.12\", \"MinAPIVersion\": \"1.40\", \"Module\": \"github.com/moby/moby/v2\", \"ModuleVersion\": \"v2.0.0+unknown\", \"Os\": \"linux\"}}, {\"Name\": \"containerd\", \"Version\": \"v2.4.2\", \"Details\": {\"GitCommit\": \"b7a25261e029d68978bbf290df0a62fc819b3c51\"}}, {\"Name\": \"runc\", \"Version\": \"1.5.2\", \"Details\": {\"GitCommit\": \"v1.5.2-0-g29dd3dc2\"}}, {\"Name\": \"docker-init\", \"Version\": \"0.19.0\", \"Details\": {\"GitCommit\": \"de40ad0\"}}], \"GitCommit\": \"285b471\", \"GoVersion\": \"go1.26.4\", \"KernelVersion\": \"6.18.57-cloudflare-2026.10.12\", \"BuildTime\": \"2026-06-03T18:00:10.000000000+00:00\"}",
+      "CI_GIT_COMMIT": "872b241f94871665c1c157adefcf90c11f0ead96",
+      "CI_GIT_REMOTE": "https://gitlab.cfdata.org/cloudflare/tun/cloudflared.git",
+      "CI_TEAMCITY_BUILDCONF": "",
+      "CI_TEAMCITY_BUILD_NUMBER": "",
+      "IMAGE_TYPE": "distroless",
+      "org.opencontainers.image.source": "https://github.com/cloudflare/cloudflared"
+    }
+  },
+  "NetworkSettings": {
+    "SandboxID": "733082dde31d6b0ad71901b374d1cc207855b8cb8a6a036674fd12723eb96b5c",
+    "SandboxKey": "/var/run/docker/netns/default",
+    "Ports": {},
+    "Networks": {
+      "host": {
+        "IPAMConfig": null,
+        "Links": null,
+        "Aliases": null,
+        "DriverOpts": null,
+        "GwPriority": 0,
+        "NetworkID": "472387872afa0351b2f6ff25cdb1c49aa44516116e5d6d96f4d2332b375f037c",
+        "EndpointID": "aa7b86a4afb25b5bf3501fedccb0f13b94075914be0e86e001466809a77b8fbf",
+        "Gateway": "",
+        "IPAddress": "",
+        "MacAddress": "",
+        "IPPrefixLen": 0,
+        "IPv6Gateway": "",
+        "GlobalIPv6Address": "",
+        "GlobalIPv6PrefixLen": 0,
+        "DNSNames": null
+      }
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+    "digest": "sha256:32f933aa6fe1f69c5885b93f3c92cc3f60cca8f0530868bc3bc2cc446114a385",
+    "size": 3829,
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+}

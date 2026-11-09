@@ -1,0 +1,6 @@
+{
+  "kind": "NodeSpa",
+  "title": "Vite + Vue",
+  "port": 80,
+  "expect": "Hello from Vite + Vue"
+}

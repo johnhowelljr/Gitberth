@@ -1,0 +1,1149 @@
+@page "/apps/{Key}"
+@page "/apps/{Key}/{Tab}"
+@implements IDisposable
+@inject AppCatalog Catalog
+@inject AppSettingsService SettingsService
+@inject AppActions Actions
+@inject ContainerService Containers
+@inject AddressBook Book
+@inject ContainerStatsCollector Stats
+@inject RestartSchedules Restarts
+@inject PortChanger Changer
+@inject UpdateService Updates
+@inject ImageService Images
+@inject NetworkService Networks
+@inject DomainService DomainService
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@if (view is null)
+{
+    @if (notFound)
+    {
+        <PageTitle>Apps · Gitberth</PageTitle>
+        <div class="gb-card">
+            @* An old link (/apps/5) named a Git app by its number: say so, rather than look for an app called 5. *@
+            @{ var oldNumber = Key.Length > 0 && Key.All(char.IsAsciiDigit); }
+            <EmptyState Icon="@Icons.Material.Outlined.SearchOff" Title="@(oldNumber ? $"No app has the number {Key} any more" : $"There's no app called {Key}")">
+                <ChildContent>@(oldNumber ? "Links that named an app by its number come from an older Gitberth. That app has been deleted, so this link leads nowhere now."
+                    : "No container on this host has that name, and Gitberth has no app by it. It may have been removed or renamed.")</ChildContent>
+                <Actions><Btn Href="apps" Icon="@Icons.Material.Outlined.GridView">All apps</Btn></Actions>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="gb-skel" style="height:200px;border-radius:16px;margin-bottom:18px"></div>
+        <div class="gb-skel" style="height:42px;margin-bottom:22px"></div>
+        <div class="gb-skel" style="height:320px;border-radius:12px"></div>
+    }
+}
+else
+{
+    var app = view.Summary;
+    var logo = LogoCatalog.Resolve(app.Image, app.Container, view.Row?.DetectedKind, app.Role == ContainerRole.Self);
+    <PageTitle>@app.Title · Gitberth</PageTitle>
+
+    <nav class="gb-crumbs" aria-label="Breadcrumb">
+        <a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+        @if (familyPrefix is { } prefix)
+        {
+            <a href="@($"apps?q={Uri.EscapeDataString(prefix + "-")}")">@prefix-*</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+        }
+        <span>@app.Title</span>
+    </nav>
+
+    <AppHero Title="@app.Title" Color="@logo.Color">
+        <Logo><AppLogo Image="@app.Image" Name="@app.Container" Size="60" Kind="@view.Row?.DetectedKind" Self="@(app.Role == ContainerRole.Self)" Dim="@(!app.Running)" /></Logo>
+        <Status>
+            <StatusLabel State="app.State" Text="@app.StateText" Hero="true" Since="@(app.Running ? (view.Details?.StartedAt ?? app.StartedAt) : null)"
+                         Detail="@(app.Running ? null : StoppedFor)" />
+            @if (app.System)
+            {
+                <span class="gb-tag gb-tag--outline">System</span>
+            }
+        </Status>
+        <SourceLine>@HeroMeta(app)</SourceLine>
+        <Addresses>@HeroAddresses(app)</Addresses>
+        <Actions>@HeroActions(app)</Actions>
+        <Stats>@HeroStats(app)</Stats>
+    </AppHero>
+
+    @Banners(app)
+
+    <TabBar Tabs="TabItems" Active="@ActiveTab" Label="@($"{app.Title}'s pages")" />
+
+    @switch (ActiveTab)
+    {
+        case "environment":
+            <AppEnvironmentTab View="view" Settings="settings" Draft="draft" LoadError="@settingsError" Changed="DraftChanged" />
+            @ApplySection()
+            break;
+        case "network":
+            <NetworkTab App="view" Changed="ReloadAsync" />
+            break;
+        case "settings":
+            <AppSettingsTab View="view" Settings="settings" Draft="draft" Options="options" Git="git" LoadError="@settingsError"
+                            Changed="DraftChanged" OnRemove="RemoveAsync" />
+            @ApplySection()
+            break;
+        case "logs":
+            <ContainerLogs @key="app.Container" ContainerName="@app.Container" />
+            break;
+        case "activity":
+            <AppActivityTab View="view" Changed="ReloadAsync" />
+            break;
+        default:
+            <AppOverviewTab View="view" Health="Health" Settings="settings" OnConnect="ConnectAsync" HostMemory="@Stats.Current.Host?.MemoryBytes"
+                            Update="update" Checking="checking" Busy="busy" OnCheck="() => CheckUpdateAsync(quiet: true)" OnRollBack="RollBackAsync" />
+            break;
+    }
+}
+
+@code {
+    private static readonly string[] TabKeys = ["overview", "environment", "network", "settings", "logs", "activity"];
+
+    [Parameter] public string Key { get; set; } = "";
+    [Parameter] public string? Tab { get; set; }
+
+    private AppView? view;
+    private SettingsView? settings;
+    private string? settingsError;
+    // The form's copies, kept across tabs and refreshes until they're applied or discarded.
+    private ContainerSettingsDraft? draft;
+    private AppOptionsDraft? options;
+    private GitOptionsDraft? git;
+    private SettingsPlan? plan;
+    private string? planFor;
+    private bool notFound, busy, planning;
+    private string lanHost = "";
+    private string? loadedKey;
+    private string? whyNotStart;
+    // A Git app whose container is gone: its last image, and whether that's still on this host (Start makes the container
+    // again from it, or builds it again). Checked once each time the container goes, not on every refresh.
+    private (string? Image, bool There)? lastImage;
+    // The app's family in the Apps list (sample of sample-node-express), for the breadcrumb; null when it stands alone.
+    private string? familyPrefix;
+    private Timer? timer;
+    private int refreshing;
+    private string shownKey = "";
+    private CancellationTokenSource? planDelay;
+    // Its update status (the Updates card, the header's Update and Roll back), and what it was read for.
+    private UpdateStatus? update;
+    private string? updateFor;
+    private bool checking, disposed;
+
+    private string ActiveTab => Tab switch
+    {
+        "env" => "environment",
+        "deployments" => "activity",
+        { } t when TabKeys.Contains(t) => t,
+        _ => "overview",
+    };
+
+    private string BaseHref => "apps/" + Uri.EscapeDataString(view?.Summary.Key ?? Key);
+
+    private int EnvChanges => draft?.ChangedFields().Contains(SettingField.Env) == true ? Math.Max(1, draft.Env.Count(r => r.IsNew ? r.Key.Trim().Length > 0 : r.Changed)) : 0;
+
+    private int SettingsChanges => (draft?.ChangedFields().Count(f => f != SettingField.Env) ?? 0) + (options?.Changed().Count ?? 0) + (git?.Dirty == true ? 1 : 0);
+
+    private int Changes => SettingsChanges + (draft?.ChangedFields().Contains(SettingField.Env) == true ? 1 : 0);
+
+    private IReadOnlyList<TabItem> TabItems =>
+    [
+        new("overview", "Overview", Icons.Material.Outlined.GridView, BaseHref),
+        new("environment", "Environment", Icons.Material.Outlined.Key, $"{BaseHref}/environment", EnvChanges, Short: "Env"),
+        new("network", "Network", Icons.Material.Outlined.Lan, $"{BaseHref}/network"),
+        new("settings", "Settings", Icons.Material.Outlined.Tune, $"{BaseHref}/settings", SettingsChanges),
+        new("logs", "Logs", Icons.Material.Outlined.Article, $"{BaseHref}/logs"),
+        new("activity", "Activity", Icons.Material.Outlined.History, $"{BaseHref}/activity"),
+    ];
+
+    private ContainerHealth? Health => view is null ? null : Stats.Current.Containers.FirstOrDefault(c => c.Name == view.Summary.Container);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Old links: /apps/5 (a Git app's id) goes to /apps/gb-kanban, and the old tab names to the new ones.
+        if (Key.Length > 0 && Key.All(char.IsAsciiDigit) && int.TryParse(Key, out var id) && await Catalog.KeyForIdAsync(id) is { } byId)
+        {
+            Nav.NavigateTo($"apps/{Uri.EscapeDataString(byId)}{(Tab is null ? "" : "/" + MapTab(Tab))}", replace: true);
+            return;
+        }
+        if (Tab is "env" or "deployments")
+        {
+            Nav.NavigateTo($"apps/{Uri.EscapeDataString(Key)}/{MapTab(Tab)}", replace: true);
+            return;
+        }
+        if (loadedKey != Key)
+        {
+            loadedKey = Key;
+            (view, settings, draft, options, git, plan, notFound, settingsError) = (null, null, null, null, null, null, false, null);
+            (update, updateFor) = (null, null);
+            try { lanHost = await Book.LanHostAsync(Nav.BaseUri); }
+            catch (Exception) { lanHost = new Uri(Nav.BaseUri).Host; }
+            await LoadAsync();
+            await LoadFamilyAsync();
+            timer?.Dispose();
+            timer = new Timer(_ =>
+            {
+                if (Interlocked.Exchange(ref refreshing, 1) == 1) return;
+                _ = InvokeAsync(async () =>
+                {
+                    try
+                    {
+                        await LoadAsync();
+                        if (ViewKey() != shownKey) StateHasChanged();
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref refreshing, 0);
+                    }
+                });
+            }, null, 5000, 5000);
+        }
+        if (ActiveTab is "settings" or "environment" or "overview" && settings is null) await LoadSettingsAsync();
+    }
+
+    private async Task LoadFamilyAsync()
+    {
+        familyPrefix = null;
+        if (view is null || AppGrouping.PrefixOf(view.Summary.Container) is not { } prefix || prefix == "gb") return;
+        try
+        {
+            var list = await Catalog.ListAsync(lanHost);
+            if (list.Apps.Count(a => AppGrouping.PrefixOf(a.Container) == prefix) >= AppGrouping.MinPrefixGroup) familyPrefix = prefix;
+        }
+        catch (Exception) { /* the breadcrumb goes straight to Apps */ }
+    }
+
+    private static string MapTab(string tab) => tab switch { "env" => "environment", "deployments" => "activity", _ => tab };
+
+    protected override void OnAfterRender(bool firstRender) => shownKey = ViewKey();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var next = await Catalog.GetAsync(Key, lanHost);
+            notFound = next is null;
+            view = next;
+            whyNotStart = next is { Summary.Running: false } ? await Changer.WhyNotStartAsync(next.Summary.Container) : null;
+            if (next is { Summary: { State: AppState.Missing, Source: AppSource.Git }, Row: { } row })
+            {
+                if (lastImage?.Image != row.CurrentImage || lastImage is null) lastImage = (row.CurrentImage, await Actions.HasLastImageAsync(row));
+            }
+            else lastImage = null;
+            // The container was recreated outside the form (or by its own apply): an unedited form follows it.
+            if (next is not null && settings is not null && settings.ContainerId != next.Summary.ContainerId && !Dirty) await LoadSettingsAsync();
+            await LoadUpdateAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    /// <summary>
+    /// The update status, read again (from the last checks: no registry is asked) when what it depends on changed: the
+    /// container (an update or rollback recreated it, here or by itself), the image it keeps for Roll back, its policy, or
+    /// its badge (a check made anywhere). With <paramref name="force"/>, whatever changed.
+    /// </summary>
+    private async Task LoadUpdateAsync(bool force = false)
+    {
+        if (view is not { } v || v.Summary.Source == AppSource.Git || v.Summary.Role == ContainerRole.Self)
+        {
+            (update, updateFor) = (null, null);
+            return;
+        }
+        // A local image's badge is worked out afresh each time it's shown (its CheckedAt is always now): its words say what changed.
+        var key = string.Join('|', v.Summary.Key, v.Summary.ContainerId, v.Summary.Image, v.Row?.PreviousImage, v.Row?.UpdatePolicy, v.Summary.Update?.Available,
+            v.Summary.Update?.Text, v.Summary.Origin == ImageOrigin.Local ? null : v.Summary.Update?.CheckedAt?.Ticks);
+        if (!force && key == updateFor) return;
+        updateFor = key;
+        try { update = await Updates.StatusAsync(v.Summary.Key); }
+        catch (Exception) { update = null; }
+    }
+
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            settings = await SettingsService.LoadAsync(Key);
+            settingsError = settings is null ? "Gitberth couldn't read its settings." : null;
+            if (settings is not null && !Dirty)
+            {
+                draft = ContainerSettingsDraft.From(settings.Container, settings.Options.SecretKeys);
+                options = AppOptionsDraft.From(settings.Options);
+                git = settings.Git is { } g ? GitOptionsDraft.From(g) : null;
+                plan = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            settingsError = ex.Message;
+        }
+    }
+
+    private bool Dirty => draft?.Dirty == true || options?.Dirty == true || git?.Dirty == true;
+
+    // The container changed under the form: applying would ask for a change against settings that aren't there any more.
+    private bool Stale => Dirty && settings is not null && view is not null && settings.ContainerId != view.Summary.ContainerId;
+
+    private string ViewKey() => view is null ? $"none:{notFound}" : string.Join('|', DateTime.UtcNow.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture),
+        view.Summary, string.Join(',', view.Summary.Chips.Select(c => c.Label)), view.Details?.Status, view.Details?.RestartCount, view.Details?.Health,
+        view.LatestChange?.Id, view.LatestChange?.Outcome, view.LatestChange?.Notice, view.Row?.ConfigChangePending, view.Row?.RebuildPending,
+        string.Join(',', (view.AppAddresses?.Addresses ?? view.Addresses?.Addresses ?? []).Select(a => $"{a.Kind}{a.Text}{a.Live}")),
+        view.Git?.Deployments.FirstOrDefault()?.Status, whyNotStart, Health?.Recent.Count, Health?.Recent.LastOrDefault().Cpu.ToString("0.0", CultureInfo.InvariantCulture),
+        Stale, plan?.Consequence, update?.Available, update?.Text, update?.Previous, update?.CheckedAt, lastImage?.There);
+
+    private async Task ReloadAsync()
+    {
+        await LoadAsync();
+        if (!Dirty) await LoadSettingsAsync();
+        StateHasChanged();
+    }
+
+    // ---- The hero ----
+
+    private string? StoppedFor => view?.Details is { Running: false, FinishedAt: { } at } && at.Year > 2000 ? Format.Ago(at) : null;
+
+    private IReadOnlyList<Address> Addresses => view?.AppAddresses?.Addresses ?? view?.Addresses?.Addresses ?? [];
+
+    private string? PrimaryHref => view?.AppAddresses is { } a ? AddressBook.Primary(a)
+        : Addresses.FirstOrDefault(x => x.Href is not null && x.Live && x.Kind != AddressKind.HostOnly)?.Href;
+
+    private bool IsDatabase => view is not null && (view.Summary.Role == ContainerRole.Database || ConnectionDetails.EngineOf(view.Summary.Image) is not null);
+
+    private RenderFragment HeroMeta(AppSummary app) => @<text>
+        <SourceBadge Source="app.Source" Large="true" Href="@(view?.Row is { } row && app.Source == AppSource.Git ? row.RepoWebUrl : null)" />
+        @if (app.Source == AppSource.Git && view?.Row is { } r)
+        {
+            <span class="gb-mono">@r.RepoFullName</span>
+            <span><SvgIcon Icon="@Icons.Material.Outlined.CallSplit" />@r.Branch</span>
+            @if (r.Subdirectory is { } sub)
+            {
+                <span><SvgIcon Icon="@Icons.Material.Outlined.Folder" /><span class="gb-mono">@sub/</span></span>
+            }
+            @if (r.CurrentCommit is { Length: >= 7 } sha)
+            {
+                <span title="@LastCommitMessage"><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@sha[..7]</span>
+                    @if (LastCommitMessage is { } message)
+                    {
+                        <span class="gb-ellipsis" style="max-width:340px">@message</span>
+                    }
+                </span>
+            }
+        }
+        else
+        {
+            <span class="gb-mono gb-ellipsis" style="max-width:420px" title="@(app.TagMoved ? AppOverviewTab.TagMovedNote(app.Image) : app.Image)">@app.Image</span>
+            <span>@OriginText(app)</span>
+            @if (view?.Details is { } d && d.ImageId.Length > 0)
+            {
+                <span title="@d.ImageId"><SvgIcon Icon="@Icons.Material.Outlined.Layers" /><span class="gb-mono">@ShortId(d.ImageId)</span></span>
+            }
+        }
+        @if (app.Title != app.Container)
+        {
+            <span title="The container's name"><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" /><span class="gb-mono">@app.Container</span></span>
+        }
+        @if (view?.Details?.Labels.GetValueOrDefault("com.docker.compose.project") is { } project)
+        {
+            <span class="gb-tag gb-tag--outline"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @project</span>
+        }
+    </text>;
+
+    private static string OriginText(AppSummary app) => app.Origin switch
+    {
+        ImageOrigin.Registry => app.Image.Contains('/') && app.Image.Split('/')[0].Contains('.') ? "from its registry" : "from Docker Hub",
+        ImageOrigin.Local => "local image",
+        ImageOrigin.Pinned => "pinned to one image",
+        _ => "built by Gitberth",
+    };
+
+    private static bool BuiltHere(AppSummary app) => AppOverviewTab.BuiltHere(app);
+
+    private string? LastCommitMessage => view?.Git?.Deployments.FirstOrDefault(d => d.Status == DeployStatus.Succeeded)?.CommitMessage;
+
+    private RenderFragment HeroAddresses(AppSummary app)
+    {
+        var addresses = Addresses;
+        var domains = addresses.Where(a => a.Kind == AddressKind.Domain).ToList();
+        var web = view?.AppAddresses?.WebPort;
+        var lan = addresses.Where(a => a.Kind == AddressKind.Lan).OrderBy(a => a.ContainerPort == web ? 0 : 1).FirstOrDefault();
+        var own = addresses.FirstOrDefault(a => a.Kind == AddressKind.OwnLan);
+        var host = addresses.FirstOrDefault(a => a.Kind == AddressKind.HostOnly);
+        var inside = addresses.Where(a => a.Kind == AddressKind.Internal).OrderBy(a => a.ContainerPort == web ? 0 : 1).FirstOrDefault();
+        return @<text>
+            @if (domains.FirstOrDefault() is { } main)
+            {
+                <span>
+                    <AddressValue Text="@AppFacts.Shown(main.Text)" Href="@main.Href" Big="true" Live="main.Live" />
+                    @if (domains.Count > 1)
+                    {
+                        <span class="gb-tag gb-tag--outline">+@(domains.Count - 1) @(domains.Count == 2 ? "domain" : "domains")</span>
+                    }
+                </span>
+            }
+            @if (lan is not null)
+            {
+                <span><AddressValue Key="LAN" Text="@AppFacts.Shown(lan.Text)" Href="@lan.Href" Copy="@lan.Copy" ShowCopy="true" Big="@(domains.Count == 0)" Live="lan.Live" /></span>
+            }
+            else if (view?.Addresses?.HostNetwork == true)
+            {
+                <span><span class="gb-addrv-k">Network</span><span class="gb-t2" style="font-size:13px">the host's own, on any port it opens</span></span>
+            }
+            else if (app.Chips.Count > 0 && host is null && app.Role != ContainerRole.Self)
+            {
+                <span>
+                    <span class="gb-addrv-k">LAN</span><span class="gb-t3" style="font-size:13px">Not published</span>
+                    <Btn Size="BtnSize.Sm" Href="@($"{BaseHref}/network")" Icon="@Icons.Material.Outlined.Lan">Publish on LAN</Btn>
+                </span>
+            }
+            @if (own is not null)
+            {
+                <span><AddressValue Key="Own" Text="@AppFacts.Shown(own.Text)" Href="@own.Href" Copy="@own.Copy" Live="own.Live" /></span>
+            }
+            @if (host is not null)
+            {
+                <span><AddressValue Key="Host" Text="@host.Text" Copy="@host.Copy" Live="host.Live" /></span>
+            }
+            @if (inside is not null)
+            {
+                <span><AddressValue Key="Internal" Text="@AppFacts.Shown(inside.Text)" Copy="@inside.Copy" Live="inside.Live" /></span>
+            }
+        </text>;
+    }
+
+    private RenderFragment HeroActions(AppSummary app) => @<text>
+        @if (PrimaryHref is { } open && app.Running)
+        {
+            <Btn Kind="BtnKind.Primary" Href="@open" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew">Open</Btn>
+        }
+        else if (IsDatabase && app.Running)
+        {
+            <Btn Kind="BtnKind.Primary" OnClick="ConnectAsync" Icon="@Icons.Material.Outlined.Link">Connect</Btn>
+        }
+        else
+        {
+            <Btn Kind="BtnKind.Primary" Href="@($"{BaseHref}/logs")" Icon="@Icons.Material.Outlined.Article">Logs</Btn>
+        }
+        @if (app.Source == AppSource.Git && view?.Row is not null)
+        {
+            <Btn Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="DeployAsync" Busy="busy" Disabled="@(app.State == AppState.Deploying)">Deploy</Btn>
+        }
+        else if (update?.Available ?? app.Update?.Available == true)
+        {
+            <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="UpdateAsync" Busy="busy">Update</Btn>
+        }
+        else if (app.Origin is ImageOrigin.Registry or ImageOrigin.Local && app.Role != ContainerRole.Self && !BuiltHere(app))
+        {
+            <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()" Busy="@(busy || checking)">Check for update</Btn>
+        }
+        @if (app.Running)
+        {
+            <Btn IconOnly="true" Icon="@Icons.Material.Outlined.RestartAlt" Label="@($"Restart {app.Title}")" Title="Restart" OnClick="() => RunAsync(ContainerAction.Restart)" Disabled="busy" />
+            @if (app.Role != ContainerRole.Self)
+            {
+                <Btn IconOnly="true" Icon="@Icons.Material.Outlined.Stop" Label="@($"Stop {app.Title}")" Title="Stop" OnClick="() => RunAsync(ContainerAction.Stop)" Disabled="busy" />
+            }
+        }
+        else if (app.State is not (AppState.Deploying or AppState.Changing or AppState.NeedsDecision) && app.State != AppState.Renamed)
+        {
+            <Btn IconOnly="true" Icon="@Icons.Material.Outlined.PlayArrow" Label="@($"Start {app.Title}")" Title="Start" OnClick="() => RunAsync(ContainerAction.Start)" Disabled="busy" Class="gb-btn--good" />
+        }
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="More actions">
+            <ActivatorContent>
+                <button type="button" class="gb-btn gb-btn--icon" aria-label="More actions" title="More" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem Icon="@(app.Pinned ? Icons.Material.Outlined.PushPin : Icons.Material.Outlined.PushPin)" OnClick="TogglePinAsync">@(app.Pinned ? "Unpin from the menu" : "Pin to the menu")</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Href="@($"{BaseHref}/settings#sec-general")">Rename…</MudMenuItem>
+                @if (app.Source != AppSource.Git && app.Role != ContainerRole.Self)
+                {
+                    <MudMenuItem Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()">@(BuiltHere(app) ? "Check for a newer build" : "Check for update")</MudMenuItem>
+                    @if (update?.Previous is { } previous)
+                    {
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Undo" OnClick="RollBackAsync" Disabled="busy">Roll back to @previous</MudMenuItem>
+                    }
+                }
+                <MudMenuItem Icon="@Icons.Material.Outlined.MonitorHeart" Href="@($"health#hc-title-{app.Container}")">On the Health page</MudMenuItem>
+                @if (CanForget)
+                {
+                    <MudDivider />
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="ForgetAsync">Forget…</MudMenuItem>
+                }
+                else if (app.Role != ContainerRole.Self)
+                {
+                    <MudDivider />
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="RemoveAsync">Remove…</MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+    </text>;
+
+    private RenderFragment HeroStats(AppSummary app)
+    {
+        var d = view?.Details;
+        var cpu = Health?.Recent.Select(p => p.Cpu).ToList() ?? [];
+        var schedule = Restarts.For(app.Container);
+        var lastDeploy = view?.Git?.Deployments.FirstOrDefault();
+        return @<text>
+            <HeroStat Label="Uptime" Small="@(app.Running && d?.StartedAt is { } s ? $"since {AppFacts.When(s)}" : null)">
+                @(app.Running && (d?.StartedAt ?? app.StartedAt) is { } started ? AppStatus.Long(DateTime.UtcNow - started)[4..] : "Not running")
+            </HeroStat>
+            <HeroStat Label="CPU" Title="100% is one core">
+                <Sparkline Values="cpu" Width="64" Height="16" />
+                @(app.CpuPercent is double c ? AppFacts.Percent(c) : "–")
+            </HeroStat>
+            <HeroStat Label="Memory" Small="@(d is { MemoryLimit: > 0 } ? $"of {AppFacts.Bytes(d.MemoryLimit)}" : "no limit")">
+                @(app.MemoryBytes is ulong m ? AppFacts.Bytes(m) : "–")
+            </HeroStat>
+            @if (lastDeploy is not null)
+            {
+                <HeroStat Label="Last deploy" Small="@($"{Format.Ago(lastDeploy.QueuedAt)} · {Format.Trigger(lastDeploy.Trigger).ToLowerInvariant()}")">
+                    <a href="@($"apps/{lastDeploy.AppId}/deployments/{lastDeploy.Id}")" style="color:inherit">#@lastDeploy.Id</a>
+                </HeroStat>
+            }
+            else
+            {
+                <HeroStat Label="Restart policy">@AppFacts.RestartWords(d?.RestartPolicy ?? settings?.Container.Restart.Name)</HeroStat>
+            }
+            <HeroStat Label="Scheduled restart" Small="@(schedule is null ? null : "counted from its start")">@(schedule is { } every ? $"Every {Every(every)}" : "Off")</HeroStat>
+            @if (d?.Health is { } health)
+            {
+                <HeroStat Label="Health check" Small="@HealthCommand">@(char.ToUpperInvariant(health[0]) + health[1..])</HeroStat>
+            }
+            else
+            {
+                <HeroStat Label="Restarts" Small="by Docker">@(d?.RestartCount.ToString(CultureInfo.InvariantCulture) ?? "–")</HeroStat>
+            }
+        </text>;
+    }
+
+    private string? HealthCommand => settings?.Container.Health.Test is { Count: > 1 } test ? ContainerSettingsDraft.HealthText(Security.Masking.Args(test)) : null;
+
+
+    private static string Every(RestartInterval every) => every.Unit switch
+    {
+        RestartUnit.Minutes => $"{every.Amount} min",
+        RestartUnit.Hours => $"{every.Amount} h",
+        _ => every.Amount == 1 ? "day" : $"{every.Amount} days",
+    };
+
+    private static string ShortId(string id) => id.StartsWith("sha256:", StringComparison.Ordinal) ? id[7..19] : id.Length > 12 ? id[..12] : id;
+
+    // ---- Banners ----
+
+    private RenderFragment Banners(AppSummary app) => @<text>
+        @if (ChangeBanner.Of(view?.LatestChange) is { } change)
+        {
+            <Banner Tone="@(change.Warning ? "serious" : "info")" Title="@(change.Decide ? "A change is waiting for you" : "About the last change")">
+                <ChildContent>@change.Text</ChildContent>
+                <Actions>
+                    @if (change.Decide)
+                    {
+                        <Btn Size="BtnSize.Sm" OnClick="KeepNewAsync" Disabled="busy">Keep the new one</Btn>
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" OnClick="PutBackAsync" Disabled="busy">Put the original back</Btn>
+                    }
+                    else
+                    {
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="DismissChangeAsync" Disabled="busy">Dismiss</Btn>
+                    }
+                </Actions>
+            </Banner>
+        }
+        @if (view?.Row is { } row && app.Source == AppSource.Git && (row.ConfigChangePending || row.RebuildPending) && app.State != AppState.Deploying)
+        {
+            <Banner Tone="info" Icon="@Icons.Material.Outlined.Sync" Title="Saved, not live yet">
+                <ChildContent>@(row.RebuildPending ? "Some saved changes only take effect after a new build." : $"{app.Title} still runs with its old settings.")</ChildContent>
+                <Actions>
+                    @if (!row.RebuildPending)
+                    {
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" OnClick="ApplyPendingAsync" Disabled="busy">Apply now</Btn>
+                    }
+                    <Btn Size="BtnSize.Sm" OnClick="DeployAsync" Disabled="busy">Rebuild and deploy</Btn>
+                </Actions>
+            </Banner>
+        }
+        @if (app.State == AppState.Renamed && app.RenamedTo is { } other)
+        {
+            <Banner Tone="warn" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Title="Renamed outside Gitberth">
+                <ChildContent>
+                    Its container runs as <a href="@($"apps/{Uri.EscapeDataString(other)}")" class="gb-mono">@other</a> now, so Gitberth won't create
+                    @app.Container again next to it. That container is an app of its own; forget this record, or rename it back to @app.Container.
+                </ChildContent>
+                <Actions>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Href="@($"apps/{Uri.EscapeDataString(other)}")" Icon="@Icons.Material.Outlined.ArrowForward">Open @other</Btn>
+                    @if (CanForget)
+                    {
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Delete" OnClick="ForgetAsync" Disabled="busy">Forget…</Btn>
+                    }
+                </Actions>
+            </Banner>
+        }
+        else if (app.State is AppState.Missing or AppState.NotCreated)
+        {
+            var missing = app.State == AppState.Missing;
+            var git = app.Source == AppSource.Git;
+            <Banner Tone="@(missing ? "critical" : "info")" Title="@(missing ? "Its container is gone" : git ? "Not deployed yet" : "Not created yet")">
+                <ChildContent>@MissingLine(app, lastImage?.There == true, view?.Row?.Branch)</ChildContent>
+                <Actions>
+                    @if (git || app.Source != AppSource.Existing)
+                    {
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@(missing && !git ? Icons.Material.Outlined.Replay : Icons.Material.Outlined.PlayArrow)"
+                             OnClick="() => RunAsync(ContainerAction.Start)" Disabled="busy">@(missing && !git ? "Create it again" : "Start")</Btn>
+                        <Btn Size="BtnSize.Sm" Href="@($"{BaseHref}/settings")">Edit settings</Btn>
+                    }
+                    @if (CanForget)
+                    {
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Delete" OnClick="ForgetAsync" Disabled="busy">Forget…</Btn>
+                    }
+                </Actions>
+            </Banner>
+        }
+        else if (whyNotStart is { } why && !app.Running)
+        {
+            <Banner Tone="info" Title="Waiting for a change to settle">@why</Banner>
+        }
+    </text>;
+
+    // A record with no container of its own (gone, never made, or renamed outside Gitberth) can be forgotten. A Git app is
+    // deleted instead, with its builds.
+    private bool CanForget => view is { Row: not null } v && v.Summary.Source != AppSource.Git
+        && (v.Summary.State is AppState.Missing or AppState.NotCreated || v.Summary.State == AppState.Renamed);
+
+    /// <summary>
+    /// What the banner says of an app with no container, and what Start does about it. A Git app's container is made again
+    /// from its last image when that's still on this host (<paramref name="lastImage"/>), else built again from its branch.
+    /// </summary>
+    internal static string MissingLine(AppSummary app, bool lastImage, string? branch) => (app.State, app.Source) switch
+    {
+        (AppState.Missing, AppSource.Git) when lastImage => "Gitberth still has its settings and its last image. Start makes its container again from that image, without a build.",
+        (AppState.Missing, AppSource.Git) => $"Gitberth still has its settings, but its last image isn't on this host any more. Start builds it again from {(branch is { Length: > 0 } b ? b : "its branch")} and deploys it.",
+        (AppState.Missing, AppSource.Existing) => $"{app.Container} was removed outside Gitberth. Gitberth kept its record (its name, ports and domains); forget it if it's gone for good.",
+        (AppState.Missing, _) => "Gitberth still has its settings. Create it again makes the container from them; Forget drops the record.",
+        (_, AppSource.Git) => "Start it to deploy it.",
+        _ => "Gitberth has its settings but never made its container. Start creates it; Forget drops the record.",
+    };
+
+    // Forget: the record and its domains go; no container, volume or image is touched.
+    private async Task ForgetAsync()
+    {
+        if (view is not { Row: { } row } current) return;
+        var app = current.Summary;
+        var domains = row.Domains.OrderBy(d => d.Id).Select(d => d.Hostname).ToList();
+        var what = domains.Count == 0 ? "its settings and saved ports"
+            : $"its settings, saved ports and {(domains.Count == 1 ? $"its domain {domains[0]}" : $"its {domains.Count} domains ({string.Join(", ", domains)})")}, which leave the tunnel";
+        var confirmed = await Dialogs.ShowMessageBoxAsync($"Forget {app.Title}?",
+            $"Gitberth deletes its record: {what}. No container, volume or image is touched{(app.RenamedTo is { } other ? $", and {other} carries on as an app of its own" : "")}.",
+            yesText: "Forget it", cancelText: "Cancel");
+        if (confirmed != true) return;
+        busy = true;
+        try
+        {
+            var report = await Catalog.ForgetAsync(row.Id);
+            var trouble = report.Notes.FirstOrDefault(n => n.Problem);
+            Snackbar.Add(trouble is null ? $"Forgot {app.Title}." : $"Forgot {app.Title}. {trouble.Text}", trouble is null ? Severity.Success : Severity.Warning);
+            Nav.NavigateTo(app.RenamedTo is { } renamed ? $"apps/{Uri.EscapeDataString(renamed)}" : "apps");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // ---- Applying settings ----
+
+    private void DraftChanged()
+    {
+        // The consequence line follows the edits, a moment after the last one.
+        planDelay?.Cancel();
+        planDelay = new CancellationTokenSource();
+        var token = planDelay.Token;
+        _ = Task.Delay(450, token).ContinueWith(async t =>
+        {
+            if (t.IsCanceled) return;
+            await InvokeAsync(async () =>
+            {
+                await PlanAsync();
+                StateHasChanged();
+            });
+        }, TaskScheduler.Default);
+    }
+
+    // The Environment tab's Secret switches are saved as the app's secret names (SecretKeys; a Git app's variables carry them too).
+    private SettingsEdit? Edit() => settings is null || draft is null || options is null ? null
+        : new SettingsEdit(settings.ContainerId, settings.Container, draft.ToSettings(), settings.Options,
+            options.ToOptions() with { SecretKeys = draft.SecretKeys(settings.Options.SecretKeys) }, settings.Git, git?.ToOptions());
+
+    private async Task PlanAsync()
+    {
+        if (!Dirty || Edit() is not { } edit)
+        {
+            plan = null;
+            return;
+        }
+        planning = true;
+        try
+        {
+            plan = await SettingsService.PlanAsync(Key, edit);
+            planFor = Key;
+        }
+        catch (Exception ex)
+        {
+            plan = new SettingsPlan { Key = Key, Edit = edit, Blocked = ex.Message };
+        }
+        finally
+        {
+            planning = false;
+        }
+    }
+
+    private RenderFragment ApplySection() => @<text>
+        @if (plan?.ComposeSnippet is { } yaml && Dirty)
+        {
+            <SectionCard Title="Change it in Compose" Icon="@Icons.Material.Outlined.AccountTree" Class="gb-mt" Sub="Compose created this container, so the change goes in its file">
+                <p class="gb-help" style="margin-bottom:12px">Gitberth doesn't recreate a Compose service behind Compose's back. Put this in the service's section, then run the command on the host.</p>
+                <CodeBlock Title="docker-compose.yml" Code="@yaml" Icon="@Icons.Material.Outlined.Description" />
+                @if (plan.ComposeCommand is { } command)
+                {
+                    <div style="height:12px"></div>
+                    <CodeBlock Title="Then run" Code="@command" Icon="@Icons.Material.Outlined.Terminal" />
+                }
+            </SectionCard>
+        }
+        @if (Dirty)
+        {
+            var warn = Stale;
+            var problems = draft?.Problems() ?? [];
+            <ApplyBar Title="@($"{Changes} unsaved {(Changes == 1 ? "change" : "changes")}")" Warn="warn" Busy="busy"
+                      Sub="@(warn ? $"{view?.Summary.Title} changed since you started editing. Discard to load it as it is now." : problems.FirstOrDefault() ?? options?.NameProblem ?? plan?.Blocked ?? plan?.Problems.FirstOrDefault()?.Message ?? plan?.Consequence ?? (planning ? "Working out what applying does…" : ""))"
+                      ApplyDisabled="@(problems.Count > 0 || options?.NameProblem is not null || plan?.ComposeSnippet is not null || plan?.Blocked is not null || plan?.Problems.Count > 0)"
+                      OnDiscard="Discard" OnApply="ReviewAsync" ApplyText="@(plan?.NeedsConfirm == true ? "Review and apply" : "Apply")">
+                <Extra>
+                    @if (plan?.Blocked is { } blocked && blocked.Contains("isn't on this host", StringComparison.Ordinal) && draft is not null)
+                    {
+                        <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="PullAsync" Busy="@(pull is not null)">@(pull is { } p ? PullWords(p) : "Pull it")</Btn>
+                    }
+                    @if (view?.Summary.Source == AppSource.Git && settings?.Access.ViaDeploy == true && plan is { Change: null, Blocked: null } && plan.Lines.Any(l => l.How is ApplyKind.Deploy or ApplyKind.Rebuild))
+                    {
+                        <Btn Kind="BtnKind.Ghost" OnClick="() => ApplyAsync(ApplyTiming.NextDeploy)" Disabled="busy">Save for next deploy</Btn>
+                    }
+                </Extra>
+            </ApplyBar>
+        }
+    </text>;
+
+    // [Pull it] when the plan says the new image isn't on this host: the pull (C's ImageService), then a fresh plan.
+    private PullJob? pull;
+
+    private static string PullWords(PullJob job) =>
+        job.Progress.Total > 0 ? $"Pulling {job.Progress.Current * 100 / job.Progress.Total}%" : $"Pulling {job.Progress.LayersDone}/{job.Progress.Layers}";
+
+    private async Task PullAsync()
+    {
+        if (draft is null || pull is not null) return;
+        var job = Images.StartPull(draft.Image.Trim(), registryId: options?.Loaded.RegistryId);
+        pull = job;
+        void Redraw() => _ = InvokeAsync(StateHasChanged);
+        job.Changed += Redraw;
+        try
+        {
+            var result = await job.Completion;
+            Snackbar.Add(result.Ok ? $"Pulled {job.Reference}." : result.Message, result.Ok ? Severity.Success : Severity.Error);
+            await PlanAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            job.Changed -= Redraw;
+            pull = null;
+        }
+    }
+
+    private void Discard()
+    {
+        if (settings is null) return;
+        draft = ContainerSettingsDraft.From(settings.Container, settings.Options.SecretKeys);
+        options = AppOptionsDraft.From(settings.Options);
+        git = settings.Git is { } g ? GitOptionsDraft.From(g) : null;
+        plan = null;
+    }
+
+    // Review and apply: a fresh plan; the change dialog for anything that touches the container, at once for the rest.
+    private async Task ReviewAsync()
+    {
+        await PlanAsync();
+        if (plan is null || !plan.CanApply)
+        {
+            if (plan?.Blocked is { } blocked) Snackbar.Add(blocked, Severity.Warning);
+            return;
+        }
+        if (plan.Change is null)
+        {
+            await ApplyAsync(ApplyTiming.Now);
+            return;
+        }
+        // Named as the page names it, never by its container (gb-adminer).
+        var dialog = await Dialogs.ShowAsync<ChangeDialog>($"Apply changes to {view?.Summary.Title}",
+            new DialogParameters<ChangeDialog> { { x => x.Plan, plan }, { x => x.Title, view?.Summary.Title } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        var result = await dialog.Result;
+        if (result is { Canceled: false })
+        {
+            settings = null;
+            Discard();
+            await LoadAsync();
+            await LoadSettingsAsync();
+        }
+        else await ReloadAsync();
+    }
+
+    private async Task ApplyAsync(ApplyTiming timing)
+    {
+        if (plan is null) return;
+        busy = true;
+        try
+        {
+            var outcome = await SettingsService.ApplyAsync(plan, timing);
+            Snackbar.Add(outcome.Message, outcome.Ok ? Severity.Success : Severity.Error);
+            if (outcome.Domains?.Notes.FirstOrDefault(n => n.Problem) is { } trouble) Snackbar.Add(trouble.Text, Severity.Warning);
+            if (outcome.DeploymentId is int deployment && view?.Summary.AppId is int appId)
+            {
+                Nav.NavigateTo($"apps/{appId}/deployments/{deployment}");
+                return;
+            }
+            if (outcome.Ok)
+            {
+                settings = null;
+                (draft, options, git, plan) = (null, null, null, null);
+                await LoadAsync();
+                await LoadSettingsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // ---- Actions ----
+
+    private async Task RunAsync(ContainerAction action)
+    {
+        if (view is null) return;
+        busy = true;
+        try
+        {
+            if (await AppCommands.RunAsync(view.Summary, action, Actions, Containers, Dialogs, Snackbar)) await LoadAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DeployAsync()
+    {
+        if (view?.Summary.AppId is not int id) return;
+        busy = true;
+        try
+        {
+            var deploymentId = await Actions.DeployAsync(id);
+            Nav.NavigateTo($"apps/{id}/deployments/{deploymentId}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task ApplyPendingAsync()
+    {
+        if (view?.Summary.AppId is not int id) return;
+        busy = true;
+        try
+        {
+            var deploymentId = await Actions.ApplySettingsAsync(id);
+            Nav.NavigateTo($"apps/{id}/deployments/{deploymentId}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // Check for update (the header, the More menu, the Updates card's Check now): asks the registry, and the card and the
+    // header follow what it found at once. The card's own button says it there, not in a snackbar too.
+    private async Task CheckUpdateAsync(bool quiet = false)
+    {
+        if (view is null || checking) return;
+        checking = true;
+        try
+        {
+            var status = await Updates.CheckAsync(view.Summary.Key);
+            update = status;
+            if (!quiet)
+                Snackbar.Add(status.Error ?? AppOverviewTab.UpdateLine(status), status.Error is not null ? Severity.Warning : status.Available ? Severity.Info : Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            checking = false;
+        }
+    }
+
+    // Update: the pull and the plan (C's), then the change dialog with that plan; Start runs it (UpdateService.Start).
+    private Task UpdateAsync() => ChangeImageAsync(key => Updates.PrepareAsync(key), "Update", "There's nothing to update.");
+
+    // Roll back: the plan back to the image kept from before the last update (nothing is pulled), through the same dialog.
+    private Task RollBackAsync() => ChangeImageAsync(key => Updates.PrepareRollbackAsync(key), "Roll back", "There's nothing to roll back to.");
+
+    private async Task ChangeImageAsync(Func<string, Task<UpdatePrepared>> prepare, string verb, string nothing)
+    {
+        if (view is null || busy) return;
+        busy = true;
+        try
+        {
+            var prepared = await prepare(view.Summary.Key);
+            if (prepared.Blocked is { } blocked || prepared.Plan is null)
+            {
+                Snackbar.Add(prepared.Blocked ?? nothing, Severity.Warning);
+                await LoadUpdateAsync(force: true);
+                return;
+            }
+            var change = prepared.Plan;
+            var request = change.Request;
+            var opts = settings?.Options ?? new AppOptions { Name = view.Summary.Title };
+            var changePlan = new SettingsPlan
+            {
+                Key = view.Summary.Key,
+                Edit = new SettingsEdit(request?.ContainerId ?? view.Summary.ContainerId, request?.Loaded ?? settings?.Container ?? new ContainerSettings(),
+                    request?.Wanted ?? settings?.Container ?? new ContainerSettings(), opts, opts),
+                Lines = change.Settings,
+                Change = change,
+                Consequence = change.Impact.FirstOrDefault(),
+                Blocked = change.Blocked,
+            };
+            var dialog = await Dialogs.ShowAsync<ChangeDialog>($"{verb} {view.Summary.Title}", new DialogParameters<ChangeDialog> { { x => x.Plan, changePlan } },
+                new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+            // It runs on when the dialog is closed early: the card and Roll back follow it once it's done.
+            if (await dialog.Result is { Canceled: false, Data: SettingsOutcome { Job: { } job } }) _ = FollowAsync(job);
+            await ReloadAsync();
+            await LoadUpdateAsync(force: true);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // Once an update or rollback is over and tidied up (the image kept for Roll back is recorded then), the page reads its
+    // update status again.
+    private async Task FollowAsync(PortChangeJob job)
+    {
+        try
+        {
+            await job.Completion;
+            await Updates.FollowUpOf(job.Plan.Container);
+        }
+        catch (Exception)
+        {
+            // The next refresh reads it again all the same.
+        }
+        if (disposed) return;
+        await InvokeAsync(async () =>
+        {
+            if (disposed) return;
+            await LoadAsync();
+            await LoadUpdateAsync(force: true);
+            StateHasChanged();
+        });
+    }
+
+    private async Task TogglePinAsync()
+    {
+        if (view is null) return;
+        try
+        {
+            var current = await Catalog.OptionsAsync(view.Summary.Key);
+            await Catalog.SaveOptionsAsync(view.Summary.Key, current with { Pinned = !view.Summary.Pinned });
+            Snackbar.Add(view.Summary.Pinned ? $"Unpinned {view.Summary.Title}." : $"Pinned {view.Summary.Title} to the menu.", Severity.Success);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task ConnectAsync()
+    {
+        if (view?.Details is not { } details) return;
+        var dialog = await Dialogs.ShowAsync<ConnectDialog>(null, new DialogParameters<ConnectDialog>
+        {
+            { x => x.Name, view.Summary.Container },
+            { x => x.Details, details },
+            { x => x.Addresses, Addresses },
+            { x => x.Network, view.Addresses?.Network },
+            { x => x.Shared, Networks.Shared },
+            { x => x.CanPublish, true },
+        }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        if (await dialog.Result is { Canceled: false, Data: true }) Nav.NavigateTo($"{BaseHref}/network");
+    }
+
+    // Remove: a Git app's delete (its images and volumes are a choice); any other app's container, its volumes a choice
+    // too, with the name typed in since they may hold a database.
+    private async Task RemoveAsync()
+    {
+        if (view is null) return;
+        var app = view.Summary;
+        if (AppCommands.Refusal(app, ContainerAction.Remove) is { } refusal)
+        {
+            Snackbar.Add(refusal, Severity.Warning);
+            return;
+        }
+        if (app.Source == AppSource.Git && view.Row is { } row)
+        {
+            // With domains off, their routes stay in the tunnel until domains are on again: the dialog says which.
+            var domainsOn = row.Domains.Count > 0 && await DomainService.EnabledAsync();
+            var dialog = await Dialogs.ShowAsync<DeleteAppDialog>(null, new DialogParameters<DeleteAppDialog>
+            {
+                { d => d.AppName, app.Title },
+                { d => d.Domains, row.Domains.OrderBy(d => d.Id).Select(d => d.Hostname).ToList() },
+                { d => d.DomainsEnabled, domainsOn },
+            });
+            if (await dialog.Result is not { Canceled: false, Data: DeleteAppDialog.Choice choice }) return;
+            busy = true;
+            try
+            {
+                var report = await Actions.DeleteAsync(row.Id, choice.RemoveImages, choice.RemoveVolumes);
+                Snackbar.Add(report.Notes.Any(n => n.Problem) ? $"Deleted {app.Title}. Its domains couldn't all be taken out of the tunnel yet." : $"Deleted {app.Title}.",
+                    report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
+                Nav.NavigateTo("apps");
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add(ex.Message, Severity.Error);
+            }
+            finally
+            {
+                busy = false;
+            }
+            return;
+        }
+        var volumes = view.Details?.Mounts.Where(m => m.Type == "volume").Select(m => m.Name ?? m.Source).ToList() ?? [];
+        var parameters = new DialogParameters<RemoveAppDialog>
+        {
+            { d => d.Title, app.Title },
+            { d => d.Container, app.Container },
+            { d => d.Volumes, volumes },
+            { d => d.Warnings, await Actions.RemoveWarningsAsync(app.Key, new RemoveOptions(false, false)) },
+        };
+        var confirm = await Dialogs.ShowAsync<RemoveAppDialog>(null, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await confirm.Result is not { Canceled: false, Data: RemoveOptions options }) return;
+        busy = true;
+        try
+        {
+            var result = await Actions.RemoveAsync(app.Key, options);
+            Snackbar.Add(result.Message, result.Ok ? Severity.Success : Severity.Error);
+            if (result.Ok) Nav.NavigateTo("apps");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // ---- A change that isn't settled ----
+
+    private async Task DismissChangeAsync()
+    {
+        if (view is null) return;
+        await Changer.DismissAsync(view.Summary.Container);
+        await ReloadAsync();
+    }
+
+    private async Task KeepNewAsync()
+    {
+        if (view?.LatestChange is not { } latest) return;
+        var name = view.Summary.Container;
+        if (await Dialogs.ShowMessageBoxAsync($"Keep the new {name}?",
+                $"The original, {latest.OldName}, is stopped and removed; its volumes stay.", yesText: "Keep the new one", cancelText: "Cancel") == true)
+            await DecideAsync(() => Changer.KeepNewAsync(name));
+    }
+
+    private async Task PutBackAsync()
+    {
+        if (view is null) return;
+        var name = view.Summary.Container;
+        if (await Dialogs.ShowMessageBoxAsync($"Put the original {name} back?",
+                "The new container stops and is removed; its volumes stay. The original takes its name, its restart policy and its place back.",
+                yesText: "Put the original back", cancelText: "Cancel") == true)
+            await DecideAsync(() => Changer.PutOriginalBackAsync(name));
+    }
+
+    private async Task DecideAsync(Func<Task<PortChangeResult>> decide)
+    {
+        busy = true;
+        try
+        {
+            var result = await decide();
+            Snackbar.Add(result.Message, result.Outcome switch
+            {
+                PortChangeOutcome.Done or PortChangeOutcome.RolledBack => Severity.Success,
+                PortChangeOutcome.NothingChanged => Severity.Info,
+                _ => Severity.Error,
+            });
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        timer?.Dispose();
+        planDelay?.Cancel();
+    }
+}

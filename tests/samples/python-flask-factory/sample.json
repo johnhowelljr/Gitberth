@@ -1,0 +1,6 @@
+{
+  "kind": "Python",
+  "title": "Flask",
+  "port": 8000,
+  "expect": "Hello from a Flask app factory"
+}

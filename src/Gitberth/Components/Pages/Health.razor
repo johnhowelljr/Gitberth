@@ -1,0 +1,518 @@
+@page "/health"
+@using System.Text.RegularExpressions
+@implements IDisposable
+@inject ContainerStatsCollector Stats
+@inject HealthSettings HealthSettings
+@inject ContainerTitles Titles
+@inject AppService Apps
+@inject GitberthOptions Options
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+<PageTitle>Health · Gitberth</PageTitle>
+
+@*
+    Every container's CPU, memory and network, read every 5 seconds and kept 6 hours. One row each, the busiest first,
+    with a sparkline and its memory; a row opens to its charts. The page stays short: the busiest dozen show, the rest
+    one click away, and stopped containers fold together.
+*@
+<PageHead Title="Health" Lead="Every container on this host, read every 5 seconds and kept 6 hours, across Gitberth's own restarts. 100% CPU is one full core.">
+    <ChildContent>
+        @if (snapshot.Host is { } host)
+        {
+            <div class="gb-hero-meta">
+                <span><SvgIcon Icon="@Icons.Material.Outlined.Dns" />@host.Name</span>
+                <span><SvgIcon Icon="@Icons.Material.Outlined.DeveloperBoard" />@host.Cpus @(host.Cpus == 1 ? "CPU" : "CPUs")</span>
+                <span><SvgIcon Icon="@Icons.Material.Outlined.Memory" />@Format.Memory(host.MemoryBytes) memory</span>
+                <span><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" />@snapshot.Containers.Count(c => c.IsUp) running</span>
+            </div>
+        }
+    </ChildContent>
+    <Actions>
+        <Seg T="bool" Options="WindowOptions" Value="longView" ValueChanged="v => longView = v" Label="How much of the charts to show" />
+        @if (snapshot.SampledAt is { } at)
+        {
+            <span class="gb-pill2 @(snapshot.Error is null ? "gb-tone-good" : "gb-tone-warn")">
+                <i class="gb-st-dot @(snapshot.Error is null ? "gb-st-dot--running" : null)"></i>@(snapshot.Error is null ? "Live" : "Not updating") · @Format.Clock(at)
+            </span>
+        }
+    </Actions>
+</PageHead>
+
+@if (snapshot.Error is not null)
+{
+    <Banner Tone="critical" Title="Docker can't be read">
+        @snapshot.Error.TrimEnd('.').
+        @if (Options.DockerHost == "unix:///var/run/docker.sock")
+        {
+            <text> Is /var/run/docker.sock mounted into the Gitberth container?</text>
+        }
+    </Banner>
+}
+
+@if (snapshot.SampledAt is null)
+{
+    @if (snapshot.Error is null)
+    {
+        <div class="gb-skel" style="height:420px;border-radius:12px"></div>
+    }
+}
+else if (snapshot.Containers.Count == 0)
+{
+    <div class="gb-card">
+        <EmptyState Icon="@Icons.Material.Outlined.MonitorHeart" Title="No containers are running">Containers show up here as soon as they start.</EmptyState>
+    </div>
+}
+else
+{
+    var end = snapshot.SampledAt.Value;
+    var window = longView ? ContainerStatsCollector.Kept : ContainerStatsCollector.RecentWindow;
+    var gathered = Shown(c => HealthSettings.IsGathered(c.Name));
+    var up = gathered.Where(c => c.IsUp).ToList();
+    var down = gathered.Where(c => !c.IsUp).ToList();
+    var skipped = Shown(c => !HealthSettings.IsGathered(c.Name));
+    var visible = showAll || query.Length > 0 ? up : up.Take(Shortlist).Concat(up.Skip(Shortlist).Where(c => open.Contains(c.Name))).ToList();
+
+    <div class="gb-toolbar" role="search">
+        <label class="gb-input" style="width:300px;max-width:100%">
+            <SvgIcon Icon="@Icons.Material.Outlined.Search" />
+            <input type="search" placeholder="Find a container" value="@query" @oninput="e => query = e.Value?.ToString()?.Trim() ?? string.Empty" aria-label="Find a container" />
+        </label>
+        <Seg T="bool" Options="SortOptions" Value="byName" ValueChanged="v => byName = v" Label="Order" />
+        <span class="gb-toolbar-right gb-t3" style="font-size:12.5px">@ToolbarLine(snapshot.Containers.Count(c => c.IsUp), down.Count, skipped.Count)</span>
+    </div>
+
+    <div class="gb-alist" role="list" aria-label="Containers">
+        <div class="gb-hrow gb-arow-head" aria-hidden="true">
+            <span style="padding-left:44px">Container</span><span>State</span><span>CPU</span><span>Memory</span><span class="gb-c-ev">@(longView ? "Last 6 hours" : "Last hour")</span><span></span>
+        </div>
+        @foreach (var c in visible)
+        {
+            @Row(c, end, window)
+        }
+        @if (!showAll && query.Length == 0 && up.Count > visible.Count)
+        {
+            <div class="gb-grp" style="justify-content:center">
+                <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ExpandMore" OnClick="() => showAll = true">Show the other @(up.Count - visible.Count)</Btn>
+            </div>
+        }
+        @if (down.Count > 0)
+        {
+            var closed = !stoppedOpen && query.Length == 0 && !down.Any(c => open.Contains(c.Name));
+            <div class="gb-grp">
+                <button type="button" class="gb-grp-chev @(closed ? "closed" : null)" aria-expanded="@(closed ? "false" : "true")" aria-label="@(closed ? "Show the stopped ones" : "Fold the stopped ones")"
+                        @onclick="() => stoppedOpen = closed">
+                    <SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" />
+                </button>
+                <span class="gb-grp-icon"><SvgIcon Icon="@Icons.Material.Outlined.StopCircle" /></span>
+                <div class="gb-grow">
+                    <div class="gb-grp-title">Stopped</div>
+                    <div class="gb-grp-meta">@down.Count @(down.Count == 1 ? "container" : "containers") with readings or events in the last 6 hours</div>
+                </div>
+            </div>
+            @if (!closed)
+            {
+                @foreach (var c in down)
+                {
+                    @Row(c, end, window)
+                }
+            }
+        }
+    </div>
+
+    @if (skipped.Count > 0)
+    {
+        <SectionCard Title="Not gathering stats" Icon="@Icons.Material.Outlined.PauseCircle" Sub="Turn it on for a container to chart it again" Class="gb-mt" Flush="true">
+            @foreach (var c in skipped)
+            {
+                <div class="gb-feed-row" @key="c.Name" style="grid-template-columns:minmax(0,1fr) auto auto">
+                    @Identity(c)
+                    <span id="@GatherId(c)">
+                        <SwitchRow Title="Gather stats" Value="false" ValueChanged="v => SetGatheredAsync(c, v)" />
+                    </span>
+                    <RestartScheduleButton Container="@c.Name" Title="@Title(c)" Recreated="@(AppFor(c)?.Deployed == true)" />
+                </div>
+            }
+        </SectionCard>
+    }
+}
+
+@code {
+    private const string Collecting = "Collecting. The first point appears within 10 seconds.";
+
+    /// <summary>
+    /// The list's counts, in the words the rest of Gitberth uses: every container that runs (as in the header and the Apps
+    /// list), the stopped ones this page has something from the last 6 hours of (the rest of the stopped aren't charted),
+    /// and those whose stats aren't gathered.
+    /// </summary>
+    public static string ToolbarLine(int running, int stoppedLately, int notGathered) =>
+        $"{running} running"
+        + (stoppedLately > 0 ? $" · {stoppedLately} stopped in the last 6 hours" : "")
+        + (notGathered > 0 ? $" · {notGathered} without stats" : "");
+    private const double MemoryFloor = 10 * 1024 * 1024;
+    // How many running containers show before "Show all": the busiest ones.
+    private const int Shortlist = 12;
+
+    private HealthSnapshot snapshot = HealthSnapshot.Empty;
+    private Dictionary<string, NavApp> appsBySlug = new(StringComparer.Ordinal);
+    private readonly HashSet<string> tables = new(StringComparer.Ordinal);
+    // The rows opened to their charts.
+    private readonly HashSet<string> open = new(StringComparer.Ordinal);
+    // The last 6 hours as 30-second averages, or the last hour with every reading.
+    private bool longView;
+    private bool byName, showAll, stoppedOpen;
+    private string query = "";
+    private string? scrollTo;
+
+    private static readonly IReadOnlyList<SegOption<bool>> WindowOptions = [new(false, "1 hour"), new(true, "6 hours")];
+
+    private static readonly IReadOnlyList<SegOption<bool>> SortOptions = [new(false, "Busiest first"), new(true, "A to Z")];
+
+    protected override async Task OnInitializedAsync()
+    {
+        snapshot = Stats.Current;
+        await LoadAppsAsync();
+        Stats.Updated += OnUpdated;
+        // A link to one container (#hc-title-postgres, from its app page) opens its charts.
+        var fragment = Uri.UnescapeDataString(new Uri(Nav.Uri).Fragment.TrimStart('#'));
+        if (fragment.StartsWith("hc-title-", StringComparison.Ordinal))
+        {
+            open.Add(fragment["hc-title-".Length..]);
+            scrollTo = fragment;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (scrollTo is not { } id || snapshot.SampledAt is null) return;
+        scrollTo = null;
+        try { await JS.InvokeVoidAsync("gitberth.scrollToId", id); }
+        catch (JSException) { }
+        catch (JSDisconnectedException) { }
+    }
+
+    private void OnUpdated() => _ = InvokeAsync(async () =>
+    {
+        snapshot = Stats.Current;
+        // A container from an app created since the page opened.
+        if (snapshot.Containers.Any(c => c.AppSlug is { } slug && !appsBySlug.ContainsKey(slug))) await LoadAppsAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadAppsAsync()
+    {
+        try { appsBySlug = (await Apps.ListNavAsync()).ToDictionary(a => a.Slug, StringComparer.Ordinal); }
+        catch (Exception) { }
+    }
+
+    // The busiest first (by their last reading), or by name; filtered by what's typed.
+    private List<ContainerHealth> Shown(Func<ContainerHealth, bool> include) =>
+        (byName
+            ? snapshot.Containers.Where(include).OrderBy(Title, StringComparer.OrdinalIgnoreCase)
+            : snapshot.Containers.Where(include).OrderByDescending(c => c.IsUp && c.Recent.Count > 0 ? c.Recent[^1].Cpu : -1).ThenBy(Title, StringComparer.OrdinalIgnoreCase))
+        .Where(c => query.Length == 0 || c.Name.Contains(query, StringComparison.OrdinalIgnoreCase) || Title(c).Contains(query, StringComparison.OrdinalIgnoreCase)
+            || c.Image.Contains(query, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    private NavApp? AppFor(ContainerHealth c) => c.AppSlug is { } slug && appsBySlug.TryGetValue(slug, out var app) ? app : null;
+
+    // The app's name, the title given to the container here, or its own name.
+    private string Title(ContainerHealth c) => AppFor(c)?.Name ?? Titles.For(c.Name) ?? c.Name;
+
+    private static string TitleId(ContainerHealth c) => $"hc-title-{c.Name}";
+
+    private static string GatherId(ContainerHealth c) => $"hc-gather-{c.Name}";
+
+    private static string Href(ContainerHealth c) => "apps/" + Uri.EscapeDataString(c.Name);
+
+    private void Toggle(string name)
+    {
+        if (!open.Remove(name)) open.Add(name);
+    }
+
+    private RenderFragment Row(ContainerHealth c, DateTime end, TimeSpan window)
+    {
+        var title = Title(c);
+        var latest = Latest(c, end);
+        var expanded = open.Contains(c.Name);
+        var cpu = c.Recent.Select(p => p.Cpu).ToList();
+        var limited = c.MemoryLimit is ulong limit && limit > 0 && snapshot.Host is { } host && limit < host.MemoryBytes;
+        return @<div class="gb-hitem @(expanded ? "open" : null)" role="listitem" @key="c.Name">
+            <div class="gb-hrow @(c.IsUp ? null : "gb-arow--stopped")">
+                <div class="gb-arow-name">
+                    <AppLogo Image="@c.Image" Name="@c.Name" Self="@(c.Name == "gitberth")" Dim="@(!c.IsUp)" />
+                    <div class="gb-arow-text">
+                        <a class="gb-arow-title" id="@TitleId(c)" href="@Href(c)">@title</a>
+                        <span class="gb-arow-sub" title="@c.Image">@(title != c.Name ? $"{c.Name} · {c.Image}" : c.Image)</span>
+                    </div>
+                </div>
+                <div class="gb-c-st">@StateLabel(c)</div>
+                <div class="gb-c-cpu gb-row" style="gap:10px" title="CPU, the last few minutes (100% is one core)">
+                    <Sparkline Values="cpu" Width="96" Height="20" Hot="@(latest?.Cpu >= 50)" />
+                    <span class="gb-num" style="font-size:12.5px">@(latest is { } l ? Format.Cpu(l.Cpu) : "–")</span>
+                </div>
+                <div class="gb-c-mem" style="display:flex;flex-direction:column;gap:4px;font-size:12.5px" title="@(limited ? $"of {Format.Memory(c.MemoryLimit!.Value)} limit" : "no limit")">
+                    <span class="gb-num">@(c.MemoryBytes is { } bytes ? Format.Memory(bytes) : "–")@(limited ? $" of {Format.Memory(c.MemoryLimit!.Value)}" : "")</span>
+                    <Meter Fraction="@(c.MemoryBytes is { } b && (limited ? c.MemoryLimit : snapshot.Host?.MemoryBytes) is ulong top and > 0 ? (double)b / top : null)" Limited="limited" />
+                </div>
+                <div class="gb-c-ev gb-t3" style="font-size:12.5px">@Summary(c, end - window)</div>
+                <div class="gb-arow-actions">
+                    <button type="button" class="gb-grp-chev @(expanded ? null : "closed")" aria-expanded="@(expanded ? "true" : "false")" aria-controls="@($"hc-body-{c.Name}")"
+                            aria-label="@(expanded ? $"Hide {title}'s charts" : $"Show {title}'s charts")" @onclick="() => Toggle(c.Name)">
+                        <SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" />
+                    </button>
+                </div>
+            </div>
+            @if (expanded)
+            {
+                @Charts(c, title, end, window, latest)
+            }
+        </div>;
+    }
+
+    private RenderFragment Charts(ContainerHealth c, string title, DateTime end, TimeSpan window, StatsPoint? latest)
+    {
+        var points = longView ? c.History : c.Recent;
+        var times = points.Select(p => p.Time).ToArray();
+        // Averages are a step apart, so a line only breaks where a whole step is missing.
+        var gap = longView ? ContainerStatsCollector.HistoryStep * 1.5 : ContainerStatsCollector.MaxGap;
+        var asTable = tables.Contains(c.Name);
+        var networkNote = NetworkNote(c);
+        var empty = c.IsUp ? Collecting : $"No readings in the last {(longView ? "6 hours" : "hour")}";
+        var (sinceLabel, since) = Since(c);
+        return @<div class="gb-hbody" id="@($"hc-body-{c.Name}")">
+            <div class="gb-row" style="flex-wrap:wrap;gap:8px 18px;margin-bottom:12px;font-size:12.5px">
+                <span class="gb-t3">@sinceLabel <strong class="gb-t1">@since</strong></span>
+                <span class="gb-grow"></span>
+                <span id="@GatherId(c)"><SwitchRow Title="Gather stats" Value="true" ValueChanged="v => SetGatheredAsync(c, v)" /></span>
+                <RestartScheduleButton Container="@c.Name" Title="@title" Recreated="@(AppFor(c)?.Deployed == true)" />
+                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" OnClick="() => RenameAsync(c)">Rename</Btn>
+                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@(asTable ? Icons.Material.Outlined.ShowChart : Icons.Material.Outlined.TableRows)" OnClick="() => ToggleTable(c.Name)">@(asTable ? "Charts" : "As a table")</Btn>
+            </div>
+            @if (asTable)
+            {
+                var marks = c.Marks.Where(m => m.Time >= end - window).Reverse().ToList();
+                <div class="gb-hcard-table" tabindex="0" role="region" aria-label="@($"Readings for {title}")">
+                    @if (marks.Count > 0)
+                    {
+                        <table class="gb-mini-table gb-mini-table--events">
+                            <caption class="gb-sr-only">What happened to @title, newest first</caption>
+                            <thead><tr><th>Time</th><th>Event</th></tr></thead>
+                            <tbody>
+                                @foreach (var m in marks)
+                                {
+                                    <tr @key="(m.Time, m.Label)"><td>@Format.Clock(m.Time)</td><td>@m.Detail</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                    <table class="gb-mini-table">
+                        <caption class="gb-sr-only">Readings for @title, newest first@(longView ? ", averaged over 30 seconds" : "")</caption>
+                        <thead><tr><th>Time</th><th>CPU</th><th>Memory</th>@if (networkNote is null) { <th>In</th><th>Out</th> }</tr></thead>
+                        <tbody>
+                            @foreach (var p in Enumerable.Reverse(points))
+                            {
+                                <tr @key="p.Time">
+                                    <td>@Format.Clock(p.Time)</td>
+                                    <td>@Format.Cpu(p.Cpu)</td>
+                                    <td>@(p.Memory is { } memory ? Format.Memory(memory) : "–")</td>
+                                    @if (networkNote is null)
+                                    {
+                                        <td>@(p.RxRate is { } rx ? Format.Rate(rx) : "–")</td>
+                                        <td>@(p.TxRate is { } tx ? Format.Rate(tx) : "–")</td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (points.Count == 0)
+                    {
+                        <div class="gb-chart-empty gb-chart-empty--static">@empty</div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="gb-grid-3">
+                    @* Keyed by the view, so switching it sends each chart its points afresh. *@
+                    <TimeChart @key="@($"cpu-{longView}")" Title="CPU" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
+                               Series="CpuSeries(points)" Current="[latest?.Cpu]" ValueFormat="Format.Cpu" Floor="5" Area="true"
+                               Marks="c.Marks" Down="c.Down" MarkLabels="true" EmptyText="@empty" />
+                    <TimeChart @key="@($"memory-{longView}")" Title="Memory" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
+                               Series="MemorySeries(points)" Current="[c.MemoryBytes is { } bytes ? (double)bytes : null]" ValueNote="@MemoryLimit(c)"
+                               ValueFormat="Format.Memory" Floor="MemoryFloor" BinaryAxis="true" Area="true" Marks="c.Marks" Down="c.Down" EmptyText="@empty" />
+                    @if (networkNote is null)
+                    {
+                        <TimeChart @key="@($"network-{longView}")" Title="Network" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
+                                   Series="NetworkSeries(points)" Current="[latest?.RxRate, latest?.TxRate]" ValueFormat="Format.Rate" Floor="10000"
+                                   Marks="c.Marks" Down="c.Down" EmptyText="@empty" />
+                    }
+                    else
+                    {
+                        <div class="gb-chart-note"><SvgIcon Icon="@Icons.Material.Outlined.Lan" Size="sm" />@networkNote</div>
+                    }
+                </div>
+            }
+        </div>;
+    }
+
+    // An app's name changes everywhere, as in its Settings; any other container gets a title that only Gitberth shows.
+    private async Task RenameAsync(ContainerHealth c)
+    {
+        var app = AppFor(c);
+        var dialog = await Dialogs.ShowAsync<RenameContainerDialog>(null, new DialogParameters<RenameContainerDialog>
+        {
+            { d => d.Container, c.Name },
+            { d => d.Current, Title(c) },
+            { d => d.IsApp, app is not null },
+        }, new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not string title) return;
+        try
+        {
+            if (app is not null)
+            {
+                if (title == app.Name) return;
+                await Apps.RenameAsync(app.Id, title);
+                await LoadAppsAsync();
+                Snackbar.Add($"Renamed {app.Name} to {title}.", Severity.Success);
+            }
+            else
+            {
+                var before = Title(c);
+                await Titles.SetAsync(c.Name, title);
+                if (Title(c) != before)
+                    Snackbar.Add(title.Length == 0 || title == c.Name ? $"{c.Name} shows its own name again." : $"{c.Name} is called {title} here now.", Severity.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private RenderFragment Identity(ContainerHealth c)
+    {
+        var title = Title(c);
+        return @<div class="gb-arow-name">
+            <AppLogo Image="@c.Image" Name="@c.Name" Size="26" Dim="true" />
+            <div class="gb-arow-text">
+                <a class="gb-arow-title" id="@TitleId(c)" href="@Href(c)" style="font-size:13.5px">@title</a>
+                <span class="gb-arow-sub">@c.Image</span>
+            </div>
+        </div>;
+    }
+
+    private RenderFragment StateLabel(ContainerHealth c)
+    {
+        var (state, label) = StateOf(c);
+        var (sinceLabel, since) = Since(c);
+        return @<StatusLabel State="state" Text="@label" Title="@c.Status" Detail="@(sinceLabel == "Uptime" ? Short(since) : null)" />;
+    }
+
+    private void ToggleTable(string name)
+    {
+        if (!tables.Remove(name)) tables.Add(name);
+    }
+
+    private async Task SetGatheredAsync(ContainerHealth c, bool gather)
+    {
+        try
+        {
+            await HealthSettings.SetGatheredAsync(c.Name, gather);
+            Snackbar.Add(gather ? $"Gathering stats for {Title(c)} again." : $"Stopped gathering stats for {Title(c)}. Its last 6 hours are kept.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    // The newest reading, while it's current: the charts' keys show it even when the chart plots averages.
+    private static StatsPoint? Latest(ContainerHealth c, DateTime now) =>
+        c.IsUp && c.Recent.Count > 0 && now - c.Recent[^1].Time <= ContainerStatsCollector.MaxGap * 2 ? c.Recent[^1] : null;
+
+    private static ChartSeries[] CpuSeries(IReadOnlyList<StatsPoint> points) =>
+        [new("CPU", 1, points.Select(p => (double?)p.Cpu).ToArray())];
+
+    private static ChartSeries[] MemorySeries(IReadOnlyList<StatsPoint> points) =>
+        [new("Memory", 2, points.Select(p => p.Memory).ToArray())];
+
+    private static ChartSeries[] NetworkSeries(IReadOnlyList<StatsPoint> points) =>
+    [
+        new("In", 1, points.Select(p => p.RxRate).ToArray()),
+        new("Out", 2, points.Select(p => p.TxRate).ToArray()),
+    ];
+
+    // The state in the design's vocabulary: what the marks say it was (a crash) when they know, else its exit code.
+    private static (AppState State, string Label) StateOf(ContainerHealth c) => c.State switch
+    {
+        "restarting" => (AppState.Restarting, "Restarting"),
+        "paused" => (AppState.Paused, "Paused"),
+        "created" => (AppState.Created, "Not started"),
+        "exited" or "dead" when c.Marks.Count > 0 && c.Marks[^1] is { Kind: MarkKind.Crash } crash => (AppState.Crashed, crash.Label),
+        "exited" or "dead" when ExitCode(c.Status) is { } code and not (0 or 137 or 143) => (AppState.Crashed, $"Exited ({code})"),
+        "exited" or "dead" => (AppState.Stopped, "Stopped"),
+        _ when c.Status.Contains("(unhealthy)") => (AppState.Unhealthy, "Unhealthy"),
+        _ when c.Status.Contains("(health: starting)") => (AppState.Starting, "Starting"),
+        _ when c.Status.Contains("(healthy)") => (AppState.Healthy, "Healthy"),
+        _ => (AppState.Running, "Running"),
+    };
+
+    private static string? NetworkNote(ContainerHealth c) => c.NetworkMode switch
+    {
+        "host" => "Uses the host's network, so Docker can't count its traffic separately.",
+        "none" => "Has no network.",
+        { } mode when mode.StartsWith("container:", StringComparison.Ordinal) => "Shares another container's network, so its traffic is counted there.",
+        _ => null,
+    };
+
+    // With no limit set, Docker reports the host's memory as the limit.
+    private string? MemoryLimit(ContainerHealth c) =>
+        c.MemoryLimit is { } limit && limit > 0 && snapshot.Host is { } host && limit < host.MemoryBytes ? $" of {Format.Memory(limit)} limit" : null;
+
+    // "Up 3 hours (healthy)" gives 3 hours (the label already says healthy); "Exited (0) 5 minutes ago" gives 5 minutes ago.
+    private static (string Label, string Value) Since(ContainerHealth c)
+    {
+        if (Regex.Match(c.Status, @"^Up (.+?)(\s*\((healthy|unhealthy|health: starting|paused)\))?$", RegexOptions.IgnoreCase) is { Success: true } up)
+            return ("Uptime", up.Groups[1].Value);
+        if (Regex.Match(c.Status, @"^Exited \(\d+\) (.+)$") is { Success: true } exited)
+            return ("Stopped", exited.Groups[1].Value);
+        return ("State", c.State == "restarting" ? "Restarting" : c.Status);
+    }
+
+    // "3 hours" as a row says it: 3h; "About a minute" as 1m.
+    private static string Short(string since)
+    {
+        var m = Regex.Match(since, @"^(About an? |Less than a |(\d+) )?(second|minute|hour|day|week|month)s?", RegexOptions.IgnoreCase);
+        if (!m.Success) return since;
+        var n = m.Groups[2].Success ? m.Groups[2].Value : "1";
+        return n + m.Groups[3].Value.ToLowerInvariant() switch { "second" => "s", "minute" => "m", "hour" => "h", "day" => "d", "week" => "w", _ => "mo" };
+    }
+
+    private static int? ExitCode(string status) =>
+        Regex.Match(status, @"^Exited \((\d+)\)") is { Success: true } m && int.TryParse(m.Groups[1].Value, out var code) ? code : null;
+
+    // "1 deploy · 2 restarts", from the marks on the charts.
+    private static string Summary(ContainerHealth c, DateTime from)
+    {
+        var shown = c.Marks.Where(m => m.Time >= from).ToList();
+        var parts = new List<string>();
+        Count(MarkKind.Deploy, "deploy", "deploys");
+        Count(MarkKind.Recreate, "recreated", "recreated");
+        Count(MarkKind.Restart, "restart", "restarts");
+        Count(MarkKind.Crash, "crash", "crashes");
+        Count(MarkKind.Stop, "stop", "stops");
+        return parts.Count == 0 ? "No restarts" : string.Join(" · ", parts);
+
+        void Count(MarkKind kind, string one, string many)
+        {
+            var n = shown.Count(m => m.Kind == kind);
+            if (n > 0) parts.Add($"{n} {(n == 1 ? one : many)}");
+        }
+    }
+
+    public void Dispose() => Stats.Updated -= OnUpdated;
+}

@@ -1,0 +1,72 @@
+@*
+    The design's button: primary (one per view), secondary (the default), ghost, danger, or an icon button. A link when
+    it has an Href, a button otherwise. Busy spins its icon and stops further clicks.
+*@
+@if (Href is not null && !Disabled)
+{
+    <a href="@Href" target="@Target" rel="@(Target == "_blank" ? "noopener" : null)" class="@Css" title="@Title" aria-label="@Label" @attributes="Extra">
+        @Content
+    </a>
+}
+else
+{
+    <button type="@Type" class="@Css" title="@Title" aria-label="@Label" disabled="@(Disabled || Busy)" @onclick="ClickAsync" @attributes="Extra">
+        @Content
+    </button>
+}
+
+@code {
+    [Parameter] public BtnKind Kind { get; set; } = BtnKind.Secondary;
+    [Parameter] public BtnSize Size { get; set; } = BtnSize.Md;
+    /// <summary>A MudBlazor icon, before the label.</summary>
+    [Parameter] public string? Icon { get; set; }
+    /// <summary>A MudBlazor icon, after the label (an arrow, say).</summary>
+    [Parameter] public string? EndIcon { get; set; }
+    /// <summary>A square button with only its icon: give it a Label for screen readers.</summary>
+    [Parameter] public bool IconOnly { get; set; }
+    [Parameter] public string? Href { get; set; }
+    [Parameter] public string? Target { get; set; }
+    [Parameter] public EventCallback<MouseEventArgs> OnClick { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public bool Busy { get; set; }
+    /// <summary>The tooltip.</summary>
+    [Parameter] public string? Title { get; set; }
+    /// <summary>What screen readers call it (aria-label), when the text alone isn't enough.</summary>
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string Type { get; set; } = "button";
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter(CaptureUnmatchedValues = true)] public IReadOnlyDictionary<string, object>? Extra { get; set; }
+
+    private string Css => string.Join(' ', new[]
+    {
+        "gb-btn",
+        Kind switch { BtnKind.Primary => "gb-btn--primary", BtnKind.Ghost => "gb-btn--ghost", BtnKind.Danger => "gb-btn--danger", _ => null },
+        Size switch { BtnSize.Sm => "gb-btn--sm", BtnSize.Lg => "gb-btn--lg", _ => null },
+        IconOnly ? "gb-btn--icon" : null,
+        Busy ? "gb-btn--busy" : null,
+        Disabled && Href is not null ? "gb-btn--disabled" : null,
+        Class,
+    }.Where(c => c is not null));
+
+    private RenderFragment Content => @<text>
+        @if (Busy)
+        {
+            <SvgIcon Icon="@Icons.Material.Outlined.Autorenew" />
+        }
+        else if (Icon is not null)
+        {
+            <SvgIcon Icon="@Icon" />
+        }
+        @if (!IconOnly)
+        {
+            @ChildContent
+        }
+        @if (EndIcon is not null && !IconOnly)
+        {
+            <SvgIcon Icon="@EndIcon" />
+        }
+    </text>;
+
+    private Task ClickAsync(MouseEventArgs e) => OnClick.InvokeAsync(e);
+}

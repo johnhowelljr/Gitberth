@@ -1,0 +1,14 @@
+bin/
+# The sample projects' own bin/ scripts (bin/www, bin/rails, bin/console) are part of them.
+!tests/samples/*/bin/
+obj/
+.vs/
+.vscode/
+.idea/
+*.user
+App_Data/
+*.db
+*.db-shm
+*.db-wal
+.env
+TestResults/

@@ -1,0 +1,144 @@
+@inject RepoVariables Variables
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@* The repo's GitHub Actions variables: where its environment is stored, shared by every app from the repo. *@
+<MudPaper Outlined="true" Class="gb-card mb-4">
+    <div class="gb-card-head">
+        <span class="gb-card-title"><MudIcon Icon="@Icons.Custom.Brands.GitHub" Size="Size.Small" />Stored in GitHub</span>
+        <a class="gb-card-hint" href="@($"https://github.com/{Owner}/{Repo}/settings/variables/actions")" target="_blank" rel="noopener">Open in GitHub</a>
+    </div>
+    <div class="gb-card-body">
+        <p class="gb-intro">
+            The repo's variables in GitHub, under Settings › Secrets and variables › Actions › Variables. Every app from
+            @Owner/@Repo gets them, at build time and when it runs. They aren't hidden: anyone who can see the repo can read them.
+        </p>
+        @if (result is null)
+        {
+            <MudSkeleton Height="36px" />
+            <MudSkeleton Height="36px" />
+        }
+        else
+        {
+            @if (result.Error is not null)
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true" Class="mb-3">@result.Error</MudAlert>
+            }
+            @if (result.Variables.Count > 0)
+            {
+                <div class="gb-repo-vars mb-4">
+                    @foreach (var v in result.Variables.OrderBy(v => v.Name, StringComparer.Ordinal))
+                    {
+                        var secret = Security.Masking.IsSecret(v.Name, v.Value);
+                        var shown = !secret || revealed.Contains(v.Name);
+                        <div class="gb-repo-var" @key="v.Name">
+                            <span class="gb-repo-var-name">@v.Name</span>
+                            <span class="gb-repo-var-value">@(shown ? v.Value : "••••••••••")</span>
+                            <span class="gb-repo-var-actions">
+                                @if (secret)
+                                {
+                                    <MudIconButton Icon="@(shown ? Icons.Material.Outlined.VisibilityOff : Icons.Material.Outlined.Visibility)" Size="Size.Small"
+                                                   OnClick="() => ToggleReveal(v.Name)" aria-label="@($"{(shown ? "Hide" : "Show")} {v.Name}")" />
+                                }
+                                <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" OnClick="() => Edit(v)" aria-label="@($"Edit {v.Name}")" Disabled="@busy" />
+                                <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" OnClick="() => DeleteAsync(v)" aria-label="@($"Delete {v.Name}")" Disabled="@busy" />
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+            else if (result.Error is null)
+            {
+                <div class="gb-placeholder mb-4">No variables in GitHub yet.</div>
+            }
+            <div class="gb-repo-var-form">
+                <MudTextField T="string" @bind-Value="name" Immediate="true" Label="Name" Placeholder="DATABASE_URL" Variant="Variant.Outlined" Margin="Margin.Dense" Class="gb-mono-input" />
+                @* Grows for values with line breaks (a private key, say), which a one-line field would flatten. *@
+                <MudTextField T="string" @bind-Value="value" Immediate="true" Label="Value" Variant="Variant.Outlined" Margin="Margin.Dense" Class="gb-mono-input"
+                              Lines="1" Sizing="InputSizing.Auto" MaxLines="8" />
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(name) || string.IsNullOrEmpty(value))" Class="gb-inline-btn">
+                    Save to GitHub
+                </MudButton>
+            </div>
+        }
+    </div>
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public string Owner { get; set; } = "";
+    [Parameter, EditorRequired] public string Repo { get; set; } = "";
+
+    private RepoVariablesResult? result;
+    private (string Owner, string Repo)? loadedFor;
+    private readonly HashSet<string> revealed = new(StringComparer.Ordinal);
+    private string name = "", value = "";
+    private bool busy;
+
+    // The page keeps this component when it moves to another app, so a new repo starts over.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == (Owner, Repo)) return;
+        loadedFor = (Owner, Repo);
+        (result, name, value) = (null, "", "");
+        revealed.Clear();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var (owner, repo) = (Owner, Repo);
+        var loaded = await Variables.GetAsync(owner, repo);
+        if ((owner, repo) == (Owner, Repo)) result = loaded;
+    }
+
+    private void ToggleReveal(string key)
+    {
+        if (!revealed.Remove(key)) revealed.Add(key);
+    }
+
+    private void Edit(RepoVariable v) => (name, value) = (v.Name, v.Value);
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        try
+        {
+            await Variables.SetAsync(Owner, Repo, name, value);
+            Snackbar.Add($"Saved {name.Trim()} to GitHub. Deploy the app to use it.", Severity.Success);
+            (name, value) = ("", "");
+            await LoadAsync();
+        }
+        catch (GitHubApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DeleteAsync(RepoVariable v)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            $"Delete {v.Name}?",
+            $"It's removed from {Owner}/{Repo}'s variables in GitHub, for every app from the repo.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (confirmed != true) return;
+        busy = true;
+        try
+        {
+            await Variables.DeleteAsync(Owner, Repo, v.Name);
+            Snackbar.Add($"Deleted {v.Name} from GitHub.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (GitHubApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -1,0 +1,26 @@
+@*
+    The change to make in a Compose-managed container's file (5.6): Compose owns the container, and the next time it
+    recreates the service it would undo a change Gitberth made, so Gitberth writes out the service's ports as they should
+    be, and the command that applies the file. Both copy as they are.
+*@
+<div class="gb-compose">
+    <CodeBlock Title="@ComposeText.FileLine(Compose)" Code="@Snippet" Icon="@Icons.Material.Outlined.Description" />
+    @if (ComposeText.CommandLine(Compose) is { } command)
+    {
+        <div class="gb-compose-command">
+            <span class="gb-faint">Then on the host:</span>
+            <CopyText Text="@command" Label="the command" />
+        </div>
+    }
+    else if (ComposeText.InPortainer(Compose))
+    {
+        <div class="gb-compose-command gb-faint">Change it in Portainer's stack editor, then update the stack there.</div>
+    }
+</div>
+
+@code {
+    /// <summary>Where Compose keeps the container's settings, from its labels.</summary>
+    [Parameter, EditorRequired] public ComposeService Compose { get; set; } = default!;
+    /// <summary>The service's ports in the file, for the bindings asked for (<see cref="ComposeService.Snippet"/>).</summary>
+    [Parameter, EditorRequired] public string Snippet { get; set; } = "";
+}

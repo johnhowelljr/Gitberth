@@ -1,0 +1,130 @@
+@implements IDisposable
+@inject HostPortMap Map
+
+@* A host port, checked against the host-port map as it's typed (7.7): free, or who holds it and a free one to use instead. *@
+<div class="gb-hpfield @Class">
+    <input type="number" inputmode="numeric" min="1" max="65535" class="gb-input gb-input--sm gb-input--mono @(tone == Tone.Problem ? "gb-input--error" : null) @(Changed ? "gb-input--changed" : null)"
+           value="@Value" @oninput="Typed" disabled="@Disabled" aria-label="@Label" placeholder="@(ContainerPort?.ToString(CultureInfo.InvariantCulture) ?? "8080")" />
+    @* Always there, so screen readers announce each answer as its text changes. *@
+    <div role="status" class="gb-hpline @(tone switch { Tone.Problem => "gb-hpline--bad", Tone.Taken => "gb-hpline--taken", Tone.Free => "gb-hpline--ok", _ => null })">
+        @if (line is not null)
+        {
+            @if (tone == Tone.Free)
+            {
+                <SvgIcon Icon="@Icons.Material.Outlined.Check" Size="xs" />
+            }
+            <span>@line</span>
+        }
+        @if (suggestion is int free && free != Value && !Disabled)
+        {
+            <button type="button" class="gb-linkbtn" @onclick="() => SetAsync(free)">Use @free</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public int? Value { get; set; }
+    [Parameter] public EventCallback<int?> ValueChanged { get; set; }
+    /// <summary>The container port it leads to: a free port to use instead is looked for from it up.</summary>
+    [Parameter] public int? ContainerPort { get; set; }
+    [Parameter] public string Protocol { get; set; } = "tcp";
+    /// <summary>Where it's bound: "" for every address (LAN), 127.0.0.1 for the host only, or a Custom row's own address.</summary>
+    [Parameter] public string HostIp { get; set; } = "";
+    /// <summary>Whose bindings and saved ports don't count against it: the app's or the container's own.</summary>
+    [Parameter] public HostPortOwner? Self { get; set; }
+    /// <summary>Host ports the table's other rows have for the same protocol, which this one can't have as well.</summary>
+    [Parameter] public IReadOnlyCollection<int> AlsoTaken { get; set; } = [];
+    /// <summary>What checking the whole table found wrong with it; shown instead of the field's own check.</summary>
+    [Parameter] public string? Problem { get; set; }
+    /// <summary>A saved port nobody changed: it's the app's own already, so it isn't checked again.</summary>
+    [Parameter] public bool Quiet { get; set; }
+    /// <summary>The field's accessible name, its label first: "Host port for 5432/tcp".</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public bool Disabled { get; set; }
+    /// <summary>Differs from what was loaded: drawn as changed.</summary>
+    [Parameter] public bool Changed { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private enum Tone { Plain, Free, Taken, Problem }
+
+    private string? line;
+    private Tone tone;
+    private int? suggestion;
+    private string checkedFor = "";
+    // A newer check wins over an older one that answers late; typing waits a moment before it's taken.
+    private int version;
+    private CancellationTokenSource? typing;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = string.Join('|', Value, ContainerPort, Protocol, HostIp, Self, string.Join(',', AlsoTaken.Order()), Problem, Quiet);
+        if (key == checkedFor) return;
+        checkedFor = key;
+        await CheckAsync(++version);
+    }
+
+    private async Task Typed(ChangeEventArgs e)
+    {
+        typing?.Cancel();
+        var mine = typing = new CancellationTokenSource();
+        var text = e.Value?.ToString();
+        int? value = int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var n) ? n : null;
+        try
+        {
+            await Task.Delay(300, mine.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        await SetAsync(value);
+    }
+
+    private Task SetAsync(int? value) => ValueChanged.InvokeAsync(value);
+
+    private async Task CheckAsync(int mine)
+    {
+        (line, tone, suggestion) = (Problem, Tone.Problem, null);
+        // A saved port nobody changed is the app's own already; a row without a port yet has nothing to check.
+        if (Problem is null && (Quiet || (Value is null && ContainerPort is null)))
+        {
+            (line, tone) = (null, Tone.Plain);
+            return;
+        }
+        if (Problem is null && Value is int typed && HostPortText.Problem(typed, AlsoTaken) is { } wrong) (line, tone) = (wrong, Tone.Problem);
+        try
+        {
+            var view = await Map.GetViewAsync();
+            if (mine != version) return;
+            HostPortCheck Check(int port) => HostPortMap.Check(view.Uses, view.Scan.Random, port, Protocol, HostIp, Self);
+            int Suggest() => HostPortMap.Suggest(view.Uses, view.Scan.Random, ContainerPort ?? Value ?? 0, Protocol, Self, AlsoTaken);
+            if (line is not null)
+            {
+                // A problem the table, the save or the range found: a free port is offered with it.
+                if ((ContainerPort ?? Value) is >= 1 and <= 65535) suggestion = Suggest();
+                return;
+            }
+            if (Value is not int port)
+            {
+                // Left empty, or none could be offered when the row got its container port: one to use.
+                (line, tone, suggestion) = ("Pick a host port.", Tone.Problem, ContainerPort is >= 1 and <= 65535 ? Suggest() : null);
+                return;
+            }
+            var check = Check(port);
+            if (!check.Free)
+            {
+                suggestion = Suggest();
+                (line, tone) = (suggestion is int free && free != port ? $"{check.FieldText} {free} is free." : check.FieldText, Tone.Taken);
+            }
+            else if (ContainerPort is int own && own != port && HostPortText.WhyNotOwn(own, port, Check) is { } why) (line, tone) = (why, Tone.Plain);
+            else (line, tone) = (check.FieldText, check.InRandomRange ? Tone.Taken : Tone.Free);
+        }
+        catch (Exception ex)
+        {
+            // The save checks again, and says so if Docker still can't be read.
+            if (mine == version && line is null) (line, tone) = (Value is null ? $"Couldn't suggest a host port: {ex.Message}" : $"Couldn't check it: {ex.Message}", Tone.Plain);
+        }
+    }
+
+    public void Dispose() => typing?.Cancel();
+}

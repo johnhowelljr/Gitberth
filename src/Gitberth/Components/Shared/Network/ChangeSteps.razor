@@ -1,0 +1,46 @@
+@*
+    A change's steps as it runs (5.5, apply-dialog.html): done ones ticked with their time, the one running now with a
+    spinning ring and what comes next, the rest still to come in their planned words.
+*@
+<ol class="gb-csteps" aria-label="Steps">
+    @for (var n = 1; n <= Count; n++)
+    {
+        var step = Steps.FirstOrDefault(s => s.Number == n);
+        var state = step?.State switch
+        {
+            StepState.Done => "done",
+            StepState.Running => "now",
+            StepState.Failed => "failed",
+            _ => "todo",
+        };
+        <li class="gb-cstep gb-cstep--@state" aria-current="@(state == "now" ? "step" : null)">
+            <span class="gb-cstep-mark">
+                @if (state == "done")
+                {
+                    <SvgIcon Icon="@Icons.Material.Outlined.Check" />
+                }
+                else if (state == "failed")
+                {
+                    <SvgIcon Icon="@Icons.Material.Outlined.Close" />
+                }
+            </span>
+            <div class="gb-cstep-t">
+                @(step?.Text ?? (n - 1 < Planned.Count ? Planned[n - 1] : $"Step {n}"))
+                @if (state == "now" && step?.Next is { } next)
+                {
+                    <div class="gb-cstep-next">@next</div>
+                }
+            </div>
+            <span class="gb-cstep-time">@step?.TookText</span>
+        </li>
+    }
+</ol>
+
+@code {
+    /// <summary>The steps as they've been reported so far.</summary>
+    [Parameter] public IReadOnlyList<PortChangeStep> Steps { get; set; } = [];
+    /// <summary>Every step the change takes, in the words they're shown in once done: the ones still to come read like this.</summary>
+    [Parameter] public IReadOnlyList<string> Planned { get; set; } = [];
+
+    private int Count => Math.Max(Steps.Count == 0 ? 0 : Steps.Max(s => s.Count), Planned.Count);
+}

@@ -1,0 +1,161 @@
+@*
+    The Advanced section of an app's settings, shared by the Settings tab and New app's Configure step: everything else
+    Docker can set (hostname, stop signal and timeout, network mode, init, privileged, read-only root, TTY, capabilities,
+    DNS, GPUs, extra hosts, devices, ulimits, security options, sysctls). In create mode it starts folded to one line,
+    unless the source set something in it, and nothing is marked changed.
+*@
+<SettingsSection Id="@Id" Title="Advanced" Icon="@Icons.Material.Outlined.Build" Changed="@(!Create && Draft.ChangedFields().Overlaps(Fields))"
+                 Description="Everything else Docker can set. Each is editable; most apps never need them.">
+    <Actions>
+        @if (Create)
+        {
+            <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" EndIcon="@(open ? Icons.Material.Outlined.ExpandLess : Icons.Material.Outlined.ExpandMore)"
+                 aria-expanded="@(open ? "true" : "false")" OnClick="() => open = !open">@(open ? "Hide" : "Show all")</Btn>
+        }
+    </Actions>
+    <ChildContent>
+        @if (!open)
+        {
+            <p class="gb-help gb-adv-folded">@Folded</p>
+        }
+        else
+        {
+                <div class="gb-fgrid gb-fgrid--4">
+                    @Text("Hostname", SettingField.Hostname, () => Draft.Hostname, v => Draft.Hostname = v, Draft.Loaded.Hostname is { Length: 12 } && Draft.Loaded.Hostname.All(char.IsAsciiHexDigitLower) ? "Docker picked it" : null, "Docker's own")
+                    @Text("Stop signal", SettingField.Stop, () => Draft.StopSignal, v => Draft.StopSignal = v, Draft.StopSignal.Length == 0 ? "image" : null, ImageStopSignal ?? "SIGTERM")
+                    <Field Label="Stop timeout" Tag="@(Draft.StopTimeoutSeconds is null ? "default" : null)" Changed="@Is(SettingField.Stop)">
+                        <label class="gb-input gb-input--sm"><input type="number" min="0" placeholder="10" aria-label="Stop timeout" readonly="@RO(SettingField.Stop)" @bind="Draft.StopTimeoutSeconds" @bind:event="oninput" @bind:after="Notify" /><span class="gb-input-suffix">s</span></label>
+                    </Field>
+                    @if (ShowNetworkMode)
+                    {
+                        <Field Label="Network mode" Changed="@Is(SettingField.NetworkMode)">
+                            <select class="gb-input gb-input--sm" aria-label="Network mode" disabled="@RO(SettingField.NetworkMode)" @bind="Draft.NetworkMode" @bind:after="Notify">
+                                <option value="">Its networks</option>
+                                <option value="host">The host's</option>
+                                <option value="none">None</option>
+                                @if (Draft.NetworkMode.StartsWith("container:", StringComparison.Ordinal))
+                                {
+                                    <option value="@Draft.NetworkMode">@Draft.NetworkMode</option>
+                                }
+                            </select>
+                        </Field>
+                    }
+                    @Flag("Init process", SettingField.Init, Draft.Init, v => Draft.Init = v)
+                    @Flag("Privileged", SettingField.Privileged, Draft.Privileged, v => Draft.Privileged = v)
+                    @Flag("Read-only root", SettingField.ReadOnlyRootfs, Draft.ReadOnlyRootfs, v => Draft.ReadOnlyRootfs = v)
+                    @Flag("Terminal (TTY)", SettingField.Terminal, Draft.Tty, v => Draft.Tty = v)
+                    @Text("Capabilities added", SettingField.Capabilities, () => Draft.CapAdd, v => Draft.CapAdd = v, null, "None")
+                    @Text("Capabilities dropped", SettingField.Capabilities, () => Draft.CapDrop, v => Draft.CapDrop = v, null, "None")
+                    @Text("DNS servers", SettingField.Dns, () => Draft.Dns, v => Draft.Dns = v, null, "Host default")
+                    @Text("GPUs", SettingField.Gpus, () => Draft.Gpus, v => Draft.Gpus = v, null, "None")
+                </div>
+                <div class="gb-fgrid">
+                    @Lines("Extra hosts", SettingField.ExtraHosts, () => Draft.ExtraHosts, v => Draft.ExtraHosts = v, "host:ip, one per line", "printer.lan:10.1.1.20")
+                    @Lines("Devices", SettingField.Devices, () => Draft.Devices, v => Draft.Devices = v, "host path:container path, one per line", "/dev/dri:/dev/dri")
+                    @Lines("Ulimits", SettingField.Ulimits, () => Draft.Ulimits, v => Draft.Ulimits = v, "name=soft:hard, one per line", "nofile=65536:65536")
+                    @Lines("Security options", SettingField.SecurityOpt, () => Draft.SecurityOpt, v => Draft.SecurityOpt = v, "One per line", "no-new-privileges")
+                    @Lines("Sysctls", SettingField.Sysctls, () => Draft.Sysctls, v => Draft.Sysctls = v, "key=value, one per line", "net.core.somaxconn=1024")
+                </div>
+        }
+    </ChildContent>
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public ContainerSettingsDraft Draft { get; set; } = default!;
+    /// <summary>The fields this app never edits; null: every field can change.</summary>
+    [Parameter] public Func<SettingField, bool>? ReadOnly { get; set; }
+    /// <summary>New app's Configure: folded until it's opened (open at once when the source set something), no "Changed" marks.</summary>
+    [Parameter] public bool Create { get; set; }
+    /// <summary>Raised after every edit.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public string Id { get; set; } = "sec-advanced";
+    /// <summary>The image's own stop signal, shown greyed while the field is empty.</summary>
+    [Parameter] public string? ImageStopSignal { get; set; }
+    /// <summary>Off where the network mode is chosen elsewhere (New app's Networks section).</summary>
+    [Parameter] public bool ShowNetworkMode { get; set; } = true;
+
+    /// <summary>The fields the section edits: its dot and its "Changed" tag follow them.</summary>
+    public static readonly SettingField[] Fields =
+    [
+        SettingField.Hostname, SettingField.NetworkMode, SettingField.ExtraHosts, SettingField.Dns, SettingField.Capabilities, SettingField.Privileged,
+        SettingField.SecurityOpt, SettingField.ReadOnlyRootfs, SettingField.Init, SettingField.Sysctls, SettingField.Ulimits, SettingField.Devices,
+        SettingField.Gpus, SettingField.Stop, SettingField.Terminal,
+    ];
+
+    private bool open = true;
+    private bool opened;
+
+    protected override void OnParametersSet()
+    {
+        if (opened) return;
+        opened = true;
+        open = !Create || Set(Draft.Loaded).Count > 0;
+    }
+
+    /// <summary>What the settings set in the section, by name ("Privileged", "Devices"): New app opens the section when there's any.</summary>
+    public static IReadOnlyList<string> Set(ContainerSettings s)
+    {
+        var set = new List<string>();
+        if (s.Hostname is { Length: > 0 }) set.Add("Hostname");
+        if (s.StopSignal is { Length: > 0 } || s.StopTimeoutSeconds is not null) set.Add("Stop");
+        if (s.Init) set.Add("Init");
+        if (s.Privileged) set.Add("Privileged");
+        if (s.ReadOnlyRootfs) set.Add("Read-only root");
+        if (s.Tty) set.Add("TTY");
+        if (s.CapAdd.Count + s.CapDrop.Count > 0) set.Add("Capabilities");
+        if (s.Dns.Count > 0) set.Add("DNS");
+        if (s.Gpus is { Length: > 0 }) set.Add("GPUs");
+        if (s.ExtraHosts.Count > 0) set.Add("Extra hosts");
+        if (s.Devices.Count > 0) set.Add("Devices");
+        if (s.Ulimits.Count > 0) set.Add("Ulimits");
+        if (s.SecurityOpt.Count > 0) set.Add("Security options");
+        if (s.Sysctls.Count > 0) set.Add("Sysctls");
+        return set;
+    }
+
+    // The folded section's one line: what's set now, or that it's all Docker's defaults.
+    private string Folded => Set(Draft.ToSettings()) is { Count: > 0 } set
+        ? $"Set: {string.Join(", ", set)}. Show all to change them."
+        : "Hostname, DNS, extra hosts, devices, GPUs, capabilities, security options, ulimits, sysctls, the stop signal, init and TTY are as Docker sets them.";
+
+    private bool RO(SettingField field) => ReadOnly?.Invoke(field) == true;
+
+    private bool Is(SettingField field) => !Create && Draft.ChangedFields().Contains(field);
+
+    private Task Notify() => Changed.InvokeAsync();
+
+    private Task Change(Action change)
+    {
+        change();
+        return Changed.InvokeAsync();
+    }
+
+    // ---- Small field builders ----
+
+    private RenderFragment Text(string label, SettingField field, Func<string> get, Action<string> set, string? tag, string placeholder) => __builder =>
+    {
+        <Field Label="@label" Tag="@tag" Changed="@Is(field)">
+            <input class="gb-input gb-input--sm gb-input--mono" value="@get()" placeholder="@placeholder" aria-label="@label" readonly="@RO(field)" spellcheck="false"
+                   @oninput="e => Change(() => set(e.Value?.ToString() ?? string.Empty))" />
+        </Field>
+    };
+
+    private RenderFragment Lines(string label, SettingField field, Func<string> get, Action<string> set, string help, string placeholder) => __builder =>
+    {
+        <Field Label="@label" Help="@help" Changed="@Is(field)">
+            <textarea class="gb-input" rows="2" spellcheck="false" placeholder="@placeholder" aria-label="@label" readonly="@RO(field)" style="min-height:58px"
+                      value="@get()" @oninput="e => Change(() => set(e.Value?.ToString() ?? string.Empty))"></textarea>
+        </Field>
+    };
+
+    private RenderFragment Flag(string label, SettingField field, bool value, Action<bool> set) => __builder =>
+    {
+        <Field Label="@label" Changed="@Is(field)">
+            <div class="gb-row" style="height:30px">
+                <button type="button" role="switch" aria-checked="@(value ? "true" : "false")" aria-label="@label" class="gb-switch @(value ? "on" : null)" disabled="@RO(field)"
+                        @onclick="() => Change(() => set(!value))"></button>
+                <span class="gb-t2" style="font-size:13px">@(value ? "On" : "Off")</span>
+            </div>
+        </Field>
+    };
+}

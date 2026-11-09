@@ -1,0 +1,16 @@
+@* A state's dot alone, for the menu's pinned apps and the host card: the word is in its title and for screen readers. *@
+<span class="gb-st @look.Modifier @Class" title="@look.Word"><i class="gb-st-dot"></i><span class="gb-sr">@look.Word</span></span>
+
+@code {
+    [Parameter, EditorRequired] public AppState State { get; set; }
+    [Parameter] public string? Class { get; set; }
+
+    private StatusLook look = AppStatus.Of(AppState.Unknown);
+
+    // Shapes that are icons in a label are dots here: a dot that's orange still reads as trouble beside its name.
+    protected override void OnParametersSet()
+    {
+        var full = AppStatus.Of(State);
+        look = full.Icon is null ? full : full with { Modifier = full.Trouble ? "gb-tone-serious" : full.Modifier };
+    }
+}

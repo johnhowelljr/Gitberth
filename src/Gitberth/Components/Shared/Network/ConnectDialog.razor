@@ -1,0 +1,146 @@
+@inject IContainerUsers Users
+
+@*
+    Connection details for a database Gitberth recognizes (5.2), for databases, apps and containers alike: from a device on
+    the LAN, or from a container on its network. Each value copies on its own, and the URL puts them together. The
+    password shows as dots until Show, which only works here; copying always copies the password itself. The values come
+    from the container's own settings (ConnectionDetails); where it's reached comes from its addresses.
+*@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.Cable" />
+            <span>Connect to @Name</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudTabs @bind-ActivePanelIndex="tab" Elevation="0" Rounded="false" ApplyEffectsToContainer="false" Class="gb-tabs gb-connect-tabs" TabPanelsClass="gb-connect-panels"
+                 SliderColor="Color.Primary">
+            <MudTabPanel Text="LAN">
+                @if (lan.Count > 0)
+                {
+                    <p class="gb-connect-intro">From any device on your network.</p>
+                    @if (lan.Count > 1)
+                    {
+                        @* It's published on the host and has an address of its own: either reaches it. *@
+                        <MudSelect T="int" @bind-Value="choice" Label="Reach it at" Variant="Variant.Outlined" Margin="Margin.Dense" Class="gb-connect-choice">
+                            @for (var i = 0; i < lan.Count; i++)
+                            {
+                                var at = i;
+                                <MudSelectItem T="int" Value="at">@ContainerPorts.Address(lan[at].Host, lan[at].Port) (@lan[at].Via)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    @Fields(lan[Math.Min(choice, lan.Count - 1)])
+                }
+                else
+                {
+                    <div class="gb-connect-state">
+                        <span>@(hostOnly is not null ? $"Published on the host only ({hostOnly}): the LAN can't reach it." : $"{Name} isn't published on the LAN.")</span>
+                        @if (CanPublish)
+                        {
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="() => MudDialog.Close(DialogResult.Ok(true))">Publish on LAN</MudButton>
+                        }
+                    </div>
+                }
+            </MudTabPanel>
+            <MudTabPanel Text="Internal">
+                @if (inside is not null)
+                {
+                    <p class="gb-connect-intro">From containers on @(Network ?? Shared). @(usedBy ?? "")</p>
+                    @Fields(inside)
+                }
+                else
+                {
+                    <div class="gb-connect-state">
+                        <span>@Name isn't on a shared network, so containers can't reach it by name. Join @Shared under Networks on its Network tab first.</span>
+                    </div>
+                }
+            </MudTabPanel>
+        </MudTabs>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Close()">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The container's name.</summary>
+    [Parameter] public string Name { get; set; } = "";
+    /// <summary>The container, whose settings hold the user, password and database.</summary>
+    [Parameter] public ContainerDetails Details { get; set; } = default!;
+    /// <summary>Where it's reached, as its Addresses card lists it.</summary>
+    [Parameter] public IReadOnlyList<Address> Addresses { get; set; } = [];
+    /// <summary>The named network containers reach it on (<see cref="ContainerAddresses.Network"/>), for "From containers on gitberth."</summary>
+    [Parameter] public string? Network { get; set; }
+    /// <summary>The shared network.</summary>
+    [Parameter] public string Shared { get; set; } = "gitberth";
+    /// <summary>[Publish on LAN] can be offered: closing with it asks the page to publish the port.</summary>
+    [Parameter] public bool CanPublish { get; set; }
+
+    // A password shown as dots until Show; never the real length.
+    private const string Hidden = "••••••••";
+
+    private List<ConnectTarget> lan = [];
+    private string? hostOnly;
+    private ConnectTarget? inside;
+    private int tab, choice;
+    private bool reveal;
+    private string? usedBy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var port = ConnectionRows.DatabasePort(Details) ?? 0;
+        lan = ConnectionRows.Lan(Addresses, port);
+        hostOnly = ConnectionRows.HostOnly(Addresses, port);
+        inside = ConnectionRows.Internal(Addresses, port);
+        // It opens where it's reached from: the LAN when it's published there, else inside Docker.
+        tab = lan.Count > 0 || inside is null ? 0 : 1;
+        try
+        {
+            var users = (await Users.UsersOfAsync(Name, [], CancellationToken.None)).Users;
+            usedBy = users.Count == 0 ? $"Nothing names {Name} in its settings."
+                : $"Used by {(users.Count == 1 ? users[0] : string.Join(", ", users.SkipLast(1)) + " and " + users[^1])}.";
+        }
+        catch (Exception)
+        {
+            // Docker didn't say: the line is left out rather than guessed.
+        }
+    }
+
+    private RenderFragment Fields(ConnectTarget at) => @<text>
+        @if (ConnectionDetails.For(Details, at.Host, at.Port) is { } info)
+        {
+            <dl class="gb-connect">
+                <dt>Host</dt>
+                <dd><CopyText Text="@info.Host" Label="@($"the host, {info.Host}")" /></dd>
+                <dt>Port</dt>
+                <dd><CopyText Text="@info.Port.ToString(CultureInfo.InvariantCulture)" Label="@($"the port, {info.Port}")" /></dd>
+                @if (info.User is { } user)
+                {
+                    <dt>User</dt>
+                    <dd><CopyText Text="@user" Label="@($"the user, {user}")" /></dd>
+                }
+                @if (info.Password is { } password)
+                {
+                    <dt>Password</dt>
+                    <dd class="gb-connect-secret">
+                        <CopyText Text="@(reveal ? password : Hidden)" Value="@password" Label="the password" />
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => reveal = !reveal" aria-pressed="@(reveal ? "true" : "false")">@(reveal ? "Hide" : "Show")</MudButton>
+                    </dd>
+                }
+                @if (info.Database is { } database)
+                {
+                    <dt>Database</dt>
+                    <dd><CopyText Text="@database" Label="@($"the database, {database}")" /></dd>
+                }
+                <dt>URL</dt>
+                <dd>
+                    <CopyText Text="@ConnectionDetails.Render(info, ConnectionFormat.Url, reveal)" Value="@ConnectionDetails.Render(info, ConnectionFormat.Url, reveal: true)"
+                              Label="the URL" />
+                </dd>
+            </dl>
+        }
+    </text>;
+}

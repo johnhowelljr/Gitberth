@@ -1,0 +1,492 @@
+@page "/apps"
+@implements IDisposable
+@inject AppCatalog Catalog
+@inject AppActions Actions
+@inject ContainerService Containers
+@inject AddressBook Book
+@inject ContainerStatsCollector Stats
+@inject ImageService Images
+@inject IDbContextFactory<GitberthDb> Db
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+<PageTitle>Apps · Gitberth</PageTitle>
+
+<PageHead Title="Apps" Lead="Every container on this host is an app here, whoever started it. Open one to change anything about it.">
+    <Actions>
+        <Btn Href="apps/new?from=paste" Icon="@Icons.Material.Outlined.ContentPaste">Paste docker run</Btn>
+    </Actions>
+</PageHead>
+
+@if (list.DockerError is { } dockerError)
+{
+    <Banner Tone="critical" Title="Docker can't be read">@dockerError.TrimEnd('.'). The list shows what Gitberth knows without it.</Banner>
+}
+
+<HostStrip Apps="list.Apps" Snapshot="Stats.Current" Disk="disk" />
+
+@if (Trouble.Count > 0 && !troubleDismissed)
+{
+    <Banner Tone="serious" Title="@($"{Trouble.Count} {(Trouble.Count == 1 ? "app is" : "apps are")} in trouble")" OnDismiss="() => troubleDismissed = true">
+        <ChildContent>@TroubleLine</ChildContent>
+        <Aside>
+            <span class="gb-attn-logos">
+                @foreach (var app in Trouble.Take(4))
+                {
+                    <AppLogo Image="@app.Image" Name="@app.Container" Size="26" Kind="@kinds.GetValueOrDefault(app.Key)" />
+                }
+            </span>
+        </Aside>
+        <Actions>
+            <Btn Size="BtnSize.Sm" OnClick="ShowTrouble">Show @(Trouble.Count == 1 ? "it" : "them")</Btn>
+        </Actions>
+    </Banner>
+}
+
+<div class="gb-toolbar" role="search">
+    <label class="gb-input">
+        <SvgIcon Icon="@Icons.Material.Outlined.Search" />
+        <input id="gb-apps-search" type="search" placeholder="Search names, images, ports, addresses"value="@query" @oninput="OnSearch" aria-label="Search apps" autocomplete="off" />
+        <span class="gb-kbd">/</span>
+    </label>
+    <div class="gb-toolbar-scroll">
+        <Seg T="StatusFilter" Options="FilterOptions" Value="filter" ValueChanged="SetFilter" Label="Show" />
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by source">
+            <ActivatorContent>
+                <button type="button" class="gb-filterbtn @(sources.Count > 0 ? "on" : null)" @onclick="context.ToggleAsync">
+                    <SvgIcon Icon="@Icons.Material.Outlined.FilterList" />Source@(sources.Count > 0 ? $": {string.Join(", ", sources.Select(SourceBadge.WordOf))}" : "")
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                @foreach (var source in Enum.GetValues<AppSource>())
+                {
+                    var on = sources.Contains(source);
+                    var count = list.Apps.Count(a => a.Source == source);
+                    <MudMenuItem Icon="@(on ? Icons.Material.Outlined.CheckBox : Icons.Material.Outlined.CheckBoxOutlineBlank)" OnClick="() => ToggleSource(source)" AutoClose="false" Disabled="@(count == 0 && !on)">
+                        @SourceBadge.WordOf(source) <span class="gb-t3">@count</span>
+                    </MudMenuItem>
+                }
+                @if (sources.Count > 0)
+                {
+                    <MudDivider />
+                    <MudMenuItem OnClick="() => sources.Clear()">Every source</MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+    </div>
+    <div class="gb-toolbar-right">
+        <label class="gb-t3" for="gb-sortby" style="font-size:12.5px;white-space:nowrap">Sort by</label>
+        <select id="gb-sortby" class="gb-input gb-input--sm" style="width:auto" value="@(sortBy?.ToString() ?? "")" @onchange="OnSortPicked">
+            <option value="">Pinned, then name</option>
+            @foreach (var by in Enum.GetValues<SortBy>())
+            {
+                <option value="@by">@AppSorting.WordOf(by)</option>
+            }
+        </select>
+        @if (sortBy is { } current)
+        {
+            <button type="button" class="gb-sortdir" @onclick="ReverseSort"
+                    title="@(descending ? "Highest or Z first: show the other way" : "Lowest or A first: show the other way")"
+                    aria-label="@($"{AppSorting.WordOf(current)}, {(descending ? "descending" : "ascending")}: reverse")">
+                <SvgIcon Icon="@(descending ? Icons.Material.Outlined.ArrowDownward : Icons.Material.Outlined.ArrowUpward)" />
+            </button>
+        }
+        <label class="gb-t3" for="gb-groupby" style="font-size:12.5px;white-space:nowrap">Group by</label>
+        <select id="gb-groupby" class="gb-input gb-input--sm" style="width:auto" @bind="groupBy">
+            <option value="@GroupBy.Prefix">Name</option>
+            <option value="@GroupBy.Source">Source</option>
+            <option value="@GroupBy.None">Nothing</option>
+        </select>
+    </div>
+</div>
+
+@if (!loaded)
+{
+    <div class="gb-alist">
+        @for (var i = 0; i < 6; i++)
+        {
+            <div class="gb-arow"><div class="gb-skel" style="height:32px;grid-column:1/-1"></div></div>
+        }
+    </div>
+}
+else if (list.Apps.Count == 0)
+{
+    <div class="gb-card">
+        <EmptyState Icon="@Icons.Material.Outlined.GridView" Title="No apps yet">
+            <ChildContent>Every container on this host shows here. Start one from a GitHub repository, a registry image or a docker run command.</ChildContent>
+            <Actions><Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add">New app</Btn></Actions>
+        </EmptyState>
+    </div>
+}
+else if (Shown.Count == 0)
+{
+    <div class="gb-card">
+        <EmptyState Icon="@Icons.Material.Outlined.SearchOff" Title="@(query.Trim().Length > 0 ? $"No apps match “{query.Trim()}”" : "No apps here")">
+            <ChildContent>@(query.Trim().Length > 0 ? "Search looks at names, images, ports and addresses." : "Nothing matches these filters.")</ChildContent>
+            <Actions>
+                <Btn OnClick="ClearFilters">Show every app</Btn>
+                @if (query.Trim().Length > 0 && !query.Trim().Contains(' '))
+                {
+                    <Btn Kind="BtnKind.Primary" Href="@($"apps/new?image={Uri.EscapeDataString(query.Trim())}")" Icon="@Icons.Material.Outlined.Add">New app from @query.Trim()</Btn>
+                }
+            </Actions>
+        </EmptyState>
+    </div>
+}
+else
+{
+    <div class="gb-alist" role="table" aria-label="Apps">
+        <div class="gb-arow gb-arow-head" role="row">
+            <span role="columnheader" style="padding-left:44px" aria-sort="@AriaSort(SortBy.Name)">@SortHead(SortBy.Name, "App")</span>
+            <span role="columnheader" aria-sort="@AriaSort(SortBy.Status)">@SortHead(SortBy.Status, "Status")</span>
+            <span role="columnheader" aria-sort="@AriaSort(SortBy.Address)">@SortHead(SortBy.Address, "Address")</span>
+            <span role="columnheader" class="gb-c-ports">Ports</span>
+            <span role="columnheader" class="gb-c-res" aria-sort="@(AriaSort(SortBy.Cpu) ?? AriaSort(SortBy.Memory))">@SortHead(SortBy.Cpu, "CPU") · @SortHead(SortBy.Memory, "Memory")</span>
+            <span role="columnheader" class="gb-c-src" aria-sort="@AriaSort(SortBy.Source)">@SortHead(SortBy.Source, "Source")</span>
+            <span></span>
+        </div>
+        @foreach (var group in Groups)
+        {
+            var closed = this.closed.Contains(group.Id);
+            @if (Groups.Count > 1 || group.Tag is not null)
+            {
+                <div class="gb-grp" role="row">
+                    <button type="button" class="gb-grp-chev @(closed ? "closed" : null)" aria-expanded="@(closed ? "false" : "true")" aria-label="@($"{(closed ? "Open" : "Fold")} {group.Title}")" @onclick="() => Toggle(group.Id)">
+                        <SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" />
+                    </button>
+                    <span class="gb-grp-icon"><SvgIcon Icon="@group.Icon" /></span>
+                    <div class="gb-grow">
+                        <div class="gb-grp-title">
+                            @group.Title
+                            @if (group.Tag is not null)
+                            {
+                                <span class="gb-tag gb-tag--outline">@group.Tag</span>
+                            }
+                        </div>
+                        <div class="gb-grp-meta">
+                            <span>@group.Apps.Count @(group.Apps.Count == 1 ? "app" : "apps")</span>
+                            <span class="gb-sep"></span><span>@group.RunningCount running</span>
+                            @if (group.StoppedCount > 0)
+                            {
+                                <span class="gb-sep"></span><span>@group.StoppedCount stopped</span>
+                            }
+                            @if (group.TroubleCount > 0)
+                            {
+                                <span class="gb-sep"></span><span style="color:#ffc49a">@group.TroubleCount in trouble</span>
+                            }
+                            @if (group.Apps.Sum(a => (double)(a.MemoryBytes ?? 0)) is var memory and > 0)
+                            {
+                                <span class="gb-sep"></span><span>@AppFacts.Bytes(memory) in use</span>
+                            }
+                            @if (group.Tag is not null && AppFacts.HostPorts(group.Apps) is { } ports)
+                            {
+                                <span class="gb-sep"></span><span>host ports <span class="gb-mono">@ports</span></span>
+                            }
+                        </div>
+                    </div>
+                    <div class="gb-grp-right">
+                        @if (group.Apps.Count > 8)
+                        {
+                            <Waffle States="@group.Apps.Select(a => a.State)" Small="true" />
+                        }
+                        @if (group.Tag is not null && group.Startable.Count() is var startable and > 1)
+                        {
+                            <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => StartAllAsync(group)" Busy="@(bulk == group.Id)">Start @startable stopped</Btn>
+                        }
+                    </div>
+                </div>
+            }
+            @if (!closed)
+            {
+                @if (group.Stacks.Count > 0)
+                {
+                    @foreach (var stack in group.Stacks)
+                    {
+                        var stackKey = group.Id + "/" + stack.Id;
+                        var stackClosed = this.closed.Contains(stackKey);
+                        <div class="gb-sub-grp" role="row">
+                            <button type="button" class="gb-grp-chev @(stackClosed ? "closed" : null)" aria-expanded="@(stackClosed ? "false" : "true")" aria-label="@($"{(stackClosed ? "Open" : "Fold")} {stack.Title}")" @onclick="() => Toggle(stackKey)">
+                                <SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" />
+                            </button>
+                            @if (stack.Slug is not null)
+                            {
+                                <AppLogo Image="@StackImage(stack.Slug)" Name="@stack.Title" Size="20" />
+                            }
+                            <b>@stack.Title</b>
+                            <span class="gb-t3">@stack.Apps.Count</span>
+                            <span class="gb-sep gb-t3"></span>
+                            <span class="gb-t3">@stack.Apps.Count(a => a.Running) running</span>
+                            @if (stack.Apps.Count(a => AppStatus.Of(a.State).Trouble) is var bad and > 0)
+                            {
+                                <span class="gb-sep gb-t3"></span><span style="color:#ffc49a">@bad in trouble</span>
+                            }
+                            @if (AppFacts.HostPorts(stack.Apps) is { } stackPorts)
+                            {
+                                <span class="gb-sep gb-t3"></span><span class="gb-mono gb-t3">@stackPorts</span>
+                            }
+                        </div>
+                        @if (!stackClosed)
+                        {
+                            @foreach (var app in stack.Apps)
+                            {
+                                @Row(app)
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    @foreach (var app in group.Apps)
+                    {
+                        @Row(app)
+                    }
+                }
+            }
+        }
+    </div>
+    <div class="gb-list-foot">
+        <span>@Shown.Count of @list.Apps.Count apps</span>
+        <span class="gb-sep"></span>
+        <span>Read @(readAt is { } at ? at.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture) : "–") from Docker, every 5 s</span>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "show")] public string? Show { get; set; }
+    [SupplyParameterFromQuery(Name = "sort")] public string? SortQ { get; set; }
+    [SupplyParameterFromQuery(Name = "dir")] public string? DirQ { get; set; }
+
+    private AppList list = AppList.Empty;
+    private IReadOnlyDictionary<string, string> kinds = AppKinds.None;
+    private DiskSpace? disk;
+    private string lanHost = "";
+    private string query = "";
+    private StatusFilter filter = StatusFilter.All;
+    private GroupBy groupBy = GroupBy.Prefix;
+    // Null: Gitberth's own order, pinned apps first and then by name.
+    private SortBy? sortBy;
+    private bool descending;
+    private readonly HashSet<AppSource> sources = [];
+    private readonly HashSet<string> closed = [];
+    private bool loaded, troubleDismissed;
+    private string? bulk;
+    private DateTime? readAt;
+    private Timer? timer;
+    private int refreshing;
+    private string shownKey = "";
+
+    private List<AppSummary> Trouble => list.Apps.Where(a => AppStatus.Of(a.State).Trouble).ToList();
+
+    private string TroubleLine => AppFacts.Names(Trouble.Select(a => $"{a.Title} ({AppStatus.Of(a.State, a.StateText).Word.ToLowerInvariant()})").ToList(), 4) + ".";
+
+    private List<AppSummary> Shown
+    {
+        get
+        {
+            var shown = AppSearch.Filter(list.Apps, query).Where(a => AppFacts.Passes(a, filter) && (sources.Count == 0 || sources.Contains(a.Source)));
+            // Groups and stacks keep the order they're given, so this sorts inside each of them.
+            return sortBy is { } by ? AppSorting.Sort(shown, by, descending) : shown.ToList();
+        }
+    }
+
+    private void SortOn(SortBy by)
+    {
+        if (sortBy == by) descending = !descending;
+        else (sortBy, descending) = (by, AppSorting.StartsDescending(by));
+        WriteSort();
+    }
+
+    private void OnSortPicked(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<SortBy>(e.Value?.ToString(), out var by) && Enum.IsDefined(by)) (sortBy, descending) = (by, AppSorting.StartsDescending(by));
+        else sortBy = null;
+        WriteSort();
+    }
+
+    private void ReverseSort()
+    {
+        descending = !descending;
+        WriteSort();
+    }
+
+    // ?sort=cpu&dir=desc: the order lives in the address, so it's still there after opening an app and coming back.
+    private void ReadSort()
+    {
+        if (Enum.TryParse<SortBy>(SortQ, ignoreCase: true, out var by) && Enum.IsDefined(by))
+            (sortBy, descending) = (by, DirQ is null ? AppSorting.StartsDescending(by) : DirQ == "desc");
+        else sortBy = null;
+    }
+
+    // The search goes along as it is now, so the address never brings back an older one.
+    private void WriteSort() => Nav.NavigateTo(Nav.GetUriWithQueryParameters(new Dictionary<string, object?>
+    {
+        ["sort"] = sortBy?.ToString().ToLowerInvariant(),
+        ["dir"] = sortBy is null ? null : descending ? "desc" : "asc",
+        ["q"] = query.Trim().Length > 0 ? query : null,
+    }), replace: true);
+
+    private string? AriaSort(SortBy by) => sortBy == by ? descending ? "descending" : "ascending" : null;
+
+    private RenderFragment SortHead(SortBy by, string label) =>
+        @<button type="button" class="gb-sorth @(sortBy == by ? "on" : null)" @onclick="() => SortOn(by)" title="@($"Sort by {AppSorting.WordOf(by)}")">
+            @label<SvgIcon Icon="@(sortBy != by ? Icons.Material.Outlined.UnfoldMore : descending ? Icons.Material.Outlined.ArrowDownward : Icons.Material.Outlined.ArrowUpward)" />
+        </button>;
+
+    private IReadOnlyList<AppGroup> Groups => AppGrouping.Group(Shown, groupBy);
+
+    private IReadOnlyList<SegOption<StatusFilter>> FilterOptions =>
+    [
+        new(StatusFilter.All, "All", Count: list.Apps.Count),
+        new(StatusFilter.Running, "Running", Count: list.Apps.Count(a => a.Running)),
+        new(StatusFilter.Stopped, "Stopped", Count: list.Apps.Count(a => !a.Running)),
+        .. Trouble.Count > 0 ? [new SegOption<StatusFilter>(StatusFilter.Attention, "Needs attention", Count: Trouble.Count)] : Array.Empty<SegOption<StatusFilter>>(),
+        .. list.Apps.Any(a => a.Update is { Available: true })
+            ? [new SegOption<StatusFilter>(StatusFilter.Updates, "Updates", Count: list.Apps.Count(a => a.Update is { Available: true }))]
+            : Array.Empty<SegOption<StatusFilter>>(),
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        query = Q ?? "";
+        filter = Show switch
+        {
+            "running" => StatusFilter.Running,
+            "stopped" => StatusFilter.Stopped,
+            "attention" => StatusFilter.Attention,
+            "updates" => StatusFilter.Updates,
+            _ => StatusFilter.All,
+        };
+        try { lanHost = await Book.LanHostAsync(Nav.BaseUri); }
+        catch (Exception) { lanHost = new Uri(Nav.BaseUri).Host; }
+        await LoadAsync();
+        timer = new Timer(_ =>
+        {
+            // A slow Docker engine mustn't stack reads up.
+            if (Interlocked.Exchange(ref refreshing, 1) == 1) return;
+            _ = InvokeAsync(async () =>
+            {
+                try
+                {
+                    await LoadAsync();
+                    if (ViewKey() != shownKey) StateHasChanged();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref refreshing, 0);
+                }
+            });
+        }, null, 5000, 5000);
+    }
+
+    // The top bar's search lands here with ?q=: a new search while the page is open. So does a sort (?sort=).
+    protected override void OnParametersSet()
+    {
+        if (Q is not null && loaded && Q != query) query = Q;
+        ReadSort();
+    }
+
+    protected override void OnAfterRender(bool firstRender) => shownKey = ViewKey();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            list = await Catalog.ListAsync(lanHost);
+            readAt = DateTime.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            list = list with { DockerError = ex.Message };
+        }
+        kinds = await AppKinds.LoadAsync(Db);
+        try { disk = Images.Disk(); }
+        catch (Exception) { disk = null; }
+        loaded = true;
+    }
+
+    // Everything the page shows from Docker, to the second for the times it prints; a read that changes nothing sends nothing.
+    private string ViewKey() => string.Join('|', DateTime.UtcNow.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture), list.DockerError,
+        string.Join(';', list.Apps.Select(a => $"{a.Key},{a.Title},{a.State},{a.StateText},{a.Pinned},{a.Update?.Available},{a.MemoryBytes / 1048576},{a.CpuPercent:0.0},{string.Join(' ', a.Chips.Select(c => c.Label))}")),
+        disk?.FreeBytes / 1_000_000_000);
+
+    private RenderFragment Row(AppSummary app)
+    {
+        var health = Stats.Current.Containers.FirstOrDefault(c => c.Name == app.Container);
+        var cpu = health?.Recent.Select(p => p.Cpu).ToList() ?? [];
+        return @<AppRow @key="app.Key" App="app" Kind="@kinds.GetValueOrDefault(app.Key)" Cpu="cpu" MemoryLimit="@health?.MemoryLimit"
+                        HostMemory="@Stats.Current.Host?.MemoryBytes" OnAction="a => RunAsync(app, a)" />;
+    }
+
+    // The image a stack's runtime logo is drawn from.
+    private static string StackImage(string slug) => slug switch
+    {
+        "nodedotjs" => "node", "go" => "golang", "openjdk" => "eclipse-temurin", "html5" => "static", _ => slug,
+    };
+
+    private void OnSearch(ChangeEventArgs e) => query = e.Value?.ToString() ?? "";
+
+    private void SetFilter(StatusFilter value) => filter = value;
+
+    private void ToggleSource(AppSource source)
+    {
+        if (!sources.Remove(source)) sources.Add(source);
+    }
+
+    private void Toggle(string id)
+    {
+        if (!closed.Remove(id)) closed.Add(id);
+    }
+
+    private void ShowTrouble()
+    {
+        filter = StatusFilter.Attention;
+        troubleDismissed = true;
+    }
+
+    private void ClearFilters()
+    {
+        (query, filter) = ("", StatusFilter.All);
+        sources.Clear();
+    }
+
+    private async Task RunAsync(AppSummary app, ContainerAction action)
+    {
+        if (await AppCommands.RunAsync(app, action, Actions, Containers, Dialogs, Snackbar)) await LoadAsync();
+    }
+
+    // "Start 17 stopped": the ones stopped on purpose, one after another; the crashed ones are left to look at first.
+    private async Task StartAllAsync(AppGroup group)
+    {
+        var targets = group.Startable.ToList();
+        if (await Dialogs.ShowMessageBoxAsync($"Start {targets.Count} apps in {group.Title}?",
+                $"{AppFacts.Names(targets.Select(a => a.Title).ToList(), 5)} start one after another. Apps that exited with an error stay as they are.",
+                yesText: $"Start {targets.Count}", cancelText: "Cancel") != true) return;
+        bulk = group.Id;
+        var failed = new List<string>();
+        try
+        {
+            foreach (var app in targets)
+            {
+                try
+                {
+                    if (await Actions.StartAsync(app.Key) is { } error) failed.Add($"{app.Title}: {error}");
+                }
+                catch (Exception ex)
+                {
+                    failed.Add($"{app.Title}: {ex.Message}");
+                }
+            }
+        }
+        finally
+        {
+            bulk = null;
+        }
+        Snackbar.Add(failed.Count == 0 ? $"Started {targets.Count} apps." : $"{targets.Count - failed.Count} started. {string.Join(" ", failed.Take(3))}",
+            failed.Count == 0 ? Severity.Success : Severity.Warning);
+        await LoadAsync();
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

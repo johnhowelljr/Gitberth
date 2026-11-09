@@ -1,0 +1,702 @@
+@implements IDisposable
+@inject AppSettingsService SettingsService
+@inject AppService Apps
+@inject PortChanger Changer
+@inject ContainerLocks Locks
+@inject ContainerPortNotes Notes
+@inject NetworkService Networks
+@inject HostScanner Scanner
+@inject HostPortMap HostPorts
+@inject IContainerEngine Engine
+@inject GitberthOptions Options
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+
+@*
+    An app's Network tab, the same for every app whatever its source (app-network.html): "How it's reached" first, a
+    diagram of every way in; then its ports (one table for every app), domains, networks and its own LAN address. Changes
+    to ports are a draft until they're applied: a recreate through the change dialog, a Git app's deploy without a build,
+    or the edit for a Compose file. Joining a network and an own address are instant. The App page passes a new AppView
+    every few seconds; a draft is never touched by that.
+*@
+@if (loaded)
+{
+    <div class="gb-stack">
+        <ReachDiagram Model="Reach" Title="@($"How {App.Summary.Title} is reached")" Sub="@DiagramSub" FootNote="Dashed paths are off · live, every 5 s"
+                      OnAction="ActAsync" Busy="@(acting || busy is not null)">
+            <Actions>
+                @if (Database && App.Details is not null)
+                {
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Link" OnClick="ConnectAsync">Connect</Btn>
+                }
+                else if (App.Summary.Running && WebAddress is { } open)
+                {
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.OpenInNew" Href="@open" Target="_blank">Open</Btn>
+                }
+            </Actions>
+            <ChildContent>
+                @if (verdict?.Compose is { } compose && (Mode == PortsMode.Compose || verdict.Kind == RecreateKind.Self))
+                {
+                    <div class="gb-stage-note">
+                        <SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />
+                        <span>Docker Compose manages @App.Summary.Title (project <span class="gb-mono">@compose.Project</span>): a port change is the edit to make in its file. Networks and an own address change at once.</span>
+                    </div>
+                }
+                else if (Mode == PortsMode.Editable && App.Inspect is not null && !LivePorts().Any(p => p.Published) && LivePorts().Count > 0)
+                {
+                    <div class="gb-stage-note">
+                        <SvgIcon Icon="@Icons.Material.Outlined.Info" />
+                        <span>Not published: containers on its networks reach it by name. Publishing recreates @App.Summary.Title@(App.Summary.Running ? $": about {(Database ? 5 : 3)} s offline" : ", which stays stopped").</span>
+                    </div>
+                }
+                else if (!App.Summary.Running && App.Inspect is not null)
+                {
+                    <div class="gb-stage-note">
+                        <SvgIcon Icon="@Icons.Material.Outlined.PauseCircleOutline" />
+                        <span>@App.Summary.Title is stopped: the paths stay drawn, and answer again when it starts.</span>
+                    </div>
+                }
+                else if (App.Inspect is null && !IsGit)
+                {
+                    <div class="gb-stage-note">
+                        <SvgIcon Icon="@Icons.Material.Outlined.Info" />
+                        <span>There's no container now: these are the ports it gets when it's created.</span>
+                    </div>
+                }
+            </ChildContent>
+        </ReachDiagram>
+
+        @if (draft is not null)
+        {
+            <PortsCard Draft="draft" Name="@NetworkName" Title="@App.Summary.Title" Mode="Mode" Notice="Notice" IsGit="IsGit" Deployed="@(App.Row?.CurrentImage is not null)"
+                       Unnoticed="@(HasDomains && App.Row?.Volumes.Count == 0)" HasDomains="HasDomains" Running="@App.Summary.Running" Database="Database"
+                       LanHost="@publicHost" LanIpv4Only="lanIpv4Only" Network="@App.Addresses?.Network" SharedNetwork="@Networks.Shared" Self="Self"
+                       Compose="verdict?.Compose" ComposeSnippet="@ComposeSnippet" Busy="@busy" WhyNot="@WhyNot" Stale="Stale" Applying="applying" Saving="acting"
+                       WebAlways="@(Mode == PortsMode.ReadOnly && App.Summary.Role != ContainerRole.AppInternal)" Problems="portProblems" LastChange="App.LatestChange" Job="job"
+                       Notes="notes" OnChanged="PortsChanged" OnApply="ApplyAsync" OnSave="SaveAsync" OnSaveLater="SaveLaterAsync" OnDiscard="Discard"
+                       OnPutBack="PutBackAsync" OnSaveNotes="SaveHostNotesAsync" />
+        }
+
+        @* The tunnel itself has no domains: its Networks card takes the row alone. *@
+        <div class="@(App.Summary.Role == ContainerRole.Tunnel ? null : "gb-grid-2")" style="align-items:start">
+            @if (App.Summary.Role != ContainerRole.Tunnel)
+            {
+                <DomainsCard AppId="App.Row?.Id" Key="@App.Summary.Key" AppName="@App.Summary.Title" Ports="WebPorts" Running="@App.Summary.Running"
+                             Deploying="@(App.Summary.State == AppState.Deploying)" FromRepo="IsGit" OnChanged="ChildChangedAsync" OnLoaded="DomainsLoaded" />
+            }
+            <NetworksCard Container="@App.Summary.Container" Title="@App.Summary.Title" IsApp="IsGit" ReadOnly="@(App.Summary.Role == ContainerRole.AppInternal)"
+                          Refresh="@RefreshKey" Busy="@busy" OnChanged="ChildChangedAsync" OnLoaded="NetworksLoaded" />
+        </div>
+
+        <LanAddressCard Id="gb-lanaddr" Container="@App.Summary.Container" Title="@App.Summary.Title" LanHost="@AddressBook.HostPart(publicHost)" IsApp="IsGit"
+                        Domains="HasDomains" Refresh="@RefreshKey" Busy="@busy" OnChanged="ChildChangedAsync" OnLoaded="LanLoaded" />
+    </div>
+}
+else
+{
+    <div class="gb-stack">
+        <div class="gb-stage" style="height:300px"><div class="gb-skel" style="margin:20px;height:260px"></div></div>
+    </div>
+}
+
+@code {
+    /// <summary>The app, as the App page read it last (every few seconds).</summary>
+    [Parameter, EditorRequired] public AppView App { get; set; } = default!;
+    /// <summary>Raised after anything here changed the app, so the page reads it again.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private bool loaded, applying, acting, disposed;
+    private string? loadedKey;
+    private string publicHost = "";
+    private bool lanIpv4Only;
+    private string lanHostIp = "";
+    private ContainerPortsDraft? draft;
+    private List<PortProblem> portProblems = [];
+    private bool triedApply;
+    private IReadOnlyList<ContainerPortNote> notes = [];
+    private IReadOnlyList<string> imageExposed = [];
+    private string? imageFor;
+    private RecreateVerdict? verdict;
+    private string? verdictFor;
+    private string? busy;
+    private PortChangeJob? job;
+    private int networkChanges;
+    // What the cards read, which the diagram draws too.
+    private ContainerNetworks? networks;
+    private IReadOnlyDictionary<string, IReadOnlyList<NetworkMember>> members = new Dictionary<string, IReadOnlyList<NetworkMember>>();
+    private LanAddressView? lan;
+    private DomainsOverview? domains;
+
+    private bool IsGit => App.Summary.Source == AppSource.Git;
+    private bool Database => App.Summary.Role == ContainerRole.Database;
+    private string NetworkName => IsGit && App.Row is { } row ? row.Slug : App.Summary.Container;
+    private HostPortOwner Self => IsGit && App.Row is { } row ? new HostPortOwner(row.ContainerName, row.Id) : new HostPortOwner(Container: App.Summary.Container);
+    private string NetworkMode => App.Details?.NetworkMode is { } m && (m is "host" or "none" || m.StartsWith("container:", StringComparison.Ordinal)) ? m : "";
+    private bool HasDomains => domains?.Domains.Count > 0 || App.Row?.Domains.Count > 0;
+    private string RefreshKey => $"{App.Summary.ContainerId}|{App.Summary.State}|{networkChanges}";
+
+    private PortsMode Mode => PortsModes.Of(IsGit, App.Summary.Role == ContainerRole.Self, App.Summary.Role == ContainerRole.AppInternal, NetworkMode, verdict);
+
+    // Docker's state changed under the draft: only Discard is offered.
+    private bool Stale => draft is { Dirty: true } && !applying && draft.Loaded != LoadedKey();
+
+    // Why Apply is off while the draft is fine: a change already running for it, or an engine too old to recreate it.
+    private string? WhyNot => busy ?? (verdict?.Kind is RecreateKind.EngineTooOld or RecreateKind.Busy ? verdict.Reason : null);
+
+    private string? DiagramSub => App.Summary.Running
+        ? $"Every way in, as Docker and the tunnel have it now."
+        : $"{App.Summary.Title} is stopped.";
+
+    // The one line that says why Gitberth won't change its ports, or how (5.6).
+    private PortsCard.PortsNotice? Notice => Mode switch
+    {
+        PortsMode.Compose when verdict?.Compose is { } c => new("Docker Compose manages this container",
+            $"Compose would undo a change made here, so a change is written as the edit to make in its file (project {c.Project}{(c.Service is null ? "" : $", service {c.Service}")})."),
+        PortsMode.ReadOnly when App.Summary.Role == ContainerRole.Self => new("Gitberth's own container", "Its ports are set in its Compose file. The web marker is still yours to move."),
+        PortsMode.ReadOnly or PortsMode.Paused when verdict?.Reason is { } reason => new("Gitberth won't recreate it", reason),
+        PortsMode.NoTable when NetworkMode.StartsWith("container:", StringComparison.Ordinal) => new("No ports of its own",
+            $"It shares the network of {NetworkMode["container:".Length..]}: its ports are that one's.", $"apps/{Uri.EscapeDataString(NetworkMode["container:".Length..])}/network",
+            NetworkMode["container:".Length..]),
+        PortsMode.NoTable => new("No network", "Network mode none: nothing reaches it, and it has no ports."),
+        _ => null,
+    };
+
+    // The web address Open goes to: the web port's LAN address while it runs.
+    private string? WebAddress => draft?.Web is { } web && web.Access is PortAccess.Lan or PortAccess.Custom && draft.Unchanged(web)
+        ? ContainerPortAddress.Of(web, AddressBook.HostPart(publicHost), NetworkName, true, Database)?.Href : null;
+
+    // The ports as saved rows, the web one marked: what DomainsCard routes to.
+    private IReadOnlyList<PortMapping> WebPorts => (draft?.Rows ?? []).Where(r => r.ContainerPort is not null && (draft is null || draft.WasLoaded(r)))
+        .Select(r => new PortMapping { ContainerPort = r.ContainerPort!.Value, Protocol = PortRules.ProtocolOf(r.Protocol), Access = r.Access, HostPort = r.HostPort, HostIp = r.HostIp, IsWeb = r.IsWeb })
+        .ToList();
+
+    private string ComposeSnippet => App.Inspect is { } inspect && verdict?.Compose is { } compose && draft is not null
+        ? compose.Snippet(CloneSpec.Bindings(inspect, draft.Rules(), lanHostIp)) : "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = App.Summary.Key;
+        if (loadedKey != key)
+        {
+            loadedKey = key;
+            (draft, portProblems, triedApply, verdict, verdictFor, imageFor, job, networks, lan, domains, applying) = (null, [], false, null, null, null, null, null, null, null, false);
+            members = new Dictionary<string, IReadOnlyList<NetworkMember>>();
+            publicHost = await Apps.GetPublicHostAsync(Nav.BaseUri);
+            try
+            {
+                lanIpv4Only = (await Scanner.LatestAsync()).LanIpv4Only;
+                lanHostIp = lanIpv4Only ? "0.0.0.0" : "";
+            }
+            catch (Exception)
+            {
+                // The host couldn't be scanned: the LAN's ports are on every address, as Docker publishes them.
+                (lanIpv4Only, lanHostIp) = (false, "");
+            }
+        }
+        await RefreshAsync();
+        loaded = true;
+    }
+
+    // What the tab reads beyond the AppView: notes, the image's ports, whether a change is under way, the recreate verdict.
+    private async Task RefreshAsync()
+    {
+        var name = App.Summary.Container;
+        try
+        {
+            if (!IsGit) notes = await Notes.ListAsync(name);
+            if (App.Details is { } details && imageFor != details.ImageId)
+            {
+                imageExposed = await ImageExposedAsync(details.ImageId);
+                imageFor = details.ImageId;
+            }
+            busy = await Changer.BusyWithAsync(name) ?? (Locks.IsHeld(name) ? $"Gitberth is already changing {App.Summary.Title}. Try again when that's done." : null);
+            if (Changer.JobFor(name) is { Completion.IsCompleted: false } running && !ReferenceEquals(running, job)) Follow(running);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+
+        // While nothing is being edited, the Ports table shows the ports as they are now.
+        if (draft is null || (!draft.Dirty && !applying && !acting && LoadedKey() != draft.Loaded))
+        {
+            draft = NewDraft();
+            portProblems = [];
+        }
+
+        // The verdict reads every container, so it's worked out again only when this one or its change moves on.
+        if (!IsGit && App.Inspect is { } inspect)
+        {
+            var c = App.LatestChange;
+            var key = $"{App.Summary.ContainerId}|{App.Details?.Status}|{c?.Id}:{c?.Outcome}:{c?.Step}";
+            if (key != verdictFor)
+            {
+                verdictFor = key;
+                _ = LoadVerdictAsync(key, name, inspect);
+            }
+        }
+    }
+
+    private ContainerPortsDraft NewDraft()
+    {
+        if (IsGit && App.Row is { } row) return ContainerPortsDraft.FromSaved(row.Ports, imageExposed);
+        if (App.Inspect is { } inspect) return ContainerPortsDraft.From(inspect, imageExposed, notes, WebPortOf(inspect));
+        // No container: the ports it gets when it's created, from its saved mirror.
+        return ContainerPortsDraft.FromSaved(App.Row?.Ports ?? [], imageExposed);
+    }
+
+    // The ports as they were loaded, the same way the draft keys them.
+    private string LoadedKey() =>
+        IsGit || App.Inspect is null ? AppSettingsModel.PortsKey(App.Row?.Ports ?? []) : ContainerPortsDraft.KeyOf(App.Inspect, notes);
+
+    // The web port: the one Gitberth keeps marked; else, for an app with no record, the first published port a browser opens.
+    private int? WebPortOf(System.Text.Json.Nodes.JsonObject inspect)
+    {
+        if (App.Row?.Ports.FirstOrDefault(p => p.IsWeb) is { } marked) return marked.ContainerPort;
+        if (App.AppAddresses?.WebPort is int web) return web;
+        if (App.Row is not null) return null;
+        return ContainerPorts.Rules(inspect).Where(r => r.Published && r.HostPort is not null && AddressBook.IsWeb(r.ContainerPort, r.Protocol, App.Summary.Role, false))
+            .OrderBy(r => r.ContainerPort).Select(r => (int?)r.ContainerPort).FirstOrDefault();
+    }
+
+    private async Task<IReadOnlyList<string>> ImageExposedAsync(string imageId)
+    {
+        try
+        {
+            return (await Engine.InspectImageAsync(imageId, CancellationToken.None))?["Config"]?["ExposedPorts"] is System.Text.Json.Nodes.JsonObject ports
+                ? ports.Select(p => ContainerPorts.ParseKey(p.Key)).OfType<(int Port, string Protocol)>().Select(p => ContainerPorts.Key(p.Port, p.Protocol)).ToList()
+                : [];
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
+
+    // PortChanger works out whether it may recreate the container from a plan that changes nothing.
+    private async Task LoadVerdictAsync(string key, string name, System.Text.Json.Nodes.JsonObject inspect)
+    {
+        try
+        {
+            var plan = await Changer.PlanAsync(name, ContainerPorts.Rules(inspect));
+            if (disposed || key != verdictFor) return;
+            await InvokeAsync(() =>
+            {
+                verdict = plan.Verdict;
+                StateHasChanged();
+            });
+        }
+        catch (Exception)
+        {
+            // Docker couldn't be read: the table stays read-only until the next refresh works it out.
+        }
+    }
+
+    // ---- The diagram ----
+
+    private ReachModel Reach => ReachModel.Build(new ReachInput
+    {
+        Name = NetworkName,
+        Title = App.Summary.Title,
+        Image = App.Summary.Image,
+        Kind = App.Row?.DetectedKind,
+        Self = App.Summary.Role == ContainerRole.Self,
+        State = App.Summary.State,
+        StateText = App.Summary.StateText,
+        Since = App.Summary.StartedAt,
+        Running = App.Summary.Running || App.Summary.State is AppState.Deploying or AppState.Changing,
+        LanHost = AddressBook.HostPart(publicHost),
+        NetworkMode = NetworkMode,
+        SharesWith = NetworkMode.StartsWith("container:", StringComparison.Ordinal) ? App.Addresses?.SharesNetworkOf : null,
+        Ports = LivePorts(),
+        WebPort = draft?.Rows.FirstOrDefault(r => r.IsWeb && draft.WasLoaded(r) && draft.Unchanged(r))?.ContainerPort ?? WebFromRow(),
+        Database = Database,
+        Domains = domains?.Domains.OrderByDescending(d => d.Main).Select(d => d.Hostname).ToList() ?? App.Row?.Domains.Select(d => d.Hostname).ToList() ?? [],
+        Tunnel = domains?.Tunnel is { } t ? new ReachTunnel(t.ContainerName, t.HostNetwork, t.OnAppNetwork) : null,
+        Networks = NamedNetworks(),
+        OnlyDefaultBridge = networks is not null && NamedNetworks().Count == 0 && networks.Networks.Any(n => n.Network == "bridge"),
+        SharedNetwork = Networks.Shared,
+        OwnLanAddress = lan?.Address,
+        OwnLanAutomatic = lan?.Automatic == true,
+        OwnLanPossible = lan is { Refusal: null },
+        OwnLanOff = lan is { On: false },
+        CanPublish = Mode is PortsMode.Editable or PortsMode.Git or PortsMode.Compose,
+        CanJoin = Mode != PortsMode.ReadOnly,
+        Facts = Facts(),
+    });
+
+    private int? WebFromRow() => App.Row?.Ports.FirstOrDefault(p => p.IsWeb)?.ContainerPort ?? App.AppAddresses?.WebPort;
+
+    // The ports as they are: the live bindings, or a Git app's saved ones when it has no container.
+    private IReadOnlyList<PortRule> LivePorts() =>
+        App.Inspect is { } inspect ? ContainerPorts.Rules(inspect)
+        : (App.Row?.Ports ?? []).Select(p => new PortRule(p.ContainerPort, p.Protocol, p.Access, p.HostPort, p.HostIp)).ToList();
+
+    private List<ReachNetwork> NamedNetworks()
+    {
+        if (networks is null)
+            return App.Addresses?.Network is { } net ? [new ReachNetwork(net, [], net == Networks.Shared)] : [];
+        return networks.Networks
+            .Where(n => n.Attached && n.Network is not ("bridge" or "host" or "none") && n.Network != LanAddresses.Network)
+            .OrderBy(n => n.Network == Networks.Shared ? 0 : 1)
+            .Select(n => new ReachNetwork(n.Network, members.TryGetValue(n.Network, out var m) ? m.Select(x => x.Title.Replace(" (app)", "", StringComparison.Ordinal)).ToList() : [], n.Network == Networks.Shared))
+            .ToList();
+    }
+
+    private List<ReachFact> Facts()
+    {
+        var facts = new List<ReachFact>();
+        if (IsGit && App.Row is { } row)
+        {
+            if (row.DetectedKind is { Length: > 0 } stack) facts.Add(new("Stack", StackName(stack)));
+            if (row.CurrentCommit is { Length: > 0 } commit) facts.Add(new("Commit", commit[..Math.Min(7, commit.Length)], true));
+        }
+        else if (App.Summary.Image.Length > 0)
+        {
+            facts.Add(new("Image", App.Summary.Image.StartsWith("sha256:", StringComparison.Ordinal) ? App.Summary.Image[7..19] : App.Summary.Image, true));
+        }
+        if (networks?.Networks.FirstOrDefault(n => n.Attached && n.IpAddress is not null && n.Network != LanAddresses.Network) is { } on)
+            facts.Add(new($"On {on.Network}", on.IpAddress!, true));
+        return facts;
+    }
+
+    // "NextJs" as people write it: Next.js; any other kind with its words apart ("SpringBoot" is "Spring Boot").
+    private static string StackName(string kind) => kind switch
+    {
+        "NextJs" => "Next.js",
+        "NodeJs" or "Node" => "Node.js",
+        "DotNet" => ".NET",
+        _ => System.Text.RegularExpressions.Regex.Replace(kind, "(?<=[a-z])(?=[A-Z])", " "),
+    };
+
+    private void NetworksLoaded((ContainerNetworks Networks, IReadOnlyDictionary<string, IReadOnlyList<NetworkMember>> Members) read) =>
+        (networks, members) = (read.Networks, read.Members);
+
+    private void LanLoaded(LanAddressView view) => lan = view;
+
+    private void DomainsLoaded(DomainsOverview overview) => domains = overview;
+
+    // A path's button: Publish on LAN, Turn on (the own address card), Join the shared network.
+    private async Task ActAsync(ReachAction action)
+    {
+        switch (action)
+        {
+            case ReachAction.PublishOnLan:
+                await PublishOnLanAsync();
+                break;
+            case ReachAction.TurnOnLanAddress:
+                // Own addresses are turned on for the host in Settings first; then each app picks its own here.
+                Nav.NavigateTo(lan?.On == false ? "settings#own-lan" : Nav.Uri.Split('#')[0] + "#gb-lanaddr");
+                break;
+            case ReachAction.JoinShared:
+                await JoinSharedAsync();
+                break;
+        }
+    }
+
+    // Publish on LAN from the diagram: the port it's about (a database's own, else the lowest TCP one) goes on the LAN at a
+    // free host port in the draft, then straight to the confirmation (a Git app's bar, or the Compose edit, shows instead).
+    private async Task PublishOnLanAsync()
+    {
+        if (draft is null) return;
+        var db = App.Details is { } d ? ConnectionRows.DatabasePort(d) : null;
+        var candidates = PortChanges.Candidates(draft.Rules(), db);
+        var pick = candidates.FirstOrDefault();
+        var row = pick is null ? null : draft.Rows.FirstOrDefault(r => r.ContainerPort == pick.ContainerPort && PortRules.ProtocolOf(r.Protocol) == pick.Protocol);
+        if (row is null)
+        {
+            Snackbar.Add("Every port is on the LAN already.", Severity.Info);
+            return;
+        }
+        row.Access = PortAccess.Lan;
+        row.Random = false;
+        if (row.HostPort is null)
+        {
+            try
+            {
+                var taken = draft.Rows.Where(r => !ReferenceEquals(r, row) && r.Access != PortAccess.Internal && r.HostPort is not null).Select(r => r.HostPort!.Value);
+                row.HostPort = await HostPorts.SuggestAsync(row.ContainerPort!.Value, PortRules.ProtocolOf(row.Protocol), Self, taken);
+            }
+            catch (Exception)
+            {
+                // The table's own check says why the host port is empty.
+            }
+        }
+        PortsChanged();
+        if (Mode == PortsMode.Editable) await ApplyAsync();
+    }
+
+    // [Connect]: how to reach a database from a device or another container; it can ask to publish it on the LAN.
+    private async Task ConnectAsync()
+    {
+        if (App.Details is not { } details) return;
+        var dialog = await Dialogs.ShowAsync<ConnectDialog>(null, new DialogParameters<ConnectDialog>
+        {
+            { x => x.Name, App.Summary.Container },
+            { x => x.Details, details },
+            { x => x.Addresses, App.Addresses?.Addresses ?? [] },
+            { x => x.Network, App.Addresses?.Network },
+            { x => x.Shared, Networks.Shared },
+            { x => x.CanPublish, Mode is PortsMode.Editable or PortsMode.Compose },
+        }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+        if (await dialog.Result is { Canceled: false, Data: true }) await PublishOnLanAsync();
+    }
+
+    private async Task JoinSharedAsync()
+    {
+        acting = true;
+        try
+        {
+            var done = await Networks.JoinAsync(App.Summary.Container, Networks.Shared);
+            Snackbar.Add(done.Error ?? done.Done!, done.Ok ? Severity.Success : Severity.Error);
+            if (done.Ok) await ChildChangedAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            acting = false;
+        }
+    }
+
+    // ---- Ports ----
+
+    private void PortsChanged()
+    {
+        if (triedApply && draft is not null) portProblems = draft.Problems();
+    }
+
+    private void Discard()
+    {
+        (draft, portProblems, triedApply) = (NewDraft(), [], false);
+    }
+
+    // The plan for the draft, from the settings service (any app); null with the reason said when it can't be made.
+    private async Task<SettingsPlan?> PlanAsync()
+    {
+        if (draft is null) return null;
+        triedApply = true;
+        portProblems = draft.Problems();
+        if (portProblems.Count > 0)
+        {
+            Snackbar.Add(portProblems.Count == 1 ? portProblems[0].Message : "Some ports need changing: see the Ports table.", Severity.Warning);
+            return null;
+        }
+        try
+        {
+            var plan = await SettingsService.PlanPortsAsync(App.Summary.Key, App.Summary.ContainerId, draft.ToPortRows(),
+                App.Row is { } row ? AppSettingsModel.PortsKey(row.Ports) : null);
+            if (plan.Problems.Count > 0)
+            {
+                Snackbar.Add(string.Join(" ", plan.Problems.Select(p => p.Message)), Severity.Warning);
+                return null;
+            }
+            return plan;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Nothing changed: {ex.Message}", Severity.Error);
+            return null;
+        }
+    }
+
+    // [Review and apply] (a recreate, through the change dialog) or a Git app's [Apply] (a deploy without a build).
+    private async Task ApplyAsync()
+    {
+        if (draft is null) return;
+        if (IsGit)
+        {
+            await SaveGitAsync(ApplyTiming.Now);
+            return;
+        }
+        acting = true;
+        try
+        {
+            var plan = await PlanAsync();
+            if (plan is null) return;
+            if (plan.Change is null)
+            {
+                await ApplyPlanAsync(plan, ApplyTiming.Now);
+                return;
+            }
+            var applied = draft;
+            var dialog = await Dialogs.ShowAsync<ChangeDialog>(null, new DialogParameters<ChangeDialog>
+            {
+                { x => x.Plan, plan },
+                { x => x.Title, App.Summary.Title },
+                { x => x.Running, App.Summary.Running },
+            }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true });
+            var result = await dialog.Result;
+            if (result is { Canceled: false, Data: SettingsOutcome outcome })
+            {
+                // Ports only noted are saved once the change is under way; the rest is the container's now.
+                if (applied.NotesChanged) await Notes.SaveAsync(App.Summary.Container, applied.Notes());
+                if (outcome.Job is { } started) Follow(started);
+                applying = outcome.Job is { Completion.IsCompleted: false };
+                await Changed.InvokeAsync();
+            }
+        }
+        finally
+        {
+            acting = false;
+        }
+    }
+
+    // [Save]: only notes, or the web marker, changed: nothing restarts.
+    private async Task SaveAsync()
+    {
+        if (draft is null) return;
+        acting = true;
+        try
+        {
+            if (draft.NotesChanged) await Notes.SaveAsync(App.Summary.Container, draft.Notes());
+            if (draft.WebChanged || IsGit)
+            {
+                var plan = await PlanAsync();
+                if (plan is null) return;
+                await ApplyPlanAsync(plan, ApplyTiming.Now);
+                return;
+            }
+            Snackbar.Add("Saved. Nothing restarted.", Severity.Success);
+            (draft, portProblems, triedApply) = (null, [], false);
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            acting = false;
+        }
+    }
+
+    private Task SaveLaterAsync() => SaveGitAsync(ApplyTiming.NextDeploy);
+
+    private async Task SaveGitAsync(ApplyTiming timing)
+    {
+        acting = true;
+        try
+        {
+            var plan = await PlanAsync();
+            if (plan is null) return;
+            await ApplyPlanAsync(plan, timing);
+        }
+        finally
+        {
+            acting = false;
+        }
+    }
+
+    // A plan nothing in Docker needs confirming for (Gitberth's own data, a Git app's save and deploy): done at once.
+    private async Task ApplyPlanAsync(SettingsPlan plan, ApplyTiming timing)
+    {
+        if (plan.Blocked is { } blocked)
+        {
+            Snackbar.Add(blocked, Severity.Warning);
+            return;
+        }
+        try
+        {
+            var outcome = await SettingsService.ApplyAsync(plan, timing);
+            // Another change of this container came back: this one was never made, so it isn't followed or called done.
+            if (outcome.Job is { } other && ChangeText.NotThisChange(other, plan.Change, App.Summary.Title) is { } refused)
+            {
+                Snackbar.Add(refused, Severity.Warning);
+                return;
+            }
+            Snackbar.Add(outcome.Message, outcome.Ok ? Severity.Success : Severity.Error);
+            if (!outcome.Ok) return;
+            if (outcome.Job is { } started) Follow(started);
+            (draft, portProblems, triedApply) = (null, [], false);
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Nothing changed: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task PutBackAsync()
+    {
+        acting = true;
+        try
+        {
+            var done = await Changer.PutOriginalBackAsync(App.Summary.Container);
+            Snackbar.Add(done.Message, done.Ok ? Severity.Success : Severity.Error);
+            await Changed.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            acting = false;
+        }
+    }
+
+    // A container on the host's network: the ports it's noted on, saved as they're added or taken away.
+    private async Task SaveHostNotesAsync(IReadOnlyList<(int Port, string Protocol)> ports)
+    {
+        acting = true;
+        try
+        {
+            await Notes.SaveAsync(App.Summary.Container, ports);
+            notes = await Notes.ListAsync(App.Summary.Container);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            acting = false;
+        }
+    }
+
+    // A network or the own address changed: the cards read again, and so does the page.
+    private async Task ChildChangedAsync()
+    {
+        networkChanges++;
+        await Changed.InvokeAsync();
+    }
+
+    // ---- The change under way ----
+
+    private void Follow(PortChangeJob started)
+    {
+        if (job is not null) job.Changed -= JobChanged;
+        job = started;
+        job.Changed += JobChanged;
+        applying = !started.Completion.IsCompleted;
+        _ = WaitAsync(started);
+    }
+
+    private async Task WaitAsync(PortChangeJob started)
+    {
+        await started.Completion;
+        if (disposed || !ReferenceEquals(started, job)) return;
+        await InvokeAsync(async () =>
+        {
+            applying = false;
+            draft = null;
+            await Changed.InvokeAsync();
+            StateHasChanged();
+        });
+    }
+
+    private void JobChanged()
+    {
+        if (!disposed) _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        if (job is not null) job.Changed -= JobChanged;
+    }
+}

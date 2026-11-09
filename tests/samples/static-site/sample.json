@@ -1,0 +1,6 @@
+{
+  "kind": "Static",
+  "title": "Static website",
+  "port": 80,
+  "expect": "Hello from a static site"
+}

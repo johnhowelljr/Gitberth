@@ -1,0 +1,332 @@
+/* The Network page (/network): host ports and Docker's networks. Built on the design system (app.css): the host strip,
+   gb-card, gb-tag, gb-acc, gb-logo; the rows below follow the Apps list's and the Health page's (56 px, 14 px gaps,
+   micro-caps heads, two-line cards on phones). */
+
+/* ---------- Head and strip ---------- */
+
+.gb-np-banner { margin-bottom: 16px; }
+
+.gb-np-strip .gb-np-strip-mono { font-family: var(--gb-mono); font-size: 20px; font-weight: 600; letter-spacing: -.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gb-np-strip .gb-hs-sub .gb-mono { color: var(--gb-text-2); }
+
+/* ---------- Cards ---------- */
+
+.gb-np-card { overflow: hidden; }
+
+.gb-np-head { flex-wrap: wrap; row-gap: 10px; }
+
+.gb-np-sub { font-weight: 400; letter-spacing: 0; }
+
+.gb-np-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 12px 18px; border-bottom: 1px solid var(--gb-line-1); background: rgba(255, 255, 255, .012); }
+
+.gb-np-check { width: 320px; max-width: 100%; }
+
+.gb-np-check input { font-family: var(--gb-mono); font-size: 13px; letter-spacing: -.01em; }
+
+.gb-np-check input::placeholder { font-family: var(--gb-sans); letter-spacing: 0; }
+
+.gb-np-check .gb-iconbtn { width: 24px; height: 24px; margin-right: -6px; }
+
+.gb-np-answer { display: flex; align-items: flex-start; gap: 8px; flex: 1 1 260px; min-width: 0; font-size: 13px; line-height: 1.45; color: var(--gb-text-2); }
+
+.gb-np-answer > .gb-i { width: 16px; height: 16px; flex: none; margin-top: 1px; color: var(--tone, var(--gb-warn)); }
+
+.gb-np-answer.gb-tone-good { color: var(--gb-text-1); }
+
+.gb-np-answer-link { display: inline-flex; align-items: center; margin-left: 6px; font-weight: 600; white-space: nowrap; vertical-align: bottom; }
+
+.gb-np-answer-link .gb-i { width: 16px; height: 16px; }
+
+.gb-np-foot { align-items: flex-start; flex-wrap: nowrap; line-height: 1.5; }
+
+.gb-np-foot > .gb-i { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--gb-text-3); }
+
+.gb-np-foot > .gb-np-warnic { color: var(--gb-warn); }
+
+/* ---------- Host ports ---------- */
+
+.gb-np-row {
+    display: grid; grid-template-columns: 112px 118px minmax(0, 1.8fr) 108px minmax(0, 1.25fr) 32px;
+    grid-template-areas: "port acc who to note act"; gap: 14px; align-items: center;
+    min-height: 56px; padding: 8px 12px 8px 18px; border-top: 1px solid var(--gb-line-1);
+}
+
+.gb-np-meta { display: contents; }
+
+.gb-np-c-port { grid-area: port; min-width: 0; }
+
+.gb-np-c-acc { grid-area: acc; min-width: 0; }
+
+.gb-np-c-who { grid-area: who; min-width: 0; }
+
+.gb-np-c-to { grid-area: to; min-width: 0; }
+
+.gb-np-c-note { grid-area: note; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+
+.gb-np-c-act { grid-area: act; display: flex; justify-content: flex-end; }
+
+.gb-np-row--head {
+    min-height: 38px; padding-top: 0; padding-bottom: 0; border-top: 0; background: rgba(255, 255, 255, .012);
+    font: 600 11px/1 var(--gb-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--gb-text-3);
+}
+
+.gb-np-row--head .gb-np-c-note { display: block; }
+
+.gb-np-row:not(.gb-np-row--head) { transition: background var(--gb-t-fast); }
+
+.gb-np-row:not(.gb-np-row--head):hover { background: var(--gb-hover); }
+
+.gb-np-port { display: inline-flex; align-items: baseline; white-space: nowrap; font-family: var(--gb-mono); font-variant-numeric: tabular-nums; }
+
+.gb-np-port b { font-size: 14.5px; font-weight: 600; letter-spacing: -.02em; color: var(--gb-text-1); }
+
+.gb-np-port small { font-size: 12px; font-weight: 500; color: var(--gb-text-3); margin-left: 1px; }
+
+.gb-np-who { display: flex; align-items: center; gap: 12px; min-width: 0; color: inherit !important; text-decoration: none !important; }
+
+a.gb-np-who:hover .gb-np-name { color: var(--gb-accent-text); }
+
+.gb-np-whotext { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+.gb-np-name { font-size: 14px; font-weight: 600; color: var(--gb-text-1); letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color var(--gb-t-fast); }
+
+.gb-np-name.gb-mono { font-size: 13px; font-weight: 600; }
+
+.gb-np-whosub { font-size: 12px; line-height: 1.35; color: var(--gb-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gb-np-whosub.gb-mono { font-size: 12px; }
+
+.gb-np-whosub .gb-mono { color: var(--gb-text-2); }
+
+.gb-np-ic { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--gb-surface-3); color: var(--gb-text-2); box-shadow: inset 0 0 0 1px var(--gb-line-2); }
+
+.gb-np-ic .gb-i { width: 15px; height: 15px; }
+
+.gb-np-ic--accent { background: var(--gb-accent-soft); color: var(--gb-accent-text); box-shadow: inset 0 0 0 1px var(--gb-accent-line); }
+
+.gb-np-row--down .gb-np-name { color: var(--gb-text-2); }
+
+.gb-np-to { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; color: var(--gb-text-2); }
+
+.gb-np-to .gb-i { width: 14px; height: 14px; color: var(--gb-text-3); }
+
+.gb-np-to .gb-mono { font-size: 13px; color: var(--gb-text-1); }
+
+.gb-np-none { color: var(--gb-text-4); }
+
+.gb-np-c-act .gb-iconbtn { color: var(--gb-text-4) !important; }
+
+.gb-np-row:hover .gb-np-c-act .gb-iconbtn { color: var(--gb-text-2) !important; }
+
+/* A folded run (9100-9175, sample-*): a stack of its logos, and its members underneath when it's open. */
+
+.gb-np-foldbtn { border: 0; background: transparent; padding: 0; margin: 0; font: inherit; text-align: left; cursor: pointer; border-radius: var(--gb-r-sm); }
+
+.gb-np-foldbtn:hover .gb-np-name { color: var(--gb-accent-text); }
+
+.gb-np-stack { display: inline-flex; flex: none; align-items: center; }
+
+.gb-np-stack .gb-logo { box-shadow: 0 0 0 2px var(--gb-surface-1); }
+
+.gb-np-stack .gb-logo + .gb-logo { margin-left: -7px; }
+
+/* A folded run's two logos, fanned like a deck in the space of one 26 px logo, so its name lines up with the rest. */
+.gb-np-stack--deck { width: 26px; height: 26px; position: relative; }
+
+.gb-np-stack--deck .gb-logo { position: absolute; }
+
+.gb-np-stack--deck .gb-logo:first-child { left: 0; top: 0; opacity: .75; }
+
+.gb-np-stack--deck .gb-logo + .gb-logo { margin-left: 0; left: 6px; top: 6px; }
+
+.gb-np-chev .gb-i { transition: transform var(--gb-t) var(--gb-ease); transform: rotate(-90deg); }
+
+.gb-np-chev.open .gb-i { transform: none; }
+
+.gb-np-row--fold.open { background: rgba(76, 141, 255, .035); }
+
+.gb-np-sublist { background: rgba(0, 0, 0, .16); box-shadow: inset 2px 0 0 var(--gb-accent-line); }
+
+/* A run's members keep every column under its heading; only their port steps in. */
+.gb-np-row--sub { min-height: 48px; }
+
+.gb-np-row--sub .gb-np-c-port { padding-left: 16px; }
+
+.gb-np-row--sub .gb-np-port b { font-size: 13px; color: var(--gb-text-2); }
+
+/* ---------- Networks ---------- */
+
+.gb-np-net {
+    display: grid; grid-template-columns: minmax(0, 2.2fr) 92px minmax(0, 1.1fr) minmax(0, 1fr) 32px;
+    grid-template-areas: "name driver subnet members act"; gap: 14px; align-items: center;
+    width: 100%; min-height: 60px; margin: 0; padding: 10px 12px 10px 18px;
+    border: 0; border-top: 1px solid var(--gb-line-1); background: transparent; color: inherit; font: inherit; text-align: left;
+}
+
+.gb-np-net--head > span { font: inherit; color: inherit; }
+
+.gb-np-net--head {
+    min-height: 38px; padding-top: 0; padding-bottom: 0; border-top: 0; background: rgba(255, 255, 255, .012);
+    font: 600 11px/1 var(--gb-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--gb-text-3);
+}
+
+button.gb-np-net { cursor: pointer; transition: background var(--gb-t-fast); }
+
+button.gb-np-net:hover { background: var(--gb-hover); }
+
+button.gb-np-net:hover .gb-np-name { color: var(--gb-accent-text); }
+
+/* The row runs edge to edge in a card that clips: its focus ring goes inside. */
+button.gb-np-net:focus-visible { border-radius: 0; box-shadow: inset 0 0 0 2px #7aa9ff; }
+
+.gb-np-netitem.open { background: rgba(255, 255, 255, .014); }
+
+.gb-np-n-name { grid-area: name; display: flex; align-items: center; gap: 12px; min-width: 0; }
+
+/* A network's line says what it is: it wraps rather than hiding the end. */
+.gb-np-n-name .gb-np-whosub { white-space: normal; }
+
+.gb-np-nameline { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+
+.gb-np-n-driver { grid-area: driver; font-size: 13px; color: var(--gb-text-2); }
+
+.gb-np-n-subnet { grid-area: subnet; min-width: 0; font-size: 13px; color: var(--gb-text-1); overflow-wrap: anywhere; }
+
+.gb-np-n-subnet .gb-mono { font-size: 12.5px; }
+
+.gb-np-n-members { grid-area: members; display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; color: var(--gb-text-2); white-space: nowrap; }
+
+.gb-np-net .gb-np-c-act { color: var(--gb-text-3); }
+
+.gb-np-net .gb-np-chev { display: inline-grid; place-items: center; width: 28px; height: 28px; }
+
+.gb-np-net .gb-np-chev .gb-i { width: 18px; height: 18px; }
+
+.gb-np-members { margin: 0 18px 16px 56px; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); background: var(--gb-inset); overflow: hidden; }
+
+.gb-np-mrow { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.5fr) 150px; gap: 14px; align-items: center; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--gb-line-1); }
+
+.gb-np-members--nonames .gb-np-mrow { grid-template-columns: minmax(0, 1fr) 150px; }
+
+.gb-np-mrow--head {
+    min-height: 34px; padding-top: 0; padding-bottom: 0; border-top: 0;
+    font: 600 11px/1 var(--gb-sans); letter-spacing: .07em; text-transform: uppercase; color: var(--gb-text-3);
+}
+
+.gb-np-mnote { display: flex; align-items: flex-start; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--gb-line-1); font-size: 12.5px; line-height: 1.5; color: var(--gb-text-2); }
+
+.gb-np-mnote .gb-i { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--gb-info); }
+
+.gb-np-m-who { min-width: 0; }
+
+.gb-np-m-who .gb-np-who { gap: 10px; }
+
+.gb-np-m-who .gb-np-name { font-size: 13.5px; }
+
+.gb-np-who .gb-tag { flex: none; }
+
+.gb-np-m-names { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+
+.gb-np-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 7px; border-radius: 5px; border: 1px solid var(--gb-line-2); background: var(--gb-surface-2); font: 500 12px/1 var(--gb-mono); letter-spacing: -.01em; color: var(--gb-text-1); white-space: nowrap; }
+
+.gb-np-m-ip { font-size: 12.5px; min-width: 0; white-space: nowrap; }
+
+.gb-np-m-ip .gb-mono { color: var(--gb-text-1); }
+
+.gb-np-mmore { display: flex; justify-content: center; padding: 6px; border-top: 1px solid var(--gb-line-1); }
+
+/* ---------- Narrower ---------- */
+
+@media (max-width: 1100px) {
+    .gb-np-row { grid-template-columns: 104px 112px minmax(0, 1fr) 96px 32px; grid-template-areas: "port acc who to act" ". . note note ."; row-gap: 4px; }
+
+    .gb-np-row--head .gb-np-c-note { display: none; }
+
+    .gb-np-c-note:empty { display: none; }
+
+    .gb-np-c-note { padding-left: 38px; }
+
+
+    .gb-np-net { grid-template-columns: minmax(0, 1.8fr) 80px minmax(0, 1fr) minmax(0, 1fr) 32px; }
+
+    .gb-np-members { margin-left: 18px; }
+}
+
+/* Phones: each port is a two-line card (port; holder, then its access, where it goes and its notes). */
+@media (max-width: 760px) {
+    .gb-np-strip .gb-np-strip-mono { font-size: 17px; }
+
+    .gb-np-head .gb-card-actions { margin-left: 0; width: 100%; }
+
+    .gb-np-head .gb-seg { width: 100%; }
+
+    .gb-np-head .gb-seg-btn { flex: 1 1 auto; justify-content: center; }
+
+    .gb-np-sub { display: none; }
+
+    .gb-np-tools { padding: 12px 14px; }
+
+    .gb-np-check { width: 100%; }
+
+    .gb-np-row {
+        grid-template-columns: 74px minmax(0, 1fr) 28px; grid-template-areas: "port who act" "port meta meta";
+        gap: 6px 12px; align-items: start; min-height: 0; padding: 12px 10px 12px 14px;
+    }
+
+    .gb-np-row--head { display: none; }
+
+    .gb-np-meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-left: 38px; min-width: 0; }
+
+    .gb-np-c-acc, .gb-np-c-to, .gb-np-c-note { grid-area: auto; padding-left: 0; }
+
+    .gb-np-c-acc:has(.gb-np-none), .gb-np-c-to:has(.gb-np-none) { display: none; }
+
+    .gb-np-c-port { padding-top: 3px; }
+
+    /* The port over its protocol, so a run (9100–9175) fits the column. */
+    .gb-np-port { flex-direction: column; align-items: flex-start; gap: 3px; }
+
+    .gb-np-port b { font-size: 14px; }
+
+    .gb-np-row--fold .gb-np-port b { font-size: 12.5px; }
+
+    .gb-np-port small { margin-left: 0; font-size: 11.5px; }
+
+    .gb-np-c-act { margin-top: 1px; }
+
+
+    .gb-np-row--sub .gb-np-c-port { padding-left: 8px; }
+
+    .gb-np-whosub { white-space: normal; }
+
+    .gb-np-foot { padding: 12px 14px; }
+
+    .gb-np-net { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-height: 0; padding: 12px 10px 12px 14px; }
+
+    .gb-np-net--head { display: none; }
+
+    .gb-np-n-name { flex: 1 1 calc(100% - 42px); order: 0; align-items: flex-start; }
+
+    .gb-np-net .gb-np-c-act { order: 1; flex: none; }
+
+    .gb-np-n-driver, .gb-np-n-subnet, .gb-np-n-members { order: 2; font-size: 12.5px; color: var(--gb-text-2); }
+
+    .gb-np-n-driver { margin-left: 38px; }
+
+    .gb-np-n-subnet::before, .gb-np-n-members::before { content: "·"; margin-right: 10px; color: var(--gb-text-4); }
+
+    .gb-np-n-members .gb-np-stack { display: none; }
+
+    .gb-np-members { margin: 0 10px 12px; }
+
+    .gb-np-mrow, .gb-np-members--nonames .gb-np-mrow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "who ip" "names names"; gap: 6px 10px; padding: 10px 12px; }
+
+    .gb-np-mrow--head { display: none; }
+
+    .gb-np-m-who { grid-area: who; }
+
+    .gb-np-m-ip { grid-area: ip; }
+
+    .gb-np-m-names { grid-area: names; padding-left: 30px; }
+}

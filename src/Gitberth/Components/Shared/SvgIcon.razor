@@ -1,0 +1,12 @@
+@* A MudBlazor Material icon (Icons.Material.Outlined.*) drawn inline, so its size and colour come from the design's CSS (.gb-i). *@
+<svg class="gb-i @SizeClass @Class" viewBox="0 0 24 24" aria-hidden="true" focusable="false">@((MarkupString)Icon)</svg>
+
+@code {
+    /// <summary>An icon from MudBlazor's Icons class: SVG content for a 24 x 24 box.</summary>
+    [Parameter, EditorRequired] public string Icon { get; set; } = "";
+    /// <summary>xs (14 px), sm (16 px), md (18 px, the default) or lg (22 px).</summary>
+    [Parameter] public string Size { get; set; } = "md";
+    [Parameter] public string? Class { get; set; }
+
+    private string SizeClass => Size switch { "xs" => "gb-i--xs", "sm" => "gb-i--sm", "lg" => "gb-i--lg", _ => "" };
+}

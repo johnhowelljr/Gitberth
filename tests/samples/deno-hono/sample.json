@@ -1,0 +1,6 @@
+{
+  "kind": "Deno",
+  "title": "Deno (Hono)",
+  "port": 8000,
+  "expect": "Hello from Hono"
+}

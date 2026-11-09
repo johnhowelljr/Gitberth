@@ -1,0 +1,16 @@
+{
+    "name": "gitberth/sample-laravel",
+    "type": "project",
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^13.0"
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "Illuminate\\Foundation\\ComposerScripts::postAutoloadDump",
+            "@php artisan package:discover --ansi"
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

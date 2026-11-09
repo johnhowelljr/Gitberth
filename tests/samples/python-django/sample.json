@@ -1,0 +1,6 @@
+{
+  "kind": "Python",
+  "title": "Django",
+  "port": 8000,
+  "expect": "Hello from Django"
+}

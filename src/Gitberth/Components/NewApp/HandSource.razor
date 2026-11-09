@@ -1,0 +1,253 @@
+@implements IDisposable
+@inject ImageService Images
+
+@*
+    New app › By hand (new-app.html): paste a docker run command or a Compose service and see what Gitberth read from it
+    (Errors block, Dropped are listed with why, Notes say how it was read), or start from a blank form with just an image.
+    What's pasted stays in this page: it's never stored as text.
+*@
+<section class="gb-card gb-handsrc" aria-labelledby="gb-hand-title">
+    <div class="gb-card-head">
+        <div class="gb-card-title" id="gb-hand-title"><SvgIcon Icon="@Icons.Material.Outlined.EditNote" />By hand</div>
+        <div class="gb-card-actions">
+            <Seg T="HandMode" Options="Modes" Value="Mode" ValueChanged="SetModeAsync" Label="How" />
+        </div>
+    </div>
+    <div class="gb-card-body gb-stack">
+        @if (Mode == HandMode.Blank)
+        {
+            <Field Label="Image" For="gb-hand-image" Help="A registry or local reference: postgres:18, ghcr.io/owner/app:1.4, or an image built on this host.">
+                <input id="gb-hand-image" class="gb-input gb-input--mono" placeholder="nginx:stable-alpine" value="@image" spellcheck="false"
+                       @oninput="ImageTypedAsync" @onkeydown="BlankKeyAsync" />
+            </Field>
+            <div role="status" class="gb-help">
+                @if (facts is { } f)
+                {
+                    <span class="gb-hpline gb-hpline--ok" style="font-size:12.5px"><SvgIcon Icon="@Icons.Material.Outlined.Check" Size="xs" />On this host: @NewAppText.Size(f.SizeBytes)@(f.ExposedPorts.Count > 0 ? $" · exposes {string.Join(", ", f.ExposedPorts.Select(p => ContainerPorts.Key(p.Port, p.Protocol)))}" : "")</span>
+                }
+                else if (image.Trim().Length > 0 && ImageReference.Parse(image.Trim()) is null)
+                {
+                    <span style="color:#ffb3b9">That isn't an image reference.</span>
+                }
+                else if (image.Trim().Length > 0)
+                {
+                    <span>Not on this host: it's pulled when the app is created.</span>
+                }
+            </div>
+            <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                <Btn Kind="BtnKind.Primary" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="BlankAsync" Busy="Busy" Disabled="@(ImageReference.Parse(image.Trim()) is null)">Continue</Btn>
+            </div>
+        }
+        else
+        {
+            <textarea class="gb-input gb-input--mono gb-paste" rows="7" spellcheck="false" aria-label="@(Mode == HandMode.Compose ? "A Compose service" : "A docker run command")"
+                      placeholder="@(Mode == HandMode.Compose ? ComposeExample : RunExample)" value="@text" @oninput="PastedAsync"></textarea>
+            @if (Mode == HandMode.Compose && services.Count > 1)
+            {
+                <div class="gb-row gb-row--wrap" style="gap:10px">
+                    <span class="gb-t3" style="font-size:13px">@services.Count services: one app each. This one:</span>
+                    <Seg T="string" Options="@(services.Select(s => new SegOption<string>(s, s)).ToList())" Value="service" ValueChanged="PickServiceAsync" Label="Service" />
+                </div>
+            }
+            @if (parsed is { } p)
+            {
+                <div>
+                    <div class="gb-micro" style="margin-bottom:10px">Gitberth read</div>
+                    <dl class="gb-read">
+                        <dt>Name</dt>
+                        <dd class="gb-mono">@(p.Name ?? NewAppText.NameFor(p.Settings.Image))</dd>
+                        <dt>Image</dt>
+                        <dd>
+                            <span class="gb-mono">@(p.Settings.Image.Length > 0 ? p.Settings.Image : "—")</span>
+                            @if (imageHere)
+                            {
+                                <span class="gb-tag gb-tag--good"><SvgIcon Icon="@Icons.Material.Outlined.Check" />On this host</span>
+                            }
+                        </dd>
+                        @if (p.Settings.Command is { Count: > 0 } cmd)
+                        {
+                            <dt>Command</dt>
+                            <dd class="gb-mono">@string.Join(' ', cmd)</dd>
+                        }
+                        <dt>Ports</dt>
+                        @if (p.Settings.Ports.Count == 0)
+                        {
+                            <dd>@(p.Settings.NetworkMode == "host" ? "None of its own: it listens on the host's ports." : "None. It doesn't serve anything.")</dd>
+                        }
+                        else
+                        {
+                            <dd class="gb-mono">@string.Join(", ", p.Settings.Ports.Select(NewAppText.PortText))</dd>
+                        }
+                        @if (p.Settings.Mounts.Count > 0)
+                        {
+                            <dt>Storage</dt>
+                            <dd class="gb-mono">@string.Join(", ", p.Settings.Mounts.Select(m => m.Kind == MountKind.Tmpfs ? $"tmpfs {m.Target}" : $"{m.Source} → {m.Target}{(m.ReadOnly ? " (read-only)" : "")}"))</dd>
+                        }
+                        @if (p.Settings.Env.Count > 0)
+                        {
+                            <dt>Environment</dt>
+                            <dd>@string.Join(", ", p.Settings.Env.Take(6).Select(e => e.Key))@(p.Settings.Env.Count > 6 ? $" and {p.Settings.Env.Count - 6} more" : "")</dd>
+                        }
+                        <dt>Restart</dt>
+                        <dd>@RestartText(p.Settings.Restart)</dd>
+                        @if (NewAppText.NetworkModeText(p.Settings.NetworkMode) is { } mode)
+                        {
+                            <dt>Network</dt>
+                            <dd><span>@mode:</span><span class="gb-t3">@(p.Settings.NetworkMode == "host" ? "no Docker network, reached at the host's address" : "no Docker network")</span></dd>
+                        }
+                        else if (p.Networks.Where(n => n.Name.Length > 0).Select(n => n.Name).ToList() is { Count: > 0 } named)
+                        {
+                            <dt>Networks</dt>
+                            <dd><span class="gb-mono">@string.Join(", ", named)</span><span class="gb-t3">as well as Gitberth's shared one</span></dd>
+                        }
+                    </dl>
+                </div>
+                <ParseIssues Issues="p.Issues" />
+                <div class="gb-row gb-row--wrap" style="justify-content:flex-end;gap:10px">
+                    @if (!p.Ok)
+                    {
+                        <span class="gb-help">Fix what's above in the paste to go on.</span>
+                    }
+                    <Btn Kind="BtnKind.Primary" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="() => OnParsed.InvokeAsync(p)" Busy="Busy" Disabled="@(!p.Ok)">Continue</Btn>
+                </div>
+            }
+            else if (composeIssues.Count > 0)
+            {
+                <ParseIssues Issues="composeIssues" />
+            }
+            else
+            {
+                <p class="gb-help">Paste it above: Gitberth reads it as you paste, and shows what it understood before anything is created.</p>
+            }
+        }
+    </div>
+</section>
+
+@code {
+    [Parameter] public HandMode Mode { get; set; } = HandMode.DockerRun;
+    [Parameter] public EventCallback<HandMode> ModeChanged { get; set; }
+    /// <summary>A pasted command or service, read and fine: the page drafts the app from it.</summary>
+    [Parameter] public EventCallback<ParsedApp> OnParsed { get; set; }
+    /// <summary>The blank form's image: the page drafts the app from it.</summary>
+    [Parameter] public EventCallback<string> OnBlank { get; set; }
+    [Parameter] public bool Busy { get; set; }
+
+    private const string RunExample = "docker run -d --name uptime-kuma \\\n  --restart unless-stopped \\\n  -p 3001:3001 \\\n  -v uptime-kuma:/app/data \\\n  louislam/uptime-kuma:1";
+    private const string ComposeExample = "services:\n  whoami:\n    image: traefik/whoami\n    ports:\n      - \"8080:80\"\n    restart: unless-stopped";
+
+    private string text = "";
+    private string image = "";
+    private ParsedApp? parsed;
+    private bool imageHere;
+    private ImageFacts? facts;
+    private IReadOnlyList<string> services = [];
+    private IReadOnlyList<ParseIssue> composeIssues = [];
+    private string? service;
+    private CancellationTokenSource? typing;
+
+    private static readonly List<SegOption<HandMode>> Modes =
+    [
+        new(HandMode.DockerRun, "docker run", Icons.Material.Outlined.Terminal),
+        new(HandMode.Compose, "Compose", Icons.Material.Outlined.Description),
+        new(HandMode.Blank, "Blank form", Icons.Material.Outlined.EditNote),
+    ];
+
+    private async Task SetModeAsync(HandMode mode)
+    {
+        Mode = mode;
+        (text, parsed, services, composeIssues, service) = ("", null, [], [], null);
+        await ModeChanged.InvokeAsync(mode);
+    }
+
+    private async Task PastedAsync(ChangeEventArgs e)
+    {
+        text = e.Value?.ToString() ?? "";
+        if (!await WaitAsync(400)) return;
+        await ReadAsync();
+    }
+
+    // What's pasted, read: a docker run with the docker run parser, a Compose file service by service.
+    private async Task ReadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            (parsed, services, composeIssues) = (null, [], []);
+            return;
+        }
+        try
+        {
+            if (Mode == HandMode.DockerRun) parsed = DockerRunParser.Parse(text);
+            else
+            {
+                var read = ComposeParser.Read(text);
+                (services, composeIssues) = (read.Services, read.Issues);
+                if (service is null || !services.Contains(service)) service = services.FirstOrDefault();
+                parsed = service is null ? null : ComposeParser.Parse(text, service);
+            }
+        }
+        catch (Exception ex)
+        {
+            (parsed, composeIssues) = (null, [new ParseIssue(ParseSeverity.Error, $"Gitberth couldn't read it: {ex.Message}")]);
+        }
+        imageHere = parsed is { Settings.Image.Length: > 0 } p && await HereAsync(p.Settings.Image) is not null;
+    }
+
+    private async Task PickServiceAsync(string picked)
+    {
+        service = picked;
+        await ReadAsync();
+    }
+
+    private async Task ImageTypedAsync(ChangeEventArgs e)
+    {
+        image = e.Value?.ToString() ?? "";
+        facts = null;
+        if (!await WaitAsync(400)) return;
+        facts = ImageReference.Parse(image.Trim()) is null ? null : await HereAsync(image.Trim());
+    }
+
+    private async Task BlankKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await BlankAsync();
+    }
+
+    private Task BlankAsync() => ImageReference.Parse(image.Trim()) is null ? Task.CompletedTask : OnBlank.InvokeAsync(image.Trim());
+
+    private async Task<ImageFacts?> HereAsync(string reference)
+    {
+        try
+        {
+            return await Images.FactsAsync(reference);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // Typing waits a moment before it's read, so each key doesn't start a read.
+    private async Task<bool> WaitAsync(int ms)
+    {
+        typing?.Cancel();
+        var mine = typing = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(ms, mine.Token);
+            return true;
+        }
+        catch (TaskCanceledException)
+        {
+            return false;
+        }
+    }
+
+    private static string RestartText(RestartSetting r) => r.Name switch
+    {
+        "no" => "Never",
+        "always" => "Always",
+        "on-failure" => r.MaximumRetryCount > 0 ? $"On failure, {r.MaximumRetryCount} times" : "On failure",
+        _ => "Unless stopped",
+    };
+
+    public void Dispose() => typing?.Cancel();
+}

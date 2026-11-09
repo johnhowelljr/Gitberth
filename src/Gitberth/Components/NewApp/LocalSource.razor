@@ -1,0 +1,106 @@
+@inject ImageService Images
+
+@*
+    New app › Local image (new-app.html): every tagged image on this host, newest first, with its size, when it was built
+    or pulled and what uses it. Gitberth's own builds are kept apart. Picking one needs no pull.
+*@
+<section class="gb-card" aria-labelledby="gb-local-title">
+    <div class="gb-card-head">
+        <div class="gb-card-title" id="gb-local-title">
+            <SvgIcon Icon="@Icons.Material.Outlined.Layers" />Local image
+            @if (images is not null)
+            {
+                <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">@images.Count images · @NewAppText.Size(images.Sum(i => i.SizeBytes))</span>
+            }
+        </div>
+        <div class="gb-card-actions">
+            <Seg T="string" Options="Filters" Value="filter" ValueChanged="v => filter = v" Label="Show" />
+        </div>
+    </div>
+    @if (images is null)
+    {
+        <div class="gb-card-body"><div class="gb-skel" style="height:120px"></div></div>
+    }
+    else if (error is not null)
+    {
+        <div class="gb-card-body"><EmptyState Small="true" Title="Docker didn't list its images" Icon="@Icons.Material.Outlined.Layers">@error</EmptyState></div>
+    }
+    else if (Shown.Count == 0)
+    {
+        <div class="gb-card-body">
+            <EmptyState Small="true" Title="@(filter == "unused" ? "Every image is in use" : "No images here")" Icon="@Icons.Material.Outlined.Layers">
+                @(filter == "unused" ? "Show all of them to run another container from one." : "Pull one from a registry instead.")
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <div class="gb-reslist" role="list">
+            @foreach (var i in Shown.Take(limit))
+            {
+                var name = i.Tags[0];
+                <div class="gb-resrow" role="listitem" @key="i.Id">
+                    <AppLogo Image="@name" Name="@name" Size="32" Self="@i.BuiltByGitberth" />
+                    <div style="min-width:0">
+                        <div class="gb-resrow-t">@name</div>
+                        <div class="gb-resrow-s">
+                            @NewAppText.Size(i.SizeBytes) · built or pulled @NewAppText.Ago(i.Created, DateTime.UtcNow)@(i.Tags.Count > 1 ? $" · also {string.Join(", ", i.Tags.Skip(1).Take(2))}" : "")
+                        </div>
+                    </div>
+                    <div class="r-extra">
+                        <span class="gb-t3" style="font-size:12.5px">@(i.Containers == 0 ? "Not used" : i.Containers == 1 ? "Used by 1 container" : $"Used by {i.Containers}")</span>
+                    </div>
+                    <Btn Size="BtnSize.Sm" OnClick="() => OnPicked.InvokeAsync(name)" Disabled="Busy">Use</Btn>
+                </div>
+            }
+        </div>
+        @if (Shown.Count > limit)
+        {
+            <div class="gb-card-foot"><Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => limit += Step">@MoreText(Shown.Count - limit)</Btn></div>
+        }
+    }
+</section>
+
+@code {
+    /// <summary>The image picked, by tag: the page drafts the app from it.</summary>
+    [Parameter] public EventCallback<string> OnPicked { get; set; }
+    [Parameter] public bool Busy { get; set; }
+
+    private IReadOnlyList<LocalImage>? images;
+    private string? error;
+    private string filter = "unused";
+    private int limit = 12;
+
+    // How many more rows each press shows.
+    private const int Step = 40;
+
+    // All is every image, as the title counts them and as New app's Local image card does.
+    private List<SegOption<string>> Filters =>
+    [
+        new("unused", "Not in use", Count: images?.Count(i => i.Containers == 0 && !i.BuiltByGitberth)),
+        new("all", "All", Count: images?.Count),
+        new("gitberth", "Built by Gitberth", Count: images?.Count(i => i.BuiltByGitberth)),
+    ];
+
+    private List<LocalImage> Shown => (images ?? []).Where(i => filter switch
+    {
+        "unused" => i.Containers == 0 && !i.BuiltByGitberth,
+        "gitberth" => i.BuiltByGitberth,
+        _ => true,
+    }).ToList();
+
+    /// <summary>The list's "more" button: "Show 2 more" for the last few, "Show 40 more of 55" while there are more than a press shows.</summary>
+    public static string MoreText(int left) => left <= Step ? $"Show {left} more" : $"Show {Step} more of {left}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            images = await Images.ListLocalAsync();
+        }
+        catch (Exception ex)
+        {
+            (images, error) = ([], ex.Message);
+        }
+    }
+}

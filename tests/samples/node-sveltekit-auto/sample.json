@@ -1,0 +1,6 @@
+{
+  "kind": "SvelteKit",
+  "title": "SvelteKit (adapter-auto",
+  "port": 3000,
+  "expect": "SvelteKit on Gitberth"
+}

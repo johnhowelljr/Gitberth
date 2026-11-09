@@ -1,0 +1,6 @@
+{
+  "kind": "NodeServer",
+  "title": "Node.js server (NestJS)",
+  "port": 3000,
+  "expect": "Hello from NestJS"
+}

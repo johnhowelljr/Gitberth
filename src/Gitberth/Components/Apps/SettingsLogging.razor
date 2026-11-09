@@ -1,0 +1,38 @@
+@* The Logging section of an app's settings, shared by the Settings tab and New app's Configure step (create mode). *@
+<SettingsSection Id="@Id" Title="Logging" Icon="@Icons.Material.Outlined.Article" Changed="@ChangedNow"
+                 Description="Where its output goes. The Logs tab reads it either way.">
+    <div class="gb-fgrid">
+        <Field Label="Driver" Changed="@ChangedNow" Was="@(Draft.Loaded.Logging.Driver is { Length: > 0 } d ? d : "the host's default")">
+            <select class="gb-input" aria-label="Log driver" disabled="@RO" @bind="Draft.LogDriver" @bind:after="Notify">
+                <option value="">The host's default</option>
+                @foreach (var driver in LogDrivers.Append(Draft.LogDriver).Where(d => d.Length > 0).Distinct())
+                {
+                    <option value="@driver">@driver</option>
+                }
+            </select>
+        </Field>
+        <Field Label="Options" Help="key=value, one per line: max-size=10m, max-file=3 for json-file.">
+            <textarea class="gb-input" rows="2" spellcheck="false" readonly="@RO" placeholder="max-size=10m" @bind="Draft.LogOptions" @bind:event="oninput" @bind:after="Notify"></textarea>
+        </Field>
+    </div>
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public ContainerSettingsDraft Draft { get; set; } = default!;
+    /// <summary>The fields this app never edits; null: every field can change.</summary>
+    [Parameter] public Func<SettingField, bool>? ReadOnly { get; set; }
+    /// <summary>New app's Configure: no "Changed" marks.</summary>
+    [Parameter] public bool Create { get; set; }
+    /// <summary>Raised after every edit.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public string Id { get; set; } = "sec-logging";
+
+    /// <summary>The drivers offered (a container's own other one is added to them).</summary>
+    public static readonly string[] LogDrivers = ["json-file", "local", "journald", "syslog", "none"];
+
+    private bool RO => ReadOnly?.Invoke(SettingField.Logging) == true;
+
+    private bool ChangedNow => !Create && Draft.ChangedFields().Contains(SettingField.Logging);
+
+    private Task Notify() => Changed.InvokeAsync();
+}

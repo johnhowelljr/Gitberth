@@ -1,0 +1,32 @@
+<header class="gb-page-header">
+    <div class="gb-page-header-text">
+        @if (Breadcrumb is not null)
+        {
+            <div class="gb-breadcrumb">@Breadcrumb</div>
+        }
+        <div class="gb-page-title">
+            @Leading
+            <h1 class="gb-h1">@Title</h1>
+            @TitleContent
+        </div>
+        @if (Subtitle is not null)
+        {
+            <p class="gb-page-subtitle">@Subtitle</p>
+        }
+        @Details
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="gb-page-header-actions">@Actions</div>
+    }
+</header>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public RenderFragment? Breadcrumb { get; set; }
+    [Parameter] public RenderFragment? Leading { get; set; }
+    [Parameter] public RenderFragment? TitleContent { get; set; }
+    [Parameter] public RenderFragment? Details { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

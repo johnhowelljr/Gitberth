@@ -1,0 +1,13 @@
+{
+  "name": "gitberth-sample-bun-hono",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot src/index.ts"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0"
+  }
+}

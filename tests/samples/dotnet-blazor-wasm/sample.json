@@ -1,0 +1,6 @@
+{
+  "kind": "DotNetWasm",
+  "title": "Blazor WebAssembly (net10.0)",
+  "port": 80,
+  "expect": "Hello from Blazor WebAssembly"
+}

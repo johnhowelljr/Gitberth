@@ -1,0 +1,303 @@
+@inject AppService Apps
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@*
+    The Environment tab: the container's own variables, editable, secrets masked with Show and Copy; the image's own
+    folded away under "From the image" until one is edited; for a Git app, build-time marks, the GitHub variables and
+    the ones Gitberth sets like Vercel. Names and values sit in a grid that wraps long ones rather than overlapping.
+*@
+@if (Draft is null || Settings is null)
+{
+    @if (LoadError is not null)
+    {
+        <Banner Tone="critical" Title="Its settings couldn't be read">@LoadError</Banner>
+    }
+    else
+    {
+        <div class="gb-skel" style="height:280px;border-radius:12px"></div>
+    }
+}
+else
+{
+    var own = Draft.Env.Where(r => r.Original?.FromImage != true).ToList();
+    var fromImage = Draft.Env.Where(r => r.Original?.FromImage == true).ToList();
+    var imageOpen = showImage || fromImage.Any(r => r.Changed);
+    var git = View.Summary.Source == AppSource.Git;
+    <SectionCard Title="Environment" Icon="@Icons.Material.Outlined.Key" Id="sec-env"
+                 Sub="@(git ? "Passed to the container when it starts; build-time ones to the build too." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
+        <Actions>
+            @if (Draft.EnvChanged)
+            {
+                <span class="gb-tag gb-tag--accent">Changed</span>
+            }
+        </Actions>
+        <ChildContent>
+            @if (ReadOnlyWhy is { } why)
+            {
+                <div class="gb-ro-note" style="margin-bottom:14px"><SvgIcon Icon="@Icons.Material.Outlined.Info" Size="sm" /><span>@why</span></div>
+            }
+            <div class="gb-envtbl" role="table" aria-label="Environment variables">
+                <div class="gb-envrow gb-envrow--head" role="row"><span role="columnheader">Name</span><span role="columnheader">Value</span><span></span></div>
+                @if (own.Count == 0 && fromImage.Count == 0)
+                {
+                    <div class="gb-envrow" role="row"><span class="gb-t3" style="grid-column:1/-1;font-size:13px">No variables yet.</span></div>
+                }
+                @foreach (var row in own)
+                {
+                    @Row(row, git)
+                }
+                @if (fromImage.Count > 0)
+                {
+                    <div class="gb-envrow gb-envrow--more" role="row">
+                        <span class="gb-row" style="gap:8px"><SvgIcon Icon="@Icons.Material.Outlined.Layers" Size="sm" Class="gb-t3" />@fromImage.Count from the image</span>
+                        <span class="gb-mono gb-t3 gb-ellipsis" style="font-size:12px" title="@string.Join(", ", fromImage.Select(r => r.Key))">@(imageOpen ? "Edit one to make it the container's own" : string.Join(", ", fromImage.Select(r => r.Key)))</span>
+                        <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" OnClick="() => showImage = !showImage" aria-expanded="@(imageOpen ? "true" : "false")" Disabled="@(fromImage.Any(r => r.Changed))">@(imageOpen ? "Hide" : "Show")</Btn>
+                    </div>
+                    @if (imageOpen)
+                    {
+                        @foreach (var row in fromImage)
+                        {
+                            @Row(row, git)
+                        }
+                    }
+                }
+            </div>
+            @foreach (var problem in Draft.EnvProblems())
+            {
+                <div class="gb-field-error" style="margin-top:8px" role="alert">@problem</div>
+            }
+            <div class="gb-tbl-actions" style="margin-top:14px">
+                <Btn Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="ReadOnly">Add variable</Btn>
+                <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ContentPaste" OnClick="PasteAsync" Disabled="ReadOnly">Paste .env</Btn>
+                @if (Draft.EnvChanged)
+                {
+                    <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Undo" OnClick="UndoAll">Undo every change here</Btn>
+                }
+            </div>
+        </ChildContent>
+    </SectionCard>
+
+    @if (git && View.Row is { } row)
+    {
+        <div style="height:16px"></div>
+        <RepoVariablesEditor Owner="@row.Owner" Repo="@row.Repo" />
+        @if (vercel is not null)
+        {
+            <SectionCard Title="Set by Gitberth, like on Vercel" Icon="@Icons.Material.Outlined.AutoAwesome" Class="gb-mt">
+                <ChildContent>
+                    @if (vercel.Off)
+                    {
+                        <p class="gb-help">They're turned off for this app in <a href="@($"{View.Summary.Href}/settings#sec-source")">Settings › Source</a>.</p>
+                    }
+                    else
+                    {
+                        <p class="gb-help" style="margin-bottom:14px">
+                            Gitberth tells the app where it runs and what was deployed, with Vercel's names, when it runs and (except <code>VERCEL_ENV</code>
+                            and Auth.js's address) while it builds. A variable with the same name set above, or in GitHub, wins.
+                        </p>
+                        <div class="gb-envtbl" role="table" aria-label="Variables Gitberth sets">
+                            @foreach (var v in vercel.Added.Where(v => VercelPrefix is null || !v.Key.StartsWith(VercelPrefix, StringComparison.Ordinal)))
+                            {
+                                <div class="gb-envrow" role="row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)">
+                                    <span class="gb-envkey"><span>@v.Key</span></span>
+                                    <span class="gb-envval"><span>@v.Value</span></span>
+                                </div>
+                            }
+                        </div>
+                        @if (VercelPrefix is { } prefix)
+                        {
+                            <p class="gb-help" style="margin-top:10px">Its framework also gets each one as <code>@(prefix)VERCEL_…</code>.</p>
+                        }
+                        @if (vercel.Yours.Count > 0)
+                        {
+                            <p class="gb-help" style="margin-top:6px">Left to the app's own values: @string.Join(", ", vercel.Yours.Where(k => VercelPrefix is null || !k.StartsWith(VercelPrefix, StringComparison.Ordinal))).</p>
+                        }
+                    }
+                </ChildContent>
+            </SectionCard>
+        }
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    [Parameter] public SettingsView? Settings { get; set; }
+    [Parameter] public ContainerSettingsDraft? Draft { get; set; }
+    [Parameter] public string? LoadError { get; set; }
+    /// <summary>Raised after every edit, so the page's apply bar follows.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private bool showImage;
+    private readonly HashSet<EnvRowDraft> revealed = [];
+    private VercelView? vercel;
+    private int? vercelFor;
+
+    // The environment is a recreate-class setting: read-only when this app's settings are (Gitberth itself).
+    private bool ReadOnly => Settings?.Access.ReadOnly.Contains(SettingField.Env) == true;
+
+    private string? ReadOnlyWhy => ReadOnly ? Settings?.Access.Recreate ?? "Gitberth doesn't change this app's environment."
+        : Settings?.Access.Compose is not null ? "Compose created this container: applying gives the lines for its file, and the command to run."
+        : Settings?.Access.Recreate is { } refusal ? $"Gitberth won't recreate it now: {refusal.TrimEnd('.')}." : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (View.Summary.Source != AppSource.Git || View.Row is not { } row || vercelFor == row.Id) return;
+        vercelFor = row.Id;
+        try { vercel = await Apps.VercelVariablesAsync(row); }
+        catch (Exception) { vercel = null; }
+    }
+
+    private string? VercelPrefix =>
+        vercel?.Added.Select(v => v.Key).FirstOrDefault(k => !k.StartsWith("VERCEL_", StringComparison.Ordinal) && k.Contains("_VERCEL_", StringComparison.Ordinal)) is { } copy
+            ? copy[..copy.IndexOf("VERCEL_", StringComparison.Ordinal)]
+            : null;
+
+    private RenderFragment Row(EnvRowDraft row, bool git) => __builder =>
+    {
+        // Secret by the owner's marking, or by its name or a password in a URL it carries (DATABASE_URL), which it always is.
+        var secret = row.IsSecret;
+        var masked = secret && !revealed.Contains(row);
+        // The image's own untouched variables are passed on as they are; marking one makes it the container's own.
+        var canMark = !row.Removed && !ReadOnly && !(row.Original?.FromImage == true && !row.Changed);
+        var css =row.Removed ? "gb-envrow--gone" : row.IsNew ? "gb-envrow--new" : row.Changed ? "gb-envrow--changed" : null;
+        <div class="gb-envrow @css" role="row" @key="row">
+            <span class="gb-envkey" role="cell">
+                @if (row.IsNew)
+                {
+                    <input class="gb-input gb-input--mono" value="@row.Key" placeholder="NAME" aria-label="Variable name" spellcheck="false"
+                           @oninput="e => SetKey(row, e.Value?.ToString())" />
+                }
+                else
+                {
+                    <span>@row.Key</span>
+                }
+                @if (secret)
+                {
+                    <span class="gb-tag" title="Masked wherever it's shown"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Secret</span>
+                }
+                @if (row.IsNew && row.Key.Length > 0)
+                {
+                    <span class="gb-tag gb-tag--good">New</span>
+                }
+                else if (row.Original?.FromImage == true)
+                {
+                    <span class="gb-default-tag">image</span>
+                }
+                @if (git && row.BuildTime)
+                {
+                    <span class="gb-tag gb-tag--accent" title="Passed to the build too">Build time</span>
+                }
+            </span>
+            <span class="gb-envval" role="cell">
+                @if (row.Removed)
+                {
+                    <span class="@(masked ? "gb-mask" : null)">@(masked ? "••••••••••" : row.Value)</span>
+                }
+                else
+                {
+                    <input class="gb-input gb-input--mono" type="@(masked ? "password" : "text")" value="@row.Value" aria-label="@($"Value of {row.Key}")"
+                           spellcheck="false" autocomplete="off" readonly="@ReadOnly" @oninput="e => SetValue(row, e.Value?.ToString())" />
+                }
+            </span>
+            <span class="gb-envrow-actions" role="cell">
+                @if (secret && !row.Removed)
+                {
+                    <button type="button" class="gb-iconbtn" title="@(masked ? "Show" : "Hide")" aria-label="@($"{(masked ? "Show" : "Hide")} {row.Key}")" @onclick="() => Reveal(row)">
+                        <SvgIcon Icon="@(masked ? Icons.Material.Outlined.Visibility : Icons.Material.Outlined.VisibilityOff)" />
+                    </button>
+                }
+                <CopyButton Value="@row.Value" Label="@($"the value of {row.Key}")" />
+                @if (canMark)
+                {
+                    <button type="button" class="gb-iconbtn gb-secretbtn @(secret ? "on" : null)" aria-pressed="@(secret ? "true" : "false")" aria-label="@($"Secret: {row.Key}")"
+                            disabled="@row.AlwaysSecret" title="@SecretTitle(row)" @onclick="() => ToggleSecret(row)">
+                        <SvgIcon Icon="@(secret ? Icons.Material.Filled.Lock : Icons.Material.Outlined.LockOpen)" />
+                    </button>
+                }
+                @if (git && !row.Removed && !ReadOnly)
+                {
+                    <button type="button" class="gb-iconbtn gb-buildbtn" title="@(row.BuildTime ? "Not at build time" : "Pass to the build too")" aria-pressed="@(row.BuildTime ? "true" : "false")"
+                            aria-label="@($"Build time for {row.Key}")" @onclick="() => ToggleBuild(row)"><SvgIcon Icon="@Icons.Material.Outlined.Build" /></button>
+                }
+                @if (row.Changed && !row.IsNew)
+                {
+                    <button type="button" class="gb-iconbtn" title="Undo" aria-label="@($"Undo {row.Key}")" @onclick="() => Undo(row)"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
+                }
+                @if (!row.Removed && !ReadOnly)
+                {
+                    <button type="button" class="gb-iconbtn" title="Remove" aria-label="@($"Remove {row.Key}")" @onclick="() => Remove(row)"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                }
+            </span>
+        </div>
+    };
+
+    private Task SetKey(EnvRowDraft row, string? key)
+    {
+        row.Key = key ?? "";
+        if (Security.Masking.IsSecretName(row.Key)) row.Secret = true;
+        return Changed.InvokeAsync();
+    }
+
+    private Task SetValue(EnvRowDraft row, string? value)
+    {
+        row.Value = value ?? "";
+        return Changed.InvokeAsync();
+    }
+
+    private void Reveal(EnvRowDraft row)
+    {
+        if (!revealed.Remove(row)) revealed.Add(row);
+    }
+
+    private Task ToggleSecret(EnvRowDraft row)
+    {
+        if (row.AlwaysSecret) return Task.CompletedTask;
+        row.Secret = !row.Secret;
+        return Changed.InvokeAsync();
+    }
+
+    private static string SecretTitle(EnvRowDraft row) =>
+        row.AlwaysSecret ? "Always secret: its name or value holds a password. Masked everywhere and kept out of logs."
+        : row.Secret ? "Secret: masked everywhere and kept out of logs. Click to make it a plain variable."
+        : "Not secret. Click to mask it everywhere and keep it out of logs.";
+
+    private Task ToggleBuild(EnvRowDraft row)
+    {
+        row.BuildTime = !row.BuildTime;
+        return Changed.InvokeAsync();
+    }
+
+    private Task Undo(EnvRowDraft row)
+    {
+        row.Undo();
+        return Changed.InvokeAsync();
+    }
+
+    private Task Remove(EnvRowDraft row)
+    {
+        Draft?.RemoveEnv(row);
+        return Changed.InvokeAsync();
+    }
+
+    private Task UndoAll()
+    {
+        Draft?.UndoEnv();
+        return Changed.InvokeAsync();
+    }
+
+    private async Task AddAsync()
+    {
+        Draft?.AddEnv();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task PasteAsync()
+    {
+        var dialog = await Dialogs.ShowAsync<PasteEnvDialog>((string?)null, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is not { Canceled: false, Data: string text } || Draft is null) return;
+        var read = Draft.PasteEnv(text);
+        Snackbar.Add($"Read {read} {(read == 1 ? "variable" : "variables")}. Nothing changes until you apply.", Severity.Info);
+        await Changed.InvokeAsync();
+    }
+}

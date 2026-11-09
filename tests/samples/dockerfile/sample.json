@@ -1,0 +1,6 @@
+{
+  "kind": "Dockerfile",
+  "title": "Your Dockerfile",
+  "port": 8080,
+  "expect": "Hello from your own Dockerfile"
+}

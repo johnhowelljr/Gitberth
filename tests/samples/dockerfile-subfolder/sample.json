@@ -1,0 +1,7 @@
+{
+  "kind": "Dockerfile",
+  "title": "Your Dockerfile",
+  "port": 8080,
+  "appDir": "docker",
+  "expect": "Hello from a Dockerfile in a sub-folder"
+}

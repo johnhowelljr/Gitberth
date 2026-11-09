@@ -1,0 +1,12 @@
+{
+  "name": "gitberth-sample-hapi",
+  "version": "1.0.0",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@hapi/hapi": "^21.0.0"
+  }
+}

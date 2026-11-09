@@ -1,0 +1,302 @@
+@*
+    The Ports card for every app (5.3, 5.6, 5.9), one component whatever the source: the table, the Access legend, what
+    Gitberth won't do and why in one line, a change's steps while it runs and the last change the journal has, and the apply
+    bar while the draft differs. A Git app applies with a deploy without a build (or saves for the next deploy); any other
+    app's recreate goes through the change dialog; ports only noted and the web marker save at once; a container Compose
+    owns gets the edit to make in its file. The page keeps the draft and does what the buttons ask.
+*@
+<section class="gb-card" aria-labelledby="gb-ports-title">
+    <div class="gb-card-head">
+        <div class="gb-card-title" id="gb-ports-title">
+            <SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Ports
+            @if (Draft.ImageExposed.Count > 0)
+            {
+                <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Exposed by the image: <span class="gb-mono">@string.Join(", ", Draft.ImageExposed)</span></span>
+            }
+        </div>
+        @if (CanAdd)
+        {
+            <div class="gb-card-actions">
+                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="@(Saving || Applying)">Add port</Btn>
+            </div>
+        }
+    </div>
+    @foreach (var f in Forwarders)
+    {
+        <div class="gb-card-body" style="padding-bottom:0">
+            <Banner Tone="warn" Title="An old Gitberth port forwarder also publishes this">
+                <ChildContent><code>@f.Name</code> publishes <code>@f.Publishes</code>.</ChildContent>
+                <Actions><Btn Size="BtnSize.Sm" OnClick="() => OnRemoveForwarder.InvokeAsync(f.Name)" Disabled="@(Saving || Busy is not null)">Remove it<span class="gb-sr"> @f.Name</span></Btn></Actions>
+            </Banner>
+        </div>
+    }
+    @if (Notice is { } notice)
+    {
+        <div class="gb-card-body" style="padding-bottom:0">
+            <Banner Tone="info" Icon="@(Mode == PortsMode.Compose ? Icons.Material.Outlined.AccountTree : Icons.Material.Outlined.Info)" Title="@notice.Title">
+                <ChildContent>@notice.Line</ChildContent>
+                <Actions>
+                    @if (notice.Href is not null)
+                    {
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Href="@notice.Href" EndIcon="@Icons.Material.Outlined.ChevronRight">@notice.HrefText</Btn>
+                    }
+                </Actions>
+            </Banner>
+        </div>
+    }
+    @if (Mode == PortsMode.HostNetwork)
+    {
+        <div class="gb-card-body gb-stack">
+            <div class="gb-hostnet">
+                <span class="gb-fn-ic gb-ac-lan"><SvgIcon Icon="@Icons.Material.Outlined.Lan" /></span>
+                <div>
+                    <div style="font-weight:600">Host network: no Docker ports</div>
+                    <p class="gb-help">
+                        It uses the host's own network, so Docker maps no ports: it listens on <span class="gb-mono">@AddressBook.HostPart(LanHost)</span> directly, on
+                        whatever port its program opens. What listens on the host is in <a href="network">Network › Host ports</a>.
+                    </p>
+                </div>
+            </div>
+            @HostNotes()
+        </div>
+    }
+    else if (Mode == PortsMode.NoTable)
+    {
+    }
+    else if (Draft.Rows.Count == 0)
+    {
+        <div class="gb-card-body">
+            <EmptyState Small="true" Title="No ports" Icon="@Icons.Material.Outlined.SettingsEthernet">
+                <ChildContent>@(IsGit ? $"Without one {Title} has no address, domain, health check or jobs." : $"{Title}'s image declares none. That's normal for a worker; add the port it listens on to give it an address.")</ChildContent>
+                <Actions>
+                    @if (CanAdd)
+                    {
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync">Add a port</Btn>
+                    }
+                </Actions>
+            </EmptyState>
+        </div>
+    }
+    else
+    {
+        <PortsTable Draft="Draft" Name="@Name" LanHost="@LanHost" Network="@Network" LanIpv4Only="LanIpv4Only" Database="Database" Self="Self"
+                    Problems="Problems" ReadOnly="@(Mode == PortsMode.ReadOnly)" Disabled="@(Mode == PortsMode.Paused || Saving || Applying)"
+                    WebEditable="@(Mode != PortsMode.ReadOnly || WebAlways)" Running="Running" ByName="ByName" OnChanged="() => OnChanged.InvokeAsync()" />
+        @if (Network is null && Draft.Rows.Any(r => r.Access == PortAccess.Internal) && !IsGit)
+        {
+            @* Said once, rather than in a tooltip on every Internal row's dash. *@
+            <div class="gb-card-body" style="padding-top:0"><p class="gb-help">Its Internal ports have no address: it isn't on a shared network. Join one in Networks below.</p></div>
+        }
+    }
+    @if (Mode is not (PortsMode.NoTable or PortsMode.HostNetwork))
+    {
+        <div class="gb-card-foot">
+            <div class="gb-plegend">
+                <span><AccessTag Kind="AddressKind.Internal" /><span class="gb-help">@PortsTable.InternalTitle(ByName, Network, SharedNetwork)</span></span>
+                <span><AccessTag Kind="AddressKind.Lan" /><span class="gb-help">Every device on your network, at @AddressBook.HostPart(LanHost):&lt;host port&gt;.</span></span>
+                <span><AccessTag Kind="AddressKind.HostOnly" /><span class="gb-help">Only programs on the host (127.0.0.1), like the Cloudflare tunnel.</span></span>
+            </div>
+        </div>
+    }
+    @if (Job is not null || LastChange is not null || Mode == PortsMode.Compose && Draft.NeedsRecreate)
+    {
+        <div class="gb-pchange">
+            @* Always there, so screen readers announce each step, and how the change ended. *@
+            <div role="status" class="gb-pchange-now">
+                @if (Job is { } job)
+                {
+                    @if (!job.Completion.IsCompleted)
+                    {
+                        <span class="gb-cstep gb-cstep--now" style="padding:0;display:inline-grid;grid-template-columns:22px"><span class="gb-cstep-mark"></span></span>
+                        <span>@PortChangeText.Progress(Title, job.Current)</span>
+                    }
+                    else
+                    {
+                        var r = job.Completion.Result;
+                        <span class="gb-tone-@(r.Ok ? "good" : "critical")" style="display:inline-flex"><SvgIcon Icon="@(r.Ok ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.ErrorOutline)" Class="gb-impact-ic" /></span>
+                        <span>@r.Message</span>
+                    }
+                }
+            </div>
+            @if (Job is { } running && !running.Completion.IsCompleted)
+            {
+                <ChangeSteps Steps="running.Steps" Planned="running.Plan.Steps" />
+            }
+            else if (Job?.Completion.Result.LastOutput is { } output)
+            {
+                <div><Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Terminal" OnClick="() => showOutput = !showOutput">@(showOutput ? "Hide its last output" : "Its last output")</Btn></div>
+                @if (showOutput)
+                {
+                    <pre class="gb-output">@output</pre>
+                }
+            }
+            @if (LastChange is { Outcome: ChangeOutcome.Running, Step: ChangeStep.WaitingForStart } waiting && Job?.Completion.IsCompleted != false)
+            {
+                @* Recreated while it was stopped: the original is kept until the new one's first start passes its checks. *@
+                <Banner Tone="info" Title="Recreated while stopped" Icon="@Icons.Material.Outlined.HourglassEmpty">
+                    <ChildContent>@waiting.Error</ChildContent>
+                    <Actions><Btn Size="BtnSize.Sm" OnClick="() => OnPutBack.InvokeAsync()" Disabled="@(Saving || Busy is not null)">Put the original back</Btn></Actions>
+                </Banner>
+            }
+            @if (Mode == PortsMode.Compose && Draft.NeedsRecreate && Compose is { } compose)
+            {
+                @* Compose owns it: the draft builds the change to make in its file, and there's nothing to apply here. *@
+                @if (Stale)
+                {
+                    <p class="gb-help">@ContainerPortsBar.Stale(Title)</p>
+                }
+                else
+                {
+                    <ComposeChange Compose="compose" Snippet="@ComposeSnippet" />
+                }
+                <div><Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" OnClick="() => OnDiscard.InvokeAsync()" Disabled="Saving">Discard</Btn></div>
+            }
+            @if (!IsGit)
+            {
+                <div class="gb-pchange-last">@PortChangeText.LastChange(LastChange, TimeZoneInfo.Local)</div>
+            }
+        </div>
+    }
+</section>
+@if (ShowsBar)
+{
+    <ApplyBar Title="@BarTitle" Sub="@BarLine" Warn="Stale" Busy="Saving" ApplyText="@ApplyText" ApplyDisabled="@(WhyNot is not null || Draft.Problems().Count > 0 && Draft.NeedsRecreate)"
+              OnDiscard="() => OnDiscard.InvokeAsync()" OnApply="ApplyAsync">
+        <Extra>
+            @if (IsGit && Draft.NeedsRecreate && Deployed && Running && !Stale)
+            {
+                <Btn Kind="BtnKind.Secondary" OnClick="() => OnSaveLater.InvokeAsync()" Disabled="Saving">Save for next deploy</Btn>
+            }
+        </Extra>
+    </ApplyBar>
+}
+
+@code {
+    /// <summary>A line that says why the ports can't change here, or how they do: Compose's file, --rm, Swarm, a deploy's temporary container.</summary>
+    public sealed record PortsNotice(string Title, string Line, string? Href = null, string? HrefText = null);
+
+    [Parameter, EditorRequired] public ContainerPortsDraft Draft { get; set; } = default!;
+    /// <summary>What containers on its network call it: its container name, or an app's network name.</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    /// <summary>What the lines name it by.</summary>
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public PortsMode Mode { get; set; }
+    [Parameter] public PortsNotice? Notice { get; set; }
+    [Parameter] public bool IsGit { get; set; }
+    /// <summary>A Git app has an image to recreate its container from.</summary>
+    [Parameter] public bool Deployed { get; set; } = true;
+    /// <summary>A Git app's deploy keeps its domains' visitors on the old version meanwhile.</summary>
+    [Parameter] public bool Unnoticed { get; set; }
+    [Parameter] public bool HasDomains { get; set; }
+    [Parameter] public bool Running { get; set; }
+    [Parameter] public bool Database { get; set; }
+    [Parameter, EditorRequired] public string LanHost { get; set; } = "";
+    [Parameter] public bool LanIpv4Only { get; set; }
+    [Parameter] public string? Network { get; set; }
+    [Parameter] public string SharedNetwork { get; set; } = "gitberth";
+    [Parameter] public HostPortOwner? Self { get; set; }
+    /// <summary>Compose's service, for the edit to make in its file.</summary>
+    [Parameter] public ComposeService? Compose { get; set; }
+    [Parameter] public string ComposeSnippet { get; set; } = "";
+    /// <summary>Why a change can't start now ("Gitberth is already changing postgres. …"); null when it can.</summary>
+    [Parameter] public string? Busy { get; set; }
+    /// <summary>Why Apply is off while the draft is fine (a change already running, an engine too old).</summary>
+    [Parameter] public string? WhyNot { get; set; }
+    /// <summary>Docker's state changed under the draft: only Discard is offered.</summary>
+    [Parameter] public bool Stale { get; set; }
+    [Parameter] public bool Applying { get; set; }
+    [Parameter] public bool Saving { get; set; }
+    /// <summary>The web marker moves even on a table Gitberth won't change (it's Gitberth's own data).</summary>
+    [Parameter] public bool WebAlways { get; set; }
+    [Parameter] public IReadOnlyList<PortProblem> Problems { get; set; } = [];
+    [Parameter] public ContainerChange? LastChange { get; set; }
+    [Parameter] public PortChangeJob? Job { get; set; }
+    [Parameter] public IReadOnlyList<ForwarderNotice> Forwarders { get; set; } = [];
+    /// <summary>The ports a container on the host's network is noted on.</summary>
+    [Parameter] public IReadOnlyList<ContainerPortNote> Notes { get; set; } = [];
+    [Parameter] public EventCallback OnChanged { get; set; }
+    /// <summary>[Review and apply] (a recreate, through the change dialog) or [Apply] (a Git app's deploy without a build).</summary>
+    [Parameter] public EventCallback OnApply { get; set; }
+    /// <summary>[Save]: only notes or the web marker changed, and nothing restarts.</summary>
+    [Parameter] public EventCallback OnSave { get; set; }
+    /// <summary>A Git app's [Save for next deploy].</summary>
+    [Parameter] public EventCallback OnSaveLater { get; set; }
+    [Parameter] public EventCallback OnDiscard { get; set; }
+    [Parameter] public EventCallback<string> OnRemoveForwarder { get; set; }
+    [Parameter] public EventCallback OnPutBack { get; set; }
+    [Parameter] public EventCallback<IReadOnlyList<(int Port, string Protocol)>> OnSaveNotes { get; set; }
+
+    private bool showOutput;
+    private int? newPort;
+    private string newProtocol = "tcp";
+
+    private bool CanAdd => Mode is PortsMode.Editable or PortsMode.Git or PortsMode.Compose;
+
+    // Containers reach it by name on its named network; on Docker's default bridge alone nothing does. A Git app's
+    // container is always on the shared network.
+    private bool ByName => Network is not null || IsGit;
+
+    // The bar: for a change Gitberth can make, or for what restarts nothing on a Compose container.
+    private bool ShowsBar => Draft.Dirty && !Applying && (Mode is PortsMode.Editable or PortsMode.Git
+        || (Mode == PortsMode.Compose && !Draft.NeedsRecreate) || (Mode == PortsMode.ReadOnly && WebAlways && !Draft.NeedsRecreate));
+
+    private string BarTitle => Draft.Changes == 1 ? "1 unsaved change" : $"{Draft.Changes} unsaved changes";
+
+    private string BarLine =>
+        Stale ? ContainerPortsBar.Stale(Title)
+        : IsGit ? PortsBar.Line(Draft.Changes, Draft.NeedsRecreate, Title, Deployed, Running, Unnoticed, Draft.WebPort, HasDomains)
+        : !Draft.NeedsRecreate ? (Draft.WebChanged && !Draft.NotesChanged ? "Nothing restarts: the web port is Gitberth's own." : "Nothing restarts.")
+        : WhyNot is { } why ? why
+        : ContainerPortsBar.Line(Draft.Changes, true, Title, Running, Database).Split(". ", 2)[^1];
+
+    private string ApplyText => !Draft.NeedsRecreate ? "Save" : IsGit ? "Apply" : "Review and apply";
+
+    private Task ApplyAsync() => Draft.NeedsRecreate ? OnApply.InvokeAsync() : OnSave.InvokeAsync();
+
+    private async Task AddAsync()
+    {
+        Draft.Rows.Add(Draft.NewRow());
+        await OnChanged.InvokeAsync();
+    }
+
+    // A container on the host's network is reached on whatever port its program listens on: the ones noted for it are
+    // listed with their address on the host, and each is saved as it's added or taken away.
+    private RenderFragment HostNotes() => @<div class="gb-stack" style="gap:10px">
+        @if (Notes.Count > 0)
+        {
+            <div class="gb-notechips">
+                @foreach (var n in Notes)
+                {
+                    var key = ContainerPorts.Key(n.Port, n.Protocol);
+                    var address = ContainerPorts.Address(AddressBook.HostPart(LanHost), n.Port);
+                    <span class="gb-notechip">
+                        @address <span class="gb-t3">@key</span>
+                        <CopyButton Value="@address" Label="@address" />
+                        <button type="button" class="gb-iconbtn" style="width:24px;height:24px" aria-label="@($"Remove {key}")" disabled="@Saving"
+                                @onclick="() => SaveNotesAsync(Notes.Where(o => o != n))"><SvgIcon Icon="@Icons.Material.Outlined.Close" Size="xs" /></button>
+                    </span>
+                }
+            </div>
+        }
+        <div class="gb-row gb-row--wrap" style="gap:8px">
+            <input type="number" class="gb-input gb-input--sm gb-input--mono" style="width:120px" placeholder="8080" aria-label="A port it listens on"
+                   value="@newPort" @onchange="e => newPort = int.TryParse(e.Value?.ToString(), out var p) ? p : null" disabled="@Saving" />
+            <select class="gb-input gb-input--sm" style="width:90px" aria-label="Protocol" value="@newProtocol" @onchange="@(e => newProtocol = e.Value?.ToString() ?? "tcp")" disabled="@Saving">
+                <option value="tcp">TCP</option>
+                <option value="udp">UDP</option>
+            </select>
+            <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddNoteAsync" Disabled="@(Saving || newPort is not (>= 1 and <= 65535))">Note a port</Btn>
+            <span class="gb-help">Gitberth only notes them, so their addresses are listed. Nothing restarts.</span>
+        </div>
+    </div>;
+
+    private async Task AddNoteAsync()
+    {
+        if (newPort is not (>= 1 and <= 65535) || newPort is not int port) return;
+        await SaveNotesAsync([.. Notes, new ContainerPortNote { ContainerName = Name, Port = port, Protocol = newProtocol }]);
+        newPort = null;
+    }
+
+    private Task SaveNotesAsync(IEnumerable<ContainerPortNote> notes) =>
+        OnSaveNotes.InvokeAsync(notes.Select(n => (n.Port, n.Protocol)).Distinct().ToList());
+}

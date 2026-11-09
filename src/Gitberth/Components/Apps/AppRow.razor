@@ -1,0 +1,163 @@
+@*
+    One app in the Apps list, the same row whatever its source: logo, name and image, state, its main address, its
+    ports, CPU and memory, where it came from, and its actions (a toolbar on hover, a menu always). On a phone it's a
+    two-line card: logo, name and menu; state; address.
+*@
+<div class="gb-arow @(App.Running ? null : "gb-arow--stopped") @(Compact ? "gb-arow--compact" : null)" role="row">
+    <div class="gb-arow-name" role="cell">
+        <AppLogo Image="@App.Image" Name="@App.Container" Kind="@Kind" Self="@(App.Role == ContainerRole.Self)" Dim="@(!App.Running)" />
+        <div class="gb-arow-text">
+            <span class="gb-arow-titleline">
+                <a class="gb-arow-title" href="@App.Href">@App.Title</a>
+                @if (App.System)
+                {
+                    <span class="gb-tag gb-tag--outline">System</span>
+                }
+                @if (App.Update is { Available: true } update)
+                {
+                    <span class="gb-tag gb-tag--accent" title="@update.Text"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Update</span>
+                }
+            </span>
+            <span class="gb-arow-sub" title="@Sub">@Sub</span>
+        </div>
+    </div>
+    <div class="gb-c-st" role="cell">
+        <StatusLabel State="App.State" Text="@App.StateText" Since="@(App.Running ? App.StartedAt : null)" />
+    </div>
+    <div class="gb-c-addr gb-arow-addr" role="cell">
+        @if (Primary is { } chip)
+        {
+            var text = chip.Value is null ? chip.Label : AppFacts.Shown(chip.Value);
+            @if (chip.Kind == AddressChipKind.Open && App.Running)
+            {
+                <a class="gb-addrv" href="@chip.Value" target="_blank" rel="noopener" title="@chip.Tooltip"><span>@text</span><SvgIcon Icon="@Icons.Material.Outlined.OpenInNew" /></a>
+            }
+            else
+            {
+                <span class="gb-addrv @(App.Running ? null : "gb-addrv--off")" title="@chip.Tooltip">
+                    @if (chip.Kind == AddressChipKind.HostOnly)
+                    {
+                        <SvgIcon Icon="@Icons.Material.Filled.Lock" Class="gb-ac-host" />
+                    }
+                    <span>@text</span>
+                </span>
+            }
+        }
+        else if (App.Chips.Count > 0)
+        {
+            <span class="gb-addrv gb-addrv--faint"><span>Internal only</span></span>
+        }
+        else
+        {
+            <span class="gb-res-none">No ports</span>
+        }
+    </div>
+    <div class="gb-c-ports gb-arow-ports" role="cell">
+        @foreach (var port in App.Chips.Take(3))
+        {
+            <PortChip Chip="port" />
+        }
+        @if (App.Chips.Count > 3)
+        {
+            <span class="gb-pc gb-pc--more" title="@string.Join(", ", App.Chips.Skip(3).Select(c => c.Label))">+@(App.Chips.Count - 3)</span>
+        }
+    </div>
+    <div class="gb-c-res" role="cell">
+        @if (App.Running && (App.CpuPercent is not null || App.MemoryBytes is not null))
+        {
+            <div class="gb-res" title="CPU (100% is one core) and memory">
+                <Sparkline Values="@Cpu" Hot="@(App.CpuPercent >= 50)" />
+                <span>@(App.CpuPercent is double cpu ? AppFacts.Percent(cpu) : "–")</span>
+                <Meter Fraction="@MemoryFraction" Limited="@(MemoryLimit is > 0)" Title="@MemoryTitle" />
+                <span>@(App.MemoryBytes is ulong m ? AppFacts.Bytes(m) : "–")</span>
+            </div>
+        }
+        else
+        {
+            <span class="gb-res-none">@(App.Running ? "Not gathered" : "Not running")</span>
+        }
+    </div>
+    <div class="gb-c-src" role="cell"><SourceBadge Source="App.Source" /></div>
+    <div class="gb-c-act gb-arow-actions" role="cell">
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="gb-arow-kebab" AriaLabel="@($"Actions for {App.Title}")">
+            <ActivatorContent>
+                <button type="button" class="gb-iconbtn" aria-label="@($"Actions for {App.Title}")" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
+            </ActivatorContent>
+            <ChildContent>
+                @Menu()
+            </ChildContent>
+        </MudMenu>
+        <div class="gb-hoverbar">
+            @if (Primary is { Kind: AddressChipKind.Open, Value: { } open } && App.Running)
+            {
+                <a class="gb-iconbtn" href="@open" target="_blank" rel="noopener" title="Open" aria-label="@($"Open {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.OpenInNew" /></a>
+            }
+            @if (App.Running)
+            {
+                <button type="button" class="gb-iconbtn" title="Restart" aria-label="@($"Restart {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Restart)"><SvgIcon Icon="@Icons.Material.Outlined.RestartAlt" /></button>
+                @if (App.Role != ContainerRole.Self)
+                {
+                    <button type="button" class="gb-iconbtn" title="Stop" aria-label="@($"Stop {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Stop)"><SvgIcon Icon="@Icons.Material.Outlined.Stop" /></button>
+                }
+            }
+            else if (CanStart)
+            {
+                <button type="button" class="gb-iconbtn" title="Start" aria-label="@($"Start {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Start)"><SvgIcon Icon="@Icons.Material.Outlined.PlayArrow" /></button>
+            }
+            <a class="gb-iconbtn" href="@($"{App.Href}/logs")" title="Logs" aria-label="@($"Logs of {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.Article" /></a>
+            <a class="gb-iconbtn" href="@($"{App.Href}/settings")" title="Settings" aria-label="@($"Settings of {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.Tune" /></a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AppSummary App { get; set; } = default!;
+    /// <summary>A Git app's detected framework, for its logo.</summary>
+    [Parameter] public string? Kind { get; set; }
+    /// <summary>Its CPU readings, oldest first, for the sparkline.</summary>
+    [Parameter] public IReadOnlyList<double> Cpu { get; set; } = [];
+    /// <summary>Its memory limit in bytes; null or 0 for none.</summary>
+    [Parameter] public ulong? MemoryLimit { get; set; }
+    /// <summary>The host's memory, for the share a container without a limit uses.</summary>
+    [Parameter] public ulong? HostMemory { get; set; }
+    [Parameter] public EventCallback<ContainerAction> OnAction { get; set; }
+    /// <summary>Name, state, address and actions only: for a half-width card.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private AddressChip? Primary => AppFacts.Primary(App);
+
+    private string Sub => App.Repo ?? App.Image;
+
+    private bool CanStart => App.State is not (AppState.Deploying or AppState.Changing or AppState.NeedsDecision);
+
+    private double? MemoryFraction => App.MemoryBytes is not ulong m ? null
+        : MemoryLimit is ulong limit and > 0 ? (double)m / limit
+        : HostMemory is ulong host and > 0 ? (double)m / host : null;
+
+    private string MemoryTitle => App.MemoryBytes is not ulong m ? "Memory"
+        : MemoryLimit is ulong limit and > 0 ? $"{AppFacts.Bytes(m)} of {AppFacts.Bytes(limit)} limit"
+        : $"{AppFacts.Bytes(m)}, no limit";
+
+    private RenderFragment Menu() => @<text>
+        <MudMenuItem Icon="@Icons.Material.Outlined.SpaceDashboard" Href="@App.Href">Open its page</MudMenuItem>
+        @if (Primary is { Kind: AddressChipKind.Open, Value: { } open } && App.Running)
+        {
+            <MudMenuItem Icon="@Icons.Material.Outlined.OpenInNew" Href="@open" Target="_blank">Open @AppFacts.Shown(open)</MudMenuItem>
+        }
+        @if (App.Running)
+        {
+            <MudMenuItem Icon="@Icons.Material.Outlined.RestartAlt" OnClick="() => OnAction.InvokeAsync(ContainerAction.Restart)">Restart</MudMenuItem>
+            @if (App.Role != ContainerRole.Self)
+            {
+                <MudMenuItem Icon="@Icons.Material.Outlined.Stop" OnClick="() => OnAction.InvokeAsync(ContainerAction.Stop)">Stop</MudMenuItem>
+            }
+        }
+        else if (CanStart)
+        {
+            <MudMenuItem Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => OnAction.InvokeAsync(ContainerAction.Start)">Start</MudMenuItem>
+        }
+        <MudMenuItem Icon="@Icons.Material.Outlined.Article" Href="@($"{App.Href}/logs")">Logs</MudMenuItem>
+        <MudMenuItem Icon="@Icons.Material.Outlined.Tune" Href="@($"{App.Href}/settings")">Settings</MudMenuItem>
+        <MudMenuItem Icon="@Icons.Material.Outlined.Lan" Href="@($"{App.Href}/network")">Network</MudMenuItem>
+    </text>;
+}

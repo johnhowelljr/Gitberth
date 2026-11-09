@@ -1,0 +1,6 @@
+{
+  "kind": "Deno",
+  "title": "Deno (Deno.serve)",
+  "port": 8000,
+  "expect": "Hello from Deno.serve"
+}

@@ -1,0 +1,97 @@
+@*
+    The Labels section of an app's settings, shared by the Settings tab and New app's Configure step (create mode). Each
+    label is a row; Gitberth's and Compose's own are read-only; the image's own are listed under it. In create mode every
+    value is new, so nothing is marked changed and a row taken out goes at once.
+*@
+<SettingsSection Id="@Id" Title="Labels" Icon="@Icons.Material.Outlined.Label" Changed="@(!Create && Draft.ChangedFields().Contains(SettingField.Labels))"
+                 Description="@(Create ? "Notes on the container that other tools read. Gitberth adds its own gitberth. labels when it creates it." : "Notes on the container that other tools read. Labels starting with gitberth. are Gitberth's own.")">
+    @if (!Rows.Any())
+    {
+        <EmptyState Small="true" Title="No labels">
+            <ChildContent>Traefik, Watchtower and Homepage read labels; add one if a tool asks for it.</ChildContent>
+            <Actions>
+                @if (!RO)
+                {
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="() => Set(() => Draft.AddLabel())">Add label</Btn>
+                }
+            </Actions>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="gb-envtbl" role="table" aria-label="Labels">
+            @foreach (var l in Rows)
+            {
+                var css = Create ? null : l.Removed ? "gb-envrow--gone" : l.IsNew ? "gb-envrow--new" : l.Changed ? "gb-envrow--changed" : null;
+                var ro = l.ReadOnly || l.Removed || RO;
+                <div class="gb-envrow @css" role="row" @key="l">
+                    <span class="gb-envkey" role="cell">
+                        @if (l.IsNew || (Create && !l.ReadOnly))
+                        {
+                            <input class="gb-input gb-input--mono" value="@l.Key" placeholder="traefik.enable" aria-label="Label" @oninput="e => Set(() => l.Key = e.Value?.ToString() ?? string.Empty)" />
+                        }
+                        else
+                        {
+                            <span>@l.Key</span>
+                        }
+                        @if (l.ReadOnly)
+                        {
+                            <span class="gb-tag" title="Gitberth's or Compose's own"><SvgIcon Icon="@Icons.Material.Filled.Lock" />@(l.Key.StartsWith("gitberth.", StringComparison.Ordinal) ? "Gitberth" : "Compose")</span>
+                        }
+                    </span>
+                    <span class="gb-envval" role="cell">
+                        <input class="gb-input gb-input--mono" value="@l.Value" readonly="@ro" aria-label="@($"Value of {l.Key}")" @oninput="e => Set(() => l.Value = e.Value?.ToString() ?? string.Empty)" />
+                    </span>
+                    <span class="gb-envrow-actions" role="cell">
+                        @if (!Create && l.Changed && !l.IsNew)
+                        {
+                            <button type="button" class="gb-iconbtn" title="Undo" aria-label="Undo" @onclick="() => Set(() => { l.Key = l.Original!.Value.Key; l.Value = l.Original.Value.Value; l.Removed = false; })"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
+                        }
+                        @if (!ro)
+                        {
+                            <button type="button" class="gb-iconbtn" title="Remove" aria-label="@($"Remove {l.Key}")" @onclick="() => Set(() => Draft.RemoveLabel(l))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                        }
+                    </span>
+                </div>
+            }
+        </div>
+        @if (!RO)
+        {
+            <div class="gb-tbl-actions"><Btn Icon="@Icons.Material.Outlined.Add" OnClick="() => Set(() => Draft.AddLabel())">Add label</Btn></div>
+        }
+    }
+    @if (Draft.Loaded.ImageLabels.Count > 0)
+    {
+        <details class="gb-help">
+            <summary style="cursor:pointer">@Draft.Loaded.ImageLabels.Count from the image, read-only</summary>
+            <div class="gb-envtbl" style="margin-top:8px">
+                @foreach (var (key, value) in Draft.Loaded.ImageLabels.OrderBy(k => k.Key, StringComparer.Ordinal))
+                {
+                    <div class="gb-envrow" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)"><span class="gb-envkey"><span>@key</span></span><span class="gb-envval"><span>@value</span></span></div>
+                }
+            </div>
+        </details>
+    }
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public ContainerSettingsDraft Draft { get; set; } = default!;
+    /// <summary>The fields this app never edits (Gitberth's own container's, say); null: every field can change.</summary>
+    [Parameter] public Func<SettingField, bool>? ReadOnly { get; set; }
+    /// <summary>New app's Configure: no "Changed" marks, and a row taken out goes at once.</summary>
+    [Parameter] public bool Create { get; set; }
+    /// <summary>Raised after every edit.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+    [Parameter] public string Id { get; set; } = "sec-labels";
+
+    private bool RO => ReadOnly?.Invoke(SettingField.Labels) == true;
+
+    // In create mode a row taken out is gone; on the Settings tab it stays, struck through, until it's applied.
+    private IEnumerable<LabelRowDraft> Rows => Create ? Draft.Labels.Where(l => !l.Removed) : Draft.Labels;
+
+    private Task Set(Action change)
+    {
+        change();
+        return Changed.InvokeAsync();
+    }
+}

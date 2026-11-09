@@ -1,0 +1,132 @@
+@implements IAsyncDisposable
+@inject DockerCli Docker
+
+<LogView Lines="lines" Title="@ContainerName" EmptyText="No output from the container yet.">
+    <Toolbar>
+        <MudMenu Label="@($"Last {tail} lines")" Size="Size.Small" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowDropDown"
+                 Dense="true" Class="ml-2">
+            @foreach (var option in TailOptions)
+            {
+                <MudMenuItem OnClick="() => SetTailAsync(option)">Last @option lines</MudMenuItem>
+            }
+        </MudMenu>
+        <MudTooltip Text="Reconnect">
+            <MudIconButton Icon="@Icons.Material.Outlined.Refresh" Size="Size.Small" OnClick="RestartAsync" aria-label="Reconnect" />
+        </MudTooltip>
+        <span class="gb-terminal-status @(streaming ? "gb-terminal-status--live" : "")">@status</span>
+    </Toolbar>
+</LogView>
+
+@code {
+    private static readonly int[] TailOptions = [100, 500, 2000];
+    private const int MaxLines = 5000;
+
+    [Parameter, EditorRequired] public string ContainerName { get; set; } = "";
+
+    private readonly Lock gate = new();
+    private readonly List<string> buffer = [];
+    private List<string> lines = [];
+    private int tail = 500;
+    private string status = "";
+    private bool streaming;
+    private CancellationTokenSource? cts;
+    private Task? pump;
+    private Timer? timer;
+    private volatile bool dirty;
+
+    protected override void OnInitialized() => Start();
+
+    private void Start()
+    {
+        lock (gate) buffer.Clear();
+        lines = [];
+        streaming = true;
+        status = "Live";
+        cts = new CancellationTokenSource();
+        var token = cts.Token;
+        var args = new[] { "logs", "-f", "--timestamps", "--tail", tail.ToString(CultureInfo.InvariantCulture), ContainerName };
+        pump = Task.Run(async () =>
+        {
+            string final;
+            try
+            {
+                var r = await Docker.RunAsync(args, new ProcessOptions { OnLine = OnLine, MaxCapture = 8 * 1024 }, token);
+                final = r.Ok ? "The container stopped" : r.ErrorText;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            await InvokeAsync(() =>
+            {
+                streaming = false;
+                status = final;
+                Flush();
+                StateHasChanged();
+            });
+        });
+        timer = new Timer(_ => { if (dirty) _ = InvokeAsync(() => { Flush(); StateHasChanged(); }); }, null, 300, 300);
+    }
+
+    private void OnLine(string line)
+    {
+        lock (gate)
+        {
+            buffer.Add(FormatLine(line));
+            if (buffer.Count > MaxLines * 2) buffer.RemoveRange(0, buffer.Count - MaxLines);
+        }
+        dirty = true;
+    }
+
+    /// <summary>"2026-11-02T10:00:00.123456789Z message" becomes "10:00:00 message" in local time.</summary>
+    private static string FormatLine(string line)
+    {
+        if (line.Length > 20 && line[4] == '-' && line[10] == 'T'
+            && DateTime.TryParseExact(line[..19], "yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var ts))
+        {
+            var space = line.IndexOf(' ');
+            return ts.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture) + (space > 0 ? line[space..] : " ");
+        }
+        return line;
+    }
+
+    private void Flush()
+    {
+        lock (gate)
+        {
+            dirty = false;
+            lines = buffer.Count > MaxLines ? buffer.GetRange(buffer.Count - MaxLines, MaxLines) : [.. buffer];
+        }
+    }
+
+    private async Task SetTailAsync(int value)
+    {
+        tail = value;
+        await RestartAsync();
+    }
+
+    private async Task StopAsync()
+    {
+        timer?.Dispose();
+        timer = null;
+        if (cts is null) return;
+        await cts.CancelAsync();
+        try
+        {
+            if (pump is not null) await pump;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        cts.Dispose();
+        cts = null;
+    }
+
+    private async Task RestartAsync()
+    {
+        await StopAsync();
+        Start();
+    }
+
+    public async ValueTask DisposeAsync() => await StopAsync();
+}

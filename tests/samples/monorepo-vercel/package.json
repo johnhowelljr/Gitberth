@@ -1,0 +1,7 @@
+{
+  "name": "monorepo-vercel",
+  "private": true,
+  "scripts": {
+    "build:shared": "node shared/build.js"
+  }
+}

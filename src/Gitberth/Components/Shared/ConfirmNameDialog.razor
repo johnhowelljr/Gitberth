@@ -1,0 +1,42 @@
+@* Confirms something that can't be undone by having the name typed in, as GitHub does for deleting a repo. *@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.Delete" Color="Color.Error" />
+            <span>@Title</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @foreach (var line in Lines)
+        {
+            <MudText Typo="Typo.body2" Class="mb-2">@line</MudText>
+        }
+        <MudTextField T="string" @bind-Value="typed" Immediate="true" Label="@($"Type {Name} to confirm")" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" AutoFocus="true" Class="mt-3 gb-mono-input" OnKeyDown="KeyDown" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" Disabled="@(typed != Name)" OnClick="Confirm">@ConfirmText</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public IReadOnlyList<string> Lines { get; set; } = [];
+    /// <summary>What has to be typed.</summary>
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string ConfirmText { get; set; } = "Remove";
+
+    private string? typed;
+
+    private void KeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Confirm();
+    }
+
+    private void Confirm()
+    {
+        if (typed == Name) MudDialog.Close(DialogResult.Ok(true));
+    }
+}

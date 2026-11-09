@@ -1,0 +1,23 @@
+# Gitberth: builds and runs your GitHub repos as containers on this Docker host.
+#   First start:  cp .env.example .env  (edit it), then  docker compose up -d
+#   Update:       docker compose pull && docker compose up -d     (your apps keep running)
+#   Logs:         docker compose logs -f gitberth
+# To build Gitberth from this folder instead of pulling the published image, see docker-compose.build.yml.
+name: gitberth  # fixes the data volume's name (gitberth_gitberth-data), whatever the folder is called
+services:
+  gitberth:
+    image: ghcr.io/johnhowelljr/gitberth:latest
+    container_name: gitberth
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      GITBERTH_ADMIN_PASSWORD: ${GITBERTH_ADMIN_PASSWORD:-}  # used on first start only; change it in the UI later
+      GITBERTH_PUBLIC_HOST: ${GITBERTH_PUBLIC_HOST:-}        # this machine's LAN address, used for app links
+      TZ: ${TZ:-UTC}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - gitberth-data:/data
+
+volumes:
+  gitberth-data:

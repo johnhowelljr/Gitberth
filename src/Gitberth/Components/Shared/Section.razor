@@ -1,0 +1,20 @@
+<section class="gb-section">
+    <div class="gb-section-head">
+        <h3>@Title</h3>
+        @if (Description is not null)
+        {
+            <p>@Description</p>
+        }
+        @DescriptionContent
+    </div>
+    <div class="gb-section-body">
+        @ChildContent
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Description { get; set; }
+    [Parameter] public RenderFragment? DescriptionContent { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

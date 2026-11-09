@@ -1,0 +1,29 @@
+@* A page's head: breadcrumbs, the title at display size, one line under it, and its actions on the right. *@
+<header class="gb-phead @Class">
+    <div style="min-width:0">
+        @if (Crumbs is not null)
+        {
+            <nav class="gb-crumbs" aria-label="Breadcrumb">@Crumbs</nav>
+        }
+        <h1 class="gb-display">@Title</h1>
+        @if (Lead is not null)
+        {
+            <p class="gb-lead">@Lead</p>
+        }
+        @ChildContent
+    </div>
+    @if (Actions is not null)
+    {
+        <div class="gb-phead-actions">@Actions</div>
+    }
+</header>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Lead { get; set; }
+    [Parameter] public RenderFragment? Crumbs { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+    /// <summary>Under the lead: tags, a "Live" marker.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

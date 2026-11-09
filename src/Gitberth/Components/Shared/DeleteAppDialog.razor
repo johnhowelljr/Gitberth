@@ -1,0 +1,47 @@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.DeleteForever" Color="Color.Error" />
+            <span>Delete @AppName?</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            This stops and removes the container and deletes the deploy history and logs. It can't be undone.
+        </MudText>
+        @if (Domains.Count > 0 && DomainsEnabled)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">
+                Its domains (@string.Join(", ", Domains)) come out of your Cloudflare Tunnel, so they can't reach whichever app gets its port next.
+                DNS records you made yourself stay; ones Gitberth added are removed.
+            </MudText>
+        }
+        else if (Domains.Count > 0)
+        {
+            <MudText Typo="Typo.body2" Class="mb-3">
+                Domains are turned off, so its domains (@string.Join(", ", Domains)) stay in your Cloudflare Tunnel for now. Gitberth takes them out
+                when domains are turned back on, and until then no new app gets the port or name they go to.
+            </MudText>
+        }
+        <MudCheckBox T="bool" @bind-Value="removeImages" Color="Color.Error" Label="Also delete its images" />
+        <MudCheckBox T="bool" @bind-Value="removeVolumes" Color="Color.Error" Label="Also delete its named volumes (their data is lost)" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="Confirm">Delete app</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Choice(bool RemoveImages, bool RemoveVolumes);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string AppName { get; set; } = "";
+    [Parameter] public IReadOnlyList<string> Domains { get; set; } = [];
+    [Parameter] public bool DomainsEnabled { get; set; } = true;
+
+    private bool removeImages = true;
+    private bool removeVolumes;
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(new Choice(removeImages, removeVolumes)));
+}

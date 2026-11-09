@@ -1,0 +1,30 @@
+@* The last few readings as a small line with a soft area under it: server-rendered SVG, no script. *@
+@if (Values.Count > 1)
+{
+    <svg class="gb-spark @(Hot ? "gb-spark--hot" : null) @Class" viewBox="0 0 @Width @Height" preserveAspectRatio="none" aria-hidden="true"
+         style="@(Stretch ? "width:100%;height:" + Height.ToString(CultureInfo.InvariantCulture) + "px" : null)">
+        <path class="gb-spark-area" d="@SparkPath.Area(Values, Max, Width, Height)" />
+        <path class="gb-spark-line" d="@SparkPath.Line(Values, Max, Width, Height)" />
+    </svg>
+}
+else
+{
+    <svg class="gb-spark @Class" viewBox="0 0 @Width @Height" aria-hidden="true"
+         style="@(Stretch ? "width:100%;height:" + Height.ToString(CultureInfo.InvariantCulture) + "px" : null)">
+        <path class="gb-spark-line" style="opacity:.35" d="@($"M0,{(Height - 1).ToString(CultureInfo.InvariantCulture)} H{Width.ToString(CultureInfo.InvariantCulture)}")" />
+    </svg>
+}
+
+@code {
+    /// <summary>The readings, oldest first; the last 30 or so are drawn.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<double> Values { get; set; } = [];
+    /// <summary>The top of the scale; null scales to the highest reading.</summary>
+    [Parameter] public double? Max { get; set; }
+    [Parameter] public int Width { get; set; } = 58;
+    [Parameter] public int Height { get; set; } = 18;
+    /// <summary>Busier than the rest: drawn in warn.</summary>
+    [Parameter] public bool Hot { get; set; }
+    /// <summary>Fill the width of its box (the host strip).</summary>
+    [Parameter] public bool Stretch { get; set; }
+    [Parameter] public string? Class { get; set; }
+}

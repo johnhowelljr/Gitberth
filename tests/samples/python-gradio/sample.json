@@ -1,0 +1,7 @@
+{
+  // The page is drawn by JavaScript; the HTML shell Gradio serves carries the app's title in its meta tags.
+  "kind": "Python",
+  "title": "Gradio",
+  "port": 7860,
+  "expect": "Hello from Gradio"
+}

@@ -1,0 +1,29 @@
+sudo docker run -itd \
+  --name "Media Server" \
+  --hostname media \
+  -e TZ=Europe/London \
+  -e "DATABASE_URL=postgres://app:s3cr=t@db:5432/app?sslmode=disable" \
+  -e PUID=1000 --env=PGID=1000 \
+  -p 8096:8096 -p 127.0.0.1:8920:8920/tcp -p [::1]:7359:7359/udp -p 1900:1900/udp \
+  -p 9000-9002:9000-9002 \
+  -v /srv/media/config:/config \
+  -v jellyfin-cache:/cache:ro \
+  -v /transcode \
+  --mount type=bind,source=/mnt/movies,target=/data/movies,readonly \
+  --mount type=tmpfs,target=/tmp/scratch,tmpfs-size=268435456 \
+  --tmpfs /run:rw,noexec,size=64m \
+  --network media --network-alias jellyfin \
+  --restart unless-stopped \
+  --memory 2g --memory-reservation=512m --cpus 2.5 --pids-limit 512 --shm-size 256m \
+  --ulimit nofile=65536:65536 \
+  --device /dev/dri:/dev/dri \
+  --gpus all \
+  --cap-add SYS_ADMIN --security-opt no-new-privileges:true \
+  --health-cmd "curl -fsS http://localhost:8096/health || exit 1" --health-interval 30s --health-retries 3 \
+  --log-driver json-file --log-opt max-size=10m \
+  --stop-timeout 30 \
+  -l com.example.team=media \
+  --add-host host.docker.internal:host-gateway \
+  --dns 1.1.1.1 \
+  --rm \
+  jellyfin/jellyfin:10.10 --ffmpeg /usr/lib/jellyfin-ffmpeg/ffmpeg

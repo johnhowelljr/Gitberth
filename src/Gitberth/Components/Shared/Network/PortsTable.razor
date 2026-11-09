@@ -1,0 +1,344 @@
+@inject HostPortMap Map
+@inject GitberthOptions Options
+
+@*
+    The Ports table for every app (5.3, 5.9): each port with its protocol, who reaches it (the three-way Access control),
+    the host port that leads to it and the address that gives, and the web marker. The container's own ports keep their
+    number and protocol; a Git app's ports, a new app's, ones Gitberth noted and ones added here can change in every part
+    and be taken away. A port Docker picks at random says so, with a way to keep it or to use the container's own.
+    Read-only, it shows what Docker has. It only edits the rows; on a phone every row stacks into labelled fields.
+*@
+<div class="gb-ptbl" role="table" aria-label="Ports">
+    @if (Draft.Rows.Count > 0)
+    {
+        <div class="gb-prow gb-prow--head" role="row">
+            <span role="columnheader">Web</span>
+            <span role="columnheader">Container port</span>
+            <span role="columnheader">Protocol</span>
+            <span role="columnheader">Access</span>
+            <span role="columnheader">Host port</span>
+            <span role="columnheader">Address</span>
+            <span role="columnheader"><span class="gb-sr">Remove</span></span>
+        </div>
+    }
+    @for (var i = 0; i < Draft.Rows.Count; i++)
+    {
+        var row = Draft.Rows[i];
+        var at = i;
+        var what = What(row, at);
+        var text = ReadOnly || row.Fixed;
+        var state = !Draft.WasLoaded(row) ? "gb-prow--new" : !Draft.Unchanged(row) ? "gb-prow--changed" : null;
+        <div class="gb-prow @(ReadOnly || !Marks ? null : state)" role="row" @key="row">
+            <div class="p-web" role="cell">
+                <span class="gb-lbl">Web</span>
+                @if (row.CanBeWeb || row.IsWeb)
+                {
+                    <button type="button" class="gb-webmark @(row.IsWeb ? "gb-webmark--on" : null)" role="switch" aria-checked="@(row.IsWeb ? "true" : "false")"
+                            aria-label="@($"Web port: {what}")" title="Web port: Open, domains, the health URL and scheduled jobs use it"
+                            disabled="@(Disabled || !WebEditable)" @onclick="() => ToggleWebAsync(row)">
+                        <SvgIcon Icon="@Icons.Material.Outlined.Language" />
+                    </button>
+                }
+            </div>
+            <div class="p-port" role="cell">
+                <span class="gb-lbl">Container port</span>
+                @if (text)
+                {
+                    <span class="gb-pport">
+                        <b>@row.ContainerPort</b><span>/@PortRules.ProtocolOf(row.Protocol)</span>
+                        @if (row.IsWeb)
+                        {
+                            <span class="gb-tag gb-tag--accent">Web</span>
+                        }
+                        else if (row.ContainerPort is int known && PortServices.Name(known, row.Protocol) is { } service)
+                        {
+                            <span class="gb-pport-svc">@service</span>
+                        }
+                    </span>
+                }
+                else
+                {
+                    <div class="gb-pport-in">
+                        <input type="number" inputmode="numeric" min="1" max="65535" class="gb-input gb-input--sm gb-input--mono @(Has(at, PortField.ContainerPort) ? "gb-input--error" : null)"
+                               value="@row.ContainerPort" placeholder="8080" disabled="@Disabled" aria-label="@($"Container port, row {at + 1}")"
+                               @onchange="e => SetContainerPortAsync(row, e)" />
+                        @if (row.IsWeb)
+                        {
+                            <span class="gb-tag gb-tag--accent" style="align-self:center">Web</span>
+                        }
+                    </div>
+                }
+                @Messages(at, PortField.ContainerPort)
+            </div>
+            <div class="p-proto" role="cell">
+                <span class="gb-lbl">Protocol</span>
+                @if (text)
+                {
+                    <span class="gb-t2">@PortRules.ProtocolOf(row.Protocol).ToUpperInvariant()</span>
+                }
+                else
+                {
+                    <select class="gb-input gb-input--sm" value="@PortRules.ProtocolOf(row.Protocol)" disabled="@Disabled" aria-label="@($"Protocol for {what}")"
+                            @onchange="@(e => SetProtocolAsync(row, e.Value?.ToString() ?? "tcp"))">
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                    </select>
+                }
+            </div>
+            <div class="p-access" role="cell">
+                <span class="gb-lbl">Access</span>
+                @if (ReadOnly)
+                {
+                    <AccessTag Kind="@KindOf(row.Access)" Text="@AccessName(row)" />
+                }
+                else
+                {
+                    <Seg T="PortAccess" Options="AccessOptions(row)" Value="row.Access" ValueChanged="access => SetAccessAsync(row, access)" Disabled="Disabled"
+                         Label="@($"Access for {what}")" />
+                }
+                @Messages(at, PortField.Access)
+            </div>
+            <div class="p-host" role="cell">
+                <span class="gb-lbl">Host port</span>
+                @if (row.Access == PortAccess.Internal)
+                {
+                    <span class="gb-pdash">—</span>
+                }
+                else if (ReadOnly || row.Random)
+                {
+                    <div class="gb-hpfield">
+                        @if (row.HostPort is int bound)
+                        {
+                            <span class="gb-hpstatic">@bound</span>
+                        }
+                        else
+                        {
+                            <span class="gb-pdash">—</span>
+                        }
+                        @if (row.Random)
+                        {
+                            @* Docker picks it again at every start: keep the one it has, or use the container's own. *@
+                            <div class="gb-hpline gb-hpline--taken">
+                                <span>Random: changes at every start.</span>
+                                @if (!ReadOnly && !Disabled)
+                                {
+                                    @if (row.Picked is int picked)
+                                    {
+                                        <button type="button" class="gb-linkbtn" @onclick="() => FixAsync(row, picked)">Keep @picked</button>
+                                    }
+                                    @if (row.ContainerPort is int own && own != row.Picked)
+                                    {
+                                        <button type="button" class="gb-linkbtn" @onclick="() => FixAsync(row, own)">Use @own</button>
+                                    }
+                                }
+                            </div>
+                        }
+                        @Messages(at, PortField.HostPort)
+                    </div>
+                }
+                else
+                {
+                    <HostPortField Value="row.HostPort" ValueChanged="port => SetHostPortAsync(row, port)" ContainerPort="row.ContainerPort"
+                                   Protocol="@PortRules.ProtocolOf(row.Protocol)" HostIp="@(ContainerPorts.BindAddress(row.Access, row.HostIp) ?? "")" Self="Self"
+                                   AlsoTaken="Taken(row)" Problem="@ProblemText(at, PortField.HostPort)" Quiet="@(Marks && Draft.Unchanged(row))"
+                                   Changed="@(Marks && Draft.WasLoaded(row) && !Draft.Unchanged(row))" Label="@($"Host port for {what}")" Disabled="@Disabled" />
+                }
+            </div>
+            <div class="p-addr" role="cell">
+                <span class="gb-lbl">Address</span>
+                @if (ContainerPortAddress.Of(row, LanHost, Name, Network is not null, Database) is { } address)
+                {
+                    <span class="gb-row gb-row--wrap" style="gap:8px;flex-wrap:wrap">
+                        <AddressValue Text="@address.Text" Href="@address.Href" Copy="@address.Text" Live="@(Running || row.Access == PortAccess.Internal)" ShowCopy="true" />
+                        @if (row.Access == PortAccess.HostOnly)
+                        {
+                            <span class="gb-t3" style="font-size:12px">host only</span>
+                        }
+                    </span>
+                }
+                else
+                {
+                    <span class="gb-pdash" title="@(row.Access == PortAccess.Internal ? $"Not on a shared network. Join {Options.Network} in Networks below." : null)">—</span>
+                }
+            </div>
+            <div class="p-more" role="cell">
+                @if (row.Removable && !ReadOnly)
+                {
+                    <button type="button" class="gb-iconbtn" aria-label="@($"Remove {what}")" title="Remove" disabled="@Disabled" @onclick="() => RemoveAsync(row)">
+                        <SvgIcon Icon="@Icons.Material.Outlined.Close" />
+                    </button>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The ports being edited: the table changes the draft's rows in place.</summary>
+    [Parameter, EditorRequired] public ContainerPortsDraft Draft { get; set; } = default!;
+    /// <summary>What containers on its network call it: its name, or an app's network name.</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    /// <summary>The LAN address of this host.</summary>
+    [Parameter, EditorRequired] public string LanHost { get; set; } = "";
+    /// <summary>The named network its Internal ports are reached on, the shared one first; null when it's on none.</summary>
+    [Parameter] public string? Network { get; set; }
+    /// <summary>The host has an IPv6 address the internet can reach, so the LAN's ports are published on IPv4 only.</summary>
+    [Parameter] public bool LanIpv4Only { get; set; }
+    /// <summary>A database Gitberth recognizes: only its web console is a link.</summary>
+    [Parameter] public bool Database { get; set; }
+    /// <summary>Whose ports don't count against its rows: the app's or the container's own.</summary>
+    [Parameter] public HostPortOwner? Self { get; set; }
+    /// <summary>What's wrong with the rows, each shown under its field.</summary>
+    [Parameter] public IReadOnlyList<PortProblem> Problems { get; set; } = [];
+    /// <summary>Gitberth won't change these ports: they show as Docker has them.</summary>
+    [Parameter] public bool ReadOnly { get; set; }
+    /// <summary>The fields are there but can't be changed now (a paused container, a change being saved).</summary>
+    [Parameter] public bool Disabled { get; set; }
+    /// <summary>The web marker can move even when the ports can't (it's Gitberth's own data).</summary>
+    [Parameter] public bool WebEditable { get; set; } = true;
+    /// <summary>It answers now: addresses are links; a stopped one's are grey.</summary>
+    [Parameter] public bool Running { get; set; } = true;
+    /// <summary>
+    /// Changed and added rows are tinted, and a row nobody changed isn't checked again (an editor: it's the app's own port
+    /// already); off for a new app, where every row is new and every host port is checked as it's typed.
+    /// </summary>
+    [Parameter] public bool Marks { get; set; } = true;
+    /// <summary>
+    /// Containers reach it by name: false when it's on no named network (only Docker's default bridge), so an Internal
+    /// port says nothing reaches it by name until it joins the shared network.
+    /// </summary>
+    [Parameter] public bool ByName { get; set; } = true;
+    /// <summary>Raised after every change to the rows.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    // Added rows whose host port was typed in: the table no longer picks one for them.
+    private readonly HashSet<ContainerPortRow> typed = new(ReferenceEqualityComparer.Instance);
+
+    // What a row's fields are named by after their label: its port once it has one, else its place.
+    private static string What(ContainerPortRow row, int at) => row.Key ?? $"row {at + 1}";
+
+    private bool Has(int at, PortField field) => Problems.Any(p => p.Row == at && p.Field == field);
+
+    private string? ProblemText(int at, PortField field) => Problems.FirstOrDefault(p => p.Row == at && p.Field == field)?.Message;
+
+    private RenderFragment Messages(int at, PortField field) => @<text>
+        @foreach (var problem in Problems.Where(p => p.Row == at && p.Field == field))
+        {
+            <div class="gb-pproblem" role="alert">@problem.Message</div>
+        }
+    </text>;
+
+    private static string AccessName(ContainerPortRow row) => row.Access switch
+    {
+        PortAccess.Internal => "Internal",
+        PortAccess.HostOnly => "Host only",
+        PortAccess.Custom => $"LAN ({row.HostIp} only)",
+        _ => "LAN",
+    };
+
+    private static AddressKind KindOf(PortAccess access) => access switch
+    {
+        PortAccess.Internal => AddressKind.Internal,
+        PortAccess.HostOnly => AddressKind.HostOnly,
+        _ => AddressKind.Lan,
+    };
+
+    // The three ways to reach a port, each in its Access hue, with a line of help each as the tooltip; one address of the
+    // host only when that's how Docker has it, since it's never offered for another port.
+    private List<SegOption<PortAccess>> AccessOptions(ContainerPortRow row)
+    {
+        var options = new List<SegOption<PortAccess>>
+        {
+            new(PortAccess.Internal, "Internal", Icons.Material.Outlined.Hub, Class: "gb-ac-internal", Title: InternalTitle(ByName, Network, Options.Network)),
+            new(PortAccess.Lan, "LAN", Icons.Material.Outlined.Lan, Class: "gb-ac-lan",
+                Title: $"Every device on your network, at {AddressBook.HostPart(LanHost)}:<host port>{(LanIpv4Only ? ", over IPv4 only" : "")}."),
+            new(PortAccess.HostOnly, "Host only", Icons.Material.Filled.Lock, Class: "gb-ac-host",
+                Title: "Only programs on the host itself (127.0.0.1), like the Cloudflare tunnel."),
+        };
+        if (row.Access == PortAccess.Custom && row.HostIp is { Length: > 0 } ip)
+            options.Add(new(PortAccess.Custom, $"{ip} only", Icons.Material.Outlined.Lan, Class: "gb-ac-lan", Title: $"Only on {ip}, one of the host's addresses."));
+        return options;
+    }
+
+    /// <summary>
+    /// What the Internal choice means, as its tooltip and the legend say it: reached by name on its named network, or, on
+    /// Docker's default bridge (no names), by nothing until it joins the shared network.
+    /// </summary>
+    public static string InternalTitle(bool byName, string? network, string shared) => byName && network is not null
+        ? $"Not published. Containers on {network} reach it by name."
+        : byName ? $"Not published. Containers on {shared} reach it by name."
+        : $"Not published. Nothing reaches it by name until it joins {shared}.";
+
+    // Host ports the other published rows have for the same protocol.
+    private List<int> Taken(ContainerPortRow row) => Draft.Rows
+        .Where(r => !ReferenceEquals(r, row) && r.Access != PortAccess.Internal && r.HostPort is not null && PortRules.ProtocolOf(r.Protocol) == PortRules.ProtocolOf(row.Protocol))
+        .Select(r => r.HostPort!.Value).ToList();
+
+    private async Task ToggleWebAsync(ContainerPortRow row)
+    {
+        Draft.SetWeb(row.IsWeb ? null : row);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetContainerPortAsync(ContainerPortRow row, ChangeEventArgs e)
+    {
+        row.ContainerPort = int.TryParse(e.Value?.ToString(), NumberStyles.None, CultureInfo.InvariantCulture, out var port) ? port : null;
+        if (!row.CanBeWeb) row.IsWeb = false;
+        // An added row's host port follows its container port until one is typed in.
+        if (row.Access != PortAccess.Internal && !typed.Contains(row)) await PickHostPortAsync(row);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetProtocolAsync(ContainerPortRow row, string protocol)
+    {
+        row.Protocol = protocol;
+        if (!row.CanBeWeb) row.IsWeb = false;
+        if (row.Access != PortAccess.Internal && !typed.Contains(row)) await PickHostPortAsync(row);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetAccessAsync(ContainerPortRow row, PortAccess access)
+    {
+        row.Access = access;
+        // A random port given another access gets the host port it has now, or one the map offers: a recreate fixes it either way.
+        row.Random = false;
+        if (access != PortAccess.Internal && row.HostPort is null) await PickHostPortAsync(row);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetHostPortAsync(ContainerPortRow row, int? port)
+    {
+        row.HostPort = port;
+        typed.Add(row);
+        await OnChanged.InvokeAsync();
+    }
+
+    // [Keep 32768] or [Use 8080] on a random port: it's fixed at that one.
+    private async Task FixAsync(ContainerPortRow row, int port)
+    {
+        (row.HostPort, row.Random) = (port, false);
+        typed.Add(row);
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task RemoveAsync(ContainerPortRow row)
+    {
+        Draft.Rows.Remove(row);
+        typed.Remove(row);
+        await OnChanged.InvokeAsync();
+    }
+
+    // The host port the map offers for the row: its container port when that's free, else the next free one above it.
+    private async Task PickHostPortAsync(ContainerPortRow row)
+    {
+        if (row.ContainerPort is not int port || port is < 1 or > 65535) return;
+        try
+        {
+            row.HostPort = await Map.SuggestAsync(port, PortRules.ProtocolOf(row.Protocol), Self, Taken(row));
+        }
+        catch (Exception)
+        {
+            // Docker couldn't be read: the field is left as it is, and its own check says why.
+        }
+    }
+}
