@@ -37,6 +37,22 @@ public sealed class WatchState
         catch (SemaphoreFullException) { }
     }
 
+    // Repos GitHub told about through the webhook since the watcher's last pass, by owner/repo.
+    private readonly ConcurrentDictionary<string, byte> _webhookRepos = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// GitHub said something changed in a repo (a push, a pull request, a branch deleted): the watcher looks now, and the
+    /// deploys that pass starts for that repo are counted as started by GitHub (<see cref="DeployTrigger.Webhook"/>).
+    /// </summary>
+    public void CheckNowFromWebhook(string owner, string repo)
+    {
+        _webhookRepos[$"{owner}/{repo}"] = 0;
+        CheckNow();
+    }
+
+    /// <summary>Whether GitHub told about this repo since the last time it was asked; asking clears it.</summary>
+    public bool TakeWebhookPoke(string owner, string repo) => _webhookRepos.TryRemove($"{owner}/{repo}", out _);
+
     internal void Record(int appId, string? sha, string? error) => _apps[appId] = new WatchInfo(DateTime.UtcNow, sha, error);
 
     internal bool InBackoff(string repo) => _retryAfter.TryGetValue(repo, out var until) && DateTime.UtcNow < until;
