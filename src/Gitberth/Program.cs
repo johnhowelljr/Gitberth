@@ -83,6 +83,8 @@ builder.Services.AddSingleton<DockerCli>();
 builder.Services.AddSingleton<ProjectAnalyzer>();
 builder.Services.AddSingleton<AppLocks>();
 builder.Services.AddSingleton<LiveLogHub>();
+// What deploys tell the outside world (GitHub's commit statuses and pull request comments); nothing until that's set up.
+builder.Services.AddSingleton<IDeployReporter, NoDeployReporter>();
 builder.Services.AddSingleton<DeployPipeline>();
 builder.Services.AddSingleton<DeployQueue>();
 builder.Services.AddSingleton<AppService>();

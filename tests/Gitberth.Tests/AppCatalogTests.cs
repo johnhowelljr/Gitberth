@@ -24,7 +24,7 @@ public sealed class AppCatalogTests : IDisposable
     private static AppSummary Of(AppList list, string key) => Assert.Single(list.Apps, a => a.Key == key);
 
     [Fact]
-    public async Task Every_container_is_listed_as_an_app_and_obs_and_kanban_come_first()
+    public async Task Every_container_is_listed_as_an_app_and_orb_and_kanban_come_first()
     {
         var list = await ListAsync();
 

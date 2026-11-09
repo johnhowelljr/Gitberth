@@ -159,14 +159,17 @@ public sealed class UnifiedAppsMigrationTests : IDisposable
     }
 
     [Fact]
-    public void It_only_adds_and_every_value_obs_and_kanban_had_stays()
+    public void It_only_adds_and_every_value_orb_and_kanban_had_stays()
     {
         NetworkModelDatabase();
         var before = Snapshot();
 
         using (var db = Db())
         {
-            Assert.Equal([OldSchema.UnifiedApps], db.Database.GetPendingMigrations());
+            // Every migration since NetworkModel: UnifiedApps first, then any later one, all of which only add.
+            var pending = db.Database.GetPendingMigrations().ToList();
+            Assert.Equal(OldSchema.UnifiedApps, pending.First());
+            Assert.Equal(db.Database.GetMigrations().SkipWhile(m => m != OldSchema.NetworkModel).Skip(1), pending);
             db.Database.Migrate();
         }
 

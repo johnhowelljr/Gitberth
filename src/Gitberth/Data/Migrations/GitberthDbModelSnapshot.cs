@@ -128,14 +128,38 @@ namespace Gitberth.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ParentAppId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("Pinned")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("PreviewExpiryDays")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PreviewForks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PreviewLimit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PreviewMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Off");
 
                     b.Property<string>("PreviousImage")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProjectHint")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("PromotedOverCommit")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("ProtectPreviews")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("RebuildPending")
                         .HasColumnType("INTEGER");
@@ -189,6 +213,8 @@ namespace Gitberth.Data.Migrations
 
                     b.HasIndex("Container")
                         .IsUnique();
+
+                    b.HasIndex("ParentAppId");
 
                     b.HasIndex("Slug")
                         .IsUnique();
@@ -332,6 +358,9 @@ namespace Gitberth.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AccessAppId")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("AppId")
                         .HasColumnType("INTEGER");
 
@@ -346,6 +375,9 @@ namespace Gitberth.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("Main")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Protected")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Service")
@@ -451,9 +483,15 @@ namespace Gitberth.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("All");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("AppId", "Key")
+                    b.HasIndex("AppId", "Key", "Scope")
                         .IsUnique();
 
                     b.ToTable("EnvVars");
@@ -537,6 +575,54 @@ namespace Gitberth.Data.Migrations
                     b.HasIndex("AppId");
 
                     b.ToTable("Ports");
+                });
+
+            modelBuilder.Entity("Gitberth.Data.PreviewInfo", b =>
+                {
+                    b.Property<int>("AppId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Branch")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("CommentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("FromFork")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("HeadSha")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("LastActivityAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ParentAppId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("PullRequest")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Ref")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("AppId");
+
+                    b.HasIndex("ParentAppId");
+
+                    b.ToTable("Previews", (string)null);
                 });
 
             modelBuilder.Entity("Gitberth.Data.RegistryCredential", b =>
@@ -661,6 +747,15 @@ namespace Gitberth.Data.Migrations
                     b.HasOne("Gitberth.Data.AppDefinition", null)
                         .WithMany("Ports")
                         .HasForeignKey("AppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Gitberth.Data.PreviewInfo", b =>
+                {
+                    b.HasOne("Gitberth.Data.AppDefinition", null)
+                        .WithOne()
+                        .HasForeignKey("Gitberth.Data.PreviewInfo", "AppId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

@@ -47,8 +47,12 @@ public sealed class DeployPipeline(
     IHostApplicationLifetime lifetime,
     ILogger<DeployPipeline> logger,
     HostPortMap? hostPorts = null,
-    HostScanner? hostScanner = null)
+    HostScanner? hostScanner = null,
+    IDeployReporter? reporter = null)
 {
+    // How long a report may hold a deploy up: GitHub being slow never delays the next deploy for long.
+    private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
+
     private const string Restarted = "Gitberth restarted during this deploy. It's tried again automatically.";
 
     private const int KeepImages = 3;
@@ -254,7 +258,25 @@ public sealed class DeployPipeline(
             DeployPaths.TryDeleteDirectory(workDir);
         }
 
+        await ReportAsync(started: false, dep);
         if (dep.Status == DeployStatus.Succeeded) await PruneImagesAsync(db, app);
+    }
+
+    /// <summary>Tells the reporter (GitHub) about a deploy. Whatever goes wrong there is logged, never the deploy's problem.</summary>
+    private async Task ReportAsync(bool started, Deployment dep)
+    {
+        if (reporter is null) return;
+        var report = new DeployReport(dep.AppId, dep.Id, dep.Trigger, dep.CommitSha, started ? DeployStatus.Building : dep.Status, dep.Error);
+        using var timeout = new CancellationTokenSource(ReportTimeout);
+        try
+        {
+            if (started) await reporter.StartedAsync(report, timeout.Token);
+            else await reporter.FinishedAsync(report, timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Couldn't report deploy {DeploymentId}", dep.Id);
+        }
     }
 
     // Where generated Dockerfiles make the app listen. A GitHub variable shared by the repo's apps doesn't move it.
@@ -445,6 +467,7 @@ public sealed class DeployPipeline(
         // Saved now, so a restart during the build still knows which commit was being tried.
         await db.SaveChangesAsync(CancellationToken.None);
         log.Step($"Commit {commit.Sha[..7]} by {commit.Author}: {commit.Subject}");
+        await ReportAsync(started: true, dep);
 
         var appDir = app.Subdirectory?.Trim().Trim('/') ?? "";
         var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist on {app.Branch}.");
