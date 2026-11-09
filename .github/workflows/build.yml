@@ -37,6 +37,20 @@ jobs:
       - name: Test
         run: dotnet test tests/Gitberth.Tests --nologo
 
+  secrets:
+    name: Secrets
+    # gitleaks over every commit in the repository: nothing is released or published while it finds a secret. Only the
+    # made-up values in .gitleaks.toml are allowed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$GITHUB_WORKSPACE":/repo:ro
+          zricethezav/gitleaks:v8.24.3 git /repo --config /repo/.gitleaks.toml --no-banner --redact -v
+
   installer:
     name: Installer
     # install.sh is piped into sh on machines of every kind: POSIX sh only, and nothing ShellCheck warns about.
@@ -50,7 +64,7 @@ jobs:
     name: Release
     # A version tag pushed with git: its GitHub release, unless one was made on GitHub already.
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: test
+    needs: [test, secrets]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -75,10 +89,11 @@ jobs:
 
   image:
     name: Image
-    needs: [test, release]
-    # After the tests; for a pushed tag, only when its release was made here (a release made on GitHub builds on its own).
+    needs: [test, secrets, release]
+    # After the tests and the secret scan; for a pushed tag, only when its release was made here (a release made on
+    # GitHub builds on its own).
     if: >-
-      always() && needs.test.result == 'success' && github.event_name != 'pull_request'
+      always() && needs.test.result == 'success' && needs.secrets.result == 'success' && github.event_name != 'pull_request'
       && (github.ref_type != 'tag' || github.event_name != 'push' || needs.release.outputs.made == 'true')
     runs-on: ubuntu-latest
     permissions:
@@ -135,8 +150,8 @@ jobs:
     # Every release shows its Docker image: the image as files to download, one per platform, for `docker load`, and a
     # "Docker image" section in its notes with the pull command. A release's own run adds them right after the build; any
     # later run catches up a release that's missing them. What a release has already is left as it is.
-    needs: [test, image]
-    if: always() && needs.test.result == 'success' && github.event_name != 'pull_request'
+    needs: [test, secrets, image]
+    if: always() && needs.test.result == 'success' && needs.secrets.result == 'success' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: write
