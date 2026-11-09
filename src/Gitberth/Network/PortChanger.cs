@@ -742,7 +742,9 @@ public sealed partial class PortChanger(
         var from = Short(Str(inspect, "Image"));
         var to = newImage is null ? "?" : Short(Str(newImage, "Id"));
         if (kind == ChangeKind.Update) return $"updated {target.Image} ({Abbrev(from)} → {Abbrev(to)})";
-        if (kind == ChangeKind.Rollback) return $"rolled back to {target.Image} ({Abbrev(from)} → {Abbrev(to)})";
+        // A rollback runs the older image by its digest (repo@sha256:…): the repository names it, the short IDs tell them apart.
+        if (kind == ChangeKind.Rollback)
+            return $"rolled back to {(target.Image.IndexOf('@') is > 0 and var at ? target.Image[..at] : target.Image)} ({Abbrev(from)} → {Abbrev(to)})";
         var ports = portsChanged ? Summary(current, bindings) : "";
         if (kind == ChangeKind.Ports || settingFields.Count == 0) return ports;
         var settings = SettingsDiff.Summary(live, target, settingFields);

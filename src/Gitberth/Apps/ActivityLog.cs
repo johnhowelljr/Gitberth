@@ -145,7 +145,11 @@ public sealed class ActivityLog(IDbContextFactory<GitberthDb> dbFactory, StatsSt
             _ => "Port change",
         };
         var offline = c.OfflineMs is int ms && c.Outcome == ChangeOutcome.Done ? $", offline {Math.Max(0.1, ms / 1000.0):0.#} s" : "";
-        return new ActivityItem(c.FinishedAt ?? c.StartedAt, ActivityKind.Change, $"{what}: {c.Summary} ({outcome}{offline})", tone, ChangeId: c.Id);
+        // An update's and a rollback's summary says what happened already ("updated …", "rolled back to …").
+        var text = c.Kind is ChangeKind.Update or ChangeKind.Rollback && c.Summary.Length > 0
+            ? char.ToUpperInvariant(c.Summary[0]) + c.Summary[1..]
+            : $"{what}: {c.Summary}";
+        return new ActivityItem(c.FinishedAt ?? c.StartedAt, ActivityKind.Change, $"{text} ({outcome}{offline})", tone, ChangeId: c.Id);
     }
 
     // Starts, stops, restarts, crashes and health changes, as the Health page marks them. Deploys and recreates are left

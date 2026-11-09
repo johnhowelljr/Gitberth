@@ -112,7 +112,7 @@ A build cut short because Gitberth restarted is retried.
 The app's **Activity** tab lists what happened to it, newest first. **Show** filters it: **All**, **Deploys**, **Changes**,
 or **Starts and stops**.
 
-![An app's Activity tab, with deploys, settings changes, starts and stops](../images/app-activity.webp)
+![A Git app's Activity tab with two deploys, each with its commit, how long it took and a link to its log](../images/app-activity.webp)
 
 Each deploy shows its state, its commit, what started it and how long it took, with:
 

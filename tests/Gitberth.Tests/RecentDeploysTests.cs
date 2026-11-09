@@ -78,6 +78,8 @@ public sealed class RecentDeploysTests : IDisposable
         Assert.Equal("settings change: memory limit 256 MB (done, offline 1.2 s)", recent[1].Item.Text);
         Assert.Equal("apps/sample-index/activity", recent[1].Item.Href);
         Assert.Equal(ActivityKind.Updated, recent[2].Item.Kind);
+        // An update's summary says "updated" itself: no "update: updated".
+        Assert.Equal("updated postgres:18 (1a2b3c4 → 5d6e7f8) (done)", recent[2].Item.Text);
         var push = recent[3];
         Assert.Equal("gb-orb", push.Key);
         Assert.Equal("deployed abcdef1 · new commit", push.Item.Text);

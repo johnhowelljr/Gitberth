@@ -20,7 +20,7 @@ variables.
 
 1. Open the app and click the **Environment** tab.
 
-   ![An app's Environment tab, with its variables, the repo's variables in GitHub and the ones Gitberth sets](../images/app-environment.webp)
+   ![An app's Environment tab, with its own variables and, folded under them, the ones that come from its image](../images/app-environment.webp)
 
 2. Change a value in place, or click **Add variable** and type the name and value.
 

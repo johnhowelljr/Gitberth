@@ -15,7 +15,20 @@ Gitberth is free for personal use. Businesses need a license; see [License](#lic
 - **Shows a change before it makes it.** Each change to a running app says what changes, what's kept and whether the app restarts, before you confirm it. [How deploys work](docs/concepts/how-deploys-work.md)
 - **Keeps images up to date.** Checks registries for newer images, then tells you or updates in a window you choose. An update that fails puts the old container back. [Image updates](docs/guides/updates.md)
 - **Makes networking visible.** Ports are reachable from your LAN by default, each one can be LAN, host only or internal, a container can have its own LAN address, and the Network page shows who holds every port. [Networking](docs/guides/networking.md)
-- **Public domains** through a Cloudflare Tunnel, and **CPU and memory charts** for every container. [Domains](docs/guides/domains.md) · [Health and monitoring](docs/guides/health-and-monitoring.md)
+- **Public domains** through a Cloudflare Tunnel (see [below](#putting-apps-on-the-internet)), and **CPU and memory charts** for every container. [Domains](docs/guides/domains.md) · [Health and monitoring](docs/guides/health-and-monitoring.md)
+
+## Putting apps on the internet
+
+Gitberth is built for your LAN. When an app should be reachable from the internet, give it a domain through a **Cloudflare Tunnel** instead of forwarding ports on your router. It's the way Gitberth is designed to publish apps, and the safest one for a home connection:
+
+- **No open ports.** cloudflared, running on the host, connects out to Cloudflare. Nothing on your network accepts connections from the internet, and your home IP address isn't in your DNS records.
+- **HTTPS without the work.** Cloudflare serves and renews a certificate for every domain.
+- **Cloudflare stands in front.** Its DDoS protection, firewall rules and rate limits apply before a request ever reaches your server.
+- **Works on any home connection,** including behind carrier-grade NAT and with an IP address that changes, with no dynamic DNS.
+- **A sign-in in front of any app** with Cloudflare Access, for things meant only for you, such as admin pages and dashboards.
+- **Gitberth does the wiring.** Add a domain on an app's page and Gitberth creates the tunnel route and the DNS record. Deploys move the domain to the new version without downtime where they can, and removing the domain cleans both up.
+
+Keep Gitberth's own page on your LAN. It controls Docker on the host, so if you want to reach it from outside, put Cloudflare Access in front of it first. [Domains](docs/guides/domains.md) · [Putting a domain in front of Gitberth](docs/concepts/security.md#putting-a-domain-in-front-of-gitberth)
 
 ## Install
 

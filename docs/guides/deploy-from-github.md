@@ -52,7 +52,7 @@ Gitberth shows **How it will run:** and the kind of project it found, such as **
   listens on `localhost`;
 - the **Generated Dockerfile**, or **Gitberth builds with the repo's own Dockerfile** when the repo has one.
 
-![New app from GitHub: the repository URL, the branch, and what Gitberth detected with its generated Dockerfile](../images/new-app-github.webp)
+![New app from GitHub: a folder's URL in the repository, its branch and subfolder, and the start of what Gitberth detected](../images/new-app-github.webp)
 
 A .NET solution with several runnable projects also shows **Project to run**.
 

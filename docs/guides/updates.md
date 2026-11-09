@@ -94,7 +94,10 @@ The image the app ran before an update stays on the host, for **Roll back**. The
 
 After an update, you can put the app back on the image it ran before. Nothing is pulled: that image is still on the host.
 
-1. Open the app's page. The **Updates** card on the **Overview** tab has **Roll back to** and the image, like **Roll back to traefik/whoami:latest (3a42…)**. The **More** menu (⋯) has the same item.
+1. Open the app's page. The **Updates** card on the **Overview** tab has **Roll back to** and the image, like **Roll back to traefik/whoami:latest (6956…)**. The **More** menu (⋯) has the same item.
+
+   ![The Updates card after an update: up to date, with Roll back to the image it ran before](../images/update-rollback.webp)
+
 2. Click it. The change dialog opens, titled **Roll back whoami?**, with what changes, what's kept and the impact.
 3. Click **Roll back whoami**.
    The dialog shows each step as it runs, and says **whoami is back on its previous image** when it's done.
