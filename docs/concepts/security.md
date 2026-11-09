@@ -63,7 +63,11 @@ Gitberth's own page is an app like any other, so you can give it a domain on its
 2. Add the domain on Gitberth's **Network** tab (see [Domains](../guides/domains.md)).
 3. Open the hostname in a private browser window, and check that Cloudflare asks you to sign in before Gitberth's sign-in page shows.
 
-Gitberth keeps a route's settings when it rewrites the route, Cloudflare Access included.
+Gitberth keeps a route's settings when it rewrites the route, Cloudflare Access included. With [protection](../guides/domains.md#protect-a-domain) set up, you can instead turn on **Protected** next to the domain and let Gitberth make the Access application.
+
+## GitHub's webhook
+
+With [instant deploys](../guides/github-integration.md#instant-deploys) on, one address is open to the internet without a sign-in: `https://<the host name you chose>/hooks/github`, and nothing else on that host name. It only accepts deliveries signed with the secret Gitberth made (HMAC-SHA256, compared in fixed time), refuses bodies over 1 MB, answers a sender that keeps getting the signature wrong with `429` for 10 minutes, and never deploys anything by itself: it only makes Gitberth check the repo now, as it would anyway within 30 seconds.
 
 ## Related
 

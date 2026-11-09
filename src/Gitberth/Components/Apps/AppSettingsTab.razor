@@ -127,6 +127,12 @@ else
                         </Field>
                     }
                 </SettingsSection>
+
+                @* Previews are saved on their own: none of it touches the app's container. *@
+                @if (!row.IsPreview)
+                {
+                    <PreviewSettingsSection App="row" Saved="OnSaved" />
+                }
             }
             else
             {
@@ -351,6 +357,8 @@ else
     [Parameter] public string? LoadError { get; set; }
     [Parameter] public EventCallback Changed { get; set; }
     [Parameter] public EventCallback OnRemove { get; set; }
+    /// <summary>Raised after a section that saves on its own (Previews) saved, so the page reads the app again.</summary>
+    [Parameter] public EventCallback OnSaved { get; set; }
 
     private string active = "sec-general";
     private DotNetObjectReference<AppSettingsTab>? self;
@@ -404,6 +412,8 @@ else
         yield return View.Summary.Source == AppSource.Git
             ? ("sec-source", "Source", Icons.Custom.Brands.GitHub, Git?.Dirty == true)
             : ("sec-source", "Image", Icons.Material.Outlined.Layers, c.Contains(SettingField.Image) || o.Contains("updates"));
+        if (View.Summary.Source == AppSource.Git && Git is not null && View.Row is { IsPreview: false })
+            yield return ("sec-previews", "Previews", Icons.Material.Outlined.Preview, false);
         yield return ("sec-command", "Command", Icons.Material.Outlined.Terminal, c.Overlaps([SettingField.Entrypoint, SettingField.Command, SettingField.WorkingDir, SettingField.User]));
         yield return ("sec-env", "Environment", Icons.Material.Outlined.Key, c.Contains(SettingField.Env));
         yield return ("sec-volumes", "Volumes", Icons.Material.Outlined.Storage, c.Contains(SettingField.Mounts));

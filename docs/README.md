@@ -27,10 +27,12 @@ Gitberth runs apps in Docker on your home server and gives every container on th
 | [Manage apps](guides/manage-apps.md) | The Apps list, an app's page, starting and stopping, changing settings, removing. |
 | [Environment variables](guides/environment-variables.md) | Variables and secrets, and the ones Gitberth adds. |
 | [Deploys and rollbacks](guides/deploys-and-rollbacks.md) | Automatic deploys from Git, the deploy log, and going back to an earlier build. |
+| [Preview deployments](guides/previews.md) | A preview of every pull request or branch, variables for production or previews, and Promote. |
 | [Image updates](guides/updates.md) | Checking for newer images, update policies, what happens when an update fails, and rolling one back. |
 | [Scheduled jobs and restarts](guides/scheduled-jobs-and-restarts.md) | Commands on a schedule, and restarts on a timer. |
 | [Networking](guides/networking.md) | Ports, who can reach them, own LAN addresses and the Network page. |
-| [Domains](guides/domains.md) | Public domains through a Cloudflare Tunnel. |
+| [Domains](guides/domains.md) | Public domains through a Cloudflare Tunnel, and protecting them with a sign-in. |
+| [GitHub integration](guides/github-integration.md) | Deploys reported on commits and pull requests, and deploys that start the moment you push. |
 | [Health and monitoring](guides/health-and-monitoring.md) | The Health page, CPU and memory charts, and health checks. |
 
 ## Look after Gitberth

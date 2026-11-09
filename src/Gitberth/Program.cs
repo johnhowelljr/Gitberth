@@ -83,8 +83,15 @@ builder.Services.AddSingleton<DockerCli>();
 builder.Services.AddSingleton<ProjectAnalyzer>();
 builder.Services.AddSingleton<AppLocks>();
 builder.Services.AddSingleton<LiveLogHub>();
-// What deploys tell the outside world (GitHub's commit statuses and pull request comments); nothing until that's set up.
-builder.Services.AddSingleton<IDeployReporter, NoDeployReporter>();
+// ---- GitHub integration (1.1): what deploys tell GitHub (commit statuses, pull request comments), and instant deploys
+// through GitHub's webhook. Each does nothing until a token (and, for the webhook, a host name) is set up.
+builder.Services.AddSingleton<GitHubWrites>();
+builder.Services.AddSingleton<GitHubIntegrationState>();
+builder.Services.AddSingleton<IDeployReporter, GitHubReporter>();
+builder.Services.AddSingleton<WebhookThrottle>();
+builder.Services.AddSingleton<GitHubWebhookEndpoint>();
+builder.Services.AddSingleton<WebhookKeeper>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookKeeper>());
 builder.Services.AddSingleton<DeployPipeline>();
 builder.Services.AddSingleton<DeployQueue>();
 builder.Services.AddSingleton<AppService>();
@@ -146,6 +153,9 @@ builder.Services.AddSingleton<LanAddresses>();
 builder.Services.AddSingleton<CronScheduler>();
 builder.Services.AddSingleton<RestartSchedules>();
 builder.Services.AddSingleton<RestartScheduler>();
+// Preview deployments: a Git app's branches and pull requests as apps of their own (the repo watcher drives them).
+builder.Services.AddSingleton<GitHubPulls>();
+builder.Services.AddSingleton<Gitberth.Previews.PreviewService>();
 builder.Services.AddHostedService<StartupTasks>();
 // Before the event watcher, so they hear its first starts.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NetworkKeeper>());
@@ -187,6 +197,11 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// GitHub's webhook (instant deploys): anonymous, signed by GitHub with Gitberth's secret instead of a sign-in or a form token.
+app.MapPost(GitHubWebhookEndpoint.Path, (HttpContext context) => context.RequestServices.GetRequiredService<GitHubWebhookEndpoint>().HandleAsync(context))
+    .AllowAnonymous()
+    .DisableAntiforgery();
 
 app.MapPost("/logout", async (HttpContext context, IAntiforgery antiforgery) =>
 {

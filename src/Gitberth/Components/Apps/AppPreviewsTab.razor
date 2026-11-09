@@ -1,0 +1,289 @@
+@using Gitberth.Previews
+@implements IDisposable
+@inject PreviewService Previews
+@inject AppActions Actions
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@*
+    A Git app's Previews tab: each branch or pull request that has a preview, with its state, commit, addresses, last
+    activity and when it goes, and what can be done with it (Open, Log, Redeploy, Promote to production, Remove).
+*@
+@if (View.Row is not { } parent)
+{
+    <div class="gb-skel" style="height:200px;border-radius:12px"></div>
+}
+else if (parent.PreviewMode == PreviewMode.Off && rows is { Count: 0 })
+{
+    <div class="gb-card">
+        <EmptyState Icon="@Icons.Material.Outlined.Preview" Title="Previews are off">
+            <ChildContent>
+                Turned on, every pull request (and, if you like, every branch) of @parent.RepoFullName gets an app of its own, with its own address,
+                built with @View.Summary.Title's settings. Promote one when it's ready, and production builds that commit.
+            </ChildContent>
+            <Actions><Btn Kind="BtnKind.Primary" Href="@($"{View.Summary.Href}/settings#sec-previews")" Icon="@Icons.Material.Outlined.Tune">Turn previews on</Btn></Actions>
+        </EmptyState>
+    </div>
+}
+else
+{
+    @if (Previews.PullsProblem(parent.Owner, parent.Repo) is { } problem)
+    {
+        <Banner Tone="warn" Title="Pull requests couldn't be read">@problem</Banner>
+    }
+    <SectionCard Title="Previews" Icon="@Icons.Material.Outlined.Preview" Flush="true" Sub="@Summary(parent)"
+                 Class="@(Previews.PullsProblem(parent.Owner, parent.Repo) is null ? null : "gb-mt")">
+        <Actions>
+            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Tune" Href="@($"{View.Summary.Href}/settings#sec-previews")">Settings</Btn>
+        </Actions>
+        <ChildContent>
+            @if (rows is null)
+            {
+                <div class="gb-card-body"><div class="gb-skel" style="height:56px"></div></div>
+            }
+            else if (rows.Count == 0)
+            {
+                <div class="gb-card-body">
+                    <EmptyState Small="true" Icon="@Icons.Material.Outlined.Preview" Title="No previews yet">
+                        @(parent.PreviewMode == PreviewMode.PullRequestsAndBranches
+                            ? "Open a pull request, or push a new commit to a branch other than " + parent.Branch + ", and its preview shows up here within a minute."
+                            : "Open a pull request and its preview shows up here within a minute.")
+                    </EmptyState>
+                </div>
+            }
+            else
+            {
+                <div>
+                    @foreach (var p in rows)
+                    {
+                        <div class="gb-drow" @key="p.AppId">
+                            <div style="min-width:0">
+                                <div class="gb-drow-host" style="font-family:inherit">
+                                    <SvgIcon Icon="@(p.Kind == PreviewKind.PullRequest ? Icons.Material.Outlined.MergeType : Icons.Material.Outlined.CallSplit)" Size="sm" Class="gb-t3" />
+                                    <a href="@p.Url" target="_blank" rel="noopener" class="gb-mono">@p.Label</a>
+                                    @if (p.Title is { Length: > 0 } title)
+                                    {
+                                        <span class="gb-ellipsis gb-t2" style="font-weight:400" title="@title">@title</span>
+                                    }
+                                    @if (p.FromFork)
+                                    {
+                                        <span class="gb-tag gb-tag--warn" title="Its code comes from someone else's copy of the repo">Fork</span>
+                                    }
+                                </div>
+                                <div class="gb-drow-sub">
+                                    @if (p.Commit is { } commit)
+                                    {
+                                        <span class="gb-mono" title="@p.CommitMessage">@commit</span>
+                                        <span> · </span>
+                                    }
+                                    <span title="@p.LastActivityAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)">last commit @Format.Ago(p.LastActivityAt)</span>
+                                    <span> · @Expiry(p)</span>
+                                </div>
+                                <div class="gb-drow-sub gb-row" style="gap:12px;flex-wrap:wrap">
+                                    @if (p.Domain is { } domain)
+                                    {
+                                        <a href="@($"https://{domain}/")" target="_blank" rel="noopener" class="gb-mono">@domain</a>
+                                    }
+                                    @if (p.LanUrl is { } lan)
+                                    {
+                                        <a href="@lan" target="_blank" rel="noopener" class="gb-mono" title="On the LAN">@lan.Replace("http://", "", StringComparison.Ordinal)</a>
+                                    }
+                                    <a href="@($"apps/{Uri.EscapeDataString(p.Key)}")" class="gb-t3">Its page</a>
+                                </div>
+                            </div>
+                            <span class="gb-pill2 @Tone(p.State)" title="@p.StateText">
+                                @if (p.State == PreviewState.Building)
+                                {
+                                    <i class="gb-st-dot gb-st-dot--busy"></i>
+                                }
+                                else if (p.State == PreviewState.Ready)
+                                {
+                                    <i class="gb-st-dot gb-st-dot--running"></i>
+                                }
+                                else if (p.State == PreviewState.Failed)
+                                {
+                                    <SvgIcon Icon="@Icons.Material.Outlined.ErrorOutline" />
+                                }
+                                else
+                                {
+                                    <i class="gb-st-dot gb-st-dot--stopped"></i>
+                                }
+                                @p.StateText
+                            </span>
+                            <div class="gb-drow-acts d-acts">
+                                @if (OpenUrl(p) is { } open)
+                                {
+                                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.OpenInNew" Href="@open" Target="_blank">Open<span class="gb-sr"> @p.Label</span></Btn>
+                                }
+                                @if (p.DeploymentId is int deployment)
+                                {
+                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Article" Href="@($"apps/{p.AppId}/deployments/{deployment}")">Log<span class="gb-sr"> of @p.Label</span></Btn>
+                                }
+                                <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="@($"More for {p.Label}")">
+                                    <ActivatorContent>
+                                        <button type="button" class="gb-btn gb-btn--icon gb-btn--ghost" aria-label="@($"More for {p.Label}")" title="More" @onclick="context.ToggleAsync">
+                                            <SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" />
+                                        </button>
+                                    </ActivatorContent>
+                                    <ChildContent>
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="() => RedeployAsync(p)" Disabled="@(busy || p.State == PreviewState.Building)">Redeploy</MudMenuItem>
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.Upgrade" OnClick="() => PromoteAsync(p)" Disabled="@(busy || !p.CanPromote)">Promote to production…</MudMenuItem>
+                                        <MudDivider />
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="() => RemoveAsync(p)" Disabled="busy">Remove…</MudMenuItem>
+                                    </ChildContent>
+                                </MudMenu>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </ChildContent>
+        <Foot>
+            <p class="gb-help">
+                Each preview is an app of its own, built with @View.Summary.Title's settings and its variables for previews (see Environment). Host folders aren't mounted,
+                so a preview never writes into production's files. @(parent.ProtectPreviews ? "Their domains are behind Cloudflare Access when it's set up in Settings › Domains." : "")
+            </p>
+        </Foot>
+    </SectionCard>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>This host's LAN address, for the previews' LAN links.</summary>
+    [Parameter] public string LanHost { get; set; } = "";
+
+    private IReadOnlyList<PreviewRow>? rows;
+    private bool busy;
+    private Timer? timer;
+    private int? loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (View.Row is not { } row || loadedFor == row.Id) return;
+        loadedFor = row.Id;
+        rows = null;
+        await LoadAsync();
+        timer?.Dispose();
+        timer = new Timer(_ => _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }), null, 5000, 5000);
+    }
+
+    private async Task LoadAsync()
+    {
+        if (View.Row is not { } row) return;
+        try
+        {
+            rows = await Previews.ListAsync(row.Id, LanHost);
+        }
+        catch (Exception ex)
+        {
+            rows ??= [];
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private string Summary(AppDefinition parent)
+    {
+        var mode = parent.PreviewMode switch
+        {
+            PreviewMode.PullRequests => "Pull requests",
+            PreviewMode.PullRequestsAndBranches => "Pull requests and branches",
+            _ => "Off",
+        };
+        var running = rows?.Count(r => r.State is PreviewState.Ready or PreviewState.Building) ?? 0;
+        return $"{mode} · {running} of {parent.PreviewLimit} running";
+    }
+
+    private static string Tone(PreviewState state) => state switch
+    {
+        PreviewState.Ready => "gb-tone-good",
+        PreviewState.Building => "gb-tone-accent",
+        PreviewState.Failed => "gb-tone-critical",
+        PreviewState.Waiting => "gb-tone-warn",
+        _ => "gb-tone-neutral",
+    };
+
+    private static string Expiry(PreviewRow p)
+    {
+        var left = p.ExpiresAt - DateTime.UtcNow;
+        return left.TotalHours < 1 ? "removed soon without a new commit"
+            : left.TotalDays < 1 ? $"removed in {(int)left.TotalHours} h without a new commit"
+            : $"removed in {(int)Math.Ceiling(left.TotalDays)} {((int)Math.Ceiling(left.TotalDays) == 1 ? "day" : "days")} without a new commit";
+    }
+
+    // Its domain, else its LAN address; only while it runs.
+    private static string? OpenUrl(PreviewRow p) => !p.Running ? null : p.Domain is { } domain ? $"https://{domain}/" : p.LanUrl;
+
+    private async Task RedeployAsync(PreviewRow p)
+    {
+        busy = true;
+        try
+        {
+            var deployment = await Actions.DeployAsync(p.AppId);
+            Nav.NavigateTo($"apps/{p.AppId}/deployments/{deployment}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task PromoteAsync(PreviewRow p)
+    {
+        if (View.Row is not { } parent) return;
+        var commit = p.Commit ?? "its commit";
+        var confirmed = await Dialogs.ShowMessageBoxAsync($"Promote {p.Label} to production?",
+            $"{View.Summary.Title} builds {commit} again, with production's variables, and runs it on its own address. It stays on that commit until "
+            + $"{parent.Branch} gets a new one, or until you deploy it by hand. The preview keeps running.",
+            yesText: "Promote", cancelText: "Cancel");
+        if (confirmed != true) return;
+        busy = true;
+        try
+        {
+            var deployment = await Previews.PromoteAsync(p.AppId);
+            Nav.NavigateTo($"apps/{parent.Id}/deployments/{deployment}");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RemoveAsync(PreviewRow p)
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync($"Remove the preview of {p.Label}?",
+            $"Its container, images and volumes go{(p.Domain is { } domain ? $", and {domain} leaves the tunnel" : "")}. A new commit on "
+            + (p.Kind == PreviewKind.PullRequest ? "the pull request" : "the branch") + " makes it again.",
+            yesText: "Remove", cancelText: "Cancel");
+        if (confirmed != true) return;
+        busy = true;
+        try
+        {
+            await Previews.RemoveAsync(p.AppId);
+            Snackbar.Add($"Removed the preview of {p.Label}.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

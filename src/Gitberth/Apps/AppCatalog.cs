@@ -418,6 +418,13 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
             picked[row.ContainerName] = (null, row, row.Container is null ? ContainerRole.App : ContainerService.IsDatabaseImage(row.ImageRef ?? "") ? ContainerRole.Database : ContainerRole.Other,
                 changeOf.GetValueOrDefault(row.ContainerName));
         if (only is not null) picked = picked.Where(p => p.Key == only).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        // A preview is its parent's (its Previews tab): kept out of the list, the menu, search and the dashboard. Its own
+        // page still finds it by its key.
+        else
+        {
+            var previews = rows.Where(r => r.IsPreview).Select(r => r.ContainerName).ToHashSet(StringComparer.Ordinal);
+            if (previews.Count > 0) picked = picked.Where(p => !previews.Contains(p.Key)).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+        }
 
         // What decides each origin and update badge: the reference it follows (the tag it runs, else its row's), and the image it runs.
         var tracked = picked.ToDictionary(p => p.Key, p => TrackedOf(p.Value.Row, p.Value.Container is { } c ? snapshot.ConfigImageOf(c) : null), StringComparer.Ordinal);

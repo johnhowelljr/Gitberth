@@ -31,17 +31,22 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     /// otherwise the next poll would see an untried commit and start over, every 30 seconds.
     /// </param>
     /// <exception cref="InvalidOperationException">The app isn't a Git app: there's nothing to build.</exception>
-    public async Task<int> DeployAsync(int appId, DeployTrigger trigger = DeployTrigger.Manual, CancellationToken ct = default, string? expectedSha = null)
+    /// <param name="gitRef">Build this ref rather than the app's branch (a promoted preview's).</param>
+    /// <param name="commit">Build exactly this commit of <paramref name="gitRef"/>.</param>
+    public async Task<int> DeployAsync(int appId, DeployTrigger trigger = DeployTrigger.Manual, CancellationToken ct = default, string? expectedSha = null,
+        string? gitRef = null, string? commit = null)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = await db.Apps.FirstAsync(a => a.Id == appId, ct);
         if (!app.Deployed) throw NotGit(app);
         app.DesiredState = DesiredState.Running;
         if (expectedSha is not null) app.LastAttemptedCommit = expectedSha;
+        // A manual deploy builds the branch again: production stops staying on a promoted preview's commit.
+        if (trigger == DeployTrigger.Manual) app.PromotedOverCommit = null;
         var dep = new Deployment { AppId = appId, Trigger = trigger, CommitSha = expectedSha };
         db.Deployments.Add(dep);
         await db.SaveChangesAsync(ct);
-        queue.Enqueue(new DeployRequest(appId, dep.Id, Build: true));
+        queue.Enqueue(new DeployRequest(appId, dep.Id, Build: true, GitRef: gitRef, Commit: commit));
         return dep.Id;
     }
 
@@ -252,6 +257,11 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         var app = await db.Apps.AsNoTracking().Include(a => a.Volumes).FirstOrDefaultAsync(a => a.Id == appId);
         if (app is null) return SyncReport.Nothing;
         if (!app.Deployed) return (await RemoveOtherAsync(app.ContainerName, app, new RemoveOptions(removeVolumes, removeImages), CancellationToken.None)).Domains ?? SyncReport.Nothing;
+        // Its previews go first, each with its container, images, own volumes and domain: they're nothing without it.
+        foreach (var previewId in await db.Apps.AsNoTracking().Where(a => a.ParentAppId == appId).Select(a => a.Id).ToListAsync())
+            await DeleteAsync(previewId, removeImages: true, removeVolumes: true);
+        var skips = Previews.PreviewService.SkipsKey(appId);
+        if (app.ParentAppId is null) await db.Settings.Where(s => s.Key == skips).ExecuteDeleteAsync();
         using (await locks.AcquireAsync(appId))
         {
             await docker.RemoveAsync(app.ContainerName);

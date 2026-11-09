@@ -71,6 +71,7 @@ jobs:
     outputs:
       made: ${{ steps.make.outputs.made }}
     steps:
+      - uses: actions/checkout@v7
       - name: Make the release
         id: make
         env:
@@ -83,7 +84,12 @@ jobs:
           fi
           # v1.3.0-rc.1 and the like are pre-releases.
           pre=""; case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes \
+          # The notes: an annotated tag's message when it has one (what changed, in words), else GitHub's generated ones.
+          # The tag itself is fetched again, since checkout can leave an annotated tag as a plain one.
+          git fetch -q --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.md
+          if [ -s notes.md ]; then notes="--notes-file=notes.md"; else notes="--generate-notes"; fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag "$notes" \
             --title "Gitberth ${GITHUB_REF_NAME#v}" $pre
           echo "made=true" >> "$GITHUB_OUTPUT"
 

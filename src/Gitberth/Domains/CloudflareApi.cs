@@ -15,6 +15,10 @@ public sealed record CloudflareZone(string Id, string Name);
 /// <param name="Tags">Comma-separated, as Cloudflare lists them; kept so a record that's put back is the same record.</param>
 public sealed record DnsRecord(string Id, string Type, string Name, string Content, bool Proxied, string? Comment = null, int Ttl = 1, string? Tags = null);
 
+/// <summary>A Cloudflare Access application: the host name it guards, its audience tag (which cloudflared checks), and who it lets in.</summary>
+/// <param name="Emails">The email addresses its allow policies name, lower case and sorted; null when the answer didn't list its policies.</param>
+public sealed record AccessApp(string Id, string Name, string Domain, string Aud, IReadOnlyList<string>? Emails);
+
 /// <summary>
 /// Gitberth's Cloudflare API calls: the routes of the tunnel on this host, and the DNS records that send a domain to it.
 /// </summary>
@@ -120,7 +124,108 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
     public Task DeleteDnsRecordAsync(string token, string zoneId, string recordId, string hostname, CancellationToken ct = default) =>
         SendAsync(token, HttpMethod.Delete, $"zones/{zoneId}/dns_records/{recordId}", null, $"remove a DNS record for {hostname}", ct);
 
-    private async Task<JsonNode?> SendAsync(string token, HttpMethod method, string path, JsonNode? body, string doing, CancellationToken ct)
+    // ---- Cloudflare Access (Zero Trust): protected domains ----
+
+    /// <summary>The permission protecting domains needs on top of <see cref="Permissions"/>, as Cloudflare's token page names it.</summary>
+    public const string AccessPermission = "Account › Access: Apps and Policies › Edit";
+
+    /// <summary>How Gitberth names the Access applications it makes: "Gitberth: app.example.com". Only those are ever changed or removed.</summary>
+    public const string AccessAppPrefix = "Gitberth: ";
+
+    private const string WithAccess = Permissions + ", plus " + AccessPermission + " to protect domains";
+
+    /// <summary>
+    /// The account's Zero Trust team domain (acme.cloudflareaccess.com), where visitors sign in; null when Zero Trust
+    /// isn't set up for the account yet.
+    /// </summary>
+    public async Task<string?> GetAccessTeamDomainAsync(string token, string accountId, CancellationToken ct = default)
+    {
+        var result = await SendAsync(token, HttpMethod.Get, $"accounts/{accountId}/access/organizations", null, "read the account's Cloudflare Access settings", ct,
+            WithAccess, notFoundOk: true);
+        return result is JsonObject o && Text(o, "auth_domain") is { Length: > 0 } domain ? domain.Trim().TrimEnd('.').ToLowerInvariant() : null;
+    }
+
+    /// <summary>The account's Access applications (every page, up to 1,000).</summary>
+    public async Task<List<AccessApp>> ListAccessAppsAsync(string token, string accountId, CancellationToken ct = default)
+    {
+        var all = new List<AccessApp>();
+        for (var page = 1; page <= 10; page++)
+        {
+            var (result, info) = await SendWithInfoAsync(token, HttpMethod.Get, $"accounts/{accountId}/access/apps?per_page=100&page={page}", null,
+                "list the account's Cloudflare Access applications", ct, WithAccess);
+            var apps = (result as JsonArray ?? []).OfType<JsonObject>().Select(ParseAccessApp).OfType<AccessApp>().ToList();
+            all.AddRange(apps);
+            var pages = info?["total_pages"] is JsonValue t && t.TryGetValue<int>(out var total) ? total : 1;
+            if (apps.Count == 0 || page >= pages) break;
+        }
+        return all;
+    }
+
+    public async Task<AccessApp?> GetAccessAppAsync(string token, string accountId, string appId, CancellationToken ct = default) =>
+        await SendAsync(token, HttpMethod.Get, $"accounts/{accountId}/access/apps/{Uri.EscapeDataString(appId)}", null, "read a Cloudflare Access application", ct,
+            WithAccess, notFoundOk: true) is JsonObject o ? ParseAccessApp(o) : null;
+
+    /// <summary>
+    /// Makes (or, with <paramref name="appId"/>, changes) the self-hosted Access application for a host name that lets in
+    /// these email addresses, with Cloudflare's default sign-in: a one-time code sent by email.
+    /// </summary>
+    public async Task<AccessApp> SaveAccessAppAsync(string token, string accountId, string? appId, string hostname, IReadOnlyList<string> emails, CancellationToken ct = default)
+    {
+        var body = AccessAppBody(hostname, emails);
+        var result = appId is null
+            ? await SendAsync(token, HttpMethod.Post, $"accounts/{accountId}/access/apps", body, $"put {hostname} behind Cloudflare Access", ct, WithAccess)
+            : await SendAsync(token, HttpMethod.Put, $"accounts/{accountId}/access/apps/{Uri.EscapeDataString(appId)}", body, $"change who may sign in to {hostname}", ct, WithAccess);
+        return (result is JsonObject o ? ParseAccessApp(o) : null) ?? throw new CloudflareApiException($"Cloudflare didn't say which Access application it made for {hostname}.");
+    }
+
+    /// <summary>Removes an Access application; one that's gone already counts as removed.</summary>
+    public Task DeleteAccessAppAsync(string token, string accountId, string appId, string hostname, CancellationToken ct = default) =>
+        SendAsync(token, HttpMethod.Delete, $"accounts/{accountId}/access/apps/{Uri.EscapeDataString(appId)}", null, $"take {hostname} out of Cloudflare Access", ct,
+            WithAccess, notFoundOk: true);
+
+    /// <summary>The application Gitberth makes for a protected host: self-hosted, one policy that allows the listed emails.</summary>
+    internal static JsonObject AccessAppBody(string hostname, IReadOnlyList<string> emails) => new()
+    {
+        ["name"] = AccessAppPrefix + hostname,
+        ["domain"] = hostname,
+        ["type"] = "self_hosted",
+        ["session_duration"] = "24h",
+        ["app_launcher_visible"] = false,
+        ["policies"] = new JsonArray(new JsonObject
+        {
+            ["name"] = "Gitberth: allowed email addresses",
+            ["decision"] = "allow",
+            ["precedence"] = 1,
+            ["include"] = new JsonArray([.. emails.Select(e => (JsonNode?)new JsonObject { ["email"] = new JsonObject { ["email"] = e } })]),
+        }),
+    };
+
+    /// <summary>An Access application as Cloudflare returns it; its emails are null when the answer doesn't list its policies.</summary>
+    internal static AccessApp? ParseAccessApp(JsonObject o)
+    {
+        if (Text(o, "id") is not { Length: > 0 } id) return null;
+        List<string>? emails = null;
+        if (o["policies"] is JsonArray policies)
+        {
+            emails = policies.OfType<JsonObject>()
+                .Where(p => Text(p, "decision") is null or "allow")
+                .SelectMany(p => (p["include"] as JsonArray ?? []).OfType<JsonObject>())
+                .Select(rule => rule["email"] is JsonObject email ? Text(email, "email") : null)
+                .OfType<string>()
+                .Select(e => e.Trim().ToLowerInvariant())
+                .Distinct()
+                .Order(StringComparer.Ordinal)
+                .ToList();
+        }
+        return new AccessApp(id, Text(o, "name") ?? "", (Text(o, "domain") ?? "").Trim().TrimEnd('/').ToLowerInvariant(), Text(o, "aud") ?? "", emails);
+    }
+
+    private async Task<JsonNode?> SendAsync(string token, HttpMethod method, string path, JsonNode? body, string doing, CancellationToken ct,
+        string permissions = Permissions, bool notFoundOk = false) =>
+        (await SendWithInfoAsync(token, method, path, body, doing, ct, permissions, notFoundOk)).Result;
+
+    private async Task<(JsonNode? Result, JsonNode? Info)> SendWithInfoAsync(string token, HttpMethod method, string path, JsonNode? body, string doing, CancellationToken ct,
+        string permissions = Permissions, bool notFoundOk = false)
     {
         using var request = new HttpRequestMessage(method, ApiRoot + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -150,20 +255,21 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
             {
             }
             if (response.IsSuccessStatusCode && doc?["success"] is JsonValue ok && ok.TryGetValue<bool>(out var success) && success)
-                return doc["result"];
-            throw new CloudflareApiException(Explain(response.StatusCode, doc, doing));
+                return (doc["result"], doc["result_info"]);
+            if (notFoundOk && response.StatusCode == HttpStatusCode.NotFound) return (null, null);
+            throw new CloudflareApiException(Explain(response.StatusCode, doc, doing, permissions));
         }
     }
 
     /// <summary>Cloudflare's error, said plainly: a missing permission names the one the token needs.</summary>
-    internal static string Explain(HttpStatusCode status, JsonNode? doc, string doing)
+    internal static string Explain(HttpStatusCode status, JsonNode? doc, string doing, string permissions = Permissions)
     {
         var first = (doc?["errors"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault();
         var code = first?["code"] is JsonValue c && c.TryGetValue<int>(out var n) ? n : 0;
         var message = first is null ? null : Text(first, "message");
         // 10000 is "Authentication error" (missing permission); 6003, 6111 and 9109 are a malformed or unknown token.
         if (status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden || code is 10000 or 9109 or 6003 or 6111)
-            return $"Cloudflare didn't let Gitberth's token {doing}. The token needs {Permissions}.";
+            return $"Cloudflare didn't let Gitberth's token {doing}. The token needs {permissions}.";
         if (status == HttpStatusCode.TooManyRequests)
             return $"Cloudflare's API rate limit was reached while trying to {doing}. It clears within minutes: Gitberth tries again on the app's next deploy, and every 15 minutes for a domain it's removing.";
         return $"Cloudflare couldn't {doing}: {message ?? $"HTTP {(int)status}"}{(code > 0 ? $" (error {code})" : "")}.";

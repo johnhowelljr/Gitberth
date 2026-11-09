@@ -99,6 +99,12 @@
                             {
                                 <Btn Size="BtnSize.Sm" OnClick="() => ServeAllPathsAsync(d.Hostname)" Disabled="busy">Serve every path<span class="gb-sr"> on @d.Hostname</span></Btn>
                             }
+                            <span class="gb-row" style="gap:6px" title="@ProtectTitle(d)">
+                                <button type="button" role="switch" aria-checked="@(d.Protected ? "true" : "false")" aria-label="@($"Protected: {d.Hostname}")"
+                                        class="gb-switch @(d.Protected ? "on" : null)" disabled="@(busy || (!d.Protected && overview.ProtectionProblem is not null))"
+                                        @onclick="() => ToggleProtectedAsync(d)"></button>
+                                <span class="gb-t3" style="font-size:12px">Protected</span>
+                            </span>
                             @if (several && !d.Main)
                             {
                                 <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeMainAsync(d.Hostname)" Disabled="busy">Make main<span class="gb-sr">: @d.Hostname</span></Btn>
@@ -109,12 +115,16 @@
                     </div>
                 }
             </div>
-            @if (several)
-            {
-                <div class="gb-card-body" style="padding-top:4px;padding-bottom:12px">
+            <div class="gb-card-body" style="padding-top:4px;padding-bottom:12px">
+                @if (several)
+                {
                     <p class="gb-help">The main domain is the address the app is told it has, like on Vercel: <code>VERCEL_URL</code> and <code>AUTH_URL</code> for apps that use Auth.js.</p>
-                </div>
-            }
+                }
+                <p class="gb-help">
+                    A protected domain asks visitors to sign in through Cloudflare Access first, with a code emailed to an address allowed in
+                    <a href="settings#protection">Settings › Domains › Protection</a>.@(overview.ProtectionProblem is { } why ? $" Not available yet: {why}" : "")
+                </p>
+            </div>
         }
         @if (notes.Count > 0)
         {
@@ -345,6 +355,34 @@
     }
 
     private Task FixAsync() => RunAsync(async () => await Domains.SyncAsync());
+
+    // The switch's tooltip: what it does, or why it can't be turned on yet.
+    private string ProtectTitle(DomainState d) =>
+        d.Protected ? $"{d.Hostname} is protected: visitors sign in through Cloudflare Access first."
+        : overview?.ProtectionProblem is { } why ? $"Protection isn't set up yet: {why}"
+        : $"Protect {d.Hostname}: visitors sign in through Cloudflare Access first.";
+
+    private async Task ToggleProtectedAsync(DomainState d)
+    {
+        var on = !d.Protected;
+        var confirmed = await Dialogs.ShowMessageBoxAsync(
+            on ? $"Protect {d.Hostname}?" : $"Stop protecting {d.Hostname}?",
+            on ? $"Visitors sign in through Cloudflare Access before they reach {AppName}: Cloudflare emails them a code, and only the addresses in Settings › Domains › Protection get in. Anything that calls {d.Hostname} without a browser (webhooks, other apps, scripts) can't any more."
+               : $"Anyone on the internet can open {d.Hostname} again. Gitberth removes the Cloudflare Access application it made for it.",
+            yesText: on ? "Protect" : "Stop protecting", cancelText: "Cancel");
+        if (confirmed != true) return;
+        await RunAsync(async () =>
+        {
+            var (error, report) = await Domains.SetProtectedAsync(AppId!.Value, d.Hostname, on);
+            if (error is not null)
+            {
+                Snackbar.Add(error, Severity.Error);
+                return null;
+            }
+            Snackbar.Add(on ? $"{d.Hostname} is protected: visitors sign in first." : $"{d.Hostname} is open to everyone again.", report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
+            return report;
+        }, d.Hostname);
+    }
 
     private Task MakeMainAsync(string hostname) => RunAsync(async () =>
     {

@@ -17,6 +17,7 @@ Gitberth can give any app domains of its own, like `app.example.com`, served ove
   - **Account › Cloudflare Tunnel › Edit**
   - **Zone › DNS › Edit**
   - **Zone › Zone › Read**
+  - **Account › Access: Apps and Policies › Edit**, only to [protect domains](#protect-a-domain)
 
 cloudflared on the host's network (`--network host`, as above) reaches apps through their host ports. cloudflared on the `gitberth` network reaches them by name. If it's on neither, Gitberth joins it to `gitberth` when you save the token.
 
@@ -60,6 +61,30 @@ With cloudflared on the host's network, the tunnel reaches apps through a host p
 
 When an app has several domains, one is its main domain, tagged **Main**: the address Gitberth tells the app it has, in `VERCEL_URL` and, for apps that use Auth.js, `AUTH_URL` (see [Environment variables](environment-variables.md)). It's the shortest one unless you click **Make main** on another. Front ends build that address into their code, so a new main domain reaches the app with its next build.
 
+## Protect a domain
+
+A protected domain asks visitors to sign in before they reach the app, through Cloudflare Access: Cloudflare emails them a one-time code, and only the email addresses you list get in. Use it for a staging copy, an admin tool, or anything that shouldn't be open to the whole internet. [Previews](previews.md)' domains are protected unless their app says otherwise.
+
+### Set up protection once
+
+1. In Cloudflare, open [Zero Trust](https://one.dash.cloudflare.com/) once and choose a team name, if you never have. Its free plan is enough. Your team domain, like `acme.cloudflareaccess.com`, is where visitors sign in.
+2. Give Gitberth's Cloudflare token **Account › Access: Apps and Policies › Edit** too (edit the token in Cloudflare; it keeps its value).
+3. In Gitberth, go to **Settings › Domains (Cloudflare) › Protection**, type the email addresses that may sign in, one per line, in **Who may sign in**, and click **Save**.
+   The tag next to **Protection** says **Ready**, with **Visitors sign in at acme.cloudflareaccess.com.** When something's missing, the **Protection isn't ready** banner says what: Zero Trust not set up, the token without the Access permission, or nobody listed. **Check again** asks Cloudflare again.
+
+### Turn it on for a domain
+
+1. On the app's **Network** tab, in the **Domains** card, turn on **Protected** next to the domain.
+2. Confirm with **Protect**.
+   Gitberth makes a self-hosted Access application named **Gitberth: app.example.com** that allows the listed addresses, and sets the tunnel's route for the domain to require an Access sign-in (`originRequest.access`), so cloudflared checks it too. The line under the domain ends with **behind Cloudflare Access**.
+
+Changing **Who may sign in** updates every protected domain's application. Turning **Protected** off (confirm with **Stop protecting**) takes the check off the route first and then removes the application Gitberth made; removing the domain or its app does the same. Gitberth only ever changes or removes applications it named **Gitberth: …**; your own stay as they are.
+
+While protection isn't set up, the switch is off and greyed out, and the card says why. A domain that's protected but can't be protected right now (the token lost the permission, or Zero Trust was turned off) isn't served at all rather than served open: its route is taken out of the tunnel and the card says **Not served until it's behind Cloudflare Access.** with the reason. It comes back once protection works again.
+
+> **Note**
+> Anything that calls a protected domain without a browser, such as another service's webhooks or a mobile app, can't sign in, so it stops getting through. Gitberth's own webhook host for GitHub (see [GitHub integration](github-integration.md#instant-deploys)) is never protected.
+
 ## Domains made in Cloudflare
 
 Gitberth works alongside routes and records you made yourself:
@@ -84,6 +109,8 @@ The line under a **Not working** domain says why. The button next to it fixes wh
 | Its DNS points somewhere else (…), so visitors don't reach the tunnel on the host. | Click **Point it here** to replace the record. |
 | Gitberth's token can't see a Cloudflare zone for it in the tunnel's account. … | Add the domain's zone to that Cloudflare account, or give the token access to it. |
 | Not serving: … isn't running, or its saved ports aren't live yet. | Start the app, or apply its saved settings. |
+| Protected: Gitberth puts it behind Cloudflare Access before it's served. | Click **Fix**. |
+| Not served until it's behind Cloudflare Access. … | Set up [protection](#set-up-protection-once), or turn **Protected** off. |
 
 A domain two or more levels below the zone, like `a.b.example.com`, also shows **Cloudflare's free certificate covers example.com and *.example.com only, so a.b.example.com needs Total TLS or an advanced certificate in Cloudflare.**
 
@@ -122,6 +149,7 @@ For apps with a domain, a Git deploy starts the new version next to the old one 
 ## Related
 
 - [Networking](networking.md)
+- [GitHub integration](github-integration.md)
 - [Gitberth's settings](../reference/gitberth-settings.md#domains-cloudflare)
 - [Troubleshooting](troubleshooting.md#domains)
 - [Security](../concepts/security.md)

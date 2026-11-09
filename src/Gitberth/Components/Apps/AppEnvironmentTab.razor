@@ -25,7 +25,7 @@ else
     var imageOpen = showImage || fromImage.Any(r => r.Changed);
     var git = View.Summary.Source == AppSource.Git;
     <SectionCard Title="Environment" Icon="@Icons.Material.Outlined.Key" Id="sec-env"
-                 Sub="@(git ? "Passed to the container when it starts; build-time ones to the build too." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
+                 Sub="@(git ? "Passed to the container when it starts; build-time ones to the build too. Each is for every deploy, for production, or for previews." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
         <Actions>
             @if (Draft.EnvChanged)
             {
@@ -188,6 +188,10 @@ else
                 {
                     <span class="gb-tag gb-tag--accent" title="Passed to the build too">Build time</span>
                 }
+                @if (git && row.Scope != EnvScope.All)
+                {
+                    <span class="gb-tag gb-tag--outline" title="@ScopeTitle(row.Scope)">@EnvScopes.Label(row.Scope)</span>
+                }
             </span>
             <span class="gb-envval" role="cell">
                 @if (row.Removed)
@@ -201,6 +205,15 @@ else
                 }
             </span>
             <span class="gb-envrow-actions" role="cell">
+                @if (git && !row.Removed && !ReadOnly && row.Original?.FromImage != true)
+                {
+                    <select class="gb-input gb-input--sm" style="width:auto;margin-right:4px" aria-label="@($"Which deploys get {row.Key}")" title="Which deploys get it"
+                            value="@row.Scope" @onchange="e => SetScope(row, e.Value?.ToString())">
+                        <option value="@EnvScope.All">All deploys</option>
+                        <option value="@EnvScope.Production">Production</option>
+                        <option value="@EnvScope.Preview">Previews</option>
+                    </select>
+                }
                 @if (secret && !row.Removed)
                 {
                     <button type="button" class="gb-iconbtn" title="@(masked ? "Show" : "Hide")" aria-label="@($"{(masked ? "Show" : "Hide")} {row.Key}")" @onclick="() => Reveal(row)">
@@ -261,6 +274,18 @@ else
         row.AlwaysSecret ? "Always secret: its name or value holds a password. Masked everywhere and kept out of logs."
         : row.Secret ? "Secret: masked everywhere and kept out of logs. Click to make it a plain variable."
         : "Not secret. Click to mask it everywhere and keep it out of logs.";
+
+    // Which deploys get it: every one, production's (the app's own container), or previews'. One name can have a value in each.
+    private Task SetScope(EnvRowDraft row, string? value)
+    {
+        if (!Enum.TryParse<EnvScope>(value, out var scope) || scope == row.Scope) return Task.CompletedTask;
+        row.Scope = scope;
+        return Changed.InvokeAsync();
+    }
+
+    private static string ScopeTitle(EnvScope scope) => scope == EnvScope.Production
+        ? "Only production gets it: the app's own container, not its previews. It wins over a value for every deploy with the same name."
+        : "Only previews get it, not production. It wins over a value for every deploy with the same name.";
 
     private Task ToggleBuild(EnvRowDraft row)
     {

@@ -72,6 +72,7 @@ public sealed record LastAttempt(string? CommitSha, DeployStatus Status, DeployT
 /// A commit that was already tried isn't deployed again as if it were new, so a broken commit doesn't loop and
 /// a manual rollback isn't undone. A failed build is retried a bounded number of times; see <see cref="ShouldRetry"/>.
 /// </summary>
+/// <param name="previews">Makes, removes and deploys the watched apps' previews; without it (in tests) there are none.</param>
 public sealed class RepoWatcher(
     IDbContextFactory<GitberthDb> dbFactory,
     GitClient git,
@@ -79,13 +80,24 @@ public sealed class RepoWatcher(
     DeployPipeline pipeline,
     SettingsService settings,
     WatchState state,
-    ILogger<RepoWatcher> logger) : BackgroundService
+    ILogger<RepoWatcher> logger,
+    Previews.PreviewService? previews = null) : BackgroundService
 {
     public const int DefaultIntervalSeconds = 30;
 
-    /// <summary>The apps whose repos are watched: Git apps (no other has a repo) set to deploy by themselves and meant to run.</summary>
+    /// <summary>
+    /// The apps whose repos are watched: Git apps (no other has a repo) set to deploy by themselves and meant to run. A
+    /// preview is never one: its deploys are its parent's previews' (<see cref="Previews.PreviewService"/>).
+    /// </summary>
     internal static IQueryable<AppDefinition> Watched(IQueryable<AppDefinition> apps) =>
-        apps.Where(a => a.Source == AppSource.Git && a.AutoDeploy && a.DesiredState == DesiredState.Running);
+        apps.Where(a => a.Source == AppSource.Git && a.AutoDeploy && a.DesiredState == DesiredState.Running && a.ParentAppId == null);
+
+    /// <summary>
+    /// Whether production stays on a promoted preview's commit: the branch's commit is still the one it was promoted over.
+    /// Any other commit (a new one on the branch) is deployed as usual, and production follows its branch again.
+    /// </summary>
+    public static bool StaysPromoted(AppDefinition app, string remoteSha) =>
+        app.PromotedOverCommit is { } promoted && string.Equals(promoted, remoteSha, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Deploy when the branch tip is neither what's running nor the commit that was last tried.</summary>
     public static bool ShouldDeploy(AppDefinition app, string remoteSha, bool deployInProgress) =>
@@ -121,6 +133,8 @@ public sealed class RepoWatcher(
                     var interval = await settings.GetIntAsync(SettingKeys.WatchIntervalSeconds, DefaultIntervalSeconds, stoppingToken);
                     state.IntervalSeconds = Math.Clamp(interval, 10, 3600);
                     await CheckAsync(stoppingToken);
+                    // Previews whose parent is gone or has previews turned off go.
+                    if (previews is not null) await previews.TidyAsync(stoppingToken);
                     // A temporary container a deploy couldn't move visitors off goes as soon as the tunnel can be changed.
                     await pipeline.TidyBridgesAsync(stoppingToken);
                 }
@@ -151,8 +165,11 @@ public sealed class RepoWatcher(
 
         foreach (var repo in apps.GroupBy(a => $"{a.Owner}/{a.Repo}", StringComparer.OrdinalIgnoreCase))
         {
-            if (state.InBackoff(repo.Key)) continue;
             var first = repo.First();
+            // GitHub told about this repo: it's looked at now, even while in back-off, and what this pass starts is GitHub's.
+            var poked = state.TakeWebhookPoke(first.Owner, first.Repo);
+            if (state.InBackoff(repo.Key) && !poked) continue;
+            var trigger = poked ? DeployTrigger.Webhook : DeployTrigger.Poll;
             RemoteInfo remote;
             try
             {
@@ -173,10 +190,13 @@ public sealed class RepoWatcher(
                 var sha = remote.Branches.FirstOrDefault(b => b.Name == app.Branch)?.Sha;
                 state.Record(app.Id, sha, sha is null ? $"Branch '{app.Branch}' doesn't exist anymore." : null);
                 if (sha is null || busy.Contains(app.Id)) continue;
+                // Promoted: production stays on the preview's commit until the branch gets a new one.
+                if (StaysPromoted(app, sha)) continue;
+                if (app.PromotedOverCommit is not null) await ForgetPromotionAsync(app.Id, ct);
                 if (ShouldDeploy(app, sha, deployInProgress: false))
                 {
                     logger.LogInformation("New commit {Sha} on {Repo} ({Branch}); deploying {App}", sha[..7], repo.Key, app.Branch, app.Name);
-                    await actions.DeployAsync(app.Id, DeployTrigger.Poll, ct, expectedSha: sha);
+                    await actions.DeployAsync(app.Id, trigger, ct, expectedSha: sha);
                 }
                 else if (!string.Equals(sha, app.CurrentCommit, StringComparison.OrdinalIgnoreCase)
                     && ShouldRetry(app, sha, await GetLastAttemptAsync(app.Id, sha, ct), BuildStamp.Current, DateTime.UtcNow))
@@ -185,14 +205,26 @@ public sealed class RepoWatcher(
                     await actions.DeployAsync(app.Id, DeployTrigger.Retry, ct, expectedSha: sha);
                 }
             }
+
+            // The repo's branches and pull requests, for the previews of its apps that have them on.
+            if (previews is not null) await previews.CheckRepoAsync(first.Owner, first.Repo, remote, poked, repo.ToList(), busy, ct);
         }
+    }
+
+    private async Task ForgetPromotionAsync(int appId, CancellationToken ct)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        await db.Apps.Where(a => a.Id == appId).ExecuteUpdateAsync(s => s.SetProperty(a => a.PromotedOverCommit, (string?)null), ct);
     }
 
     /// <summary>
     /// The latest build of this commit. Settings changes in between (which recreate the running container) don't hide
     /// it, but a manual rollback afterwards means it's left alone.
     /// </summary>
-    private async Task<LastAttempt?> GetLastAttemptAsync(int appId, string sha, CancellationToken ct)
+    private Task<LastAttempt?> GetLastAttemptAsync(int appId, string sha, CancellationToken ct) => LastAttemptAsync(dbFactory, appId, sha, ct);
+
+    /// <summary>The latest build of this commit of the app, for <see cref="ShouldRetry"/> (previews' too).</summary>
+    internal static async Task<LastAttempt?> LastAttemptAsync(IDbContextFactory<GitberthDb> dbFactory, int appId, string sha, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var last = await db.Deployments.AsNoTracking()

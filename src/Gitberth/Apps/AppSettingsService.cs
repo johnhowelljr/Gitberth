@@ -86,12 +86,14 @@ public sealed class AppSettingsService
             problems.AddRange(fields.Where(GitAppSettings.ReadOnly.Contains).Select(f => new SettingProblem(f,
                 f == SettingField.Image ? "A Git app's image is built from its repo." : "A Git app always runs on the shared network.")));
             var lines = SettingsDiff.Lines(edit.Loaded, edit.Wanted, fields, secrets, f => SettingFields.Live.Contains(f) ? ApplyKind.Live : ApplyKind.Deploy);
-            var recreate = fields.Any(f => !SettingFields.Live.Contains(f));
+            // Variables changed only for previews: production's container stays as it is.
+            var previewsOnly = fields.Contains(SettingField.Env) && SameForProduction(edit.Loaded.Env, edit.Wanted.Env);
+            var recreate = fields.Any(f => !SettingFields.Live.Contains(f) && !(f == SettingField.Env && previewsOnly));
             return plan with
             {
                 Lines = [.. lines, .. own],
                 Problems = problems,
-                Consequence = !recreate ? "No restart."
+                Consequence = !recreate ? (previewsOnly ? "Production doesn't restart: previews take it with their next deploy." : "No restart.")
                     : !app.Running ? "Saved. It applies with the next deploy."
                     : view.Row is { } busy && await _host.DeployActiveAsync(busy.Id, ct) ? UnderWay
                     : view.Row is { } row && await _host.UnnoticedAsync(row, app.Running, ct) ? "Applies with a deploy without a build: no downtime for its domains."
@@ -365,6 +367,14 @@ public sealed class AppSettingsService
         if (!before.SecretKeys.Order(StringComparer.Ordinal).SequenceEqual(after.SecretKeys.Order(StringComparer.Ordinal)))
             yield return Line("Secret variables", Names(before.SecretKeys), Names(after.SecretKeys));
         if (before.Pinned != after.Pinned) yield return Line("Pinned", before.Pinned ? "yes" : "no", after.Pinned ? "yes" : "no");
+    }
+
+    /// <summary>Whether two sets of a Git app's variables give production the same ones (only values for previews differ).</summary>
+    internal static bool SameForProduction(IReadOnlyList<EnvSetting> before, IReadOnlyList<EnvSetting> after)
+    {
+        static IEnumerable<string> Key(IEnumerable<EnvSetting> env) => EnvScopes.ForDeploy(env.Where(e => !e.FromImage), preview: false)
+            .OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => $"{e.Key}={e.Value}|{e.Secret}|{e.BuildTime}");
+        return Key(before).SequenceEqual(Key(after), StringComparer.Ordinal);
     }
 
     internal static IEnumerable<SettingLine> GitLines(GitOptions? before, GitOptions? after)

@@ -12,7 +12,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Gitberth.Deploy;
 
 /// <param name="Build">True: clone and build a new image. False: recreate the container from <paramref name="Image"/> (or the current image).</param>
-public sealed record DeployRequest(int AppId, int DeploymentId, bool Build, string? Image = null);
+/// <param name="GitRef">Build this ref rather than the app's branch: a preview promoted to production builds its refs/pull/12/head.</param>
+/// <param name="Commit">Build exactly this commit of <paramref name="GitRef"/> (the one the promoted preview ran), not its tip.</param>
+public sealed record DeployRequest(int AppId, int DeploymentId, bool Build, string? Image = null, string? GitRef = null, string? Commit = null);
 
 public sealed class DeployException(string message) : Exception(message);
 
@@ -104,8 +106,31 @@ public sealed class DeployPipeline(
             return;
         }
 
-        // Empty values mean "not set", so a suggested-but-unfilled variable never overrides the app's own default.
-        var env = app.EnvVars.OrderBy(v => v.Id)
+        // A preview is deployed with its parent's settings, copied again now, and its parent's variables for previews.
+        PreviewInfo? preview = null;
+        AppDefinition? parent = null;
+        if (app.ParentAppId is int parentId)
+        {
+            preview = await db.Previews.FirstOrDefaultAsync(p => p.AppId == app.Id, CancellationToken.None);
+            parent = await db.Apps.AsNoTracking().Include(a => a.Ports).Include(a => a.EnvVars).Include(a => a.Volumes).Include(a => a.Networks).AsSplitQuery()
+                .FirstOrDefaultAsync(a => a.Id == parentId, CancellationToken.None);
+            if (preview is null || parent is null)
+            {
+                dep.Status = DeployStatus.Failed;
+                dep.Error = "The app this previews is gone, so the preview isn't deployed.";
+                dep.FinishedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(CancellationToken.None);
+                hub.Close(request.DeploymentId);
+                return;
+            }
+            await db.Entry(app).Collection(a => a.Networks).LoadAsync(CancellationToken.None);
+            Previews.PreviewCopy.Sync(app, parent, preview);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        // Empty values mean "not set", so a suggested-but-unfilled variable never overrides the app's own default. Production
+        // gets the app's values for every deploy and for production; a preview its parent's for every deploy and for previews.
+        var env = Apps.EnvScopes.ForDeploy((parent ?? app).EnvVars, preview: parent is not null)
             .Select(v => (Var: v, Value: protector.TryUnprotect(v.ProtectedValue)))
             .Where(x => x.Value.Length > 0)
             .ToList();
@@ -127,7 +152,14 @@ public sealed class DeployPipeline(
             await ForgetVariablesIfDeletedAsync(db, app);
             var ownKeys = own.Select(e => e.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             // Marked secret in Gitberth, even when the value itself comes from GitHub.
-            var secretKeys = app.EnvVars.Where(v => v.IsSecret).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var secretKeys = (parent ?? app).EnvVars.Where(v => v.IsSecret).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (parent is not null && preview is not null)
+            {
+                log.Step($"A preview of {parent.Name} ({Previews.PreviewNames.Label(preview.Kind, preview.Branch, preview.PullRequest)}): its settings are {parent.Name}'s, and so are its variables for previews");
+                var leftOut = Previews.PreviewCopy.LeftOut(parent.Volumes);
+                if (leftOut.Count > 0)
+                    log.Line($"Not mounted, because a preview never writes into production's folders: {string.Join(", ", leftOut.Select(v => $"{v.Source} at {v.Target}"))}.");
+            }
             var usable = repo.Variables.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
             var overridden = usable.Where(v => ownKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var listener = usable.Where(v => !ownKeys.Contains(v.Name) && ListenerKeys.Contains(v.Name)).Select(v => v.Name).ToList();
@@ -146,18 +178,24 @@ public sealed class DeployPipeline(
             var runtimeEnv = fromGitHub.Concat(own).ToList();
             var buildEnv = fromGitHub.Concat(env.Where(x => x.Var.BuildTime).Select(x => new EnvValue(x.Var.Key, x.Value, Secret(x.Var, x.Value)))).ToList();
             var gitHubKeys = fromGitHub.Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
-            // What Vercel's variables tell the app: its main domain, and whether its branch is the repo's production one.
-            var vercelFor = app.VercelVariables ? new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), await IsProductionBranchAsync(app)) : null;
+            // What Vercel's variables tell the app: its main domain, and whether its branch is the repo's production one. A
+            // preview is a preview whatever its branch: its own domain, and its parent's as the production one.
+            var vercelFor = !app.VercelVariables ? null
+                : preview is not null && parent is not null
+                    ? new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), Production: false,
+                        await domains.MainHostnameAsync(parent.Id, CancellationToken.None), preview.PullRequest, Preview: true)
+                    : new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), await IsProductionBranchAsync(app));
+            // What the build fetches: the preview's ref, or the promoted preview's exact commit; the app's branch otherwise.
+            var fetch = new BuildSource(request.GitRef ?? preview?.Ref, request.GitRef is null ? null : request.Commit, Promoted: request.GitRef is not null);
 
             var prepared = request.Build
-                ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), workDir, log, ct)
+                ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), fetch, workDir, log, ct)
                 : await PrepareImageAsync(app, request, dep, log);
 
             ct.ThrowIfCancellationRequested();
             if (vercelFor is not null)
             {
-                var facts = new DeployFacts(vercelFor.MainDomain, app.Owner, app.Repo, app.Branch, dep.CommitSha, dep.CommitMessage, dep.CommitAuthor,
-                    prepared.Traits, vercelFor.Production);
+                var facts = vercelFor.Facts(app, dep.CommitSha, dep.CommitMessage, dep.CommitAuthor, prepared.Traits);
                 foreach (var line in DescribeVercelVariables(runtimeEnv, facts)) log.Line(line);
                 runtimeEnv = VercelEnv.AddTo(runtimeEnv, VercelEnv.For(facts));
             }
@@ -253,6 +291,8 @@ public sealed class DeployPipeline(
         finally
         {
             dep.FinishedAt = DateTime.UtcNow;
+            // A preview's commit that didn't make it to production: production follows its branch again.
+            if (dep.Trigger == DeployTrigger.Promote && dep.Status != DeployStatus.Succeeded) app.PromotedOverCommit = null;
             await SaveOutcomeAsync(db, dep, app);
             hub.Close(dep.Id);
             DeployPaths.TryDeleteDirectory(workDir);
@@ -316,6 +356,7 @@ public sealed class DeployPipeline(
                 .SetProperty(a => a.CurrentImage, app.CurrentImage)
                 .SetProperty(a => a.CurrentCommit, app.CurrentCommit)
                 .SetProperty(a => a.LastAttemptedCommit, app.LastAttemptedCommit)
+                .SetProperty(a => a.PromotedOverCommit, app.PromotedOverCommit)
                 .SetProperty(a => a.ConfigChangePending, app.ConfigChangePending)
                 .SetProperty(a => a.RebuildPending, app.RebuildPending)
                 .SetProperty(a => a.DetectedKind, app.DetectedKind)
@@ -385,7 +426,13 @@ public sealed class DeployPipeline(
     }
 
     /// <summary>Where Vercel's variables say the app lives, and whether it's the production deploy; null when they're off for the app.</summary>
-    private sealed record VercelContext(string? MainDomain, bool Production);
+    /// <param name="ProductionDomain">A preview's parent's main domain.</param>
+    /// <param name="PullRequest">A pull request's preview: its number.</param>
+    private sealed record VercelContext(string? MainDomain, bool Production, string? ProductionDomain = null, int? PullRequest = null, bool Preview = false)
+    {
+        public DeployFacts Facts(AppDefinition app, string? sha, string? message, string? author, AppTraits traits) =>
+            new(MainDomain, app.Owner, app.Repo, app.Branch, sha, message, author, traits, Production, ProductionDomain, PullRequest, Preview);
+    }
 
     /// <summary>Whether the app deploys the repo's default branch, which is production on Vercel; any other branch is a preview there.</summary>
     private async Task<bool> IsProductionBranchAsync(AppDefinition app)
@@ -406,13 +453,16 @@ public sealed class DeployPipeline(
     internal static IEnumerable<string> DescribeVercelVariables(IReadOnlyList<EnvValue> env, DeployFacts facts)
     {
         var copies = facts.Traits.Prefix is { } prefix ? $", also as {prefix}VERCEL_…" : "";
-        var environment = facts.Production ? "production" : $"preview, because {facts.Branch} isn't the repo's default branch";
+        var environment = facts.Production ? "production" : facts.Preview ? "preview" : $"preview, because {facts.Branch} isn't the repo's default branch";
         var url = env.FirstOrDefault(e => e.Key == "VERCEL_URL")?.Value ?? (facts.Traits.ChecksVercel ? null : facts.MainDomain);
+        // A preview's production URL is its parent's main domain.
+        var productionUrl = facts.Preview ? facts.ProductionDomain : facts.MainDomain;
         yield return url is not null
             ? $"Vercel's variables are set, with VERCEL_URL={url} and VERCEL_ENV={environment}{copies}."
-            : facts.MainDomain is { } main
+            : productionUrl is { } main
                 ? $"Vercel's variables are set, with VERCEL_PROJECT_PRODUCTION_URL={main} and VERCEL_ENV={environment}{copies}. VERCEL_URL isn't: "
-                    + "the app's code checks process.env.VERCEL, and code like that takes VERCEL_URL to mean it runs on Vercel."
+                    + (facts.MainDomain is null ? "the preview has no domain of its own."
+                        : "the app's code checks process.env.VERCEL, and code like that takes VERCEL_URL to mean it runs on Vercel.")
                 : $"Vercel's variables are set, with VERCEL_ENV={environment}{copies}. VERCEL_URL isn't, because Gitberth doesn't route a domain to the app.";
         var own = env.FirstOrDefault(e => VercelEnv.AuthUrlKeys.Contains(e.Key));
         if (own is not null && facts.MainDomain is { } domain && IsLocal(own.Value))
@@ -438,11 +488,18 @@ public sealed class DeployPipeline(
             .ToList();
     }
 
+    /// <summary>What a build fetches when it isn't the app's branch tip.</summary>
+    /// <param name="Ref">A preview's ref (refs/pull/12/head, refs/heads/feature); null: the app's branch.</param>
+    /// <param name="Commit">The exact commit to build (a promoted preview's); null: the ref's tip.</param>
+    /// <param name="Promoted">Production builds a preview's commit.</param>
+    private sealed record BuildSource(string? Ref, string? Commit, bool Promoted);
+
     /// <param name="gitHubKeys">Which of <paramref name="buildEnv"/> come from the repo's GitHub variables rather than the app's own.</param>
     /// <param name="vercelFor">What Vercel's variables tell the app; null when they're off for it.</param>
     /// <param name="runtimeKeys">Every name the app or the repo sets, build-time or not: those win over Vercel's during the build too.</param>
+    /// <param name="fetch">What to fetch, when it isn't the app's branch tip.</param>
     private async Task<Prepared> BuildAsync(GitberthDb db, AppDefinition app, Deployment dep, List<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys,
-        VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, string workDir, DeployLog log, CancellationToken ct)
+        VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, BuildSource fetch, string workDir, DeployLog log, CancellationToken ct)
     {
         DeployPaths.TryDeleteDirectory(workDir);
         var srcDir = Path.Combine(workDir, "src");
@@ -450,11 +507,18 @@ public sealed class DeployPipeline(
         Directory.CreateDirectory(buildDir);
 
         await SetStatusAsync(db, dep, DeployStatus.Cloning);
-        log.Step($"Cloning {app.RepoFullName} ({app.Branch})");
+        log.Step(fetch switch
+        {
+            { Promoted: true, Commit: { Length: >= 7 } sha } => $"Fetching {sha[..7]} of {app.RepoFullName} from {fetch.Ref}, the preview promoted to production",
+            { Ref: { } named } => $"Fetching {app.RepoFullName} ({named})",
+            _ => $"Cloning {app.RepoFullName} ({app.Branch})",
+        });
         CommitInfo commit;
         try
         {
-            commit = await git.CloneAsync(new GitHubRepoRef(app.Owner, app.Repo), app.Branch, srcDir, log.Line, ct);
+            commit = fetch.Ref is { } gitRef
+                ? await git.FetchAsync(new GitHubRepoRef(app.Owner, app.Repo), gitRef, fetch.Commit, srcDir, log.Line, ct)
+                : await git.CloneAsync(new GitHubRepoRef(app.Owner, app.Repo), app.Branch, srcDir, log.Line, ct);
         }
         catch (GitException ex)
         {
@@ -477,7 +541,7 @@ public sealed class DeployPipeline(
         var traits = VercelEnv.Detect(folder, srcDir);
         var vercel = vercelFor is null
             ? []
-            : VercelEnv.ForBuild(new DeployFacts(vercelFor.MainDomain, app.Owner, app.Repo, app.Branch, commit.Sha, dep.CommitMessage, commit.Author, traits, vercelFor.Production));
+            : VercelEnv.ForBuild(vercelFor.Facts(app, commit.Sha, dep.CommitMessage, commit.Author, traits));
         var vercelKeys = vercel.Select(v => v.Key).ToHashSet(StringComparer.Ordinal);
         buildEnv = VercelEnv.AddTo(buildEnv, vercel, runtimeKeys);
         // vercel.json's cron jobs travel with the image too, so a rollback runs the jobs of the image it goes back to.
