@@ -23,8 +23,9 @@ REPO="johnhowelljr/Gitberth"
 RAW="${GITBERTH_RAW:-https://raw.githubusercontent.com/$REPO/main}"
 DOCS="https://github.com/$REPO/blob/main/docs"
 VOLUME="gitberth_gitberth-data"
-# docker-compose.yml as it was published up to v1.0.0: an untouched copy of it is replaced with the current one.
-OLD_COMPOSE="cbf5096b1fd6dee851dfcbf1376231000a8184104331f810a7523ef8ce46b63c"
+# Every docker-compose.yml published before the current one (v1.0.0's, then 5c131d0's): an untouched copy of one of them
+# is replaced with the current one. A copy someone changed is kept as it is.
+OLD_COMPOSE="cbf5096b1fd6dee851dfcbf1376231000a8184104331f810a7523ef8ce46b63c f5616041a572cf9c69b531c1af89cb255a13aac6424805098b51a65abab03c3d"
 
 if [ -t 1 ]; then B=$(printf '\033[1m'); R=$(printf '\033[31m'); Y=$(printf '\033[33m'); G=$(printf '\033[32m'); N=$(printf '\033[0m')
 else B=; R=; Y=; G=; N=; fi
@@ -33,10 +34,10 @@ say() { printf '%s==>%s %s\n' "$B" "$N" "$*"; }
 note() { printf '    %s\n' "$*"; }
 warn() { printf '%s  ! %s%s\n' "$Y" "$*" "$N"; }
 # fail "why" ["what to do" ...]: says so, puts back anything it moved aside, and stops.
+failing=no
 fail() {
+    failing=yes
     put_back_stray
-    # The files a check was made with, not yet in place: nothing changed, so they go.
-    if [ -n "${dir:-}" ]; then rm -f "$dir/.env.new" "$dir/.env.new.tmp" "$dir/docker-compose.yml.new"; fi
     printf '\n%sGitberth isn'"'"'t running:%s %s\n' "$R" "$N" "$1" >&2
     shift
     for line in "$@"; do printf '  %s\n' "$line" >&2; done
@@ -51,10 +52,10 @@ fetch() {
     else return 1; fi
 }
 
-# Whether a page answers, within 5 seconds.
+# Whether a page on this machine answers, within 5 seconds, never through a proxy.
 probe() {
-    if command -v curl > /dev/null 2>&1; then curl -fsS -o /dev/null --max-time 5 "$1" 2> /dev/null
-    else wget -q -O /dev/null -T 5 "$1" 2> /dev/null; fi
+    if command -v curl > /dev/null 2>&1; then curl -fsS -o /dev/null --max-time 5 --noproxy '*' "$1" 2> /dev/null
+    else http_proxy='' HTTP_PROXY='' wget -q -O /dev/null -T 5 "$1" 2> /dev/null; fi
 }
 
 docker_up() { docker info > /dev/null 2>&1; }
@@ -241,8 +242,32 @@ put_back_stray() {
     stray_aside=""
 }
 
+# Whatever ends the run: an unexpected error (a full disk, say) still says so and puts back what was moved aside, and
+# the files a check was made with, never put in place, go.
+finished=no
+on_exit() {
+    if [ "$finished" = no ] && [ "$failing" = no ]; then
+        printf '\n%sGitberth isn'"'"'t running:%s the installer stopped on the error above, before it was done.\n' "$R" "$N" >&2
+        printf '  If the disk is full or read-only, fix that and run this again: nothing it checked was lost.\n' >&2
+        put_back_stray
+    fi
+    if [ -n "${dir:-}" ]; then rm -f "$dir/.env.new" "$dir/.env.new.tmp" "$dir/docker-compose.yml.new" "$dir/.gitberth-write-test"; fi
+    if [ -n "${aptconf:-}" ]; then rm -f "$aptconf"; fi
+}
+
+# What to check when something can't be downloaded: IPv4 (github.com and ghcr.io have no IPv6), or a proxy.
+net_hint() {
+    if command -v ip > /dev/null 2>&1 && [ -z "$(ip -4 route show default 2> /dev/null)" ]; then
+        printf '%s' "This machine has no IPv4 route, and github.com and ghcr.io only answer over IPv4: give it IPv4, or NAT64 with DNS64."
+    else
+        printf '%s' "Behind a proxy? Set https_proxy and run the installer with sudo -E; Docker needs it too, for pulls (https://docs.docker.com/engine/daemon/proxy/)."
+    fi
+}
+
 main() {
     set -eu
+    trap on_exit EXIT
+    trap 'exit 130' INT TERM
     # The settings as given, read once and then cleared: Compose would otherwise take them from the environment over
     # .env, and the next plain `docker compose up -d` would undo them.
     want_dir="${GITBERTH_DIR:-}"; want_port="${GITBERTH_PORT:-}"; want_image="${GITBERTH_IMAGE:-}"
@@ -259,6 +284,23 @@ main() {
         x86_64 | amd64 | aarch64 | arm64) ;;
         *) fail "Gitberth's image is for Intel/AMD (x86_64) and ARM (aarch64) machines; this one is $(uname -m)." ;;
     esac
+    # A 64-bit kernel can run a 32-bit system (Raspberry Pi OS 32-bit on a Pi 4 or 5): its Docker can't run Gitberth.
+    if command -v dpkg > /dev/null 2>&1; then
+        case "$(dpkg --print-architecture 2> /dev/null)" in
+            '' | amd64 | arm64) ;;
+            *) fail "this system is 32-bit ($(dpkg --print-architecture)), and Gitberth's image is for 64-bit systems." \
+                "Install the 64-bit version of the operating system, then run this again." ;;
+        esac
+    fi
+    # apt waits for another package install (a fresh machine's unattended upgrades) instead of failing on its lock.
+    aptconf=""
+    if command -v apt-get > /dev/null 2>&1 && [ -z "${APT_CONFIG:-}" ]; then
+        aptconf="$(mktemp)"
+        printf 'DPkg::Lock::Timeout "600";\n' > "$aptconf"
+        export APT_CONFIG="$aptconf"
+    fi
+    wsl=no
+    if grep -qi microsoft /proc/sys/kernel/osrelease 2> /dev/null; then wsl=yes; fi
     if command -v pveversion > /dev/null 2>&1 && [ "$on_pve" != 1 ]; then
         fail "this is a Proxmox host." \
             "Docker on the Proxmox host changes its firewall, and the VMs and LXCs on its bridges can lose their network." \
@@ -291,7 +333,7 @@ main() {
         else
             installer="$(mktemp)"
             fetch https://get.docker.com > "$installer" || fail "Docker's installer couldn't be downloaded from get.docker.com." \
-                "Check that this machine reaches the internet:  curl -sI https://get.docker.com"
+                "Check that this machine reaches the internet:  curl -sI https://get.docker.com" "$(net_hint)"
             if command -v apt-get > /dev/null 2>&1; then wait_for_apt; fi
             if ! sh "$installer" > /var/log/gitberth-docker-install.log 2>&1; then
                 rm -f "$installer"
@@ -304,10 +346,30 @@ main() {
             rm -f "$installer"
         fi
     fi
+    # Ubuntu's snap of Docker can't open most folders, /opt among them, and isn't Docker's own build.
+    if case "$(command -v docker)" in /snap/*) true ;; *) false ;; esac || { command -v snap > /dev/null 2>&1 && snap list docker > /dev/null 2>&1; }; then
+        fail "Docker on this machine is the snap package, which can't use the folders Gitberth needs (/opt among them)." \
+            "Remove it, then run this again and the installer puts in Docker's own packages:" \
+            "    snap remove --purge docker      (this deletes the snap's containers, images and volumes)"
+    fi
     docker_up || start_docker || fail "Docker is installed but isn't running, and couldn't be started." \
         "See why with:  systemctl status docker   or   journalctl -u docker"
     if docker version 2> /dev/null | grep -qi podman; then
         fail "this machine's docker command is Podman's." "Gitberth needs Docker Engine: https://docs.docker.com/engine/install/"
+    fi
+    engine_arch="$(docker version --format '{{.Server.Arch}}' 2> /dev/null || true)"
+    case "$engine_arch" in
+        '' | amd64 | arm64) ;;
+        *) fail "Docker on this machine runs $engine_arch containers, and Gitberth's image is for amd64 and arm64." \
+            "Install the 64-bit version of the operating system and Docker, then run this again." ;;
+    esac
+    # Room for Gitberth's image (about 400 MB) and its first data, where Docker keeps them.
+    docker_root="$(docker info --format '{{.DockerRootDir}}' 2> /dev/null || true)"
+    free_kb="$(df -Pk "${docker_root:-/var/lib/docker}" 2> /dev/null | awk 'NR == 2 {print $4}')"
+    case "$free_kb" in '' | *[!0-9]*) free_kb="" ;; esac
+    if [ -n "$free_kb" ] && [ "$free_kb" -lt 1048576 ]; then
+        fail "there's only $((free_kb / 1024)) MB free where Docker keeps its data (${docker_root:-/var/lib/docker}); Gitberth needs about 1 GB." \
+            "Free some space (docker system df shows what Docker uses), then run this again."
     fi
     version="$(docker version --format '{{.Server.Version}}' 2> /dev/null || echo 0)"
     major="${version%%.*}"
@@ -408,6 +470,10 @@ main() {
     mkdir -p "$dir" 2> /dev/null || fail "the folder $dir couldn't be made." "Choose another one with GITBERTH_DIR."
     cd "$dir" || fail "the folder $dir couldn't be opened."
     dir="$(pwd -P)"
+    if ! touch "$dir/.gitberth-write-test" 2> /dev/null; then
+        fail "nothing can be written in $dir." "Is the disk full or read-only? Fix that, or choose another folder with GITBERTH_DIR."
+    fi
+    rm -f "$dir/.gitberth-write-test"
     for other in compose.yaml compose.yml docker-compose.yaml; do
         if [ -f "$other" ]; then fail "$dir holds another Compose project ($other)." "Give Gitberth a folder of its own with GITBERTH_DIR."; fi
     done
@@ -422,15 +488,21 @@ main() {
     # The compose file: kept as it is, or the current one when there's none or it's an untouched published copy.
     composefile="$dir/docker-compose.yml"
     new_compose=no
-    if [ ! -f docker-compose.yml ] || [ "$(sha256sum docker-compose.yml | awk '{print $1}')" = "$OLD_COMPOSE" ]; then
-        fetch "$RAW/docker-compose.yml" > docker-compose.yml.new 2> /dev/null || fail "Gitberth's compose file couldn't be downloaded from GitHub."
+    published_copy=no
+    if [ -f docker-compose.yml ]; then
+        current="$(sha256sum docker-compose.yml | awk '{print $1}')"
+        for known in $OLD_COMPOSE; do if [ "$current" = "$known" ]; then published_copy=yes; fi; done
+    fi
+    if [ ! -f docker-compose.yml ] || [ "$published_copy" = yes ]; then
+        fetch "$RAW/docker-compose.yml" > docker-compose.yml.new 2> /dev/null || fail "Gitberth's compose file couldn't be downloaded from GitHub." \
+            "Check that this machine reaches it:  curl -sI $RAW/docker-compose.yml" "$(net_hint)"
         chmod 644 docker-compose.yml.new
         composefile="$dir/docker-compose.yml.new"
         new_compose=yes
     fi
     # The settings: the .env there is kept, with any setting given here written into it; a new one is made otherwise.
     envfile="$dir/.env.new"
-    : > "$envfile"
+    printf '' > "$envfile" || fail "nothing can be written in $dir." "Is the disk full or read-only?"
     data=no
     if has_data; then data=yes; fi
 
@@ -550,7 +622,7 @@ main() {
             warn "The image couldn't be pulled, so the copy already on this machine is used:"
             note "$(printf '%s' "$out" | tail -n 1)"
         else
-            fail "the image $image couldn't be pulled." "$out" "Check that this machine reaches ghcr.io:  curl -sI https://ghcr.io"
+            fail "the image $image couldn't be pulled." "$out" "Check that this machine reaches ghcr.io:  curl -sI https://ghcr.io" "$(net_hint)"
         fi
     fi
     if ! out="$(docker run --rm --network none --entrypoint true "$image" 2>&1)"; then
@@ -584,15 +656,14 @@ main() {
     fi
 
     # ---- Every check passed: the changes ----
+    # Each file is replaced in one step (a rename), so a full disk can never leave half of one.
     if [ "$new_compose" = yes ]; then
-        if [ -f docker-compose.yml ]; then note "Updating docker-compose.yml to the current one (it takes the port and image from .env)"; fi
-        mv docker-compose.yml.new docker-compose.yml
+        if [ -f docker-compose.yml ]; then note "Updating docker-compose.yml to the current published one"; fi
+        mv docker-compose.yml.new docker-compose.yml || fail "docker-compose.yml couldn't be written in $dir."
         composefile="$dir/docker-compose.yml"
     fi
     if [ -f .env ] && cmp -s .env "$envfile"; then rm -f "$envfile"
-    else
-        if [ -f .env ]; then cat "$envfile" > .env; rm -f "$envfile"; else mv "$envfile" .env; fi
-    fi
+    else mv "$envfile" .env || fail ".env couldn't be written in $dir."; fi
     envfile="$dir/.env"
     if [ -n "$saved" ]; then note "Saved in .env:$saved"; fi
     if [ -n "$made_env" ]; then note "Made $dir/.env: $made_env"; fi
@@ -607,8 +678,8 @@ main() {
         note "The gitberth container that was here is stopped and renamed $stray_aside."
         if [ "$data" = no ]; then
             dc create gitberth > /dev/null 2>&1 || fail "Gitberth's container couldn't be created."
-            docker run --rm --volumes-from "$stray_aside:ro" -v "$VOLUME:/to" --entrypoint sh "$image" -c 'cp -a /data/. /to/' \
-                || fail "the old container's data couldn't be copied over."
+            docker run --rm --security-opt label=disable --volumes-from "$stray_aside:ro" -v "$VOLUME:/to" --entrypoint sh "$image" \
+                -c 'cp -a /data/. /to/' || fail "the old container's data couldn't be copied over."
             data=yes
             note "Its data was copied over, so Gitberth carries on with its settings, apps and password."
         fi
@@ -621,10 +692,10 @@ main() {
         new_image="$(docker image inspect -f '{{.Id}}' "$image" 2> /dev/null || true)"
         if [ -n "$new_image" ] && [ "$running_image" != "$new_image" ]; then
             say "Backing up Gitberth's data"
-            mkdir -p backups
+            mkdir -p backups || fail "the folder $dir/backups couldn't be made, so Gitberth wasn't updated." "Is the disk full or read-only?"
             backup="backups/gitberth-data-$(date +%Y%m%d-%H%M%S).tgz"
             dc stop gitberth > /dev/null 2>&1 || true
-            docker run --rm -v "$VOLUME:/data:ro" -v "$dir/backups:/backup" --entrypoint sh "$image" \
+            docker run --rm --security-opt label=disable -v "$VOLUME:/data:ro" -v "$dir/backups:/backup" --entrypoint sh "$image" \
                 -c "umask 077 && tar czf /backup/${backup#backups/} -C /data ." \
                 || { dc start gitberth > /dev/null 2>&1 || true; fail "Gitberth's data couldn't be backed up, so it wasn't updated."; }
             # The five newest are kept. The names are the installer's own, so ls is safe here.
@@ -640,6 +711,7 @@ main() {
         dc create gitberth > /dev/null 2>&1 || fail "Gitberth's container couldn't be created."
         printf '\n%sGitberth is set up, not started%s (GITBERTH_START=no).\n' "$G" "$N"
         printf '  Its data volume is %s. Start it with:  cd %s && docker compose up -d\n\n' "$VOLUME" "$dir"
+        finished=yes
         return 0
     fi
 
@@ -672,6 +744,10 @@ main() {
         sleep 2
     done
     if docker logs "$container" 2>&1 | grep -q "Docker isn't reachable"; then
+        if docker info --format '{{.SecurityOptions}}' 2> /dev/null | grep -qi selinux; then
+            fail "Gitberth started, but SELinux keeps it from using Docker's socket." \
+                "Its docker-compose.yml needs  security_opt: [label=disable]  under the gitberth service, as the published one has."
+        fi
         fail "Gitberth started, but it can't reach Docker through /var/run/docker.sock." \
             "Check that the socket is there (ls -l /var/run/docker.sock) and that docker-compose.yml still mounts it."
     fi
@@ -707,6 +783,10 @@ main() {
         printf '\n'
         warn "This machine couldn't open http://$url_host:$port itself. If other devices can't either, set this machine's"
         warn "LAN address with GITBERTH_PUBLIC_HOST, or check its firewall."
+    elif [ "$wsl" = yes ] && [ -z "$want_host" ]; then
+        printf '\n'
+        warn "This is WSL: http://$url_host:$port works from this PC only. For other devices, turn on WSL's mirrored networking"
+        warn "(or forward the port in Windows), then run this again with GITBERTH_PUBLIC_HOST set to the PC's LAN address."
     fi
     if [ -n "$backup" ]; then printf '\n  Gitberth'"'"'s data from before the update: %s/%s\n' "$dir" "$backup"; fi
     if [ -n "$stray_aside_done" ]; then
@@ -715,6 +795,7 @@ main() {
     fi
     printf '\n  To update it later, run this installer again.\n'
     printf '  Docs: %s/README.md\n\n' "$DOCS"
+    finished=yes
 }
 
 main "$@" < /dev/null

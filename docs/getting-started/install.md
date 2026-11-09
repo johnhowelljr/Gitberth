@@ -12,6 +12,9 @@ The examples use a container called `homelab` at `192.168.50.10`.
   `open sysctl net.ipv4.ip_unprivileged_port_start … permission denied`. `lxc-pve` 6.0.5-2 and later fix it, so update
   the Proxmox host first.
 - **A free static address on your LAN** for the container. Gitberth and every app it runs are reached at this address.
+- **A 64-bit system**, Intel/AMD (amd64) or ARM (arm64), with about 1 GB free for Docker. On a Raspberry Pi, that means
+  the 64-bit Raspberry Pi OS. Docker from Ubuntu's snap doesn't work: the installer explains how to swap it for Docker's
+  own packages.
 
 ## 1. Create the LXC
 
