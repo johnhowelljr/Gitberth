@@ -71,18 +71,20 @@ Copy host folders (bind mounts) with your usual tools.
 
 ### Before you start
 
-- Set up the new host as in [Install](../getting-started/install.md), up to and not including `docker compose up -d`. Use the same `docker-compose.yml`: its project name, `gitberth`, gives the volume its name, `gitberth_gitberth-data`.
+- Set up the new host as in [Install](../getting-started/install.md), but stop before Gitberth starts: Gitberth's data has to go into its volume before its first start.
 - Copy your backup files and your old `.env` to `/opt/gitberth` on the new host.
 - If the old machine still runs cloudflared, stop it before you start cloudflared on the new one. Two cloudflared containers with the same tunnel token share the tunnel's visitors.
 
 ### Steps
 
-1. Create Gitberth's container and volume without starting it:
+1. Set Gitberth up without starting it. The installer keeps the `.env` you copied, and with `GITBERTH_START=no` it installs Docker if needed, checks the machine, and creates Gitberth's container and volume but doesn't start them:
 
    ```bash
+   curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/install.sh | GITBERTH_START=no sh
    cd /opt/gitberth
-   docker compose create
    ```
+
+   By hand instead: put `docker-compose.yml` in `/opt/gitberth` (its project name, `gitberth`, gives the volume its name, `gitberth_gitberth-data`) and run `docker compose create` there.
 
 2. Unpack Gitberth's data into the volume:
 
@@ -101,7 +103,7 @@ Copy host folders (bind mounts) with your usual tools.
 
    Copy host folders back to the same paths. Load a database dump into the database once it runs.
 4. Pull the images your registry apps run, with the same names and tags, for example `docker pull postgres:18`. Load images built on the host with `docker load`.
-5. Start Gitberth:
+5. Start Gitberth, with `docker compose up -d` or by running the installer again, which checks that it answers:
 
    ```bash
    docker compose up -d

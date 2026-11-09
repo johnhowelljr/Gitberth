@@ -8,6 +8,17 @@ Back up Gitberth's data volume (see [Back up and restore](backups-and-restore.md
 
 ## Update to the newest version
 
+The quickest way is to run the installer again. It keeps your settings and data, pulls the newest release, backs up
+Gitberth's data to `/opt/gitberth/backups` before the new version starts (the five newest backups are kept), and checks
+that Gitberth answers afterwards. For a Gitberth you built from source, it shows the command that updates it that way
+instead.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/install.sh | sh
+```
+
+By hand:
+
 1. On the host, go to Gitberth's folder:
 
    ```bash
@@ -54,21 +65,18 @@ Each release's page shows its image and the `docker pull` command, and has the i
 
 ## Pin a version
 
-1. In `/opt/gitberth/docker-compose.yml`, change the `image:` line to the tag you want:
+Run the installer with the tag you want. It saves it in `.env` as `GITBERTH_IMAGE`, backs up Gitberth's data, and
+switches to it:
 
-   ```yaml
-   services:
-     gitberth:
-       image: ghcr.io/johnhowelljr/gitberth:1.2
-   ```
+```bash
+curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/install.sh | GITBERTH_IMAGE=ghcr.io/johnhowelljr/gitberth:1.2 sh
+```
 
-2. Pull and recreate:
+By hand: add `GITBERTH_IMAGE=ghcr.io/johnhowelljr/gitberth:1.2` to `/opt/gitberth/.env`, then run
+`docker compose pull && docker compose up -d` there.
 
-   ```bash
-   docker compose pull && docker compose up -d
-   ```
-
-With `1.2`, `docker compose pull` brings fixes released as 1.2.x. With `1.2.0` you stay on that one build. To follow the newest release again, set the tag back to `latest`.
+With `1.2`, updates bring fixes released as 1.2.x. With `1.2.0` you stay on that one build. To follow the newest release
+again, set it back to `ghcr.io/johnhowelljr/gitberth:latest`.
 
 ### See which image you run
 

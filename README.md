@@ -32,19 +32,16 @@ Keep Gitberth's own page on your LAN. It controls Docker on the host, so if you 
 
 ## Install
 
-On a Proxmox host running PVE 9.1 or later (8.4.16 or later on 8.x), create an **unprivileged** Debian 13 LXC with 4 vCPU, 8 GB RAM, a 64 GB disk and a static IP, then run `pct set <id> --features nesting=1,keyctl=1` on the host. Inside the LXC:
+On a Proxmox host running PVE 9.1 or later (8.4.16 or later on 8.x), create an **unprivileged** Debian 13 LXC with 4 vCPU, 8 GB RAM, a 64 GB disk and a static IP, then run `pct set <id> --features nesting=1,keyctl=1` on the host. Inside the LXC, as root:
 
 ```bash
 apt update && apt install -y curl
-curl -fsSL https://get.docker.com | sh
-mkdir -p /opt/gitberth && cd /opt/gitberth
-curl -fsSLO https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/docker-compose.yml
-curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/.env.example -o .env
-nano .env            # admin password, this machine's LAN address, time zone
-docker compose up -d
+curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/install.sh | sh
 ```
 
-Open `http://<lxc-ip>:8080` and sign in as `admin`. The image, `ghcr.io/johnhowelljr/gitberth`, is ready-made for Intel/AMD and ARM machines. The [installation guide](docs/getting-started/install.md) covers each step, updating, and building from source.
+The installer sets up Docker if it's missing, checks that the machine can run containers, starts Gitberth, waits until it answers, and prints its address with the username `admin` and a password it made up. If anything's in the way, it says what and how to fix it. Run it again at any time to update Gitberth; your settings and data stay.
+
+The image, `ghcr.io/johnhowelljr/gitberth`, is ready-made for Intel/AMD and ARM machines. The [installation guide](docs/getting-started/install.md) covers the installer's settings, installing by hand, and building from source.
 
 ## Documentation
 

@@ -10,11 +10,11 @@ The `docker-compose.yml` from the install looks like this:
 name: gitberth  # fixes the data volume's name (gitberth_gitberth-data), whatever the folder is called
 services:
   gitberth:
-    image: ghcr.io/johnhowelljr/gitberth:latest
+    image: ${GITBERTH_IMAGE:-ghcr.io/johnhowelljr/gitberth:latest}
     container_name: gitberth
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${GITBERTH_PORT:-8080}:8080"
     environment:
       GITBERTH_ADMIN_PASSWORD: ${GITBERTH_ADMIN_PASSWORD:-}  # used on first start only; change it in the UI later
       GITBERTH_PUBLIC_HOST: ${GITBERTH_PUBLIC_HOST:-}        # this machine's LAN address, used for app links
@@ -27,15 +27,18 @@ volumes:
   gitberth-data:
 ```
 
-The three variables come from the `.env` file next to it:
+Its variables come from the `.env` file next to it, which the installer writes:
 
 ```bash
-GITBERTH_ADMIN_PASSWORD=
-GITBERTH_PUBLIC_HOST=192.168.50.10
-TZ=UTC
+GITBERTH_ADMIN_PASSWORD='kX4pQ7vRt2LmN9sWb3Ye'
+GITBERTH_PUBLIC_HOST='192.168.50.10'
+TZ='UTC'
+GITBERTH_PORT='8090'
 ```
 
-After you change `.env` or `docker-compose.yml`, run `docker compose up -d` in `/opt/gitberth` to recreate Gitberth with the change. Your apps keep running.
+`GITBERTH_PORT` (the port Gitberth's page is on, 8080 if it's not set) and `GITBERTH_IMAGE` (the image it runs, the newest release if it's not set) are only in `.env` when they're changed.
+
+After you change `.env` or `docker-compose.yml`, run `docker compose up -d` in `/opt/gitberth` to recreate Gitberth with the change, or run the installer again, which checks the change first. Your apps keep running.
 
 ## Environment variables
 
@@ -52,7 +55,7 @@ After you change `.env` or `docker-compose.yml`, run `docker compose up -d` in `
 | `ASPNETCORE_HTTP_PORTS` | The port Gitberth listens on inside its container. The image sets it. | `8080` |
 | `DOTNET_RUNNING_IN_CONTAINER` | Set by the .NET base image. Gitberth reads it to know it runs in a container: it then keeps its data in `/data`, finds its own container, and can run its helper containers. | `true` in the image |
 
-Only the first three belong in `.env` for a normal install. To change one of the others, add it under `environment:` in `docker-compose.yml`.
+Only the first three, plus `GITBERTH_PORT` and `GITBERTH_IMAGE` (which the compose file reads, not Gitberth), belong in `.env` for a normal install. To change one of the others, add it under `environment:` in `docker-compose.yml`.
 
 A `GITBERTH_*` variable or `DOCKER_HOST` that's set but empty counts as unset, so it gets its default: an empty `GITBERTH_DATA` still means `/data` in a container.
 

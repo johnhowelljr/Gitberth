@@ -37,6 +37,15 @@ jobs:
       - name: Test
         run: dotnet test tests/Gitberth.Tests --nologo
 
+  installer:
+    name: Installer
+    # install.sh is piped into sh on machines of every kind: POSIX sh only, and nothing ShellCheck warns about.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: ShellCheck
+        run: shellcheck -s sh install.sh
+
   release:
     name: Release
     # A version tag pushed with git: its GitHub release, unless one was made on GitHub already.

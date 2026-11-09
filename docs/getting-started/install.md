@@ -26,7 +26,65 @@ The examples use a container called `homelab` at `192.168.50.10`.
 
 4. Start the container and open its console.
 
-## 2. Install Docker
+## 2. Run the installer
+
+Inside the LXC, as root:
+
+```bash
+apt update && apt install -y curl
+curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/install.sh | sh
+```
+
+It does every step below for you, checking each one, and ends with Gitberth's address, the username `admin` and a
+password it made up:
+
+```text
+Gitberth 1.0.0 is running.
+
+  Open      http://192.168.50.10:8080
+  Sign in   admin
+  Password  kX4pQ7vRt2LmN9sWb3Ye
+```
+
+What the installer does:
+
+- **Installs Docker** if it's missing (with Docker's own installer), starts it, and checks that it's Docker 25 or later
+  with Compose 2.20 or later.
+- **Checks everything before it changes anything:** the folder, your settings, the port, the image, and that this
+  machine can start a container at all. In an LXC it tells you whether the Proxmox host needs nesting turned on or an
+  update. If a check fails, nothing has changed.
+- **Writes `/opt/gitberth/.env`** with a made-up admin password, this machine's LAN address and its time zone.
+- **Gives way carefully to a Gitberth that's here already:**
+  - Gitberth installed before, by the installer or by hand with the compose file: it's updated in its own folder, with
+    its data backed up first to `/opt/gitberth/backups` (the five newest are kept).
+  - A `gitberth` container you started with `docker run`: it's stopped, renamed and kept, and its data is copied to the
+    new Gitberth, so you carry on where you were. If it was started with `--rm`, the installer stops and shows how to
+    save its data first, because stopping it would delete it.
+  - A Gitberth built from source, or set up with other compose files: the installer stops and shows the command that
+    updates it the way it was made.
+- **Starts Gitberth and waits until its page answers.** If it doesn't, it shows the container's log and puts back
+  anything it moved aside.
+
+Change what it picks by putting settings just before `sh` (after `sudo`, if you use it), for example
+`curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/install.sh | GITBERTH_PORT=8090 sh`:
+
+| Setting | What it does | Default |
+|---|---|---|
+| `GITBERTH_PORT` | The port Gitberth's page is on. | `8080` |
+| `GITBERTH_ADMIN_PASSWORD` | The admin password for the first start, at least 10 characters. | Made up, and shown at the end |
+| `GITBERTH_PUBLIC_HOST` | This machine's LAN address, for the addresses Gitberth shows. | Detected |
+| `GITBERTH_TZ` | Gitberth's time zone, like `Europe/London`. | This machine's |
+| `GITBERTH_DIR` | Where the compose file and `.env` go. | `/opt/gitberth`, or wherever Gitberth is installed already |
+| `GITBERTH_IMAGE` | The image to run, such as a pinned version: `ghcr.io/johnhowelljr/gitberth:1.0`. | The newest release |
+| `GITBERTH_START` | `no` sets everything up without starting Gitberth, to restore a backup first. | Starts it |
+
+A setting given on a later run is saved in `.env`, so it stays. Run the installer again at any time to update Gitberth:
+it keeps `.env`, the compose file and Gitberth's data, and shows the address again (the password only on the first
+run; after that it's yours). Then go on to [Sign in](#7-sign-in).
+
+The rest of this page does the same by hand.
+
+## 3. Install Docker
 
 Inside the LXC, run:
 
@@ -35,7 +93,7 @@ apt update && apt install -y curl
 curl -fsSL https://get.docker.com | sh
 ```
 
-## 3. Get the Compose file and the settings file
+## 4. Get the Compose file and the settings file
 
 ```bash
 mkdir -p /opt/gitberth && cd /opt/gitberth
@@ -47,7 +105,7 @@ curl -fsSL https://raw.githubusercontent.com/johnhowelljr/Gitberth/main/.env.exa
 is compiled on your machine. It publishes port 8080, gives Gitberth the Docker socket, and keeps its data in a volume
 called `gitberth_gitberth-data`. [Configuration](../reference/configuration.md) describes the file line by line.
 
-## 4. Fill in `.env`
+## 5. Fill in `.env`
 
 Open the file with `nano .env` and set three values:
 
@@ -63,7 +121,7 @@ TZ=UTC
 | `GITBERTH_PUBLIC_HOST` | This machine's LAN address. Gitberth uses it in every app address and connection string it shows. |
 | `TZ` | The time zone for every time Gitberth shows, its logs and the window for automatic updates, like `UTC` or `America/New_York`. |
 
-## 5. Start Gitberth
+## 6. Start Gitberth
 
 ```bash
 docker compose up -d
@@ -71,7 +129,7 @@ docker compose up -d
 
 Docker pulls the image and starts a container called `gitberth`.
 
-## 6. Sign in
+## 7. Sign in
 
 1. Open `http://192.168.50.10:8080` in your browser.
 2. Sign in with the username `admin` and the password from `.env`.
@@ -112,8 +170,13 @@ Gitberth](../guides/updating-gitberth.md) covers both ways of installing it.
 
 ## If something's wrong
 
+- **Run the installer.** It's safe on an install that's already there, made by it or by hand: it keeps your settings
+  and data, checks Docker, the LXC, the port and the container, and says what's wrong in plain words.
 - **The page doesn't load.** Check that the container runs with `docker compose ps`, and read
   `docker compose logs gitberth`.
+- **The container never starts in an LXC.** If the error mentions `ip_unprivileged_port_start`, the Proxmox host needs
+  updating (see [Before you start](#before-you-start)). Otherwise nesting is probably off: on the Proxmox host run
+  `pct set <id> --features nesting=1,keyctl=1`, then restart the LXC. The installer tells the two apart for you.
 - **The dashboard says Docker can't be read.** Gitberth can't reach the Docker socket. Check that the `volumes:` section of
   `docker-compose.yml` still mounts `/var/run/docker.sock`.
 - **App addresses show the wrong host.** Set `GITBERTH_PUBLIC_HOST`, or set the address in **Settings** › **Network**.
