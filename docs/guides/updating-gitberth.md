@@ -43,7 +43,7 @@ Back up Gitberth's data volume (see [Back up and restore](backups-and-restore.md
 | Tag | What it is |
 |---|---|
 | `latest` | The newest release. The `docker-compose.yml` from the install uses this. |
-| `1.2.0` | One release, built when release `v1.2.0` is published on GitHub. |
+| `1.2.0` | One release, built when release `v1.2.0` is published on GitHub, or when the tag `v1.2.0` is pushed, which makes that release. |
 | `1.2` | The newest release of 1.2. |
 | `edge` | The newest build of the `main` branch: changes that aren't in a release yet. |
 | `sha-<commit>` | The build of one commit. |
