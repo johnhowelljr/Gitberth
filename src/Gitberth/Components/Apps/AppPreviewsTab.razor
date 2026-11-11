@@ -142,7 +142,8 @@ else
         <Foot>
             <p class="gb-help">
                 Each preview is an app of its own, built with @View.Summary.Title's settings and its variables for previews (see Environment). Host folders aren't mounted,
-                so a preview never writes into production's files. @(parent.ProtectPreviews ? "Their domains are behind Cloudflare Access when it's set up in Settings › Domains." : "")
+                and host devices and privileged mode aren't passed in, so a preview never writes into production's files or takes its devices.
+                @(parent.PreviewForks ? "A pull request from a fork also runs without added capabilities, security options or GPUs. " : "")@(parent.ProtectPreviews ? "Their domains are behind Cloudflare Access when it's set up in Settings › Domains." : "")
             </p>
         </Foot>
     </SectionCard>

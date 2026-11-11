@@ -102,13 +102,16 @@
         busy = true;
         try
         {
-            if (await Previews.SaveSettingsAsync(App.Id, wanted) is { } problem)
+            var saved = await Previews.SaveSettingsAsync(App.Id, wanted);
+            if (saved.Problem is { } problem)
             {
                 Snackbar.Add(problem, Severity.Warning);
                 return;
             }
             loaded = wanted;
-            Snackbar.Add(wanted.Mode == PreviewMode.Off ? "Previews are off." : "Saved. Gitberth looks at the repo again now.", Severity.Success);
+            // Saved, but the previews' domains didn't follow in Cloudflare yet: said, never dropped.
+            if (saved.Warning is { } warning) Snackbar.Add($"Saved. {warning}", Severity.Warning);
+            else Snackbar.Add(wanted.Mode == PreviewMode.Off ? "Previews are off." : "Saved. Gitberth looks at the repo again now.", Severity.Success);
             await Saved.InvokeAsync();
         }
         catch (Exception ex)

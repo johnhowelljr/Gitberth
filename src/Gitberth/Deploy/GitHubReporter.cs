@@ -113,9 +113,9 @@ public static class GitHubReports
 /// <summary>
 /// Tells GitHub about deploys: a commit status per app on the commit it builds (when that's on in Settings, as it is
 /// unless turned off), and for a preview of a pull request one comment on the pull request, made once and then kept up
-/// to date. It uses the saved token; without one it does nothing. A feature the token isn't allowed to use is shown in
-/// Settings and rests for an hour (<see cref="GitHubIntegrationState"/>). It never fails a deploy: the pipeline gives it
-/// 10 seconds and logs whatever goes wrong.
+/// to date. It uses the saved token; without one it does nothing. A feature GitHub refuses on a repo is shown in Settings
+/// and rests on that repo for an hour, or everywhere when it refused the token itself (<see cref="GitHubIntegrationState"/>).
+/// It never fails a deploy: the pipeline gives it 10 seconds and logs whatever goes wrong.
 /// </summary>
 public sealed class GitHubReporter(
     IDbContextFactory<GitberthDb> dbFactory,
@@ -160,19 +160,21 @@ public sealed class GitHubReporter(
         var logUrl = GitHubReports.LogUrl(uiAddress, app.Id, report.DeploymentId);
         var address = ended && report.Status == DeployStatus.Succeeded || preview is not null ? GitHubReports.Address(app, await LanHostAsync(uiAddress, ct)) : null;
         var status = ended ? report.Status : DeployStatus.Building;
+        // A repo GitHub refused rests on its own; other repos' deploys still report.
+        var repo = $"{app.Owner}/{app.Repo}";
 
-        if (statuses && report.CommitSha is { } sha && await OnAsync(SettingKeys.GitHubStatuses, ct) && !state.Paused(GitHubFeature.Statuses, Now()))
+        if (statuses && report.CommitSha is { } sha && await OnAsync(SettingKeys.GitHubStatuses, ct) && !state.Paused(GitHubFeature.Statuses, repo, Now()))
         {
             var context = GitHubReports.Context(parentName, app.IsPreview);
             var commitStatus = GitHubReports.Status(status, report.Error, context, address, logUrl, app.IsPreview);
-            await TryAsync(GitHubFeature.Statuses, () => github.SetStatusAsync(token, app.Owner, app.Repo, sha, commitStatus, ct));
+            await TryAsync(GitHubFeature.Statuses, repo, () => github.SetStatusAsync(token, app.Owner, app.Repo, sha, commitStatus, ct));
         }
 
-        if (preview is { Kind: PreviewKind.PullRequest, PullRequest: int number } && await OnAsync(SettingKeys.GitHubComments, ct) && !state.Paused(GitHubFeature.Comments, Now()))
+        if (preview is { Kind: PreviewKind.PullRequest, PullRequest: int number } && await OnAsync(SettingKeys.GitHubComments, ct) && !state.Paused(GitHubFeature.Comments, repo, Now()))
         {
             var body = GitHubReports.CommentBody(new PreviewComment(parentName, GitHubReports.CommentState(status),
                 status == DeployStatus.Succeeded || app.CurrentImage is not null ? address : null, report.CommitSha ?? preview.HeadSha, logUrl, Now()));
-            await TryAsync(GitHubFeature.Comments, async () =>
+            await TryAsync(GitHubFeature.Comments, repo, async () =>
             {
                 if (preview.CommentId is long id && await github.UpdateCommentAsync(token, app.Owner, app.Repo, id, body, ct)) return;
                 // None yet, or someone deleted it: a new one, remembered for next time.
@@ -184,16 +186,20 @@ public sealed class GitHubReporter(
 
     private async Task<bool> OnAsync(string key, CancellationToken ct) => await settings.GetAsync(key, ct) != "false";
 
-    private async Task TryAsync(GitHubFeature feature, Func<Task> call)
+    private async Task TryAsync(GitHubFeature feature, string repo, Func<Task> call)
     {
         try
         {
             await call();
-            state.Worked(feature);
+            state.Worked(feature, repo);
+        }
+        catch (GitHubWriteException ex) when (ex.BadToken)
+        {
+            if (state.Report(feature, ex.Message, Now())) logger.LogWarning("GitHub refused Gitberth's token: {Problem}", ex.Message);
         }
         catch (GitHubWriteException ex) when (ex.MissingPermission)
         {
-            if (state.Report(feature, ex.Message, Now())) logger.LogWarning("GitHub refused Gitberth's token: {Problem}", ex.Message);
+            if (state.Refused(feature, repo, ex.Message, Now())) logger.LogWarning("GitHub refused Gitberth on {Repo}: {Problem}", repo, ex.Message);
         }
         catch (GitHubWriteException ex)
         {

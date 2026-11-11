@@ -76,6 +76,9 @@ on by itself for those names when it suggests them for a Node.js app.
 - Changing a build-time variable needs a new build. Gitberth saves it, and the next deploy builds the app with it.
 - In the Dockerfiles Gitberth generates, secret values reach the build as BuildKit secrets, so they're never written into
   the image's history. Other values go in as build arguments.
+- Docker's build cache doesn't see secret values, so Gitberth gives the build steps that use them one more build
+  argument, `GITBERTH_SECRETS`, made from the values with a key only this Gitberth has: it gives none of them away, and
+  a changed secret (or a preview's own value) builds those steps again instead of reusing what an older value built.
 - A Dockerfile in your repo only gets build arguments, and only for the `ARG`s it declares.
 
 ## Variables kept in GitHub

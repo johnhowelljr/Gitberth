@@ -48,9 +48,11 @@ public sealed record PreviewSettingsFacts(PreviewMode Mode, string ProductionBra
 /// <item>A pull request (an open one, from this repo, or from a fork when the app allows forks) gets a preview.</item>
 /// <item>A branch other than the production one gets a preview when it gets a new commit after branch previews were
 /// turned on: the first time the planner sees branches it notes their commits, so turning previews on doesn't build
-/// every old branch at once. A branch a pull request previews gets no preview of its own.</item>
+/// every old branch at once. A branch a pull request previews gets no preview of its own, and once the pull request is
+/// closed or merged, only a later commit gives it one.</item>
 /// <item>A preview goes when its pull request closes or is merged, its branch is deleted, previews (or that kind of
-/// them) are turned off, or it has had no new commit for the expiry days.</item>
+/// them) are turned off, forks are turned off for a fork's pull request, or it has had no new commit for the expiry
+/// days.</item>
 /// </list>
 /// </summary>
 public static class PreviewPlanner
@@ -60,6 +62,9 @@ public static class PreviewPlanner
 
     /// <summary>Why a pull request's preview goes when it's no longer open (GitHub is asked which, when it can be).</summary>
     public const string ClosedReason = "the pull request was closed or merged";
+
+    /// <summary>Why a fork's pull request's preview goes when forks are turned off.</summary>
+    public const string ForksOffReason = "pull requests from forks aren't previewed any more";
 
     public static string SkipKeyOf(PreviewKind kind, string branch, int? pullRequest) =>
         kind == PreviewKind.PullRequest ? "pr:" + pullRequest?.ToString(CultureInfo.InvariantCulture) : "branch:" + branch;
@@ -101,6 +106,12 @@ public static class PreviewPlanner
         // ---- Pull requests ----
         foreach (var p in existing.Where(p => p.Kind == PreviewKind.PullRequest))
         {
+            // Forks turned off: a fork's preview goes, whether or not GitHub can be asked, and never takes a new commit.
+            if (p.FromFork && !parent.Forks)
+            {
+                Remove(p, ForksOffReason);
+                continue;
+            }
             if (open is null)
             {
                 // GitHub can't be asked: the repo's own list still has its newest commit.
@@ -109,7 +120,7 @@ public static class PreviewPlanner
             }
             var pull = open.FirstOrDefault(o => o.Number == p.PullRequest);
             if (pull is null) Remove(p, ClosedReason);
-            else if (pull.FromFork && !parent.Forks) Remove(p, "pull requests from forks aren't previewed any more");
+            else if (pull.FromFork && !parent.Forks) Remove(p, ForksOffReason);
             else if (pull.HeadSha != p.HeadSha || pull.Title != p.Title) update.Add(new PreviewUpdate(p.AppId, pull.HeadSha, pull.Title, pull.HeadSha != p.HeadSha));
         }
         foreach (var pull in eligible ?? [])
@@ -131,6 +142,10 @@ public static class PreviewPlanner
         else
         {
             var candidates = branches.Where(b => b.Name != parent.ProductionBranch && !previewedByPull.Contains(b.Name)).ToList();
+            // A branch a pull request previews, and the production branch, have their commit noted on every look: when the
+            // pull request is merged and its branch stays (or production moves to another branch), the branch gets a
+            // preview only with a later commit.
+            foreach (var b in branches.Where(b => b.Name == parent.ProductionBranch || previewedByPull.Contains(b.Name))) next["branch:" + b.Name] = b.Sha;
             // The first look: every branch's commit is noted, and only a later one gets a preview.
             var first = !skips.ContainsKey(BaselineKey);
             if (first)

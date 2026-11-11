@@ -49,6 +49,9 @@ public sealed class StartupTasks(
                 dep.FinishedAt = DateTime.UtcNow;
             }
             await db.SaveChangesAsync(stoppingToken);
+            // A promote cut short lets production follow its branch again.
+            foreach (var appId in interrupted.Where(d => d.Trigger == DeployTrigger.Promote).Select(d => d.AppId).Distinct())
+                await RepoWatcher.ForgetUnheldPromotionAsync(db, appId, stoppingToken);
         }
 
         foreach (var dir in Directory.EnumerateDirectories(options.WorkDir)) DeployPaths.TryDeleteDirectory(dir);

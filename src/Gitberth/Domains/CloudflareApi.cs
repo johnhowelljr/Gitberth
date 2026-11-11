@@ -6,7 +6,15 @@ using System.Text.Json.Nodes;
 
 namespace Gitberth.Domains;
 
-public sealed class CloudflareApiException(string message) : Exception(message);
+/// <param name="transient">Cloudflare failed for a moment rather than because of how things are set up (see <see cref="Transient"/>).</param>
+public sealed class CloudflareApiException(string message, bool transient = false) : Exception(message)
+{
+    /// <summary>
+    /// Cloudflare was busy or out of reach (it answered 5xx or 429, or not at all, or not in time): the same call may work
+    /// in a while. A refused token, a missing permission or something not set up is never transient.
+    /// </summary>
+    public bool Transient { get; } = transient;
+}
 
 public sealed record CloudflareZone(string Id, string Name);
 
@@ -126,8 +134,14 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
 
     // ---- Cloudflare Access (Zero Trust): protected domains ----
 
-    /// <summary>The permission protecting domains needs on top of <see cref="Permissions"/>, as Cloudflare's token page names it.</summary>
-    public const string AccessPermission = "Account › Access: Apps and Policies › Edit";
+    /// <summary>Makes, changes and removes the Access applications that protect domains.</summary>
+    public const string AccessAppsPermission = "Account › Access: Apps and Policies › Edit";
+
+    /// <summary>Reads the account's Zero Trust team domain, where visitors sign in: Cloudflare keeps it apart from the applications.</summary>
+    public const string AccessOrganizationPermission = "Account › Access: Organizations, Identity Providers, and Groups › Read";
+
+    /// <summary>What protecting domains needs on top of <see cref="Permissions"/>, as Cloudflare's token page names it.</summary>
+    public const string AccessPermission = AccessAppsPermission + " and " + AccessOrganizationPermission;
 
     /// <summary>How Gitberth names the Access applications it makes: "Gitberth: app.example.com". Only those are ever changed or removed.</summary>
     public const string AccessAppPrefix = "Gitberth: ";
@@ -238,11 +252,11 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
         }
         catch (HttpRequestException ex)
         {
-            throw new CloudflareApiException($"api.cloudflare.com couldn't be reached to {doing} ({ex.Message}).");
+            throw new CloudflareApiException($"api.cloudflare.com couldn't be reached to {doing} ({ex.Message}).", transient: true);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new CloudflareApiException($"api.cloudflare.com didn't answer in time to {doing}.");
+            throw new CloudflareApiException($"api.cloudflare.com didn't answer in time to {doing}.", transient: true);
         }
         using (response)
         {
@@ -257,9 +271,12 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
             if (response.IsSuccessStatusCode && doc?["success"] is JsonValue ok && ok.TryGetValue<bool>(out var success) && success)
                 return (doc["result"], doc["result_info"]);
             if (notFoundOk && response.StatusCode == HttpStatusCode.NotFound) return (null, null);
-            throw new CloudflareApiException(Explain(response.StatusCode, doc, doing, permissions));
+            throw new CloudflareApiException(Explain(response.StatusCode, doc, doing, permissions), IsTransient(response.StatusCode));
         }
     }
+
+    /// <summary>Whether an answer means Cloudflare is busy or failing for now (5xx, its rate limit, a timeout), so asking again later may work.</summary>
+    internal static bool IsTransient(HttpStatusCode status) => status is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout || (int)status >= 500;
 
     /// <summary>Cloudflare's error, said plainly: a missing permission names the one the token needs.</summary>
     internal static string Explain(HttpStatusCode status, JsonNode? doc, string doing, string permissions = Permissions)

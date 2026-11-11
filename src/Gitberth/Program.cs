@@ -155,6 +155,8 @@ builder.Services.AddSingleton<RestartSchedules>();
 builder.Services.AddSingleton<RestartScheduler>();
 // Preview deployments: a Git app's branches and pull requests as apps of their own (the repo watcher drives them).
 builder.Services.AddSingleton<GitHubPulls>();
+// Shared by PreviewService and AppActions: deleting an app never races a watcher pass that would make its previews again.
+builder.Services.AddSingleton<Gitberth.Previews.PreviewGate>();
 builder.Services.AddSingleton<Gitberth.Previews.PreviewService>();
 builder.Services.AddHostedService<StartupTasks>();
 // Before the event watcher, so they hear its first starts.
@@ -163,7 +165,8 @@ builder.Services.AddHostedService<AppSync>();
 builder.Services.AddHostedService<UpdateWatcher>();
 builder.Services.AddHostedService<PortChangeWatcher>();
 builder.Services.AddHostedService<RepoWatcher>();
-// Domains taken off an app whose route or DNS record couldn't be removed yet: tried again every 15 minutes.
+// What a sync couldn't finish (the tunnel, a removed domain's route or DNS record, a protected domain not behind
+// Cloudflare Access yet, an Access application Cloudflare couldn't remove for the moment): tried again every 15 minutes.
 builder.Services.AddHostedService<RemovalRetry>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerEventWatcher>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerStatsCollector>());
@@ -199,9 +202,8 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 // GitHub's webhook (instant deploys): anonymous, signed by GitHub with Gitberth's secret instead of a sign-in or a form token.
-app.MapPost(GitHubWebhookEndpoint.Path, (HttpContext context) => context.RequestServices.GetRequiredService<GitHubWebhookEndpoint>().HandleAsync(context))
-    .AllowAnonymous()
-    .DisableAntiforgery();
+// Every method is mapped, so its host answers a bare status code and never shows Gitberth's pages.
+GitHubWebhookEndpoint.Map(app);
 
 app.MapPost("/logout", async (HttpContext context, IAntiforgery antiforgery) =>
 {

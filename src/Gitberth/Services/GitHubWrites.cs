@@ -8,10 +8,12 @@ namespace Gitberth.Services;
 /// <summary>What Gitberth tells GitHub about deploys, or asks it to do, each with the token permission it needs.</summary>
 public enum GitHubFeature { Statuses, Comments, Webhooks }
 
-/// <param name="MissingPermission">GitHub refused because the token lacks a permission (or can't see the repo): asking again won't help for a while.</param>
-public sealed class GitHubWriteException(string message, bool missingPermission = false) : Exception(message)
+/// <param name="MissingPermission">GitHub refused on this repo (403 or 404): the token lacks the permission there, or can't see the repo. Asking again there won't help for a while; other repos may be fine.</param>
+/// <param name="BadToken">GitHub refused the token itself (401): nothing works with it until it's replaced.</param>
+public sealed class GitHubWriteException(string message, bool missingPermission = false, bool badToken = false) : Exception(message)
 {
     public bool MissingPermission { get; } = missingPermission;
+    public bool BadToken { get; } = badToken;
 }
 
 /// <summary>A commit status: pending, success, failure or error, with a line of text and a link, under a context of its own.</summary>
@@ -94,7 +96,8 @@ public sealed class GitHubWrites(IHttpClientFactory httpFactory)
     }
 
     /// <summary>Adds Gitberth's webhook to the repo, or sets an existing one (same URL) to send what Gitberth needs, signed with its secret.</summary>
-    public async Task SaveHookAsync(string token, string owner, string repo, long? existingId, string url, string secret, CancellationToken ct = default)
+    /// <returns>The webhook's ID; null when GitHub didn't say which one it added.</returns>
+    public async Task<long?> SaveHookAsync(string token, string owner, string repo, long? existingId, string url, string secret, CancellationToken ct = default)
     {
         var body = new
         {
@@ -107,6 +110,7 @@ public sealed class GitHubWrites(IHttpClientFactory httpFactory)
             ? await SendAsync(token, HttpMethod.Patch, $"repos/{owner}/{repo}/hooks/{id}", body, ct)
             : await SendAsync(token, HttpMethod.Post, $"repos/{owner}/{repo}/hooks", body, ct);
         await EnsureOkAsync(response, GitHubFeature.Webhooks, $"add a webhook to {owner}/{repo}", ct);
+        return existingId ?? ReadId(await response.Content.ReadAsStringAsync(ct));
     }
 
     private async Task<HttpResponseMessage> SendAsync(string token, HttpMethod method, string path, object? body, CancellationToken ct)
@@ -131,24 +135,26 @@ public sealed class GitHubWrites(IHttpClientFactory httpFactory)
         }
     }
 
-    // A fine-grained token answers 403 when it lacks the permission and 404 for a repo it can't see; a classic one needs
-    // its scopes. A 403 or 429 can also be the rate limit, which isn't about permissions.
+    // A fine-grained token answers 403 when it lacks the permission and 404 for a repo it can't see, which is about that
+    // repo only; 401 is the token itself. A classic one needs its scopes. A 403 or 429 can also be the rate limit, which
+    // isn't about permissions.
     private static async Task EnsureOkAsync(HttpResponseMessage response, GitHubFeature feature, string doing, CancellationToken ct)
     {
         if (response.IsSuccessStatusCode) return;
         if (IsRateLimited(response))
             throw new GitHubWriteException($"GitHub's API rate limit for this token is used up, so Gitberth couldn't {doing}. It tries again with the next deploy.");
         if (response.StatusCode == HttpStatusCode.Unauthorized)
-            throw new GitHubWriteException("GitHub says the token is invalid or expired. Update it in Settings.", missingPermission: true);
+            throw new GitHubWriteException("GitHub says the token is invalid or expired. Update it in Settings.", badToken: true);
         if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
             throw new GitHubWriteException(MissingPermissionText(feature, doing), missingPermission: true);
         throw new GitHubWriteException($"GitHub didn't let Gitberth {doing}: {await ErrorMessageAsync(response, ct)} (HTTP {(int)response.StatusCode}).");
     }
 
-    /// <summary>What to tell someone whose token can't do this: the permission it needs, for either kind of token.</summary>
+    /// <summary>What to tell someone whose token can't do this on a repo: the permission it needs, for either kind of token.</summary>
     internal static string MissingPermissionText(GitHubFeature feature, string doing) =>
-        $"The GitHub token isn't allowed to {doing}. For a fine-grained token, edit it at github.com/settings/personal-access-tokens and set Repository permissions > {PermissionFor(feature)}; "
-        + $"a classic token needs {ClassicScopeFor(feature)}. Gitberth stops trying for an hour, or until the token is saved again.";
+        $"The GitHub token isn't allowed to {doing}. For a fine-grained token, edit it at github.com/settings/personal-access-tokens: the repo must be one of its repositories, "
+        + $"with Repository permissions > {PermissionFor(feature)}; a classic token needs {ClassicScopeFor(feature)}. "
+        + "Gitberth stops trying on this repo for an hour, or until the token is saved again.";
 
     private static bool IsRateLimited(HttpResponseMessage response) =>
         response.StatusCode == HttpStatusCode.TooManyRequests

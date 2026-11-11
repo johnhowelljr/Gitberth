@@ -75,10 +75,13 @@ public sealed class AppSettingsService
         var fields = SettingsDiff.Changed(edit.Loaded, edit.Wanted);
         var secrets = edit.WantedOptions.SecretKeys;
         var own = OptionLines(edit.LoadedOptions, edit.WantedOptions).Concat(GitLines(edit.LoadedGit, edit.WantedGit)).ToList();
-        var plan = new SettingsPlan { Key = key, Edit = edit, Lines = own, Consequence = own.Count > 0 ? "Saved at once: nothing restarts." : null };
+        // Gitberth's own fields are checked whatever else changed, so Apply never meets them as an error halfway.
+        var ownProblems = OptionProblems(edit.LoadedOptions, edit.WantedOptions);
+        var plan = new SettingsPlan { Key = key, Edit = edit, Lines = own, Problems = ownProblems, Consequence = own.Count > 0 ? "Saved at once: nothing restarts." : null };
         if (fields.Count == 0) return plan;
         var context = await ContextAsync(app.Source == AppSource.Git, ct);
-        var problems = SettingsRules.Check(edit.Wanted, context).Where(p => p.Field is not { } f || fields.Contains(f)).Concat(LabelProblems(edit, fields)).ToList();
+        var problems = SettingsRules.Check(edit.Wanted, context).Where(p => p.Field is not { } f || fields.Contains(f)).Concat(LabelProblems(edit, fields))
+            .Concat(ownProblems).ToList();
 
         // A Git app: saved, its limits applied live, the rest by a deploy without a build.
         if (app.Source == AppSource.Git)
@@ -349,6 +352,20 @@ public sealed class AppSettingsService
                 .OrderBy(l => l.Key, StringComparer.Ordinal);
         if (!Reserved(edit.Loaded.Labels).SequenceEqual(Reserved(edit.Wanted.Labels)))
             yield return new SettingProblem(SettingField.Labels, "The gitberth.* and com.docker.compose.* labels are Gitberth's and Compose's: they can't be changed here.");
+    }
+
+    /// <summary>
+    /// What's wrong with the edit's own Gitberth fields, as saving them would refuse it (a name that can't be used, a
+    /// restart sooner than every 5 minutes), said before Apply: only what changed is checked.
+    /// </summary>
+    internal static List<SettingProblem> OptionProblems(AppOptions before, AppOptions after)
+    {
+        var problems = new List<SettingProblem>();
+        var name = after.Name.Trim();
+        if (name != before.Name && (AppService.NameProblem(name) ?? ContainerTitles.Problem(name)) is { } nameProblem) problems.Add(new(null, nameProblem));
+        if (after.ScheduledRestart is { } every && every != before.ScheduledRestart && RestartInterval.Problem(every.Amount, every.Unit) is { } restartProblem)
+            problems.Add(new(null, "Scheduled restart: " + restartProblem));
+        return problems;
     }
 
     // The CHANGE lines of Gitberth's own data, applied at once.

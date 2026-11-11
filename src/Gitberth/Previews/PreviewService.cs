@@ -29,6 +29,11 @@ public sealed record PreviewSettings(PreviewMode Mode, int Limit, int ExpiryDays
         : null;
 }
 
+/// <summary>What saving a Git app's preview settings did.</summary>
+/// <param name="Problem">Why nothing was saved; null when the settings were.</param>
+/// <param name="Warning">They were saved, but the previews' domains didn't follow in Cloudflare yet: why.</param>
+public sealed record PreviewSave(string? Problem, string? Warning = null);
+
 /// <summary>One preview, as its parent's Previews tab lists it.</summary>
 /// <param name="Key">Its own page's key: its container's name.</param>
 /// <param name="Url">The pull request on GitHub, or the branch.</param>
@@ -59,6 +64,7 @@ public sealed record PreviewOf(PreviewInfo Info, int ParentId, string ParentName
 /// Previews tab lists them and acts on them; Promote builds a preview's commit as production.
 /// </summary>
 /// <param name="hostPorts">Picks a preview's host port; without it (in tests) the first one no saved port has from its container port up.</param>
+/// <param name="gate">One change to previews at a time, shared with deleting an app (AppActions); without it, one of its own.</param>
 public sealed class PreviewService(
     IDbContextFactory<GitberthDb> dbFactory,
     AppActions actions,
@@ -70,7 +76,8 @@ public sealed class PreviewService(
     ActivityLog activity,
     WatchState watch,
     ILogger<PreviewService> logger,
-    HostPortMap? hostPorts = null)
+    HostPortMap? hostPorts = null,
+    PreviewGate? gate = null)
 {
     /// <summary>How often a repo's pull requests are asked for at most when nothing says they changed.</summary>
     internal TimeSpan PullsEvery { get; set; } = TimeSpan.FromMinutes(5);
@@ -78,8 +85,9 @@ public sealed class PreviewService(
     /// <summary>The clock the planner reads; tests move it.</summary>
     internal Func<DateTime> Now { get; set; } = () => DateTime.UtcNow;
 
-    // One change to previews at a time: the watcher's pass, a removal by hand, a settings save, a promote.
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    // One change to previews at a time: the watcher's pass, a removal by hand, a settings save, a promote, and an app
+    // being deleted with its previews.
+    private readonly PreviewGate _gate = gate ?? new PreviewGate();
 
     /// <summary>A repo's open pull requests as GitHub last listed them, and the heads the repo listed then.</summary>
     private sealed record PullCache(DateTime At, IReadOnlyList<PullRequestInfo>? Pulls, IReadOnlyDictionary<int, string> Heads, string? Error);
@@ -283,11 +291,16 @@ public sealed class PreviewService(
     internal async Task<int> CreateAsync(AppDefinition parent, PreviewTarget target, CancellationToken ct)
     {
         var label = PreviewNames.Label(target.Kind, target.Branch, target.PullRequest);
+        // Its named volumes are named after its slug (gb-<slug>-<name>): a slug that gives one of them the name of another
+        // app's volume, or of one Docker has already, would have the preview use, and its removal delete, someone else's data.
+        var volumes = PreviewCopy.Volumes(parent.Volumes).Select(v => v.Source).ToList();
+        var takenVolumes = volumes.Count == 0 ? null : await VolumesTakenAsync(ct);
         string? slug = null;
-        // The usual name first; when it's taken (another app, a container, a route), another hash of what it previews.
+        // The usual name first; when it's taken (another app, a container, a route, a volume), another hash of what it previews.
         for (var salt = 0; salt < 5 && slug is null; salt++)
         {
             var candidate = PreviewNames.Slug(parent.Slug, target.Kind, target.Branch, target.PullRequest, salt);
+            if (takenVolumes is not null && volumes.Any(v => takenVolumes.Contains(VolumeNames.Resolve(candidate, v)))) continue;
             if (await apps.ChooseSlugAsync(candidate, ct) is { Taken: null } chosen && chosen.Slug == candidate) slug = candidate;
         }
         if (slug is null) throw new InvalidOperationException($"No free name was found for the preview of {parent.Name} for {label}.");
@@ -330,6 +343,8 @@ public sealed class PreviewService(
                         domain.Service = removal.Service;
                         db.DomainRemovals.Remove(removal);
                     }
+                    // Once GitHub's webhook host, it's the preview's now (see DomainService.ForgetEarlierHostsAsync).
+                    await DomainService.ForgetEarlierHostsAsync(db, [hostname], ct);
                     row.Domains.Add(domain);
                 }
             }
@@ -344,6 +359,17 @@ public sealed class PreviewService(
         await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Event,
             $"Preview {label} added{(target.Title is { Length: > 0 } title ? $": {title}" : "")}.", ActivityTone.Neutral, ct);
         return row.Id;
+    }
+
+    // Every volume name an app's row gives (gb-<slug>-<name>), and every volume Docker has. Never guessed: without
+    // Docker's list, the preview waits for the next look. Later changes are checked where they're made (VolumeOwners).
+    private async Task<HashSet<string>> VolumesTakenAsync(CancellationToken ct)
+    {
+        var taken = new HashSet<string>(await docker.VolumeNamesAsync(ct)
+            ?? throw new InvalidOperationException("Docker didn't say which volumes it has, so the preview's volumes can't be checked yet."), StringComparer.Ordinal);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        taken.UnionWith((await VolumeOwners.LoadAsync(db, ct)).Names);
+        return taken;
     }
 
     // The host port for a preview's web port: the map's suggestion (its container port when free, else the next free one).
@@ -428,9 +454,8 @@ public sealed class PreviewService(
         var head = await (ProductionHead ?? BranchHeadAsync)(parent, ct);
         if (head is null)
             throw new InvalidOperationException($"Gitberth can't see the newest commit on {parent.Branch} right now, so production can't be kept on the preview's. Try again in a moment.");
-        await using (var db = await dbFactory.CreateDbContextAsync(ct))
-            await db.Apps.Where(a => a.Id == parent.Id).ExecuteUpdateAsync(s => s.SetProperty(a => a.PromotedOverCommit, head), ct);
-        var deployment = await actions.DeployAsync(parent.Id, DeployTrigger.Promote, ct, expectedSha: commit, gitRef: info.Ref, commit: commit);
+        // The branch's commit production stays off is saved with the promote's deploy, never without it.
+        var deployment = await actions.DeployAsync(parent.Id, DeployTrigger.Promote, ct, expectedSha: commit, gitRef: info.Ref, commit: commit, promotedOver: head);
         await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Event,
             $"Preview {PreviewNames.Label(info.Kind, info.Branch, info.PullRequest)} promoted: production builds {commit[..Math.Min(7, commit.Length)]} and stays on it until the next commit on {parent.Branch}.",
             ActivityTone.Neutral, ct);
@@ -456,45 +481,62 @@ public sealed class PreviewService(
     // ---- Settings ----
 
     /// <summary>
-    /// Saves a Git app's preview settings. Turning previews off removes its previews (the page asks first); turning the
-    /// protection of their domains on or off follows on every preview's domain. Returns why it couldn't, or null.
+    /// Saves a Git app's preview settings. Turning previews off removes its previews (the page asks first), and turning
+    /// forks off removes the previews of pull requests from forks; turning the protection of their domains on or off
+    /// follows on every preview's domain, and what the tunnel didn't take yet is said (<see cref="PreviewSave.Warning"/>):
+    /// above all a domain that may still be open while protection is on.
     /// </summary>
-    public async Task<string?> SaveSettingsAsync(int parentId, PreviewSettings wanted, CancellationToken ct = default)
+    public async Task<PreviewSave> SaveSettingsAsync(int parentId, PreviewSettings wanted, CancellationToken ct = default)
     {
-        if (wanted.Problem is { } problem) return problem;
+        if (wanted.Problem is { } problem) return new(problem);
+        string? warning = null;
         await _gate.WaitAsync(ct);
         try
         {
             PreviewSettings before;
-            List<int> previewIds;
+            List<int> previewIds, forkIds;
+            List<string> hostnames = [];
             await using (var db = await dbFactory.CreateDbContextAsync(ct))
             {
                 var app = await db.Apps.FirstOrDefaultAsync(a => a.Id == parentId, ct);
-                if (app is null) return "That app doesn't exist any more.";
-                if (!app.Deployed || app.IsPreview) return $"{app.Name} isn't deployed from a repo, so it has no previews.";
+                if (app is null) return new("That app doesn't exist any more.");
+                if (!app.Deployed || app.IsPreview) return new($"{app.Name} isn't deployed from a repo, so it has no previews.");
                 before = PreviewSettings.Of(app);
                 (app.PreviewMode, app.PreviewLimit, app.PreviewExpiryDays, app.PreviewForks, app.ProtectPreviews) = (wanted.Mode, wanted.Limit, wanted.ExpiryDays, wanted.Forks, wanted.Protect);
                 app.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
                 previewIds = await db.Apps.AsNoTracking().Where(a => a.ParentAppId == parentId).Select(a => a.Id).ToListAsync(ct);
+                forkIds = await db.Previews.AsNoTracking().Where(p => p.ParentAppId == parentId && p.FromFork).Select(p => p.AppId).ToListAsync(ct);
                 if (wanted.Protect != before.Protect && previewIds.Count > 0)
+                {
                     await db.Domains.Where(d => previewIds.Contains(d.AppId)).ExecuteUpdateAsync(s => s.SetProperty(d => d.Protected, wanted.Protect), ct);
+                    // The domains of the previews that stay: a fork's that goes below is no one's to warn about.
+                    var staying = wanted.Forks ? previewIds : previewIds.Except(forkIds).ToList();
+                    hostnames = await db.Domains.AsNoTracking().Where(d => staying.Contains(d.AppId)).Select(d => d.Hostname).ToListAsync(ct);
+                }
             }
             if (wanted.Mode == PreviewMode.Off && before.Mode != PreviewMode.Off)
             {
                 foreach (var id in previewIds) await RemoveCoreAsync(id, "previews were turned off", ct);
                 await SaveSkipsAsync(parentId, new Dictionary<string, string>(), ct);
             }
-            else if (wanted.Protect != before.Protect && previewIds.Count > 0)
+            else
             {
-                // The tunnel and Cloudflare Access follow the domains' new protection.
-                try
+                // Forks turned off: their previews go now, so none of their code is built or run again.
+                if (!wanted.Forks)
+                    foreach (var id in forkIds) await RemoveCoreAsync(id, PreviewPlanner.ForksOffReason, ct);
+                if (wanted.Protect != before.Protect && hostnames.Count > 0)
                 {
-                    if (await domains.EnabledAsync(ct)) await domains.SyncAsync(ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger.LogWarning(ex, "The previews' domains couldn't be synced after their protection changed");
+                    // The tunnel and Cloudflare Access follow the domains' new protection; what didn't is said, not dropped.
+                    try
+                    {
+                        if (await domains.EnabledAsync(ct)) warning = DomainsWarning(await domains.SyncAsync(ct), hostnames, wanted.Protect);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        logger.LogWarning(ex, "The previews' domains couldn't be synced after their protection changed");
+                        warning = $"Gitberth couldn't update the previews' domains in Cloudflare ({ex.Message}).";
+                    }
                 }
             }
         }
@@ -503,8 +545,14 @@ public sealed class PreviewService(
             _gate.Release();
         }
         watch.CheckNow();
-        return null;
+        return new(null, warning);
     }
+
+    // What the sync left undone for the previews' domains: one that may still be open while they're to be protected, or
+    // still behind Access while they're not, else its first problem.
+    private static string? DomainsWarning(SyncReport report, List<string> hostnames, bool protect) =>
+        (protect ? DomainService.NotProtectedYet(report, hostnames) : DomainService.NotOpenYet(report, hostnames))
+        ?? report.For(hostnames).Notes.FirstOrDefault(n => n.Problem)?.Text;
 
     // ---- What the pages show ----
 

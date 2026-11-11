@@ -21,10 +21,40 @@ public sealed partial class DomainService
     /// <summary>The payload URL GitHub sends deliveries to, for a webhook host name.</summary>
     public static string WebhookUrl(string host) => $"https://{host}/hooks/github";
 
+    /// <summary>How many earlier webhook host names are remembered.</summary>
+    private const int EarlierKept = 10;
+
+    /// <summary>The earlier webhook host names, as saved (<see cref="SettingKeys.GitHubWebhookHostsBefore"/>), newest first.</summary>
+    internal static List<string> EarlierHosts(string? saved) =>
+        [.. (saved ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
+
+    /// <summary>
+    /// The earlier webhook host names, less these apps' domains, which are forgotten as earlier ones: from the moment a name
+    /// is an app's, its rules in the tunnel are the app's (or whoever made them), never Gitberth's to remove. Saved with the
+    /// context's next save. Earlier names play no part on GitHub: a webhook there is Gitberth's only by the ID it recorded,
+    /// or by its payload URL (<see cref="WebhookKeeper"/>).
+    /// </summary>
+    internal static async Task<List<string>> ForgetEarlierHostsAsync(GitberthDb db, IEnumerable<string> domains, CancellationToken ct)
+    {
+        var row = await db.Settings.FirstOrDefaultAsync(s => s.Key == SettingKeys.GitHubWebhookHostsBefore, ct);
+        var earlier = EarlierHosts(row?.Value);
+        var taken = domains.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var kept = earlier.Where(h => !taken.Contains(h)).ToList();
+        if (row is not null && kept.Count < earlier.Count)
+        {
+            if (kept.Count == 0) db.Settings.Remove(row);
+            else row.Value = string.Join('\n', kept);
+        }
+        return kept;
+    }
+
     /// <summary>
     /// Sets (or, with an empty one, takes away) the host name GitHub's webhooks reach Gitberth on, and routes it: the old
-    /// one's route and the DNS record Gitberth added go the way a removed domain's do. Makes the webhook's secret the first
-    /// time. A name one of the apps has, or one with routes of its own in the tunnel, isn't taken.
+    /// one's route and the DNS record Gitberth added go the way a removed domain's do. The old one is remembered, so its
+    /// rules in the tunnel are known as Gitberth's; the webhooks on GitHub follow by the IDs Gitberth recorded
+    /// (<see cref="WebhookKeeper"/>) in the keeper's next run, or stay where they are when it can't move them then, and
+    /// they're forgotten once the name is taken away. Makes the webhook's secret the first time. A name one of the apps
+    /// has, or one with routes of its own in the tunnel, isn't taken.
     /// </summary>
     public async Task<(string? Error, SyncReport Report)> SetWebhookHostAsync(string? input, CancellationToken ct = default)
     {
@@ -59,6 +89,12 @@ public sealed partial class DomainService
             }
             if (hostname is not null && await settings.GetSecretAsync(SettingKeys.GitHubWebhookSecret, ct) is null)
                 await settings.SetSecretAsync(SettingKeys.GitHubWebhookSecret, WebhookSignature.NewSecret(), ct);
+            if (before is not null)
+            {
+                List<string> earlier = [before, .. EarlierHosts(await settings.GetAsync(SettingKeys.GitHubWebhookHostsBefore, ct))];
+                var kept = earlier.Where(h => !string.Equals(h, hostname, StringComparison.OrdinalIgnoreCase)).Distinct(StringComparer.OrdinalIgnoreCase).Take(EarlierKept);
+                await settings.SetAsync(SettingKeys.GitHubWebhookHostsBefore, string.Join('\n', kept), ct);
+            }
             await settings.SetAsync(SettingKeys.GitHubWebhookHost, hostname, ct);
             return (null, await SyncIfTokenAsync(ct));
         }

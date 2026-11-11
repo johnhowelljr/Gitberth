@@ -94,10 +94,26 @@ public sealed class RepoWatcher(
 
     /// <summary>
     /// Whether production stays on a promoted preview's commit: the branch's commit is still the one it was promoted over.
-    /// Any other commit (a new one on the branch) is deployed as usual, and production follows its branch again.
+    /// Any other commit (a new one on the branch) is deployed as usual, and production follows its branch again. So does
+    /// the same commit once the promote is known not to hold (<see cref="ForgetUnheldPromotionAsync"/>).
     /// </summary>
     public static bool StaysPromoted(AppDefinition app, string remoteSha) =>
         app.PromotedOverCommit is { } promoted && string.Equals(promoted, remoteSha, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Clears the app's PromotedOverCommit unless its newest Promote deploy is queued, under way or worked: a promote that
+    /// never ran (Gitberth restarted, a newer deploy took its place, the app was stopped) or failed doesn't keep production
+    /// off its branch. One statement, so a promote saved meanwhile (its deploy is queued with it) stays. Returns whether it
+    /// cleared it.
+    /// </summary>
+    internal static async Task<bool> ForgetUnheldPromotionAsync(GitberthDb db, int appId, CancellationToken ct = default) =>
+        await db.Apps.Where(a => a.Id == appId && a.PromotedOverCommit != null
+                // No promote that's queued, under way or worked and has no newer promote after it.
+                && !db.Deployments.Any(d => d.AppId == a.Id && d.Trigger == DeployTrigger.Promote
+                    && (d.Status == DeployStatus.Queued || d.Status == DeployStatus.Cloning || d.Status == DeployStatus.Building
+                        || d.Status == DeployStatus.Starting || d.Status == DeployStatus.Succeeded)
+                    && !db.Deployments.Any(e => e.AppId == a.Id && e.Trigger == DeployTrigger.Promote && e.Id > d.Id)))
+            .ExecuteUpdateAsync(s => s.SetProperty(a => a.PromotedOverCommit, (string?)null), ct) > 0;
 
     /// <summary>Deploy when the branch tip is neither what's running nor the commit that was last tried.</summary>
     public static bool ShouldDeploy(AppDefinition app, string remoteSha, bool deployInProgress) =>
@@ -190,19 +206,16 @@ public sealed class RepoWatcher(
                 var sha = remote.Branches.FirstOrDefault(b => b.Name == app.Branch)?.Sha;
                 state.Record(app.Id, sha, sha is null ? $"Branch '{app.Branch}' doesn't exist anymore." : null);
                 if (sha is null || busy.Contains(app.Id)) continue;
-                // Promoted: production stays on the preview's commit until the branch gets a new one.
-                if (StaysPromoted(app, sha)) continue;
-                if (app.PromotedOverCommit is not null) await ForgetPromotionAsync(app.Id, ct);
-                if (ShouldDeploy(app, sha, deployInProgress: false))
+                switch (await NextDeployAsync(dbFactory, app, sha, trigger, logger, ct))
                 {
-                    logger.LogInformation("New commit {Sha} on {Repo} ({Branch}); deploying {App}", sha[..7], repo.Key, app.Branch, app.Name);
-                    await actions.DeployAsync(app.Id, trigger, ct, expectedSha: sha);
-                }
-                else if (!string.Equals(sha, app.CurrentCommit, StringComparison.OrdinalIgnoreCase)
-                    && ShouldRetry(app, sha, await GetLastAttemptAsync(app.Id, sha, ct), BuildStamp.Current, DateTime.UtcNow))
-                {
-                    logger.LogInformation("Retrying {App} at {Sha}, whose last build failed", app.Name, sha[..7]);
-                    await actions.DeployAsync(app.Id, DeployTrigger.Retry, ct, expectedSha: sha);
+                    case DeployTrigger.Retry:
+                        logger.LogInformation("Retrying {App} at {Sha}, whose last build failed", app.Name, sha[..7]);
+                        await actions.DeployAsync(app.Id, DeployTrigger.Retry, ct, expectedSha: sha);
+                        break;
+                    case { } why:
+                        logger.LogInformation("New commit {Sha} on {Repo} ({Branch}); deploying {App}", sha[..7], repo.Key, app.Branch, app.Name);
+                        await actions.DeployAsync(app.Id, why, ct, expectedSha: sha);
+                        break;
                 }
             }
 
@@ -211,19 +224,39 @@ public sealed class RepoWatcher(
         }
     }
 
-    private async Task ForgetPromotionAsync(int appId, CancellationToken ct)
+    /// <summary>
+    /// What the watcher starts for an app whose branch is at <paramref name="sha"/>: a deploy of a new commit
+    /// (<paramref name="trigger"/>), a retry of one whose build failed (<see cref="DeployTrigger.Retry"/>), or nothing
+    /// (null). Promoted, production stays on the preview's commit while its branch is still at the commit it was promoted
+    /// over and that promote is queued, under way or worked. Otherwise it follows its branch again (a new commit there,
+    /// or a promote that never ran or failed), and the branch's commit is deployed like any other.
+    /// </summary>
+    internal static async Task<DeployTrigger?> NextDeployAsync(IDbContextFactory<GitberthDb> dbFactory, AppDefinition app, string sha, DeployTrigger trigger,
+        ILogger logger, CancellationToken ct)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        await db.Apps.Where(a => a.Id == appId).ExecuteUpdateAsync(s => s.SetProperty(a => a.PromotedOverCommit, (string?)null), ct);
+        if (app.PromotedOverCommit is { } promoted)
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            // The branch moved on: production follows it again, unless a newer promote was saved meanwhile.
+            if (!StaysPromoted(app, sha))
+                await db.Apps.Where(a => a.Id == app.Id && a.PromotedOverCommit == promoted).ExecuteUpdateAsync(s => s.SetProperty(a => a.PromotedOverCommit, (string?)null), ct);
+            else if (await ForgetUnheldPromotionAsync(db, app.Id, ct))
+                logger.LogInformation("The promote of {App} never ran or failed, so it follows {Branch} again", app.Name, app.Branch);
+            else
+                return null;
+        }
+        if (ShouldDeploy(app, sha, deployInProgress: false)) return trigger;
+        // Tried already: again only when its build failed and is due another try.
+        return !string.Equals(sha, app.CurrentCommit, StringComparison.OrdinalIgnoreCase)
+            && ShouldRetry(app, sha, await LastAttemptAsync(dbFactory, app.Id, sha, ct), BuildStamp.Current, DateTime.UtcNow)
+            ? DeployTrigger.Retry
+            : null;
     }
 
     /// <summary>
-    /// The latest build of this commit. Settings changes in between (which recreate the running container) don't hide
-    /// it, but a manual rollback afterwards means it's left alone.
+    /// The latest build of this commit of the app, for <see cref="ShouldRetry"/> (previews' too). Settings changes in between
+    /// (which recreate the running container) don't hide it, but a manual rollback afterwards means it's left alone.
     /// </summary>
-    private Task<LastAttempt?> GetLastAttemptAsync(int appId, string sha, CancellationToken ct) => LastAttemptAsync(dbFactory, appId, sha, ct);
-
-    /// <summary>The latest build of this commit of the app, for <see cref="ShouldRetry"/> (previews' too).</summary>
     internal static async Task<LastAttempt?> LastAttemptAsync(IDbContextFactory<GitberthDb> dbFactory, int appId, string sha, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);

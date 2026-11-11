@@ -179,6 +179,14 @@ public sealed partial class AppService(
             if (!VolumeNames.IsBind(source) && !VolumeName().IsMatch(source))
                 errors.Add($"'{source}' isn't a valid volume. Use a name made of letters, digits, - and _, or an absolute host path like /srv/myapp.");
         }
+        // An app's named volumes, by the names they'd get, here and in its previews: none may be another app's (VolumeOwners).
+        if (appId is int id)
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            if (await db.Apps.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, ct) is { } app)
+                errors.AddRange((await VolumeOwners.LoadAsync(db, ct)).Problems(app, m.Volumes
+                    .Where(v => !string.IsNullOrWhiteSpace(v.Source) && !string.IsNullOrWhiteSpace(v.Target)).Select(v => new VolumeMount { Source = v.Source })));
+        }
         return errors;
     }
 
@@ -589,6 +597,10 @@ public sealed partial class AppService(
             var keysBefore = RuntimeKeys(app, protector, options.Network);
             var buildBefore = Fingerprint(app, protector, options.Network).Build;
             GitAppSettings.Apply(app, edit.Wanted, fields, protector);
+            // A named volume whose name another app has, here or in a preview's copy, isn't saved (VolumeOwners). The
+            // query reads what's saved, before this change.
+            if (fields.Contains(SettingField.Mounts) && (await VolumeOwners.LoadAsync(db, ct)).Problems(app, app.Volumes) is { Count: > 0 } clashes)
+                return new GitSaved(false, false, new HashSet<SettingField>(), clashes.Select(c => new SettingProblem(SettingField.Mounts, c)).ToList());
             if (edit.WantedGit is { } wantedGit && wantedGit != edit.LoadedGit) GitAppSettings.Apply(app, wantedGit);
             ApplyOptions(app, edit.LoadedOptions, edit.WantedOptions);
             var keysAfter = RuntimeKeys(app, protector, options.Network);

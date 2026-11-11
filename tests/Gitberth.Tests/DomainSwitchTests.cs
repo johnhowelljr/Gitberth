@@ -324,21 +324,44 @@ public sealed class DomainSwitchTests : IDisposable
     [Fact]
     public async Task Nothing_is_retried_with_nothing_pending_domains_off_or_no_token()
     {
-        // Domains on with a token, nothing pending: not a single call.
-        await TurnOnWithTokenAsync();
-        Assert.Null(await _domains.RetryRemovalsAsync());
-
-        // Pending, but domains off, or on without a token: still none, and the removal waits.
+        // Pending, but domains off, or on without a token: not a single call, and the removal waits. That holds even
+        // before anything has synced since Gitberth started.
         PendingRemoval();
-        await _settings.SetAsync(SettingKeys.DomainsEnabled, null);
         Assert.Null(await _domains.RetryRemovalsAsync());
         await _settings.SetAsync(SettingKeys.DomainsEnabled, "true");
-        await _settings.SetSecretAsync(SettingKeys.CloudflareToken, null);
         Assert.Null(await _domains.RetryRemovalsAsync());
-
         Assert.Empty(_cloudflare.Calls);
         Assert.Equal("", DockerCalls());
         Assert.True(Pending());
+
+        // With a token, the retry finishes it. Then, with nothing pending, not a single call.
+        await _settings.SetSecretAsync(SettingKeys.CloudflareToken, "token");
+        CloudflareStillRouting();
+        Assert.NotNull(await _domains.RetryRemovalsAsync());
+        Assert.False(Pending());
+        var (calls, docker) = (_cloudflare.Calls.Count, DockerCalls());
+        Assert.Null(await _domains.RetryRemovalsAsync());
+        Assert.Equal(calls, _cloudflare.Calls.Count);
+        Assert.Equal(docker, DockerCalls());
+    }
+
+    [Fact]
+    public async Task The_first_try_after_gitberth_starts_syncs_once_even_with_nothing_pending()
+    {
+        // Whether the last sync before Gitberth stopped got as far as the tunnel isn't known, so the first try syncs.
+        await TurnOnWithTokenAsync();
+        _cloudflare.Respond = r => r.RequestUri!.AbsolutePath.EndsWith("/configurations", StringComparison.Ordinal)
+            ? Ok(r.Method == HttpMethod.Put ? """{"version":2}"""
+                : """{"config":{"ingress":[{"hostname":"app.example.com","service":"http://localhost:3001"},{"service":"http_status:404"}]}}""")
+            : null;
+
+        Assert.NotNull(await _domains.RetryRemovalsAsync());
+        Assert.Contains($"GET /client/v4/accounts/{AccountId}/cfd_tunnel/{TunnelId}/configurations", _cloudflare.Calls);
+
+        // That one reached the tunnel, and nothing is pending: the next try asks nothing.
+        var calls = _cloudflare.Calls.Count;
+        Assert.Null(await _domains.RetryRemovalsAsync());
+        Assert.Equal(calls, _cloudflare.Calls.Count);
     }
 
     [Fact]

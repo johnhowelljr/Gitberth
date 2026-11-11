@@ -1,6 +1,7 @@
 using Gitberth.Apps;
 using Gitberth.Data;
 using Gitberth.Deploy;
+using Gitberth.Docker;
 using Gitberth.Git;
 using Gitberth.Network;
 using Gitberth.Previews;
@@ -91,6 +92,15 @@ public class PreviewRulesTests
     [InlineData("main", false)]
     public void Only_a_branch_or_a_pull_requests_head_is_fetched(string gitRef, bool safe) => Assert.Equal(safe, GitClient.IsSafeRef(gitRef));
 
+    [Theory]
+    [InlineData("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", true)]
+    [InlineData("1d2948c", true)]
+    [InlineData("1d2948", false)]
+    [InlineData("--upload-pack=x", false)]
+    [InlineData("1d2948cz", false)]
+    [InlineData("refs/heads/main", false)]
+    public void Only_a_commit_id_is_fetched_as_a_commit(string commit, bool sha) => Assert.Equal(sha, GitClient.IsSha(commit));
+
     [Fact]
     public void A_pull_request_from_a_fork_is_told_apart_and_one_from_a_deleted_fork_counts_as_one()
     {
@@ -143,11 +153,12 @@ public class PreviewRulesTests
     {
         RemoteBranch[] branches = [new("main", A), new("feature/login", B), new("old-idea", C)];
 
-        // The first look builds nothing: every branch's commit is noted.
+        // The first look builds nothing: every branch's commit is noted, the production branch's too (should it stop being
+        // production, it gets a preview only with a later commit).
         var first = PreviewPlanner.Plan(Settings(), branches, [], [], [], new Dictionary<string, string>(), Now);
         Assert.Empty(first.Create);
         Assert.Equal(B, first.Skips["branch:feature/login"]);
-        Assert.False(first.Skips.ContainsKey("branch:main"));
+        Assert.Equal(A, first.Skips["branch:main"]);
 
         // A new commit on feature/login gets it a preview; old-idea, untouched, stays without one.
         var second = Plan(Settings(), [new("main", A), new("feature/login", A), new("old-idea", C)], [], skips: first.Skips);
@@ -269,7 +280,61 @@ public class PreviewRulesTests
     {
         var skips = new Dictionary<string, string> { [PreviewPlanner.BaselineKey] = "1", ["branch:gone"] = A, ["branch:kept"] = B, ["pr:12"] = A, ["pr:13"] = B };
         var plan = Plan(Settings(), [new("main", A), new("kept", B)], [new(13, "Open", "x", B, false)], skips: skips);
-        Assert.Equal(["@branches", "branch:kept", "pr:13"], plan.Skips.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["@branches", "branch:kept", "branch:main", "pr:13"], plan.Skips.Keys.Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void A_merged_pull_requests_branch_that_stays_gets_no_preview_until_a_new_commit()
+    {
+        ExistingPreview pr = new(5, PreviewKind.PullRequest, "feature/login", 12, "Add login", B, false, Now);
+        RemoteBranch[] branches = [new("main", A), new("feature/login", B)];
+
+        // While the pull request previews it, the branch has no preview of its own, and its commit is noted on every look.
+        var open = Plan(Settings(), branches, [new(12, "Add login", "feature/login", B, false)], [pr]);
+        Assert.Empty(open.Create);
+        Assert.Equal(B, open.Skips["branch:feature/login"]);
+
+        // Merged on GitHub, the branch kept: the pull request's preview goes, and the branch gets none for the same commit.
+        var merged = Plan(Settings(), branches, [], [pr], open.Skips);
+        Assert.Equal([(5, PreviewPlanner.ClosedReason)], merged.Remove.Select(r => (r.AppId, r.Reason)));
+        Assert.Empty(merged.Create);
+        Assert.Empty(Plan(Settings(), branches, [], skips: merged.Skips).Create);
+
+        // A new commit on it does.
+        var pushed = Plan(Settings(), [new("main", A), new("feature/login", C)], [], skips: merged.Skips);
+        Assert.Equal([("feature/login", C)], pushed.Create.Select(c => (c.Branch, c.HeadSha)));
+    }
+
+    [Fact]
+    public void A_branch_that_stops_being_production_gets_a_preview_only_with_a_new_commit()
+    {
+        var onMain = Plan(Settings(), [new("main", A), new("develop", B)], []);
+        Assert.Equal(A, onMain.Skips["branch:main"]);
+
+        // Production moved to develop: main, at the commit production last had, gets no preview; a new commit gives it one.
+        var settings = Settings() with { ProductionBranch = "develop" };
+        Assert.Empty(Plan(settings, [new("main", A), new("develop", B)], [], skips: onMain.Skips).Create);
+        Assert.Equal(["main"], Plan(settings, [new("main", C), new("develop", B)], [], skips: onMain.Skips).Create.Select(c => c.Branch));
+    }
+
+    [Fact]
+    public void With_forks_off_a_forks_preview_goes_and_takes_no_new_commit_even_when_github_cannot_be_asked()
+    {
+        ExistingPreview[] existing =
+        [
+            new(5, PreviewKind.PullRequest, "patch-1", 13, "Fix typo", A, FromFork: true, Now),
+            new(6, PreviewKind.PullRequest, "feature/login", 12, "Add login", A, FromFork: false, Now),
+        ];
+        // GitHub's list unknown (unreachable, rate limited, or just restarted); the repo lists new commits on both.
+        var plan = Plan(Settings(PreviewMode.PullRequests), [new("main", C)], pulls: null, existing, heads: [new RemotePull(13, B), new RemotePull(12, B)]);
+        Assert.Equal([(5, PreviewPlanner.ForksOffReason)], plan.Remove.Select(r => (r.AppId, r.Reason)));
+        Assert.Equal([6], plan.Update.Select(u => u.AppId));
+        Assert.Empty(plan.Create);
+
+        // With forks on, the fork's preview takes its new commit like any other.
+        var allowed = Plan(Settings(PreviewMode.PullRequests, forks: true), [new("main", C)], pulls: null, existing, heads: [new RemotePull(13, B)]);
+        Assert.Empty(allowed.Remove);
+        Assert.Equal([new PreviewUpdate(5, B, "Fix typo", NewCommit: true)], allowed.Update);
     }
 
     // ---- The limit ----
@@ -357,6 +422,125 @@ public class PreviewRulesTests
         preview.Ports[0].HostPort = 3002;
         PreviewCopy.Sync(preview, parent, info);
         Assert.Equal(3002, preview.Ports[0].HostPort);
+    }
+
+    [Fact]
+    public void A_preview_keeps_every_volume_it_has_and_gets_the_parents_new_ones_where_it_has_none()
+    {
+        // The preview has its copy of data, the volume its image declared (cache), and a host folder from an older Gitberth.
+        var preview = new AppDefinition
+        {
+            Slug = "orb-test", ParentAppId = 1,
+            Volumes =
+            [
+                new VolumeMount { Id = 1, Source = "data", Target = "/data" },
+                new VolumeMount { Id = 2, Source = "cache", Target = "/cache" },
+                new VolumeMount { Id = 3, Source = "/srv/orb/uploads", Target = "/uploads" },
+            ],
+        };
+        // The parent renamed data to store, added logs read-only, and put a read-only volume where the preview's cache is.
+        VolumeMount[] parent =
+        [
+            new() { Id = 4, Source = "store", Target = "/data/" },
+            new() { Id = 5, Source = "logs", Target = "/logs", ReadOnly = true },
+            new() { Id = 6, Source = "scratch", Target = "/cache", ReadOnly = true },
+            new() { Id = 7, Source = "/srv/orb", Target = "/srv" },
+        ];
+
+        var after = PreviewCopy.VolumesAfterSync(preview.Volumes, parent);
+
+        // Its data and cache stay where they are, under their names: its container may still mount them, and only their
+        // rows keep another app from taking the names. Each path is mounted as the parent mounts it. logs is new; a host
+        // folder never stays.
+        Assert.Equal([("data", "/data", false), ("cache", "/cache", true), ("logs", "/logs", true)], after.Select(v => (v.Source, v.Target, v.ReadOnly)));
+        Assert.Equal(3, preview.Volumes.Count);
+        Assert.False(preview.Volumes[1].ReadOnly);
+
+        // Synced in place, the same. Then the parent drops all but logs, now writable: the preview keeps the rest as they are.
+        PreviewCopy.SyncVolumes(preview.Volumes, parent);
+        Assert.Equal(after.Select(v => (v.Source, v.Target, v.ReadOnly)), preview.Volumes.Select(v => (v.Source, v.Target, v.ReadOnly)));
+        PreviewCopy.SyncVolumes(preview.Volumes, [new VolumeMount { Source = "logs", Target = "/logs" }]);
+        Assert.Equal([("data", "/data", false), ("cache", "/cache", true), ("logs", "/logs", false)], preview.Volumes.Select(v => (v.Source, v.Target, v.ReadOnly)));
+    }
+
+    [Fact]
+    public void A_preview_keeps_its_volume_where_the_parent_has_a_tmpfs_now_and_gets_its_other_tmpfs()
+    {
+        // The parent swapped its volume cache at /cache for a tmpfs, and keeps /tmp/scratch in memory too.
+        var parent = new AppDefinition
+        {
+            Id = 1, Name = "orb", Slug = "orb", Owner = "acme", Repo = "orb",
+            RuntimeExtras = GitExtras.Write(new GitExtras { Tmpfs = [new GitTmpfs("/cache/"), new GitTmpfs("/tmp/scratch", Bytes: 1 << 20)] }),
+        };
+        var preview = new AppDefinition { Slug = "orb-pr-12", ParentAppId = 1, Volumes = [new VolumeMount { Id = 1, Source = "cache", Target = "/cache" }] };
+        var info = new PreviewInfo { Kind = PreviewKind.PullRequest, Branch = "feature/login", PullRequest = 12, Ref = "refs/pull/12/head" };
+
+        PreviewCopy.Sync(preview, parent, info);
+
+        // One mount at /cache, the preview's own volume (Docker refuses a volume and a tmpfs at one path); /tmp/scratch comes along.
+        Assert.Equal([("cache", "/cache")], preview.Volumes.Select(v => (v.Source, v.Target)));
+        Assert.Equal(["/tmp/scratch"], GitExtras.Parse(preview.RuntimeExtras)!.Tmpfs!.Select(t => t.Target));
+        var (tmpfs, volume) = Assert.Single(PreviewCopy.TmpfsUnderVolumes(GitExtras.Parse(parent.RuntimeExtras), preview.Volumes));
+        Assert.Equal(("/cache/", "cache"), (tmpfs.Target, volume.Source));
+
+        // A preview without a volume there gets every tmpfs.
+        var fresh = new AppDefinition { Slug = "orb-pr-13", ParentAppId = 1 };
+        PreviewCopy.Sync(fresh, parent, info);
+        Assert.Equal(parent.RuntimeExtras, fresh.RuntimeExtras);
+    }
+
+    [Fact]
+    public void A_preview_never_gets_the_hosts_devices_and_a_forks_nothing_that_reaches_the_host()
+    {
+        var extras = new GitExtras
+        {
+            Devices = [new DeviceSetting("/dev/ttyUSB0", "/dev/ttyUSB0")], Privileged = true, CapAdd = ["NET_ADMIN", "SYS_TIME"], CapDrop = ["MKNOD"],
+            SecurityOpt = ["seccomp=unconfined", "no-new-privileges:true"], Gpus = "all", Init = true, ReadOnlyRootfs = true, PidsLimit = 200,
+        };
+        var parent = new AppDefinition { Id = 1, Name = "orb", Slug = "orb", Owner = "acme", Repo = "orb", RuntimeExtras = GitExtras.Write(extras) };
+        PreviewInfo Info(bool fork) => new() { Kind = PreviewKind.PullRequest, Branch = "patch-1", PullRequest = 13, Ref = "refs/pull/13/head", FromFork = fork };
+
+        // A pull request from this repo: everything but the devices, which stay production's (a Zigbee stick is one
+        // container's), and privileged mode, which would give it every device of the host, the stick too.
+        var own = new AppDefinition { Slug = "orb-pr-13", ParentAppId = 1 };
+        PreviewCopy.Sync(own, parent, Info(fork: false));
+        Assert.Equal(GitExtras.Write(extras with { Devices = null, Privileged = null }), own.RuntimeExtras);
+        var ownArgs = ContainerSpec.ExtraArgs(GitExtras.Parse(own.RuntimeExtras)!);
+        Assert.DoesNotContain("--device", ownArgs);
+        Assert.DoesNotContain("--privileged", ownArgs);
+        Assert.Equal(["--cap-add", "NET_ADMIN", "--cap-add", "SYS_TIME"], ownArgs.SkipWhile(a => a != "--cap-add").Take(4));
+        Assert.Equal(
+        [
+            "Not given the host's device, because a preview never takes production's: /dev/ttyUSB0.",
+            "Runs without privileged mode, because it would give the preview every device of the host, and a preview never takes production's.",
+        ], PreviewCopy.ExtrasLeftOut(extras, fromFork: false));
+        // Privileged without a device of its own: still every device of the host.
+        var privileged = new GitExtras { Privileged = true, Init = true };
+        Assert.Equal(GitExtras.Write(new GitExtras { Init = true }), GitExtras.Write(PreviewCopy.Extras(privileged, fromFork: false)));
+        Assert.Equal(["Runs without privileged mode, because it would give the preview every device of the host, and a preview never takes production's."],
+            PreviewCopy.ExtrasLeftOut(privileged, fromFork: false));
+
+        // From a fork: nothing that reaches past the container either. What only takes rights away stays.
+        var fork = new AppDefinition { Slug = "orb-pr-13", ParentAppId = 1 };
+        PreviewCopy.Sync(fork, parent, Info(fork: true));
+        var args = ContainerSpec.ExtraArgs(GitExtras.Parse(fork.RuntimeExtras)!);
+        foreach (var flag in new[] { "--device", "--privileged", "--cap-add", "--gpus" }) Assert.DoesNotContain(flag, args);
+        Assert.Equal(["--security-opt", "no-new-privileges:true"], args.SkipWhile(a => a != "--security-opt").Take(2));
+        Assert.DoesNotContain("seccomp=unconfined", args);
+        Assert.Contains("--init", args);
+        Assert.Contains("--read-only", args);
+        Assert.Equal(["--cap-drop", "MKNOD"], args.SkipWhile(a => a != "--cap-drop").Take(2));
+        Assert.Equal(
+        [
+            "Not given the host's device, because a preview never takes production's: /dev/ttyUSB0.",
+            "Runs without privileged mode, because it would give the preview every device of the host, and a preview never takes production's.",
+            "Runs without added capabilities (NET_ADMIN, SYS_TIME), security options (seccomp=unconfined) or GPUs (all), because the pull request comes from a fork and its code mustn't reach the host.",
+        ], PreviewCopy.ExtrasLeftOut(extras, fromFork: true));
+
+        // A parent without any of them: nothing to say, and nothing changes.
+        Assert.Empty(PreviewCopy.ExtrasLeftOut(new GitExtras { Init = true }, fromFork: true));
+        Assert.Empty(PreviewCopy.ExtrasLeftOut(null, fromFork: true));
+        Assert.Null(PreviewCopy.Extras(null, fromFork: true));
     }
 
     // ---- Environments ----

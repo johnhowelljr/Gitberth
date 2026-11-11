@@ -239,10 +239,17 @@ public static class DockerfileMarkers
     public const string RepoRootContext = "# gitberth:context repo-root";
 
     /// <summary>
+    /// The build arg declared where secrets are mounted, whose value changes with theirs (Deploy.BuildSecrets): BuildKit
+    /// leaves secret mounts out of its build cache, so without it a step would reuse what it built with an older value.
+    /// </summary>
+    public const string SecretsArg = "GITBERTH_SECRETS";
+
+    /// <summary>
     /// Build-time variables become ARG lines. Secret ones are mounted into every RUN from there to the stage's end instead
     /// (`RUN --mount=type=secret,id=KEY,env=KEY`): the steps see them as variables, and the image history never records
-    /// them. Volume targets are created and handed to the image's app user ($APP_UID in .NET images, root elsewhere), so
-    /// a fresh named volume is writable by the app.
+    /// them. With secrets, <see cref="SecretsArg"/> is declared there too, so those steps are cached by the secrets'
+    /// values. Volume targets are created and handed to the image's app user ($APP_UID in .NET images, root elsewhere),
+    /// so a fresh named volume is writable by the app.
     /// </summary>
     public static string Expand(string dockerfile, IReadOnlyCollection<string> buildArgs, IReadOnlyCollection<string> volumeTargets,
         IReadOnlyCollection<string>? secrets = null)
@@ -262,6 +269,7 @@ public static class DockerfileMarkers
             else if (trimmed == BuildArgs)
             {
                 foreach (var key in buildArgs) sb.Append("ARG ").Append(key).Append('\n');
+                if (mounts.Length > 0) sb.Append("ARG ").Append(SecretsArg).Append('\n');
                 inSecretStage = true;
             }
             else if (trimmed == Volumes)

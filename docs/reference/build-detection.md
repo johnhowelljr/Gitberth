@@ -323,8 +323,9 @@ vote. Tests, fixtures, tooling and libraries are left out.
 - To edit it yourself, turn on **Customize the Dockerfile** when you add the app, or set **Build** to **Custom
   Dockerfile** in the app's **Settings** › **Source**. It starts from the generated one.
 - Keep the `# gitberth:build-args` and `# gitberth:volumes` lines in a custom Dockerfile. Gitberth fills them in at build
-  time: the first with the build-time variables (secret ones as BuildKit secrets, never written into the image's history),
-  the second with the app's volume folders, created and handed to the app's user.
+  time: the first with the build-time variables (secret ones as BuildKit secrets, never written into the image's history,
+  with `ARG GITBERTH_SECRETS` so a changed secret builds the steps that use it again), the second with the app's volume
+  folders, created and handed to the app's user.
 - A custom Dockerfile started from a generated one for a sub-folder app keeps the `# gitberth:context repo-root` line,
   and is still built from the repository root.
 - Your repository is never modified: the Dockerfile is written outside the clone.

@@ -20,10 +20,11 @@ namespace Gitberth.Services;
 /// <param name="containers">The container path, which itself starts an app's container through this class, so it comes when it's first needed.</param>
 /// <param name="changer">Creates a missing app's container again from its saved settings; it depends on ContainerService, so it comes when it's first needed.</param>
 /// <param name="settings">An app's ports, for any app that isn't a Git app (AppSettingsService, which depends on this class).</param>
+/// <param name="previewGate">The previews' gate (PreviewService's): deleting an app turns its previews off under it, so the watcher never makes one again meanwhile.</param>
 public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQueue queue, DockerCli docker, AppLocks locks, GitberthOptions options, RepoVariables repoVariables,
     DomainService domains, RestartSchedules restarts, AppService apps, ILogger<AppActions> logger,
     AppCatalog? catalog = null, Lazy<ContainerService>? containers = null, Lazy<PortChanger>? changer = null, Lazy<AppSettingsService>? settings = null,
-    NetworkService? network = null, ContainerTitles? titles = null, HealthSettings? health = null)
+    NetworkService? network = null, ContainerTitles? titles = null, HealthSettings? health = null, Previews.PreviewGate? previewGate = null)
 {
     /// <summary>Clone, build and run the branch tip.</summary>
     /// <param name="expectedSha">
@@ -33,16 +34,23 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     /// <exception cref="InvalidOperationException">The app isn't a Git app: there's nothing to build.</exception>
     /// <param name="gitRef">Build this ref rather than the app's branch (a promoted preview's).</param>
     /// <param name="commit">Build exactly this commit of <paramref name="gitRef"/>.</param>
+    /// <param name="promotedOver">
+    /// A promote's: the branch's commit production stays off while the promote holds, saved with its deploy so the
+    /// watcher never sees one without the other.
+    /// </param>
     public async Task<int> DeployAsync(int appId, DeployTrigger trigger = DeployTrigger.Manual, CancellationToken ct = default, string? expectedSha = null,
-        string? gitRef = null, string? commit = null)
+        string? gitRef = null, string? commit = null, string? promotedOver = null)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = await db.Apps.FirstAsync(a => a.Id == appId, ct);
         if (!app.Deployed) throw NotGit(app);
         app.DesiredState = DesiredState.Running;
-        if (expectedSha is not null) app.LastAttemptedCommit = expectedSha;
+        // A promote's commit isn't its branch's: a promote that never runs, or fails, leaves what the watcher knows about
+        // the branch as it was, so a rollback stays.
+        if (expectedSha is not null && trigger != DeployTrigger.Promote) app.LastAttemptedCommit = expectedSha;
         // A manual deploy builds the branch again: production stops staying on a promoted preview's commit.
         if (trigger == DeployTrigger.Manual) app.PromotedOverCommit = null;
+        else if (trigger == DeployTrigger.Promote && promotedOver is not null) app.PromotedOverCommit = promotedOver;
         var dep = new Deployment { AppId = appId, Trigger = trigger, CommitSha = expectedSha };
         db.Deployments.Add(dep);
         await db.SaveChangesAsync(ct);
@@ -237,13 +245,15 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
 
     public bool CancelDeploy(int appId) => queue.Cancel(appId);
 
-    // The app's deploys still waiting in the queue: the queue's worker skips one that isn't Queued any more.
+    // The app's deploys still waiting in the queue: the queue's worker skips one that isn't Queued any more. A promote
+    // among them that never ran lets production follow its branch again.
     private async Task CancelQueuedAsync(int appId, string why)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var now = DateTime.UtcNow;
         await db.Deployments.Where(d => d.AppId == appId && d.Status == DeployStatus.Queued)
             .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DeployStatus.Cancelled).SetProperty(d => d.Error, why).SetProperty(d => d.FinishedAt, now));
+        await RepoWatcher.ForgetUnheldPromotionAsync(db, appId);
     }
 
     /// <summary>
@@ -257,9 +267,25 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         var app = await db.Apps.AsNoTracking().Include(a => a.Volumes).FirstOrDefaultAsync(a => a.Id == appId);
         if (app is null) return SyncReport.Nothing;
         if (!app.Deployed) return (await RemoveOtherAsync(app.ContainerName, app, new RemoveOptions(removeVolumes, removeImages), CancellationToken.None)).Domains ?? SyncReport.Nothing;
-        // Its previews go first, each with its container, images, own volumes and domain: they're nothing without it.
-        foreach (var previewId in await db.Apps.AsNoTracking().Where(a => a.ParentAppId == appId).Select(a => a.Id).ToListAsync())
-            await DeleteAsync(previewId, removeImages: true, removeVolumes: true);
+        // Its previews go first, each with its container, images, own volumes and domain: they're nothing without it. Under
+        // the previews' gate, previews are turned off and the app stops being meant to run first, so a watcher's pass under
+        // way finishes before, and every later one finds nothing of it to make, deploy or preview.
+        if (app.ParentAppId is null)
+        {
+            if (previewGate is not null) await previewGate.WaitAsync();
+            try
+            {
+                await db.Apps.Where(a => a.Id == appId).ExecuteUpdateAsync(s => s
+                    .SetProperty(a => a.PreviewMode, PreviewMode.Off)
+                    .SetProperty(a => a.DesiredState, DesiredState.Stopped));
+                foreach (var previewId in await db.Apps.AsNoTracking().Where(a => a.ParentAppId == appId).Select(a => a.Id).ToListAsync())
+                    await DeleteAsync(previewId, removeImages: true, removeVolumes: true);
+            }
+            finally
+            {
+                previewGate?.Release();
+            }
+        }
         var skips = Previews.PreviewService.SkipsKey(appId);
         if (app.ParentAppId is null) await db.Settings.Where(s => s.Key == skips).ExecuteDeleteAsync();
         using (await locks.AcquireAsync(appId))
@@ -274,8 +300,13 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
             }
             if (removeVolumes)
             {
-                foreach (var v in app.Volumes.Where(v => !VolumeNames.IsBind(v.Source)))
-                    await docker.RemoveVolumeAsync(VolumeNames.Resolve(app.Slug, v.Source));
+                // One another app has too stays: it's that app's data as well (VolumeOwners).
+                var owners = await VolumeOwners.LoadAsync(db);
+                foreach (var name in app.Volumes.Where(v => !VolumeNames.IsBind(v.Source)).Select(v => VolumeNames.Resolve(app.Slug, v.Source)))
+                {
+                    if (owners.OtherThan(appId, name) is { } other) logger.LogWarning("Kept the volume {Volume} of {App}: {Other} has it too", name, app.Slug, other);
+                    else await docker.RemoveVolumeAsync(name);
+                }
             }
         }
         await restarts.SetAsync(app.ContainerName, null);

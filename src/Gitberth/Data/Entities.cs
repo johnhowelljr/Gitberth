@@ -109,7 +109,8 @@ public class AppDefinition
     public bool ProtectPreviews { get; set; } = true;
     /// <summary>
     /// The production branch's commit when a preview was promoted over it: production stays on the promoted commit, and the
-    /// watcher doesn't deploy this one. The next new commit on the branch, or a manual deploy, clears it.
+    /// watcher doesn't deploy this one. The next new commit on the branch, or a manual deploy, clears it; so does a promote
+    /// that never ran or failed (RepoWatcher.ForgetUnheldPromotionAsync).
     /// </summary>
     public string? PromotedOverCommit { get; set; }
 

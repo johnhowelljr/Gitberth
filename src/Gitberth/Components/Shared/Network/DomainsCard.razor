@@ -377,7 +377,8 @@
             if (error is not null)
             {
                 Snackbar.Add(error, Severity.Error);
-                return null;
+                // A sync that couldn't finish says why under the list too.
+                return report.Notes.Count > 0 ? report : null;
             }
             Snackbar.Add(on ? $"{d.Hostname} is protected: visitors sign in first." : $"{d.Hostname} is open to everyone again.", report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
             return report;

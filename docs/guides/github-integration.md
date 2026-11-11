@@ -16,7 +16,7 @@ A [fine-grained personal access token](https://github.com/settings/personal-acce
 
 A classic token needs the `repo` scope, and `admin:repo_hook` for the webhook. Gitberth never changes your code.
 
-You can leave any of the last three out: when GitHub refuses one, **Settings › GitHub integration** says which permission is missing in a banner, like **Commit statuses aren't set: GitHub refused the token**, and Gitberth stops asking for an hour, or until you save a token again. Deploys carry on either way. To add a permission, edit the token on GitHub (its permissions can change without a new token) and click **Replace token** with the same one, so Gitberth tries again at once.
+You can leave any of the last three out: when GitHub refuses one on a repo, **Settings › GitHub integration** says which permission is missing, in a banner like **Commit statuses aren't set on acme/web** (for the webhook, in the list of repos), and Gitberth stops asking on that repo for an hour, or until you save a token again. The banner goes with that hour (so a repo you no longer deploy doesn't keep one), and comes back if GitHub refuses again on the repo's next deploy. Other repos carry on. Only a token GitHub refuses outright (expired, say) stops it everywhere: **Commit statuses aren't set: GitHub refused the token**. Deploys carry on either way. To add a permission, edit the token on GitHub (its permissions can change without a new token) and click **Replace token** with the same one, so Gitberth tries again at once.
 
 ## Commit statuses
 
@@ -61,7 +61,7 @@ GitHub has to reach Gitberth from the internet, so instant deploys need [domains
 1. Go to **Settings › GitHub integration**.
 2. Under **Instant deploys**, type a host name nothing else uses, like `hooks.example.com`, in **Host name for GitHub's webhooks**, and click **Turn on**.
    Gitberth routes **only** `https://hooks.example.com/hooks/github` to itself through the tunnel, adds the DNS record, and makes a secret for the webhook. Every other address on that host name answers 404, and it's never behind Cloudflare Access (GitHub can't sign in).
-3. Gitberth adds the webhook to every repo it deploys, and to new ones as you add them. The list under the section says, per repo, **Webhook added** or why not.
+3. Gitberth adds the webhook to every repo it deploys, and to new ones as you add them. The list under the section says, per repo, **Webhook added** or why not. It only ever changes its own webhook: the one it added to the repo, or one that has exactly its payload URL (one you added by hand, say). It remembers which one that is, so when you change the host name, that webhook moves to the new one right away. If it can't move it then (there's no token, GitHub refuses the token or the repo, or GitHub fails), Gitberth leaves that webhook on the old host name and forgets it was its own, since another Gitberth may take that name over, and adds a new one as soon as GitHub lets it; delete the old one on GitHub if you like. Any other webhook is left alone, even one on the same path or on a host name Gitberth had before (another Gitberth's, say), and so is its own once someone points it somewhere else. Once no app deploys a repo, Gitberth forgets which webhook there was its own: the webhook stays on the repo as it was, and another Gitberth may take it over in the meantime. If you deploy the repo again, Gitberth takes up the webhook that has exactly its payload URL, or adds a new one. An earlier host name you later give to an app as a domain is the app's from then on: its rules in the tunnel are never taken for Gitberth's.
 
 Without **Webhooks: Read and write** on the token, add the webhook by hand on each repo, from the values the section shows: on GitHub, open the repo's **Settings › Webhooks › Add webhook** and fill in
 
@@ -76,7 +76,7 @@ GitHub sends a ping when the webhook is added; Gitberth answers it, and GitHub s
 
 ### How deliveries are checked
 
-Every delivery is signed by GitHub with the secret (`X-Hub-Signature-256`), and Gitberth checks the signature before it reads anything else. One with a wrong signature gets `401` and nothing happens; after 10 wrong ones in 10 minutes from the same address, that address gets `429` until the 10 minutes are up. A delivery larger than 1 MB is refused. A delivery never deploys by itself: it only makes Gitberth look at the repo now, with the same rules as polling (a commit that already failed isn't retried in a loop, a rollback isn't undone).
+Every delivery is signed by GitHub with the secret (`X-Hub-Signature-256`), and Gitberth checks the signature before it reads anything else. One with a wrong signature gets `401` and nothing happens; after 10 wrong ones in 10 minutes from the same address, that address's wrong ones get `429` until the 10 minutes are up. A delivery with the right signature always gets through, even from an address that sent wrong ones (GitHub's addresses carry everyone's webhooks). A delivery larger than 1 MB is refused. A delivery never deploys by itself: it only makes Gitberth look at the repo now, with the same rules as polling (a commit that already failed isn't retried in a loop, a rollback isn't undone).
 
 | Gitberth answers | When |
 |---|---|
@@ -84,8 +84,10 @@ Every delivery is signed by GitHub with the secret (`X-Hub-Signature-256`), and 
 | `202` | A push, pull request or deleted branch in a repo Gitberth deploys: it looks now. |
 | `204` | Any other event, or a repo Gitberth doesn't deploy. |
 | `401` | A wrong or missing signature. |
+| `429` | Another wrong signature from an address that sent 10 in 10 minutes. |
+| `405` | Anything but a `POST`. The host only ever answers with a status code, never with Gitberth's pages. |
 
-To stop, click **Turn off** next to the host name. Gitberth takes the route out of your tunnel and the DNS record it added, and goes back to checking every 30 seconds. The webhooks stay on your repos (their deliveries fail); delete them on GitHub if you like.
+To stop, click **Turn off** next to the host name. Gitberth takes the route out of your tunnel and the DNS record it added, and goes back to checking every 30 seconds. The webhooks stay on your repos (their deliveries fail); delete them on GitHub if you like. Gitberth forgets which ones were its own, since another Gitberth may take over that host name and them meanwhile: turned on again with the same host name, Gitberth takes up the webhooks that have exactly its payload URL; with another host name, it adds new ones and leaves the old ones as they are.
 
 ## Related
 

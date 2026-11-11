@@ -12,3 +12,7 @@ App_Data/
 *.db-wal
 .env
 TestResults/
+# The end-to-end rig (tests/e2e): Python's caches, and a run's report and screenshots.
+__pycache__/
+.pytest_cache/
+tests/e2e/out/

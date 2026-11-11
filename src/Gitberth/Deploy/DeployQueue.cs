@@ -94,6 +94,8 @@ public sealed class DeployQueue(
             dep.Error = "Superseded by a newer deploy";
             dep.FinishedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
+            // A promote that never ran lets production follow its branch again, unless a newer promote took its place.
+            if (dep.Trigger == DeployTrigger.Promote) await RepoWatcher.ForgetUnheldPromotionAsync(db, dep.AppId);
         }
         catch (Exception ex)
         {

@@ -106,7 +106,7 @@ internal sealed class AppsRig : IDisposable
         var queue = new DeployQueue(pipeline, hub, Db, new Stopping(), NullLogger<DeployQueue>.Instance);
         ContainerService? containers = null;
         Actions = new AppActions(Db, queue, Cli, AppLocks, Options, repoVariables, Domains, Restarts, Apps, NullLogger<AppActions>.Instance,
-            Catalog, new Lazy<ContainerService>(() => containers!), changer: null, settings: null, Network, Titles, Health)
+            Catalog, new Lazy<ContainerService>(() => containers!), changer: null, settings: null, Network, Titles, Health, PreviewGate)
         {
             Create = (request, _) =>
             {
@@ -119,6 +119,8 @@ internal sealed class AppsRig : IDisposable
 
     public int ObsId { get; }
     public int KanbanId { get; }
+    /// <summary>The previews' gate AppActions holds while deleting an app's previews; a PreviewService here shares it.</summary>
+    public Gitberth.Previews.PreviewGate PreviewGate { get; } = new();
     public IDbContextFactory<GitberthDb> Db { get; }
     public GitberthOptions Options { get; }
     public SecretProtector Protector { get; }
@@ -247,6 +249,9 @@ internal sealed class HostEngine : HttpMessageHandler
     /// <summary>docker commands that fail, by their first words ("volume rm", "image rm"), with what they say.</summary>
     public Dictionary<string, string> Failing { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>The volumes `docker volume ls` lists.</summary>
+    public HashSet<string> Volumes { get; } = new(StringComparer.Ordinal);
+
     public JsonObject Inspect(string name)
     {
         lock (_gate) return _inspects[name];
@@ -368,14 +373,18 @@ internal sealed class HostEngine : HttpMessageHandler
         }
     }
 
+    /// <summary>Awaited before each docker command runs, with its line: a test holds one while something else happens.</summary>
+    public Func<string, Task>? BeforeCommand { get; set; }
+
     /// <summary>The docker CLI, answered from the same containers.</summary>
-    public Task<ProcessResult> RunAsync(IReadOnlyList<string> args, ProcessOptions? options, CancellationToken ct)
+    public async Task<ProcessResult> RunAsync(IReadOnlyList<string> args, ProcessOptions? options, CancellationToken ct)
     {
         var line = string.Join(' ', args);
+        if (BeforeCommand is { } before) await before(line);
         lock (_gate)
         {
             Commands.Add(line);
-            return Task.FromResult(args switch
+            return (args switch
             {
                 ["ps", ..] => Ok(string.Concat(_listed.Where(l => !args.Contains("label=gitberth.managed=true") || ContainerPorts.Str(l["Labels"], "gitberth.managed") == "true")
                     .Select(PsLine))),
@@ -385,6 +394,7 @@ internal sealed class HostEngine : HttpMessageHandler
                 ["container", "inspect", "--format", "{{.State.Running}} {{.State.StartedAt}}", var name] =>
                     _inspects.TryGetValue(name, out var i) ? Ok($"{(ContainerPorts.Running(i) ? "true" : "false")} {ContainerPorts.Str(i["State"], "StartedAt")}\n") : Missing(name),
                 ["container", "inspect", ..] when !args.Contains("--format") => InspectAll(args.Skip(2).ToList()),
+                ["volume", "ls", ..] => Ok(string.Concat(Volumes.Order(StringComparer.Ordinal).Select(v => v + "\n"))),
                 ["start" or "stop" or "restart" or "rm" or "volume" or "image" or "update" or "network" or "rename" or "run" or "create", ..] => Write(args, line),
                 _ => Ok(""),
             });

@@ -500,6 +500,28 @@ public sealed class CronSchedulerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_preview_runs_none_of_its_images_jobs_as_on_vercel()
+    {
+        // The same image, with its cron label, running as a preview of another app.
+        using (var db = _db.CreateDbContext())
+        {
+            var production = new AppDefinition { Name = "Shop", Slug = "shop", Owner = "acme", Repo = "web" };
+            db.Apps.Add(production);
+            db.SaveChanges();
+            db.Apps.Where(a => a.Id == _appId).ExecuteUpdate(s => s.SetProperty(a => a.ParentAppId, production.Id));
+        }
+        var scheduler = Scheduler();
+
+        Assert.Empty(await scheduler.TickAsync(Six, CancellationToken.None));
+        Assert.Empty(_app.Requests);
+        var jobs = await scheduler.GetAsync(_appId);
+        Assert.Single(jobs.Jobs);
+        Assert.Equal(CronScheduler.PreviewProblem, jobs.Problem);
+        Assert.Equal(CronScheduler.PreviewProblem, (await Assert.ThrowsAsync<InvalidOperationException>(() => scheduler.RunNowAsync(_appId, "/api/hello", "* * * * *"))).Message);
+        Assert.Empty(_app.Requests);
+    }
+
+    [Fact]
     public async Task An_image_without_crons_shows_no_jobs_and_calls_nothing()
     {
         var scheduler = Scheduler(crons: null);

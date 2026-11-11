@@ -302,6 +302,34 @@ public sealed class AppSettingsServiceTests
     }
 
     [Fact]
+    public async Task Gitberths_own_fields_that_cant_be_saved_are_said_before_apply_in_plain_words()
+    {
+        Container("gitberth", AppSource.Existing);
+        var loaded = (await _service.LoadAsync("gitberth"))!;
+        SettingsEdit Edit(AppOptions wanted) => new(loaded.ContainerId, loaded.Container, loaded.Container, loaded.Options, wanted);
+
+        // A restart sooner than every 5 minutes, alone: the plan says so, and Apply saves nothing.
+        var soon = await _service.PlanAsync("gitberth", Edit(loaded.Options with { ScheduledRestart = new RestartInterval(1, RestartUnit.Minutes) }));
+        Assert.False(soon.CanApply);
+        Assert.Equal(["Scheduled restart: The shortest schedule is every 5 minutes."], soon.Problems.Select(p => p.Message));
+        var refused = await _service.ApplyAsync(soon);
+        Assert.Equal((false, "Scheduled restart: The shortest schedule is every 5 minutes."), (refused.Ok, refused.Message));
+        Assert.DoesNotContain("Parameter", refused.Message);
+        Assert.Empty(_apps.Log);
+
+        // A name that can't be used: the same.
+        var nameless = await _service.PlanAsync("gitberth", Edit(loaded.Options with { Name = "  " }));
+        Assert.Equal(["Give the app a name."], nameless.Problems.Select(p => p.Message));
+        Assert.False((await _service.ApplyAsync(nameless)).Ok);
+        Assert.Empty(_apps.Log);
+
+        // What can be saved still is, and what didn't change isn't checked again.
+        var fine = await _service.PlanAsync("gitberth", Edit(loaded.Options with { ScheduledRestart = new RestartInterval(5, RestartUnit.Minutes) }));
+        Assert.Empty(fine.Problems);
+        Assert.True((await _service.ApplyAsync(fine)).Ok);
+    }
+
+    [Fact]
     public async Task An_app_without_a_container_changes_its_snapshot()
     {
         var row = new AppDefinition { Id = 3, Name = "whoami", Slug = "whoami" };

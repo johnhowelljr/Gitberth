@@ -583,6 +583,8 @@ else
         }
         catch (JSDisconnectedException) { }
         catch (JSException) { }
+        // The page closed or moved on: its pending calls are cancelled, and there's nothing left to tidy in it.
+        catch (OperationCanceledException) { }
         self?.Dispose();
     }
 }

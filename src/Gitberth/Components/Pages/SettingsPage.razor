@@ -84,7 +84,7 @@
             <div class="gb-sec-body">
                 @foreach (var problem in GitHubState.Problems)
                 {
-                    <Banner Tone="warn" Title="@ProblemTitle(problem.Feature)">@problem.Text</Banner>
+                    <Banner Tone="warn" Title="@ProblemTitle(problem)">@problem.Text</Banner>
                 }
                 <SwitchRow @key="@($"st{integrationKey}")" Title="Commit statuses" Value="statusesOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitHubStatuses, v)" Disabled="busy"
                            Sub="Each deploy marks its commit on GitHub: pending while it builds, then live (with the app's address) or failed (with a link to the deploy log). Needs Commit statuses: Read and write." />
@@ -288,8 +288,9 @@
                     </div>
                     <p class="gb-help">
                         A <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare API token</a>: Create Token › Create Custom Token,
-                        with <strong>@CloudflareApi.Permissions</strong>, for your account and your domains' zones, and <strong>@CloudflareApi.AccessPermission</strong>
-                        to protect domains. Routes you already made in Cloudflare that go to an app become its domains.
+                        with <strong>@CloudflareApi.Permissions</strong>, for your account and your domains' zones. To protect domains, it also needs
+                        <strong>@CloudflareApi.AccessAppsPermission</strong> and <strong>@CloudflareApi.AccessOrganizationPermission</strong>.
+                        Routes you already made in Cloudflare that go to an app become its domains.
                     </p>
                     @if (cloudflareNotes.Count > 0)
                     {
@@ -603,11 +604,15 @@
     private bool protectBusy;
     private IReadOnlyList<DomainNote> protectionNotes = [];
 
-    private static string ProblemTitle(GitHubFeature feature) => feature switch
+    // GitHub refused the token itself, or only on one repo (the others carry on).
+    private static string ProblemTitle(GitHubProblem problem) => (problem.Feature, problem.Repo) switch
     {
-        GitHubFeature.Statuses => "Commit statuses aren't set: GitHub refused the token",
-        GitHubFeature.Comments => "Pull request comments aren't made: GitHub refused the token",
-        _ => "The webhook isn't added to your repos: GitHub refused the token",
+        (GitHubFeature.Statuses, null) => "Commit statuses aren't set: GitHub refused the token",
+        (GitHubFeature.Statuses, { } repo) => $"Commit statuses aren't set on {repo}",
+        (GitHubFeature.Comments, null) => "Pull request comments aren't made: GitHub refused the token",
+        (GitHubFeature.Comments, { } repo) => $"Pull request comments aren't made on {repo}",
+        (_, null) => "The webhook isn't added to your repos: GitHub refused the token",
+        (_, { } repo) => $"The webhook isn't added to {repo}",
     };
 
     private static string ProtectedCount(int count) => count switch

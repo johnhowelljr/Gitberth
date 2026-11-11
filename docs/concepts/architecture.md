@@ -39,7 +39,7 @@ Besides answering the UI, Gitberth runs these in its own process:
 | Repo watcher | Runs one `git ls-remote` per repo, every 30 seconds by default, and queues a deploy when a branch moves. Retries a failed build a bounded number of times. |
 | Deploy queue | Runs one deploy at a time per app; a newer request replaces one that's still waiting. One image build runs at a time across all apps. |
 | Update watcher | Checks images for a newer digest, every 6 hours by default (apps set to **When I ask** are left out), and runs automatic updates in their window. |
-| Domain removal retry | Every 15 minutes, while domains are on, tries again to take out of Cloudflare the domains whose removal failed. |
+| Domain removal retry | Every 15 minutes, while domains are on, tries again to take out of Cloudflare the routes and DNS records of domains whose removal failed, and, when Cloudflare couldn't take the change or Cloudflare Access failed for a moment, to finish protecting a domain, taking its protection off, or removing a removed domain's Access application. An Access application Cloudflare refused to remove is tried once more after **Check again** in Settings › Domains › Protection finds Access working. |
 | Stats collector | Reads every running container's CPU, memory and network every 5 seconds, and keeps 6 hours. |
 | Event watcher | Follows Docker's events (starts, stops, crashes, health changes) for the Health charts and each app's **Activity**. |
 | Network keeper | Joins containers again to the networks Gitberth keeps them on when something else recreates them. |

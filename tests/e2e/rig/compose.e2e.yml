@@ -1,0 +1,32 @@
+# The rig's additions to docker-compose.yml, and nothing else: Gitberth runs as it's normally started, but github.com,
+# api.github.com and api.cloudflare.com lead to the stand-ins, whose test CA it trusts (.NET reads SSL_CERT_FILE, git
+# GIT_SSL_CAINFO; the bundle is its image's own CAs plus the rig's), and it's also on the rig's network so the stand-ins
+# can deliver webhooks to it and the scenarios can reach it by name. Values come from the env file inner.sh writes.
+services:
+  gitberth:
+    extra_hosts:
+      - "github.com:${E2E_STANDIN_IP}"
+      - "www.github.com:${E2E_STANDIN_IP}"
+      - "api.github.com:${E2E_STANDIN_IP}"
+      - "codeload.github.com:${E2E_STANDIN_IP}"
+      - "uploads.github.com:${E2E_STANDIN_IP}"
+      - "raw.githubusercontent.com:${E2E_STANDIN_IP}"
+      - "objects.githubusercontent.com:${E2E_STANDIN_IP}"
+      - "api.cloudflare.com:${E2E_STANDIN_IP}"
+    environment:
+      SSL_CERT_FILE: /e2e-trust/gitberth-bundle.pem
+      GIT_SSL_CAINFO: /e2e-trust/gitberth-bundle.pem
+    volumes:
+      - gbe2e-trust:/e2e-trust:ro
+    networks:
+      default: {}
+      gbe2e:
+        ipv4_address: ${E2E_GITBERTH_IP}
+
+networks:
+  gbe2e:
+    external: true
+
+volumes:
+  gbe2e-trust:
+    external: true
