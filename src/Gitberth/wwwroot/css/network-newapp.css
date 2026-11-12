@@ -390,6 +390,18 @@ a.gb-fn:hover { border-color: color-mix(in srgb, var(--ac, #fff) 50%, rgba(255, 
 .gb-regrow-s { font-size: 12.5px; color: var(--gb-text-3); margin-top: 2px; }
 .gb-regform { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: start; }
 .gb-regform > .gb-regform-go { padding-top: 24px; }
+/* Notifications: where they go, each with its last delivery. */
+.gb-notirow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border-top: 1px solid var(--gb-line-1); background: var(--gb-surface-2); }
+.gb-notirow:first-child { border-top: 0; }
+.gb-notirow-icon { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: var(--gb-r-sm); background: var(--gb-surface-3); color: var(--gb-text-2); }
+.gb-notirow-icon svg { width: 17px; height: 17px; }
+.gb-notirow-go { gap: 6px; justify-content: flex-end; }
+.gb-notirow-ok { color: var(--gb-text-3); }
+.gb-notirow-bad { color: var(--gb-warn); }
+@media (max-width: 720px) {
+    .gb-notirow { grid-template-columns: auto minmax(0, 1fr); }
+    .gb-notirow-go { grid-column: 1 / -1; justify-content: flex-start; }
+}
 .gb-window { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .gb-window .gb-input { width: 110px; }
 .gb-setrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: end; }

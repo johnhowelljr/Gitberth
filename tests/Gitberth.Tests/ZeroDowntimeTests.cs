@@ -1493,6 +1493,59 @@ public sealed class ZeroDowntimeTests : IAsyncLifetime
         Assert.Equal(["gb-web", "gb-web-pr-7"], _docker.Containers.Select(c => c.Name).Order(StringComparer.Ordinal));
     }
 
+    [Fact]
+    public async Task A_preview_never_gets_productions_database_unless_it_has_a_value_for_previews()
+    {
+        const string image = "gitberth/web-pr-8:1";
+        int previewId;
+        await using (var db = _db.CreateDbContext())
+        {
+            var parent = await db.Apps.SingleAsync(a => a.Id == _appId);
+            parent.PreviewMode = PreviewMode.PullRequests;
+            parent.EnvVars.Add(new EnvVar { Key = "DATABASE_URL", ProtectedValue = _protector.Protect("postgres://app:pw@postgres:5432/web") });
+            var preview = new AppDefinition { Name = "Web · PR #8", Slug = "web-pr-8", Owner = "acme", Repo = "web", ParentAppId = _appId, AutoDeploy = false, CurrentImage = image, CurrentCommit = "8888888" };
+            preview.Ports.Add(new PortMapping { HostPort = 3002, ContainerPort = 3000, IsWeb = true });
+            db.Apps.Add(preview);
+            await db.SaveChangesAsync();
+            db.Previews.Add(new PreviewInfo { AppId = preview.Id, ParentAppId = _appId, Kind = PreviewKind.PullRequest, Branch = "feature", PullRequest = 8, Ref = "refs/pull/8/head", HeadSha = "8888888" });
+            await db.SaveChangesAsync();
+            previewId = preview.Id;
+        }
+        _docker.Images[image] = "{}";
+
+        async Task<Deployment> DeployAsync()
+        {
+            int id;
+            await using (var db = _db.CreateDbContext())
+            {
+                var d = new Deployment { AppId = previewId, Trigger = DeployTrigger.ConfigChange, ImageTag = image, CommitSha = "8888888" };
+                db.Deployments.Add(d);
+                await db.SaveChangesAsync();
+                id = d.Id;
+            }
+            await _pipeline.RunAsync(new DeployRequest(previewId, id, Build: false, Image: image), CancellationToken.None);
+            await using var after = _db.CreateDbContext();
+            return await after.Deployments.AsNoTracking().SingleAsync(d => d.Id == id);
+        }
+
+        // Production's value for all deploys: refused before anything runs, and the log says what to do.
+        var refused = await DeployAsync();
+        Assert.Equal(DeployStatus.Failed, refused.Status);
+        Assert.Equal("DATABASE_URL would reach this preview with production's value (set in Gitberth for all deploys), so the preview's build and code would use "
+            + "production's database. On Web's Environment tab, give it a value for Previews: a database of the previews' own, or the same value if previews may share production's.", refused.Error);
+        Assert.DoesNotContain(_docker.Containers, c => c.Name == "gb-web-pr-8");
+
+        // A value for previews (even production's own, on purpose) lets it run with that.
+        await using (var db = _db.CreateDbContext())
+        {
+            db.EnvVars.Add(new EnvVar { AppId = _appId, Key = "DATABASE_URL", Scope = EnvScope.Preview, ProtectedValue = _protector.Protect("postgres://app:pw@postgres:5432/web_preview") });
+            await db.SaveChangesAsync();
+        }
+        var ran = await DeployAsync();
+        Assert.True(ran.Status == DeployStatus.Succeeded, ran.Error);
+        Assert.Contains(_docker.Containers, c => c.Name == "gb-web-pr-8");
+    }
+
     // web's preview of the branch test, as PreviewService makes one (web-test), with copies of web's named volumes. Vercel's
     // variables are off, so no deploy here asks GitHub which branch is the default one.
     private async Task<int> AddTestPreviewAsync(string image, params string[] volumes)

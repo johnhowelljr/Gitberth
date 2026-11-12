@@ -210,11 +210,12 @@ public sealed class RepoWatcher(
                 {
                     case DeployTrigger.Retry:
                         logger.LogInformation("Retrying {App} at {Sha}, whose last build failed", app.Name, sha[..7]);
-                        await actions.DeployAsync(app.Id, DeployTrigger.Retry, ct, expectedSha: sha);
+                        await actions.DeployWatchedAsync(app.Id, DeployTrigger.Retry, sha, ct);
                         break;
                     case { } why:
                         logger.LogInformation("New commit {Sha} on {Repo} ({Branch}); deploying {App}", sha[..7], repo.Key, app.Branch, app.Name);
-                        await actions.DeployAsync(app.Id, why, ct, expectedSha: sha);
+                        // Not when it was stopped (or is being deleted) since this pass read it.
+                        await actions.DeployWatchedAsync(app.Id, why, sha, ct);
                         break;
                 }
             }

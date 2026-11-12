@@ -42,8 +42,11 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
     /// <summary>The comment on DNS records Gitberth adds: only those are ever removed with a domain.</summary>
     public const string AddedByGitberth = "Added by Gitberth";
 
+    /// <summary>The comment Gitberth put on its records before it was renamed: still its own, and changed to <see cref="AddedByGitberth"/> on sight.</summary>
+    public const string AddedByGitDock = "Added by GitDock";
+
     /// <summary>Whether Gitberth added the record. Ones added before it was renamed carry its old name, GitDock, and are its own too.</summary>
-    public static bool AddedByUs(string? comment) => comment is AddedByGitberth or "Added by GitDock";
+    public static bool AddedByUs(string? comment) => comment is AddedByGitberth or AddedByGitDock;
 
     /// <summary>Whether Cloudflare accepts the token at all (user tokens, then account-owned ones).</summary>
     public async Task VerifyTokenAsync(string token, string accountId, CancellationToken ct = default)
@@ -128,6 +131,9 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
 
     public Task SetProxiedAsync(string token, string zoneId, string recordId, string hostname, CancellationToken ct = default) =>
         SendAsync(token, HttpMethod.Patch, $"zones/{zoneId}/dns_records/{recordId}", new JsonObject { ["proxied"] = true }, $"turn on Cloudflare's proxy for {hostname}", ct);
+
+    public Task SetCommentAsync(string token, string zoneId, string recordId, string hostname, string comment, CancellationToken ct = default) =>
+        SendAsync(token, HttpMethod.Patch, $"zones/{zoneId}/dns_records/{recordId}", new JsonObject { ["comment"] = comment }, $"update the note on {hostname}'s DNS record", ct);
 
     public Task DeleteDnsRecordAsync(string token, string zoneId, string recordId, string hostname, CancellationToken ct = default) =>
         SendAsync(token, HttpMethod.Delete, $"zones/{zoneId}/dns_records/{recordId}", null, $"remove a DNS record for {hostname}", ct);

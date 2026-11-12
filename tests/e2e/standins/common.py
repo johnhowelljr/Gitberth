@@ -112,7 +112,9 @@ def send(handler, resp):
 
 # Headers that say who called and how; Authorization is kept as the token's tag, never the token.
 _KEPT_HEADERS = ("User-Agent", "Content-Type", "Accept", "X-GitHub-Api-Version", "Git-Protocol", "Content-Encoding",
-                 "Transfer-Encoding", "If-None-Match")
+                 "Transfer-Encoding", "If-None-Match",
+                 # What notifications are sent with (ntfy's headers, a webhook's event).
+                 "Title", "Priority", "Tags", "Click", "X-Gitberth-Event")
 
 
 def token_of(headers):

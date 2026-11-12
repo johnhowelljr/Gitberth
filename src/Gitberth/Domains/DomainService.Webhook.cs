@@ -104,6 +104,13 @@ public sealed partial class DomainService
         }
     }
 
+    /// <summary>Returns once no change to the domains is under way (a sync, a host name being saved): what it did is recorded then.</summary>
+    public async Task SettledAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct);
+        _gate.Release();
+    }
+
     private async Task<SyncReport> SyncIfTokenAsync(CancellationToken ct) => await TokenSavedAsync(ct) ? await SyncCoreAsync(widen: null, ct) : SyncReport.Nothing;
 
     // Why the host can't be the webhook's: someone else's rules are on it already. Null when it's free (or Cloudflare can't be asked yet).

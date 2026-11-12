@@ -77,7 +77,9 @@ public sealed class PreviewService(
     WatchState watch,
     ILogger<PreviewService> logger,
     HostPortMap? hostPorts = null,
-    PreviewGate? gate = null)
+    PreviewGate? gate = null,
+    RepoVariables? repoVariables = null,
+    Security.SecretProtector? protector = null)
 {
     /// <summary>How often a repo's pull requests are asked for at most when nothing says they changed.</summary>
     internal TimeSpan PullsEvery { get; set; } = TimeSpan.FromMinutes(5);
@@ -609,6 +611,31 @@ public sealed class PreviewService(
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         return await db.Apps.AsNoTracking().CountAsync(a => a.ParentAppId == parentId, ct);
+    }
+
+    /// <summary>
+    /// The variables that would give the app's previews production's database (<see cref="PreviewDatabases"/>): its Previews
+    /// section says so before a preview is refused for it. Its GitHub variables as last read when GitHub can't be asked.
+    /// </summary>
+    public async Task<IReadOnlyList<PreviewDatabases.Shared>> SharedDatabasesAsync(int appId, CancellationToken ct = default)
+    {
+        if (protector is null) return [];
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var app = await db.Apps.AsNoTracking().Include(a => a.EnvVars).FirstOrDefaultAsync(a => a.Id == appId, ct);
+        if (app is null || !app.Deployed || app.IsPreview) return [];
+        IEnumerable<(string, string)> github = [];
+        if (repoVariables is not null)
+        {
+            try
+            {
+                github = (await repoVariables.ForDeployAsync(app.Owner, app.Repo, ct)).Variables.Select(v => (v.Name, v.Value));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogDebug(ex, "Couldn't read {Repo}'s GitHub variables for its Previews section", $"{app.Owner}/{app.Repo}");
+            }
+        }
+        return PreviewDatabases.Find(app.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)), github);
     }
 
     /// <summary>What a preview previews and of which app, for its own page's banner; null when the app isn't a preview.</summary>

@@ -241,6 +241,8 @@ public sealed class DeploymentProtectionTests : IDisposable
         public Func<HttpRequestMessage, HttpStatusCode?>? Fail { get; set; }
         /// <summary>Where app.example.com's DNS record sends it: this tunnel, unless another has it now.</summary>
         public string AppTarget { get; set; } = $"{TunnelId}.cfargotunnel.com";
+        /// <summary>The note on app.example.com's DNS record; null for none.</summary>
+        public string? AppComment { get; set; }
         /// <summary>The routes of the account's other tunnels (another Gitberth's, say), by tunnel ID.</summary>
         public Dictionary<string, JsonArray> OtherTunnels { get; } = new();
         private int _next = 1;
@@ -279,11 +281,19 @@ public sealed class DeploymentProtectionTests : IDisposable
             }
             if (path.EndsWith("/zones", StringComparison.Ordinal))
                 return Ok(JsonNode.Parse(query.Contains("name=example.com&", StringComparison.Ordinal) ? """[{"id":"z1","name":"example.com"}]""" : "[]"));
+            if (path.EndsWith("/zones/z1/dns_records/r1", StringComparison.Ordinal) && request.Method == HttpMethod.Patch)
+            {
+                AppComment = body!["comment"]!.GetValue<string>();
+                return Ok(new JsonObject { ["id"] = "r1" });
+            }
             if (path.EndsWith("/zones/z1/dns_records", StringComparison.Ordinal))
-                return request.Method == HttpMethod.Post ? Ok(new JsonObject { ["id"] = "r-new" })
-                    : Ok(query.Contains("name=app.example.com&", StringComparison.Ordinal)
-                        ? JsonNode.Parse($$"""[{"id":"r1","type":"CNAME","name":"app.example.com","content":"{{AppTarget}}","proxied":true}]""")
-                        : new JsonArray());
+            {
+                if (request.Method == HttpMethod.Post) return Ok(new JsonObject { ["id"] = "r-new" });
+                if (!query.Contains("name=app.example.com&", StringComparison.Ordinal)) return Ok(new JsonArray());
+                var record = new JsonObject { ["id"] = "r1", ["type"] = "CNAME", ["name"] = "app.example.com", ["content"] = AppTarget, ["proxied"] = true };
+                if (AppComment is not null) record["comment"] = AppComment;
+                return Ok(new JsonArray(record));
+            }
             if (path.EndsWith("/access/organizations", StringComparison.Ordinal))
                 return TeamDomain is null ? new HttpResponseMessage(HttpStatusCode.NotFound) : Ok(new JsonObject { ["auth_domain"] = TeamDomain });
             if (path.EndsWith("/access/apps", StringComparison.Ordinal))
@@ -1471,12 +1481,56 @@ public sealed class DeploymentProtectionTests : IDisposable
         // Routed as asked, but GitHub checks the certificate, so no delivery would get there: a problem, never "done".
         Assert.Null(error);
         Assert.Contains(report.Notes, n => n.Problem && n.Text == "GitHub's webhooks can't reach Gitberth at hooks.gitberth.example.com yet: "
-            + "Cloudflare's free certificate covers example.com and *.example.com only, so hooks.gitberth.example.com needs Total TLS or an advanced certificate in Cloudflare.");
+            + "Cloudflare's free certificate covers example.com and *.example.com only, so hooks.gitberth.example.com needs Total TLS or an advanced certificate in Cloudflare. "
+            + "Once a delivery from GitHub gets through, this goes.");
+
+        // A delivery signed with Gitberth's secret came in at that name: the zone has a certificate for it (Total TLS), so
+        // the next sync doesn't say it again.
+        var endpoint = new GitHubWebhookEndpoint(_db, _settings, new Gitberth.Deploy.WatchState(), new WebhookThrottle(), NullLogger<GitHubWebhookEndpoint>.Instance);
+        var secret = (await _settings.GetSecretAsync(SettingKeys.GitHubWebhookSecret))!;
+        var body = Encoding.UTF8.GetBytes("""{"zen":"Keep it logically awesome."}""");
+        Assert.Equal(200, await endpoint.HandleAsync("ping", WebhookSignature.Sign(secret, body), body, "203.0.113.5", default, "Hooks.Gitberth.Example.com"));
+        Assert.DoesNotContain((await _domains.SyncAsync()).Notes, n => n.Text.StartsWith("GitHub's webhooks can't reach Gitberth", StringComparison.Ordinal));
+        // A bad signature proves nothing.
+        await _settings.SetAsync(SettingKeys.GitHubWebhookDelivered, null);
+        Assert.Equal(401, await endpoint.HandleAsync("ping", "sha256=00", body, "203.0.113.5", default, "hooks.gitberth.example.com"));
+        Assert.Null(await _settings.GetAsync(SettingKeys.GitHubWebhookDelivered));
 
         // One level below the zone is covered.
         var (_, covered) = await _domains.SetWebhookHostAsync("hooks.example.com");
         Assert.DoesNotContain(covered.Notes, n => n.Text.StartsWith("GitHub's webhooks can't reach Gitberth", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task Its_own_dns_record_from_before_the_rename_gets_todays_note_and_nobody_elses_is_touched()
+    {
+        _cloudflare.AppComment = CloudflareApi.AddedByGitDock;
+        var report = await _domains.SyncAsync();
+        Assert.Equal(CloudflareApi.AddedByGitberth, _cloudflare.AppComment);
+        Assert.Contains(report.Notes, n => !n.Problem && n.Text == "Changed the note on app.example.com's DNS record from \"Added by GitDock\" to \"Added by Gitberth\"");
+        // Once.
+        await _domains.SyncAsync();
+        Assert.Single(_cloudflare.Calls, c => c == "PATCH /client/v4/zones/z1/dns_records/r1");
+
+        // Someone else's note stays as it is.
+        _cloudflare.AppComment = "Made by hand";
+        await _domains.SyncAsync();
+        Assert.Equal("Made by hand", _cloudflare.AppComment);
+
+        // A refusal (an older token) is no problem: the record works either way, and it's tried again next time.
+        _cloudflare.AppComment = CloudflareApi.AddedByGitDock;
+        _cloudflare.Fail = r => r.Method == HttpMethod.Patch ? HttpStatusCode.Forbidden : null;
+        Assert.DoesNotContain((await _domains.SyncAsync()).Notes, n => n.Problem);
+        Assert.Equal(CloudflareApi.AddedByGitDock, _cloudflare.AppComment);
+    }
+
+    [Theory]
+    [InlineData("application/json", 1024 * 1024)]
+    [InlineData("application/x-www-form-urlencoded", 3 * 1024 * 1024)]
+    [InlineData("application/x-www-form-urlencoded; charset=utf-8", 3 * 1024 * 1024)]
+    [InlineData(null, 1024 * 1024)]
+    public void A_form_encoded_delivery_may_be_three_times_the_size_of_its_json(string? contentType, long limit) =>
+        Assert.Equal(limit, GitHubWebhookEndpoint.MaxBodyFor(contentType));
 
     [Fact]
     public async Task A_new_webhook_host_takes_the_route_from_the_old_one_and_keeps_the_secret()

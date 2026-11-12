@@ -97,12 +97,14 @@ public sealed class WordsAndLabelsTests : IDisposable
             AppSettingsService.GitLines(git, git with { AutoDeploy = false, DockerfileMode = DockerfileMode.Custom }).Select(l => (l.Label, l.Before, l.After)));
         Assert.Equal(("Gather stats", "on", "off"),
             AppSettingsService.OptionLines(new AppOptions(), new AppOptions { GatherStats = false }).Select(l => (l.Label, l.Before, l.After)).Single());
+        Assert.Equal(("Notifications", "on", "off"),
+            AppSettingsService.OptionLines(new AppOptions(), new AppOptions { Notify = false }).Select(l => (l.Label, l.Before, l.After)).Single());
     }
 
     [Fact]
     public void The_settings_index_names_each_section_by_its_title()
     {
-        Assert.Equal(["GitHub access", "GitHub integration", "Registries", "Updates", "Domains", "Network", "Own LAN addresses", "Deploys", "Admin password", "System"],
+        Assert.Equal(["GitHub access", "GitHub integration", "Notifications", "Registries", "Updates", "Domains", "Network", "Own LAN addresses", "Deploys", "Admin password", "System"],
             SettingsPage.Toc.Select(t => t.Text));
         // A message that sends you to a section names one there is.
         Assert.Equal("Own LAN addresses are off. Turn them on in Settings › Own LAN addresses.", LanAddresses.OffText);

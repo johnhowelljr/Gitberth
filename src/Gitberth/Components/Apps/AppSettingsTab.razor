@@ -64,7 +64,7 @@ else
                 <div class="gb-ro-note"><SvgIcon Icon="@Icons.Material.Outlined.Info" Size="sm" /><span>@notice</span></div>
             }
 
-            <SettingsSection Id="sec-general" Title="General" Icon="@Icons.Material.Outlined.Tune" Changed="@(opt.Any(o => o is "name" or "pinned" or "stats" or "health URL"))"
+            <SettingsSection Id="sec-general" Title="General" Icon="@Icons.Material.Outlined.Tune" Changed="@(opt.Any(o => o is "name" or "pinned" or "stats" or "notifications" or "health URL"))"
                              Description="How it shows up in Gitberth. Nothing here restarts it.">
                 <div class="gb-fgrid">
                     <Field Label="Name" For="set-name" Changed="@opt.Contains("name")" Was="@Options.Loaded.Name" OnUndo="() => Undo(() => Options.Name = Options.Loaded.Name)"
@@ -84,6 +84,8 @@ else
                 <div class="gb-fgrid">
                     <SwitchRow Title="Pinned" Sub="Shown in the sidebar." Value="Options.Pinned" ValueChanged="v => Set(() => Options.Pinned = v)" Changed="@opt.Contains("pinned")" />
                     <SwitchRow Title="Gather stats" Sub="CPU, memory and network every 5 s, kept 6 hours." Value="Options.GatherStats" ValueChanged="v => Set(() => Options.GatherStats = v)" Changed="@opt.Contains("stats")" />
+                    <SwitchRow Title="Notifications" Sub="Tell about its deploys, crashes and health checks, where Settings › Notifications sends them." Value="Options.Notify"
+                               ValueChanged="v => Set(() => Options.Notify = v)" Changed="@opt.Contains("notifications")" />
                 </div>
             </SettingsSection>
 

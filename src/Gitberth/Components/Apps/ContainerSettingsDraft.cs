@@ -633,6 +633,7 @@ public sealed class AppOptionsDraft
     public string Name { get; set; }
     public bool Pinned { get; set; }
     public bool GatherStats { get; set; }
+    public bool Notify { get; set; }
     public string HealthCheckPath { get; set; }
     public UpdatePolicy Updates { get; set; }
     /// <summary>The scheduled restart in minutes; 0 for none.</summary>
@@ -646,6 +647,7 @@ public sealed class AppOptionsDraft
         Name = o.Name;
         Pinned = o.Pinned;
         GatherStats = o.GatherStats;
+        Notify = o.Notify;
         HealthCheckPath = o.HealthCheckPath ?? "";
         Updates = o.Updates;
         RestartOn = o.ScheduledRestart is not null;
@@ -659,6 +661,7 @@ public sealed class AppOptionsDraft
         Name = Name.Trim().Length == 0 ? Loaded.Name : Name.Trim(),
         Pinned = Pinned,
         GatherStats = GatherStats,
+        Notify = Notify,
         HealthCheckPath = HealthCheckPath.Trim() == (Loaded.HealthCheckPath ?? "") ? Loaded.HealthCheckPath : HealthCheckPath.Trim().Length == 0 ? null : HealthCheckPath.Trim(),
         Updates = Updates,
         ScheduledRestart = !RestartOn ? null : Loaded.ScheduledRestart is { } r && r.Amount == RestartAmount && r.Unit == RestartUnit ? r : new RestartInterval(Math.Max(1, RestartAmount), RestartUnit),
@@ -673,6 +676,7 @@ public sealed class AppOptionsDraft
         if (a.Name != b.Name) changed.Add("name");
         if (a.Pinned != b.Pinned) changed.Add("pinned");
         if (a.GatherStats != b.GatherStats) changed.Add("stats");
+        if (a.Notify != b.Notify) changed.Add("notifications");
         if (a.HealthCheckPath != b.HealthCheckPath) changed.Add("health URL");
         if (a.Updates != b.Updates) changed.Add("updates");
         if (a.ScheduledRestart != b.ScheduledRestart) changed.Add("scheduled restart");

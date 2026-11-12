@@ -74,9 +74,14 @@ Without **Webhooks: Read and write** on the token, add the webhook by hand on ea
 
 GitHub sends a ping when the webhook is added; Gitberth answers it, and GitHub shows a green tick next to the delivery.
 
+GitHub checks the host name's certificate, and Cloudflare's free one covers only names one level below your zone
+(`hooks.example.com`, not `hooks.gitberth.example.com`). For a deeper name the section says **GitHub's webhooks can't
+reach Gitberth at … yet**, until the zone has Total TLS or an advanced certificate: once a delivery from GitHub gets
+through, Gitberth knows the certificate works and stops saying so.
+
 ### How deliveries are checked
 
-Every delivery is signed by GitHub with the secret (`X-Hub-Signature-256`), and Gitberth checks the signature before it reads anything else. One with a wrong signature gets `401` and nothing happens; after 10 wrong ones in 10 minutes from the same address, that address's wrong ones get `429` until the 10 minutes are up. A delivery with the right signature always gets through, even from an address that sent wrong ones (GitHub's addresses carry everyone's webhooks). A delivery larger than 1 MB is refused. A delivery never deploys by itself: it only makes Gitberth look at the repo now, with the same rules as polling (a commit that already failed isn't retried in a loop, a rollback isn't undone).
+Every delivery is signed by GitHub with the secret (`X-Hub-Signature-256`), and Gitberth checks the signature before it reads anything else. One with a wrong signature gets `401` and nothing happens; after 10 wrong ones in 10 minutes from the same address, that address's wrong ones get `429` until the 10 minutes are up. A delivery with the right signature always gets through, even from an address that sent wrong ones (GitHub's addresses carry everyone's webhooks). A delivery larger than 1 MB is refused (3 MB for one sent as `application/x-www-form-urlencoded`, whose encoding makes the same push about three times larger). A delivery never deploys by itself: it only makes Gitberth look at the repo now, with the same rules as polling (a commit that already failed isn't retried in a loop, a rollback isn't undone).
 
 | Gitberth answers | When |
 |---|---|

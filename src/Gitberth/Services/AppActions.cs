@@ -39,11 +39,44 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     /// watcher never sees one without the other.
     /// </param>
     public async Task<int> DeployAsync(int appId, DeployTrigger trigger = DeployTrigger.Manual, CancellationToken ct = default, string? expectedSha = null,
+        string? gitRef = null, string? commit = null, string? promotedOver = null) =>
+        await QueueDeployAsync(appId, trigger, onlyIfRunning: false, ct, expectedSha, gitRef, commit, promotedOver)
+        ?? throw new InvalidOperationException("The app is being deleted, so it isn't deployed.");
+
+    /// <summary>
+    /// A watcher's deploy of a commit it saw: none (null) when the app stopped being meant to run since the watcher read it
+    /// (stopped by its owner, or being deleted), so a pass that read the list before never starts it again.
+    /// </summary>
+    public Task<int?> DeployWatchedAsync(int appId, DeployTrigger trigger, string sha, CancellationToken ct = default) =>
+        QueueDeployAsync(appId, trigger, onlyIfRunning: true, ct, expectedSha: sha);
+
+    // Apps being deleted, which no deploy may start for. Set under _deployGate, which a deploy holds from its check to its
+    // queueing, so once delete has set it every deploy is either refused or queued already (and delete cancels those).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> _deleting = new();
+    private readonly SemaphoreSlim _deployGate = new(1, 1);
+
+    private async Task<int?> QueueDeployAsync(int appId, DeployTrigger trigger, bool onlyIfRunning, CancellationToken ct, string? expectedSha = null,
         string? gitRef = null, string? commit = null, string? promotedOver = null)
     {
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var app = await db.Apps.FirstAsync(a => a.Id == appId, ct);
-        if (!app.Deployed) throw NotGit(app);
+        await _deployGate.WaitAsync(ct);
+        try
+        {
+            if (_deleting.ContainsKey(appId)) return null;
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var app = await db.Apps.FirstAsync(a => a.Id == appId, ct);
+            if (!app.Deployed) throw NotGit(app);
+            if (onlyIfRunning && app.DesiredState != DesiredState.Running) return null;
+            return await QueueAsync(db, app, appId, trigger, expectedSha, gitRef, commit, promotedOver, ct);
+        }
+        finally
+        {
+            _deployGate.Release();
+        }
+    }
+
+    private async Task<int> QueueAsync(GitberthDb db, AppDefinition app, int appId, DeployTrigger trigger, string? expectedSha, string? gitRef, string? commit,
+        string? promotedOver, CancellationToken ct)
+    {
         app.DesiredState = DesiredState.Running;
         // A promote's commit isn't its branch's: a promote that never runs, or fails, leaves what the watcher knows about
         // the branch as it was, so a rollback stays.
@@ -262,7 +295,26 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     /// </summary>
     public async Task<SyncReport> DeleteAsync(int appId, bool removeImages, bool removeVolumes)
     {
-        queue.Cancel(appId);
+        // From here no deploy of it starts (DeployAsync refuses, the watcher's finds it not meant to run); one already
+        // queued is cancelled, and one running is cancelled and finishes before its container is removed (the app's lock).
+        await _deployGate.WaitAsync();
+        _deleting[appId] = 0;
+        _deployGate.Release();
+        try
+        {
+            queue.Cancel(appId);
+            await CancelQueuedAsync(appId, "The app is being deleted.");
+            return await DeleteCoreAsync(appId, removeImages, removeVolumes);
+        }
+        finally
+        {
+            // Once the row is gone nothing can deploy it anyway; after a failure the app may be deployed again.
+            _deleting.TryRemove(appId, out _);
+        }
+    }
+
+    private async Task<SyncReport> DeleteCoreAsync(int appId, bool removeImages, bool removeVolumes)
+    {
         await using var db = await dbFactory.CreateDbContextAsync();
         var app = await db.Apps.AsNoTracking().Include(a => a.Volumes).FirstOrDefaultAsync(a => a.Id == appId);
         if (app is null) return SyncReport.Nothing;
@@ -278,8 +330,19 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
                 await db.Apps.Where(a => a.Id == appId).ExecuteUpdateAsync(s => s
                     .SetProperty(a => a.PreviewMode, PreviewMode.Off)
                     .SetProperty(a => a.DesiredState, DesiredState.Stopped));
-                foreach (var previewId in await db.Apps.AsNoTracking().Where(a => a.ParentAppId == appId).Select(a => a.Id).ToListAsync())
-                    await DeleteAsync(previewId, removeImages: true, removeVolumes: true);
+                try
+                {
+                    foreach (var previewId in await db.Apps.AsNoTracking().Where(a => a.ParentAppId == appId).Select(a => a.Id).ToListAsync())
+                        await DeleteAsync(previewId, removeImages: true, removeVolumes: true);
+                }
+                catch
+                {
+                    // Its own container wasn't touched yet: it's left as it was, running and previewing as before.
+                    await db.Apps.Where(a => a.Id == appId).ExecuteUpdateAsync(s => s
+                        .SetProperty(a => a.PreviewMode, app.PreviewMode)
+                        .SetProperty(a => a.DesiredState, app.DesiredState));
+                    throw;
+                }
             }
             finally
             {

@@ -10,6 +10,7 @@ using Gitberth.Git;
 using Gitberth.Health;
 using Gitberth.Images;
 using Gitberth.Network;
+using Gitberth.Notifications;
 using Gitberth.Security;
 using Gitberth.Services;
 using Gitberth.Sources;
@@ -87,7 +88,20 @@ builder.Services.AddSingleton<LiveLogHub>();
 // through GitHub's webhook. Each does nothing until a token (and, for the webhook, a host name) is set up.
 builder.Services.AddSingleton<GitHubWrites>();
 builder.Services.AddSingleton<GitHubIntegrationState>();
-builder.Services.AddSingleton<IDeployReporter, GitHubReporter>();
+builder.Services.AddSingleton<GitHubReporter>();
+// ---- Notifications (1.2): failed deploys, crashes and failing health checks, by mail, Discord, Slack, ntfy or a webhook.
+// Nothing is sent until Settings › Notifications has somewhere to send it.
+builder.Services.AddHttpClient(NotificationSender.ClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddSingleton<NotificationSettings>();
+builder.Services.AddSingleton<IMailer, SmtpMailer>();
+builder.Services.AddSingleton<NotificationSender>();
+builder.Services.AddSingleton<Notifier>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Notifier>());
+builder.Services.AddSingleton<DeployNotifier>();
+// Every deploy is told to GitHub and to notifications, at once.
+builder.Services.AddSingleton<IDeployReporter>(sp => new DeployReporters(
+    [sp.GetRequiredService<GitHubReporter>(), sp.GetRequiredService<DeployNotifier>()], sp.GetRequiredService<ILogger<DeployReporters>>()));
+builder.Services.AddSingleton<ContainerAlerts>();
 builder.Services.AddSingleton<WebhookThrottle>();
 builder.Services.AddSingleton<GitHubWebhookEndpoint>();
 builder.Services.AddSingleton<WebhookKeeper>();
@@ -168,6 +182,8 @@ builder.Services.AddHostedService<RepoWatcher>();
 // What a sync couldn't finish (the tunnel, a removed domain's route or DNS record, a protected domain not behind
 // Cloudflare Access yet, an Access application Cloudflare couldn't remove for the moment): tried again every 15 minutes.
 builder.Services.AddHostedService<RemovalRetry>();
+// Before the event watcher, so it hears the watcher's first events.
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerAlerts>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerEventWatcher>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerStatsCollector>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CronScheduler>());
@@ -184,6 +200,7 @@ await app.Services.GetRequiredService<AdminAuthService>().EnsureAdminPasswordAsy
 await app.Services.GetRequiredService<HealthSettings>().LoadAsync();
 await app.Services.GetRequiredService<ContainerTitles>().LoadAsync();
 await app.Services.GetRequiredService<RestartSchedules>().LoadAsync();
+await app.Services.GetRequiredService<NotificationSettings>().LoadAsync();
 
 if (!app.Environment.IsDevelopment())
 {

@@ -142,6 +142,24 @@ One name can have a value in each: `API_URL` for all deploys, and another `API_U
 Changing a variable for previews never marks production as needing a new build or restart; previews take it with their
 next deploy.
 
+### Production's database
+
+A preview never uses production's database unless you tell it to. A preview's build can run migrations, and its code is a
+pull request's, so a variable that says where a database is stops a preview's deploy before anything is built when it
+would reach the preview with production's value: one set for **All deploys**, or one of the repo's GitHub variables
+(which every deploy gets). Variables count by their name (`DATABASE_URL`, `POSTGRES_PRISMA_URL`, `PGHOST`, `MONGODB_URI`,
+`REDIS_URL`, `ConnectionStrings__Default`, …) or by their value (`postgres://…`, `mysql://…`, `mongodb+srv://…`,
+`redis://…`). The deploy log says which:
+
+**DATABASE_URL would reach this preview with production's value (from the repo's GitHub variables), so the preview's
+build and code would use production's database. On web's Environment tab, give it a value for Previews: a database of
+the previews' own, or the same value if previews may share production's.**
+
+Give the variable a **Previews** value on the **Environment** tab: a database for previews (a second database on the same
+server is enough), or production's own value again if previews may share it. When the build uses it too (to run
+migrations, say), mark it **Build time** as well: a value set in Gitberth takes the GitHub one's place in the build too.
+The **Previews** section of the app's **Settings** says so before you turn previews on.
+
 ### Vercel's variables in a preview
 
 A preview gets Vercel's variables for a preview:

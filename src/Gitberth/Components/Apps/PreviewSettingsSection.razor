@@ -32,6 +32,12 @@
             <SwitchRow Title="Protect previews' domains" Value="protect" ValueChanged="v => protect = v" Changed="@(protect != loaded.Protect)"
                        Sub="Visitors sign in through Cloudflare Access before they see a preview. Access is set up in Settings › Domains." />
         </div>
+        @if (shared.Count > 0)
+        {
+            <Banner Tone="serious" Title="@(shared.Count == 1 ? $"{shared[0].Name} would give previews production's database" : "These would give previews production's database")">
+                @PreviewDatabases.Refusal(shared, App.Name) Until then each preview's deploy stops before it builds.
+            </Banner>
+        }
         @if (forks)
         {
             <Banner Tone="serious" Title="Anyone's code, built and run on this server">
@@ -77,14 +83,29 @@
         _ => "No previews: only production runs.",
     };
 
-    protected override void OnParametersSet()
+    // Variables that would give its previews production's database: said here, before a preview is refused for it.
+    private IReadOnlyList<PreviewDatabases.Shared> shared = [];
+
+    protected override async Task OnParametersSetAsync()
     {
         var now = PreviewSettings.Of(App);
         // Follows the app as it's saved, unless there's an edit in progress.
         if (loadedFor == App.Id && (now == loaded || Dirty)) return;
+        var first = loadedFor != App.Id;
         loadedFor = App.Id;
         loaded = now;
         Undo();
+        if (first)
+        {
+            try
+            {
+                shared = await Previews.SharedDatabasesAsync(App.Id);
+            }
+            catch (Exception)
+            {
+                shared = [];
+            }
+        }
     }
 
     private void Undo() => (mode, limit, days, forks, protect) = (loaded.Mode, loaded.Limit, loaded.ExpiryDays, loaded.Forks, loaded.Protect);

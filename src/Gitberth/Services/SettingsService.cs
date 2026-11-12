@@ -44,6 +44,11 @@ public static class SettingKeys
     /// <summary>The host name GitHub's webhooks reach Gitberth on through the tunnel (only its path /hooks/github). Unset: none.</summary>
     public const string GitHubWebhookHost = "github.webhookHost";
     /// <summary>
+    /// The host name a delivery signed with Gitberth's secret last came in at: proof GitHub reaches it there, certificate and
+    /// all, so a name Cloudflare's free certificate wouldn't cover (one with Total TLS) isn't warned about any more.
+    /// </summary>
+    public const string GitHubWebhookDelivered = "github.webhookDelivered";
+    /// <summary>
     /// The host names GitHub's webhooks reached Gitberth on before, newest first, one per line: their routes in the tunnel
     /// are Gitberth's own to remove. Nobody else's are touched.
     /// </summary>
@@ -83,6 +88,16 @@ public static class SettingKeys
     /// first use, encrypted, never shown.
     /// </summary>
     public const string BuildSecretsKey = "build.secretsKey";
+
+    // ---- Notifications (1.2) ----
+    /// <summary>Where notifications go: a JSON list of channels, encrypted (webhook URLs, tokens and the mail password are keys).</summary>
+    public const string NotifyDestinations = "notify.destinations";
+    /// <summary>The kinds of notification that are on, as a JSON list of names; failures only when unset.</summary>
+    public const string NotifyEvents = "notify.events";
+    /// <summary>"true" when deploys of previews are told about too.</summary>
+    public const string NotifyPreviews = "notify.previews";
+    /// <summary>The containers whose apps are left out of notifications, as a JSON list of names.</summary>
+    public const string NotifyMuted = "notify.muted";
 }
 
 /// <summary>Key/value settings stored in SQLite; secrets are encrypted.</summary>

@@ -21,7 +21,7 @@
 
 <PageTitle>Settings · Gitberth</PageTitle>
 
-<PageHead Title="Settings" Lead="GitHub and registry access, domains, the network, updates, and this Gitberth installation.">
+<PageHead Title="Settings" Lead="GitHub and registry access, notifications, domains, the network, updates, and this Gitberth installation.">
     <Crumbs><a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /><span>Settings</span></Crumbs>
 </PageHead>
 
@@ -164,6 +164,8 @@
                 }
             </div>
         </section>
+
+        <NotificationsSection />
 
         <section class="gb-card gb-sec" id="registries" aria-labelledby="registries-t">
             @Head("registries-t", Icons.Material.Outlined.Key, "Registries", "Sign-ins for private images: used to pull them and to check them for updates.")
@@ -539,6 +541,7 @@
     [
         ("github", "GitHub access", Icons.Custom.Brands.GitHub),
         ("github-integration", "GitHub integration", Icons.Material.Outlined.Sync),
+        ("notifications", "Notifications", Icons.Material.Outlined.NotificationsActive),
         ("registries", "Registries", Icons.Material.Outlined.Key),
         ("updates", "Updates", Icons.Material.Outlined.CloudDownload),
         ("domains", "Domains", Icons.Material.Outlined.Public),

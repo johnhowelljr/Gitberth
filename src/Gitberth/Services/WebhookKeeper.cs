@@ -37,6 +37,9 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
     // set a moment ago): cloudflared takes a new configuration a few seconds later, and until then the ping would get 404.
     private async Task RouteRunsAsync(CancellationToken ct)
     {
+        // A host name saved a moment ago is saved before the sync that writes its route: waiting for any domain change under
+        // way to finish means the route's tunnel change is the one recorded below, not an older one.
+        if (domains is not null) await domains.SettledAsync(ct);
         if (domains?.LastTunnelChange is not { } change || Now() - change.At > RecentRoute) return;
         if (!await domains.WaitForTunnelAsync(change.Version, change.At, RouteWait, ct))
             logger.LogInformation("cloudflared didn't confirm the webhook's route within {Seconds} seconds; adding the webhook anyway", RouteWait.TotalSeconds);

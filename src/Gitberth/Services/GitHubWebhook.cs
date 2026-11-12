@@ -141,6 +141,13 @@ public sealed class GitHubWebhookEndpoint(IDbContextFactory<GitberthDb> dbFactor
     public const string Path = "/hooks/github";
     public const int MaxBody = 1024 * 1024;
 
+    /// <summary>
+    /// The most a delivery may be: 1 MB of JSON, or three times that form-encoded (payload=…), where every quote, colon
+    /// and brace takes three characters, so the same push fits either way.
+    /// </summary>
+    public static long MaxBodyFor(string? contentType) =>
+        contentType?.StartsWith("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase) == true ? 3L * MaxBody : MaxBody;
+
     internal Func<DateTime> Now { get; set; } = () => DateTime.UtcNow;
 
     /// <summary>
@@ -153,7 +160,8 @@ public sealed class GitHubWebhookEndpoint(IDbContextFactory<GitberthDb> dbFactor
             .DisableAntiforgery();
 
     /// <summary>The answer to one delivery, as an HTTP status code.</summary>
-    public async Task<int> HandleAsync(string? eventName, string? signature, byte[] body, string sender, CancellationToken ct = default)
+    /// <param name="host">The host name it came in at: a signed delivery there proves GitHub reaches it, certificate and all.</param>
+    public async Task<int> HandleAsync(string? eventName, string? signature, byte[] body, string sender, CancellationToken ct = default, string? host = null)
     {
         var secret = await settings.GetSecretAsync(SettingKeys.GitHubWebhookSecret, ct);
         // Checked first: a delivery signed with the secret always gets through, and only bad ones are ever throttled.
@@ -164,6 +172,8 @@ public sealed class GitHubWebhookEndpoint(IDbContextFactory<GitberthDb> dbFactor
             throttle.Failed(sender, now);
             return StatusCodes.Status401Unauthorized;
         }
+        if (host?.Trim().ToLowerInvariant() is { Length: > 0 } at && await settings.GetAsync(SettingKeys.GitHubWebhookDelivered, ct) != at)
+            await settings.SetAsync(SettingKeys.GitHubWebhookDelivered, at, ct);
         if (eventName == "ping") return StatusCodes.Status200OK;
         if (!WebhookEvents.Deploys(eventName) || WebhookEvents.RepoOf(body) is not { } about) return StatusCodes.Status204NoContent;
         var (owner, repo) = about;
@@ -191,7 +201,8 @@ public sealed class GitHubWebhookEndpoint(IDbContextFactory<GitberthDb> dbFactor
         }
         try
         {
-            if (request.ContentLength > MaxBody)
+            var limit = MaxBodyFor(request.ContentType);
+            if (request.ContentLength > limit)
             {
                 context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
                 return;
@@ -202,7 +213,7 @@ public sealed class GitHubWebhookEndpoint(IDbContextFactory<GitberthDb> dbFactor
             while ((read = await request.Body.ReadAsync(chunk, context.RequestAborted)) > 0)
             {
                 buffer.Write(chunk, 0, read);
-                if (buffer.Length > MaxBody)
+                if (buffer.Length > limit)
                 {
                     context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
                     return;
@@ -210,7 +221,7 @@ public sealed class GitHubWebhookEndpoint(IDbContextFactory<GitberthDb> dbFactor
             }
             var sender = request.Headers["CF-Connecting-IP"].FirstOrDefault() is { Length: > 0 } ip ? ip : context.Connection.RemoteIpAddress?.ToString() ?? "";
             context.Response.StatusCode = await HandleAsync(request.Headers["X-GitHub-Event"].FirstOrDefault(), request.Headers["X-Hub-Signature-256"].FirstOrDefault(),
-                buffer.ToArray(), sender, context.RequestAborted);
+                buffer.ToArray(), sender, context.RequestAborted, request.Host.Host);
         }
         catch (Exception ex)
         {

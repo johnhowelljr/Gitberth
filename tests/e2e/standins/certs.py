@@ -9,6 +9,8 @@ import subprocess
 HOSTS = [
     "github.com", "www.github.com", "api.github.com", "codeload.github.com", "raw.githubusercontent.com",
     "objects.githubusercontent.com", "uploads.github.com", "api.cloudflare.com", "gbe2e-standin",
+    # Where notifications go: Discord's and Slack's webhooks, an ntfy server, any webhook.
+    "discord.com", "hooks.slack.com", "ntfy.e2e.test", "notify.e2e.test",
 ]
 
 

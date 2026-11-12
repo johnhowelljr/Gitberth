@@ -25,7 +25,7 @@ namespace Gitberth.Apps;
 public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkService network, AddressBook book, AppService apps,
     ContainerStatsCollector stats, ContainerTitles titles, HealthSettings health, RestartSchedules restarts, IChangeJournal journal,
     DockerCli docker, DomainService domains, SecretProtector protector, GitberthOptions options, ActivityLog activity,
-    Lazy<UpdateService> updates, ILogger<AppCatalog> logger)
+    Lazy<UpdateService> updates, ILogger<AppCatalog> logger, Notifications.NotificationSettings? notify = null)
 {
     private static readonly JsonSerializerOptions SnapshotJson = new() { Converters = { new JsonStringEnumConverter() } };
 
@@ -214,6 +214,7 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
         // Also clears choices left over from an older container with the same name.
         await health.SetGatheredAsync(app.ContainerName, row.Options.GatherStats, ct);
         await restarts.SetAsync(app.ContainerName, row.Options.ScheduledRestart, ct);
+        if (notify is not null) await notify.SetMutedAsync(app.ContainerName, !row.Options.Notify, ct);
         Changed?.Invoke();
         return app;
     }
@@ -259,11 +260,12 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
     public async Task<AppOptions> OptionsAsync(string key, CancellationToken ct = default)
     {
         if (await RowOfAsync(key, ct) is { } row)
-            return GitAppSettings.ToOptions(row, health, restarts);
+            return GitAppSettings.ToOptions(row, health, restarts) with { Notify = notify?.IsMuted(row.ContainerName) != true };
         return new AppOptions
         {
             Name = titles.For(key) ?? key,
             GatherStats = health.IsGathered(key),
+            Notify = notify?.IsMuted(key) != true,
             ScheduledRestart = restarts.For(key),
             Updates = UpdatePolicy.Notify,
         };
@@ -285,6 +287,7 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
 
         if (name != current.Name && (row is null || row.Source == AppSource.Existing)) await titles.SetAsync(key, name, ct);
         if (options.GatherStats != current.GatherStats) await health.SetGatheredAsync(key, options.GatherStats, ct);
+        if (options.Notify != current.Notify && notify is not null) await notify.SetMutedAsync(key, !options.Notify, ct);
         if (options.ScheduledRestart != current.ScheduledRestart) await restarts.SetAsync(key, options.ScheduledRestart, ct);
         if (row is not null && (rowData || name != current.Name))
         {

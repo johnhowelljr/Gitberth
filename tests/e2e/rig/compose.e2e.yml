@@ -13,6 +13,12 @@ services:
       - "raw.githubusercontent.com:${E2E_STANDIN_IP}"
       - "objects.githubusercontent.com:${E2E_STANDIN_IP}"
       - "api.cloudflare.com:${E2E_STANDIN_IP}"
+      # Where notifications go (Settings › Notifications), and its mail server: the stand-ins too.
+      - "discord.com:${E2E_STANDIN_IP}"
+      - "hooks.slack.com:${E2E_STANDIN_IP}"
+      - "ntfy.e2e.test:${E2E_STANDIN_IP}"
+      - "notify.e2e.test:${E2E_STANDIN_IP}"
+      - "smtp.e2e.test:${E2E_STANDIN_IP}"
     environment:
       SSL_CERT_FILE: /e2e-trust/gitberth-bundle.pem
       GIT_SSL_CAINFO: /e2e-trust/gitberth-bundle.pem

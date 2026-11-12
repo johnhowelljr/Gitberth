@@ -5,6 +5,8 @@
   /build    what the build saw (build.json, from build_info.py)
   /file     GET ?path= a file's contents (404 when missing); POST ?path= writes the body there (for volume checks)
   /cron     the cron job vercel.json schedules: each hit is a line in /data/cron.log
+  /exit     POST ?code= ends the process with that code, as a crash does (for notifications)
+  /sick     POST ?on=1 makes /tmp/sick, which a HEALTHCHECK can fail on; ?on=0 takes it away
 """
 import json
 import os
@@ -63,6 +65,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         url = urlsplit(self.path)
+        q = parse_qs(url.query)
+        if url.path == "/exit":
+            code = int(q.get("code", ["1"])[0])
+            self._send(200, {"exiting": code})
+            self.wfile.flush()
+            print(f"exiting with {code}, as asked", flush=True)
+            os._exit(code)
+        if url.path == "/sick":
+            if q.get("on", ["1"])[0] == "1":
+                open("/tmp/sick", "w").close()
+            elif os.path.exists("/tmp/sick"):
+                os.remove("/tmp/sick")
+            self._send(200, {"sick": os.path.exists("/tmp/sick")})
+            return
         if url.path != "/file":
             self._send(404, {"error": "not found"})
             return

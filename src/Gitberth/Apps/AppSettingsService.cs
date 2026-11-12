@@ -27,8 +27,9 @@ public sealed class AppSettingsService
 
     public AppSettingsService(AppCatalog catalog, AppService apps, Lazy<AppActions> actions, PortChanger changer, ContainerUpdater updater,
         IContainerEngine engine, AppLocks appLocks, DomainService domains, HealthSettings health, RestartSchedules restarts, SecretProtector protector,
-        IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity, ILogger<AppSettingsService> logger)
-        : this(new AppSettingsHost(catalog, apps, actions, appLocks, domains, health, restarts, protector, dbFactory, options, activity), changer, updater, engine, options,
+        IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity, ILogger<AppSettingsService> logger,
+        Notifications.NotificationSettings? notify = null)
+        : this(new AppSettingsHost(catalog, apps, actions, appLocks, domains, health, restarts, protector, dbFactory, options, activity, notify), changer, updater, engine, options,
             logger)
     {
     }
@@ -376,6 +377,7 @@ public sealed class AppSettingsService
         if (before.WebPort != after.WebPort) yield return Line("Web port", before.WebPort?.ToString() ?? "none", after.WebPort?.ToString() ?? "none");
         if (before.HealthCheckPath != after.HealthCheckPath) yield return Line("Health URL", before.HealthCheckPath ?? "none", after.HealthCheckPath ?? "none");
         if (before.GatherStats != after.GatherStats) yield return Line("Gather stats", before.GatherStats ? "on" : "off", after.GatherStats ? "on" : "off");
+        if (before.Notify != after.Notify) yield return Line("Notifications", before.Notify ? "on" : "off", after.Notify ? "on" : "off");
         if (before.ScheduledRestart != after.ScheduledRestart)
             yield return Line("Scheduled restart", before.ScheduledRestart?.ToString() ?? "never", after.ScheduledRestart?.ToString() ?? "never");
         if (before.Updates != after.Updates) yield return Line("Updates", PolicyWords(before.Updates), PolicyWords(after.Updates));
@@ -464,7 +466,8 @@ internal interface IAppSettingsHost
 
 /// <summary>The seam over Gitberth's services: the catalog (A), the Git apps' records and deploys, domains and Activity.</summary>
 internal sealed class AppSettingsHost(AppCatalog catalog, AppService apps, Lazy<AppActions> actions, AppLocks appLocks, DomainService domains, HealthSettings health,
-    RestartSchedules restarts, SecretProtector protector, IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity) : IAppSettingsHost
+    RestartSchedules restarts, SecretProtector protector, IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity,
+    Notifications.NotificationSettings? notify = null) : IAppSettingsHost
 {
     public Task<AppView?> ViewAsync(string key, CancellationToken ct) => catalog.GetAsync(key, options.PublicHost ?? "", ct);
 
@@ -484,7 +487,7 @@ internal sealed class AppSettingsHost(AppCatalog catalog, AppService apps, Lazy<
 
     public GitOptions GitOptions(AppDefinition app) => GitAppSettings.ToGit(app);
 
-    public AppOptions GitAppOptions(AppDefinition app) => GitAppSettings.ToOptions(app, health, restarts);
+    public AppOptions GitAppOptions(AppDefinition app) => GitAppSettings.ToOptions(app, health, restarts) with { Notify = notify?.IsMuted(app.ContainerName) != true };
 
     public Task<GitSaved> SaveGitAsync(int appId, SettingsEdit edit, CancellationToken ct) => apps.SaveSettingsAsync(appId, edit, ct);
 

@@ -172,6 +172,12 @@ public sealed class DeployPipeline(
                     log.Line($"No tmpfs at {tmpfs.Target}: the preview keeps its volume {VolumeNames.Resolve(app.Slug, volume.Source)} there, and Docker mounts one thing at a path.");
             }
             var usable = repo.Variables.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
+            // A preview never gets production's database without being told to: stopped before anything is built, since a
+            // build can run migrations.
+            if (parent is not null && preview is not null
+                && Previews.PreviewDatabases.Find(parent.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)),
+                    usable.Select(v => (v.Name, v.Value))) is { Count: > 0 } shared)
+                throw new DeployException(Previews.PreviewDatabases.Refusal(shared, parent.Name));
             var overridden = usable.Where(v => ownKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var listener = usable.Where(v => !ownKeys.Contains(v.Name) && ListenerKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var fromGitHub = usable

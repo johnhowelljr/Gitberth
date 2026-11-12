@@ -11,6 +11,8 @@ Gitberth is free for personal use. Businesses need a license; see [License](#lic
 ## What it does
 
 - **Builds from GitHub.** Node.js, Python, Go, .NET, Rust, Ruby, PHP, Java, static sites, or the repo's own Dockerfile, found by looking at the repo. Each push deploys within about 30 seconds, and a deploy that fails its checks leaves the running version in place. [How Gitberth builds your project](docs/reference/build-detection.md)
+- **Previews of every pull request.** Each pull request, and each branch if you like, runs next to production with its own address and its own data, with variables for production or for previews, and **Promote** puts a preview's commit into production. [Preview deployments](docs/guides/previews.md)
+- **Talks to GitHub and to you.** Each deploy marks its commit on GitHub, a pull request's preview comments its address, a push deploys at once through a webhook, and a failed deploy or a crash sends a message by email, Discord, Slack, ntfy or webhook. [GitHub integration](docs/guides/github-integration.md) · [Notifications](docs/guides/notifications.md)
 - **Every container is an app.** The same page, settings and history for an app you deployed, a database you pulled and a container someone started by hand. [Manage apps](docs/guides/manage-apps.md)
 - **Shows a change before it makes it.** Each change to a running app says what changes, what's kept and whether the app restarts, before you confirm it. [How deploys work](docs/concepts/how-deploys-work.md)
 - **Keeps images up to date.** Checks registries for newer images, then tells you or updates in a window you choose. An update that fails puts the old container back. [Image updates](docs/guides/updates.md)

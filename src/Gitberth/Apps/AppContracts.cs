@@ -158,6 +158,8 @@ public sealed record AppOptions
     public int? WebPort { get; init; }
     public string? HealthCheckPath { get; init; }
     public bool GatherStats { get; init; } = true;
+    /// <summary>Whether Settings › Notifications tells about this app (kept by its container's name, like GatherStats).</summary>
+    public bool Notify { get; init; } = true;
     public RestartInterval? ScheduledRestart { get; init; }
     public UpdatePolicy Updates { get; init; } = UpdatePolicy.Notify;
     /// <summary>The reference updates follow; null: Config.Image.</summary>

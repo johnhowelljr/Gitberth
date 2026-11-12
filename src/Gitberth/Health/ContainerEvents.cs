@@ -196,6 +196,18 @@ public static class EventMarks
         _ => new(MarkKind.Stop, "Stopped", "Stopped", MarkTone.Neutral),
     };
 
+    /// <summary>
+    /// Whether the die at <paramref name="i"/> was a crash, by the same rule as the charts' marks: it ran out of memory, or
+    /// its process ended with an error on its own. Not a stop someone asked for (a kill or a stop around it), not an exit
+    /// with 0, and not one ended by SIGTERM or SIGINT (143, 130), which is a stop from outside even when Docker didn't say so.
+    /// </summary>
+    public static (bool Crashed, bool OutOfMemory) CrashOf(IReadOnlyList<ContainerEvent> events, int i) => WhyDied(events, i) switch
+    {
+        Why.OutOfMemory => (true, true),
+        Why.Exited when events[i].ExitCode is { } code and not (0 or 130 or 143) => (true, false),
+        _ => (false, false),
+    };
+
     /// <summary>Why the container in a die event stopped: asked to (a kill before it, or the stop Docker reports after it), out of memory, or on its own.</summary>
     private static Why WhyDied(IReadOnlyList<ContainerEvent> events, int i)
     {

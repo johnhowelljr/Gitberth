@@ -34,6 +34,7 @@ Gitberth runs apps in Docker on your home server and gives every container on th
 | [Domains](guides/domains.md) | Public domains through a Cloudflare Tunnel, and protecting them with a sign-in. |
 | [GitHub integration](guides/github-integration.md) | Deploys reported on commits and pull requests, and deploys that start the moment you push. |
 | [Health and monitoring](guides/health-and-monitoring.md) | The Health page, CPU and memory charts, and health checks. |
+| [Notifications](guides/notifications.md) | A message by email, Discord, Slack, ntfy or webhook when a deploy fails or an app crashes. |
 
 ## Look after Gitberth
 

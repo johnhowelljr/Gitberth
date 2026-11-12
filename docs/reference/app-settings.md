@@ -36,6 +36,7 @@ How the app shows up in Gitberth. Nothing here restarts it.
 | **Health URL** | A path, starting with `/`, that a new container must answer (with a status below 400) before it takes over from the old one, after a deploy or a change. Shown for Git apps and apps with a web port. Set it when "it started" isn't enough to know the app works. | None | At once |
 | **Pinned** | Shows the app in the sidebar and on the dashboard. | Off | At once |
 | **Gather stats** | Reads its CPU, memory and network every 5 seconds and keeps 6 hours, for the Health page and the Overview charts. Turn it off for a container you don't care about. | On | At once |
+| **Notifications** | Whether [notifications](../guides/notifications.md) tell about this app: its deploys, crashes and health check. Off leaves it out, wherever Settings › Notifications sends them. | On | At once |
 
 ### Source
 
