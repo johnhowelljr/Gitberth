@@ -7,9 +7,23 @@ public enum DockerfileMode { Auto, Custom }
 
 public enum DesiredState { Running, Stopped }
 
-public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart }
+// Stored as strings: values are only ever added, never renamed. Webhook: started by GitHub telling Gitberth about a push;
+// Promote: a preview's commit made the production version.
+public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart, Webhook, Promote }
 
 public enum DeployStatus { Queued, Cloning, Building, Starting, Succeeded, Failed, RolledBack, Cancelled }
+
+/// <summary>Which branches and pull requests of a Git app get a preview of their own.</summary>
+public enum PreviewMode { Off, PullRequests, PullRequestsAndBranches }
+
+/// <summary>What a preview is a preview of.</summary>
+public enum PreviewKind { Branch, PullRequest }
+
+/// <summary>
+/// Where an environment variable applies, as Vercel's environments: every deploy, only the production one (the app's own
+/// container), or only previews. A Production or Preview value wins over an All one with the same name.
+/// </summary>
+public enum EnvScope { All, Production, Preview }
 
 /// <summary>
 /// One app: a container Gitberth runs or knows. A Git app is a repo + branch (+ optional subfolder) and how its container
@@ -76,6 +90,32 @@ public class AppDefinition
     public string? SecretKeys { get; set; }
     /// <summary>Shown in the menu's Pinned section.</summary>
     public bool Pinned { get; set; }
+
+    /// <summary>
+    /// Set on a preview's own row: the Git app it previews. A preview is a Git app of its own (its own slug, container,
+    /// image repository, queue slot, lock, volumes and domain), kept out of the Apps list and shown on its parent's page.
+    /// No foreign key: adding one would make EF Core rebuild Apps. <see cref="PreviewInfo"/> holds what it previews.
+    /// </summary>
+    public int? ParentAppId { get; set; }
+    /// <summary>A Git app's previews: off, or for pull requests, or for pull requests and branches.</summary>
+    public PreviewMode PreviewMode { get; set; } = PreviewMode.Off;
+    /// <summary>How many of its previews may run at once (a home server's room); more wait until one goes.</summary>
+    public int PreviewLimit { get; set; } = 3;
+    /// <summary>A preview with no new commit for this many days is removed.</summary>
+    public int PreviewExpiryDays { get; set; } = 7;
+    /// <summary>Also preview pull requests from forks: their code is anyone's, and it's built on this server. Off unless chosen.</summary>
+    public bool PreviewForks { get; set; }
+    /// <summary>Put previews' domains behind Cloudflare Access, when it's set up. On unless turned off.</summary>
+    public bool ProtectPreviews { get; set; } = true;
+    /// <summary>
+    /// The production branch's commit when a preview was promoted over it: production stays on the promoted commit, and the
+    /// watcher doesn't deploy this one. The next new commit on the branch, or a manual deploy, clears it; so does a promote
+    /// that never ran or failed (RepoWatcher.ForgetUnheldPromotionAsync).
+    /// </summary>
+    public string? PromotedOverCommit { get; set; }
+
+    /// <summary>A preview's own row (see <see cref="ParentAppId"/>).</summary>
+    public bool IsPreview => ParentAppId is not null;
 
     public List<PortMapping> Ports { get; set; } = [];
     public List<EnvVar> EnvVars { get; set; } = [];
@@ -228,6 +268,37 @@ public class EnvVar
     public bool IsSecret { get; set; }
     /// <summary>Also passed to the image build as a build arg (needed for VITE_*, NEXT_PUBLIC_*, ...).</summary>
     public bool BuildTime { get; set; }
+    /// <summary>Which deploys get it: all, the production one, or previews. One name can have a value per scope.</summary>
+    public EnvScope Scope { get; set; } = EnvScope.All;
+}
+
+/// <summary>
+/// What a preview previews, kept with the preview's own app row (<see cref="AppDefinition.ParentAppId"/>): a branch, or a
+/// pull request and its head branch.
+/// </summary>
+public class PreviewInfo
+{
+    /// <summary>The preview's own app row.</summary>
+    public int AppId { get; set; }
+    /// <summary>The Git app it previews (also on the preview's row).</summary>
+    public int ParentAppId { get; set; }
+    public PreviewKind Kind { get; set; }
+    /// <summary>The branch: the pull request's head branch for a pull request.</summary>
+    public string Branch { get; set; } = "";
+    public int? PullRequest { get; set; }
+    /// <summary>The pull request's title, for the Previews list and the comment on it.</summary>
+    public string? Title { get; set; }
+    /// <summary>What a deploy fetches: refs/heads/&lt;branch&gt;, or refs/pull/&lt;n&gt;/head for a pull request.</summary>
+    public string Ref { get; set; } = "";
+    /// <summary>The newest commit seen on it.</summary>
+    public string? HeadSha { get; set; }
+    /// <summary>A pull request from a fork: someone else's code (previewed only when the app allows forks).</summary>
+    public bool FromFork { get; set; }
+    /// <summary>The comment on the pull request that Gitberth keeps up to date with the preview's address.</summary>
+    public long? CommentId { get; set; }
+    /// <summary>Its last new commit or update: it's removed after the parent's PreviewExpiryDays without one.</summary>
+    public DateTime LastActivityAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
 public class VolumeMount
@@ -263,6 +334,10 @@ public class CustomDomain
     /// </summary>
     public bool Main { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>Behind Cloudflare Access: visitors sign in (an emailed code) before they reach the app.</summary>
+    public bool Protected { get; set; }
+    /// <summary>The Cloudflare Access application Gitberth made for it; only one Gitberth made is ever changed or removed.</summary>
+    public string? AccessAppId { get; set; }
 }
 
 /// <summary>

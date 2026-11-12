@@ -1,0 +1,126 @@
+@using Gitberth.Previews
+@inject PreviewService Previews
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@*
+    A Git app's Previews section on its Settings tab. Saved on its own (none of it touches the app's container): which
+    branches and pull requests get a preview, how many run, when they go, forks, and their domains' protection. Turning
+    previews off asks first, since it removes them.
+*@
+<SettingsSection Id="sec-previews" Title="Previews" Icon="@Icons.Material.Outlined.Preview" Changed="Dirty"
+                 Description="Pull requests and branches as apps of their own, with their own address, to try before they reach production.">
+    <Field Label="Previews" Changed="@(mode != loaded.Mode)">
+        <Seg T="PreviewMode" Options="ModeOptions" Value="mode" ValueChanged="v => mode = v" Label="Previews" />
+    </Field>
+    <p class="gb-help" style="margin-top:-4px">@ModeHelp</p>
+    @if (mode != PreviewMode.Off)
+    {
+        <div class="gb-fgrid">
+            <Field Label="At most running" For="set-preview-limit" Changed="@(limit != loaded.Limit)" Was="@loaded.Limit.ToString(CultureInfo.InvariantCulture)"
+                   OnUndo="() => limit = loaded.Limit" Help="More wait, and start when one is removed." Error="@(limit is < 1 or > 20 ? "Between 1 and 20." : null)">
+                <input id="set-preview-limit" type="number" min="1" max="20" class="gb-input" @bind="limit" @bind:event="oninput" />
+            </Field>
+            <Field Label="Remove after (days without a new commit)" For="set-preview-days" Changed="@(days != loaded.ExpiryDays)" Was="@loaded.ExpiryDays.ToString(CultureInfo.InvariantCulture)"
+                   OnUndo="() => days = loaded.ExpiryDays" Help="A closed or merged pull request, or a deleted branch, takes its preview at once." Error="@(days is < 1 or > 365 ? "Between 1 and 365." : null)">
+                <input id="set-preview-days" type="number" min="1" max="365" class="gb-input" @bind="days" @bind:event="oninput" />
+            </Field>
+        </div>
+        <div class="gb-fgrid">
+            <SwitchRow Title="Also pull requests from forks" Value="forks" ValueChanged="v => forks = v" Changed="@(forks != loaded.Forks)"
+                       Sub="Off: only pull requests from branches of this repo get a preview." />
+            <SwitchRow Title="Protect previews' domains" Value="protect" ValueChanged="v => protect = v" Changed="@(protect != loaded.Protect)"
+                       Sub="Visitors sign in through Cloudflare Access before they see a preview. Access is set up in Settings › Domains." />
+        </div>
+        @if (forks)
+        {
+            <Banner Tone="serious" Title="Anyone's code, built and run on this server">
+                Whoever opens a pull request from a fork decides what its preview builds and runs here, on your network. Turn this on only if you trust everyone who can open one.
+            </Banner>
+        }
+    }
+    <div class="gb-row" style="justify-content:flex-end;gap:8px;margin-top:14px">
+        @if (Dirty)
+        {
+            <Btn Kind="BtnKind.Ghost" OnClick="Undo" Disabled="busy">Undo</Btn>
+        }
+        <Btn Kind="BtnKind.Primary" OnClick="SaveAsync" Busy="busy" Disabled="@(!Dirty || Wanted.Problem is not null)">Save previews</Btn>
+    </div>
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public AppDefinition App { get; set; } = default!;
+    /// <summary>Raised after a save, so the page reads the app again.</summary>
+    [Parameter] public EventCallback Saved { get; set; }
+
+    private PreviewSettings loaded = new(PreviewMode.Off, 3, 7, false, true);
+    private PreviewMode mode;
+    private int limit, days;
+    private bool forks, protect, busy;
+    private int? loadedFor;
+
+    private static readonly IReadOnlyList<SegOption<PreviewMode>> ModeOptions =
+    [
+        new(PreviewMode.Off, "Off"),
+        new(PreviewMode.PullRequests, "Pull requests"),
+        new(PreviewMode.PullRequestsAndBranches, "Pull requests and branches"),
+    ];
+
+    private PreviewSettings Wanted => new(mode, limit, days, forks, protect);
+
+    private bool Dirty => Wanted != loaded;
+
+    private string ModeHelp => mode switch
+    {
+        PreviewMode.PullRequests => "Every open pull request gets a preview, updated with each new commit, and removed when it's closed or merged.",
+        PreviewMode.PullRequestsAndBranches => $"Pull requests, and every branch other than {App.Branch} once it gets a new commit after you turn this on, so old branches aren't all built at once.",
+        _ => "No previews: only production runs.",
+    };
+
+    protected override void OnParametersSet()
+    {
+        var now = PreviewSettings.Of(App);
+        // Follows the app as it's saved, unless there's an edit in progress.
+        if (loadedFor == App.Id && (now == loaded || Dirty)) return;
+        loadedFor = App.Id;
+        loaded = now;
+        Undo();
+    }
+
+    private void Undo() => (mode, limit, days, forks, protect) = (loaded.Mode, loaded.Limit, loaded.ExpiryDays, loaded.Forks, loaded.Protect);
+
+    private async Task SaveAsync()
+    {
+        var wanted = Wanted;
+        if (wanted.Mode == PreviewMode.Off && loaded.Mode != PreviewMode.Off && await Previews.CountAsync(App.Id) is var count and > 0)
+        {
+            var confirmed = await Dialogs.ShowMessageBoxAsync("Turn previews off?",
+                $"{(count == 1 ? "Its preview is" : $"Its {count} previews are")} removed now, with {(count == 1 ? "its container, images, volumes and domain" : "their containers, images, volumes and domains")}.",
+                yesText: "Turn off and remove", cancelText: "Cancel");
+            if (confirmed != true) return;
+        }
+        busy = true;
+        try
+        {
+            var saved = await Previews.SaveSettingsAsync(App.Id, wanted);
+            if (saved.Problem is { } problem)
+            {
+                Snackbar.Add(problem, Severity.Warning);
+                return;
+            }
+            loaded = wanted;
+            // Saved, but the previews' domains didn't follow in Cloudflare yet: said, never dropped.
+            if (saved.Warning is { } warning) Snackbar.Add($"Saved. {warning}", Severity.Warning);
+            else Snackbar.Add(wanted.Mode == PreviewMode.Off ? "Previews are off." : "Saved. Gitberth looks at the repo again now.", Severity.Success);
+            await Saved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

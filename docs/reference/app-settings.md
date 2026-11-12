@@ -52,6 +52,19 @@ detected. The app's image is built from the repository, so it has no **Image** f
 | **Dockerfile** | With **Custom Dockerfile**: your Dockerfile. Keep the `# gitberth:build-args` and `# gitberth:volumes` lines; Gitberth fills them in. | The generated one | Build |
 | **Project to run** | .NET only: which project of the solution runs, such as `src/MyApp/MyApp.csproj`. | The one Gitberth picked | Build |
 
+### Previews
+
+Git apps only: a preview of each pull request, or branch, as an app of its own. Saved on its own with **Save previews**;
+nothing here restarts the app. See [Preview deployments](../guides/previews.md).
+
+| Field | What it does | Default | Applies |
+|---|---|---|---|
+| **Previews** | **Off**, **Pull requests**, or **Pull requests and branches** (a branch once it gets a new commit). Turning them off removes the previews, after asking. | **Off** | At once |
+| **At most running** | How many previews run at once (1 to 20). More wait, and start when one goes. | 3 | At once |
+| **Remove after (days without a new commit)** | A preview with no new commit for this long is removed (1 to 365). | 7 | At once |
+| **Also pull requests from forks** | Previews pull requests from other people's copies of the repo. Their code is built and run on this server, without added capabilities, security options or GPUs (no preview gets the host's devices or privileged mode). Turning it off removes their previews. | Off | At once |
+| **Protect previews' domains** | Visitors sign in through Cloudflare Access before they reach a preview's domain. | On | At once |
+
 ### Image
 
 Apps that run an image: what it runs. The section says where the image came from, its ID, age and size, and where its
@@ -85,6 +98,10 @@ Storage that outlives the container. Recreating never deletes a volume.
 
 **Named volume**, **Host folder** and **Temporary (tmpfs)** add a row. Add a volume for any data that must stay: without
 one, what the app writes goes when the container is recreated.
+
+A Git app's named volume is called `gb-<app>-<name>`, so one app's name can spell another's: `test-data` on `orb` and
+`data` on `orb-test` are both `gb-orb-test-data`. Gitberth refuses to save a named volume whose name another app has
+already, or that one of the app's [previews](../guides/previews.md) would then share with another app.
 
 ### Restart
 
@@ -146,7 +163,7 @@ Everything else Docker can set. Most apps never need these. Every field here app
 | **Stop timeout** | Seconds Docker waits after the stop signal before it kills the container. | 10 |
 | **Network mode** | **Its networks**, **The host's** (it uses the host's network directly, with no ports of its own) or **None**. A Git app always runs on its networks. | **Its networks** |
 | **Init process** | Runs a small init process that reaps zombie processes and passes on signals. | Off |
-| **Privileged** | Gives the container full access to the host's devices. | Off |
+| **Privileged** | Gives the container full access to the host's devices. A [preview](../guides/previews.md) never gets it, nor the app's **Devices**. | Off |
 | **Read-only root** | Makes the container's own files read-only; only volumes are writable. | Off |
 | **Terminal (TTY)** | Gives it a terminal. | Off |
 | **Capabilities added** / **Capabilities dropped** | Linux capabilities, such as `NET_ADMIN`. | None |
@@ -173,6 +190,7 @@ The app's environment variables. See [Environment variables](../guides/environme
 | **Name** / **Value** | Each variable the container gets. Change a value in place; a new row takes a name too. | Recreate |
 | **Secret** (lock) | Masks the value wherever it's shown. Always on for names and values that look secret. | At once |
 | **Build time** (wrench) | Git apps: passes the variable to the image build too. | Build |
+| **All deploys** / **Production** / **Previews** | Git apps: which deploys get the variable. One name can have a value for each; a **Production** or **Previews** one wins over **All deploys**. See [Environments](../guides/previews.md#environments). | Recreate (production) or the previews' next deploy |
 | **N from the image** | The image's own variables, folded. Edit one to make it the app's own. | Recreate |
 | **Add variable**, **Paste .env** | Add one variable, or several from `.env` lines. | Recreate |
 | **Stored in GitHub** | Git apps: the repository's GitHub variables. **Save to GitHub** and delete act on GitHub at once; the app gets them with its next deploy. | Next deploy |

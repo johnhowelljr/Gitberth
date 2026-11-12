@@ -14,6 +14,8 @@ public sealed class EnvRowDraft
     public bool FromImage { get; set; }
     public bool Secret { get; set; }
     public bool BuildTime { get; set; }
+    /// <summary>A Git app's: which deploys get it (every one, production's or previews').</summary>
+    public Data.EnvScope Scope { get; set; }
     /// <summary>Taken out: shown struck through until the change is applied or undone.</summary>
     public bool Removed { get; set; }
     /// <summary>As it was loaded; null for a row added here.</summary>
@@ -21,7 +23,8 @@ public sealed class EnvRowDraft
 
     public bool IsNew => Original is null;
 
-    public bool Changed => Original is null || Removed || Original.Key != Key || Original.Value != Value || Original.BuildTime != BuildTime || Original.Secret != Secret;
+    public bool Changed => Original is null || Removed || Original.Key != Key || Original.Value != Value || Original.BuildTime != BuildTime || Original.Secret != Secret
+        || Original.Scope != Scope;
 
     /// <summary>
     /// Its name or value makes it a secret whatever it's marked (a password-like name, a URL with a password in it): it's
@@ -36,7 +39,7 @@ public sealed class EnvRowDraft
     public void Undo()
     {
         if (Original is null) return;
-        (Key, Value, FromImage, BuildTime, Secret, Removed) = (Original.Key, Original.Value, Original.FromImage, Original.BuildTime, Original.Secret, false);
+        (Key, Value, FromImage, BuildTime, Secret, Scope, Removed) = (Original.Key, Original.Value, Original.FromImage, Original.BuildTime, Original.Secret, Original.Scope, false);
     }
 }
 
@@ -162,7 +165,7 @@ public sealed class ContainerSettingsDraft
         Command = loadedCommand = s.Command is null ? "" : ShellLine.Join(s.Command);
         WorkingDir = s.WorkingDir ?? "";
         User = s.User ?? "";
-        Env = s.Env.Select(e => new EnvRowDraft { Key = e.Key, Value = e.Value, FromImage = e.FromImage, Secret = e.Secret, BuildTime = e.BuildTime, Original = e }).ToList();
+        Env = s.Env.Select(e => new EnvRowDraft { Key = e.Key, Value = e.Value, FromImage = e.FromImage, Secret = e.Secret, BuildTime = e.BuildTime, Scope = e.Scope, Original = e }).ToList();
         Mounts = s.Mounts.Select(m => new MountRowDraft { Kind = m.Kind, Source = m.Source, Target = m.Target, ReadOnly = m.ReadOnly, TmpfsBytes = m.TmpfsBytes, Original = m }).ToList();
         Labels = s.Labels.OrderBy(l => l.Key, StringComparer.Ordinal).Select(l => new LabelRowDraft { Key = l.Key, Value = l.Value, Original = l }).ToList();
         RestartPolicy = string.IsNullOrEmpty(s.Restart.Name) ? "no" : s.Restart.Name;
@@ -248,7 +251,7 @@ public sealed class ContainerSettingsDraft
             WorkingDir = Text(WorkingDir, s.WorkingDir),
             User = Text(User, s.User),
             Env = EnvChanged ? Env.Where(r => !r.Removed && r.Key.Trim().Length > 0)
-                .Select(r => r.Original is { } o && !r.Changed ? o : new EnvSetting(r.Key.Trim(), r.Value, FromImage: r.FromImage && !r.Changed, Secret: r.IsSecret, BuildTime: r.BuildTime))
+                .Select(r => r.Original is { } o && !r.Changed ? o : new EnvSetting(r.Key.Trim(), r.Value, FromImage: r.FromImage && !r.Changed, Secret: r.IsSecret, BuildTime: r.BuildTime, Scope: r.Scope))
                 .ToList() : s.Env,
             Mounts = Mounts.Any(m => m.Changed) ? Mounts.Where(m => !m.Removed && m.Target.Trim().Length > 0).Select(m => m.Changed ? m.ToSetting() : m.Original!).ToList() : s.Mounts,
             Labels = Labels.Any(l => l.Changed) ? Labels.Where(l => !l.Removed && l.Key.Trim().Length > 0).GroupBy(l => l.Key.Trim()).ToDictionary(g => g.Key, g => g.Last().Value) : s.Labels,
@@ -440,7 +443,8 @@ public sealed class ContainerSettingsDraft
             var key = line[..eq].Trim();
             var value = line[(eq + 1)..].Trim();
             if (value.Length >= 2 && (value[0] == '"' && value[^1] == '"' || value[0] == '\'' && value[^1] == '\'')) value = value[1..^1];
-            if (Env.FirstOrDefault(r => r.Key == key && !r.Removed) is { } existing)
+            // Pasted values are for every deploy: they replace the variable's All value, never a production or preview one.
+            if (Env.FirstOrDefault(r => r.Key == key && !r.Removed && r.Scope == Data.EnvScope.All) is { } existing)
             {
                 existing.Value = value;
                 existing.FromImage = false;
@@ -451,13 +455,13 @@ public sealed class ContainerSettingsDraft
         return read;
     }
 
-    /// <summary>A variable can't be named twice, and needs a name.</summary>
+    /// <summary>A variable can't be named twice (in the same scope, for a Git app), and needs a name.</summary>
     public IReadOnlyList<string> EnvProblems()
     {
         var live = Env.Where(r => !r.Removed).ToList();
         var problems = new List<string>();
         if (live.Any(r => r.Key.Trim().Length == 0 && r.Value.Length > 0)) problems.Add("A variable has a value but no name.");
-        foreach (var dup in live.Where(r => r.Key.Trim().Length > 0).GroupBy(r => r.Key.Trim()).Where(g => g.Count() > 1))
+        foreach (var dup in live.Where(r => r.Key.Trim().Length > 0).GroupBy(r => EnvScopes.Named(r.Key.Trim(), r.Scope)).Where(g => g.Count() > 1))
             problems.Add($"{dup.Key} is set twice.");
         foreach (var bad in live.Where(r => r.Key.Contains(' ') || r.Key.Contains('=')))
             problems.Add($"“{bad.Key}” can't be a variable's name: no spaces or =.");

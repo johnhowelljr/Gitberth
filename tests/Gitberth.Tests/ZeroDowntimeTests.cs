@@ -80,6 +80,10 @@ public sealed class ZeroDowntimeTests : IAsyncLifetime
         public List<Container> Containers { get; } = [];
         /// <summary>Each image's labels, as `docker image inspect` prints them.</summary>
         public Dictionary<string, string> Images { get; } = new(StringComparer.Ordinal);
+        /// <summary>The VOLUMEs an image declares, as `docker image inspect` prints them; none when it isn't here.</summary>
+        public Dictionary<string, string> ImageVolumes { get; } = new(StringComparer.Ordinal);
+        /// <summary>The volumes `docker volume ls` lists.</summary>
+        public HashSet<string> Volumes { get; } = new(StringComparer.Ordinal);
         /// <summary>The networks there are, by name; each one's ID is <see cref="IdOf"/>.</summary>
         public HashSet<string> Networks { get; } = ["gitberth"];
 
@@ -123,6 +127,7 @@ public sealed class ZeroDowntimeTests : IAsyncLifetime
                     return Ok("json-file\n");
                 case "image" when a[1] == "inspect":
                     if (!Images.TryGetValue(a[^1], out var labels)) return Fail("Error: No such image");
+                    if (a[3] == "{{json .Config.Volumes}}") return Ok(ImageVolumes.TryGetValue(a[^1], out var volumes) ? volumes : "null");
                     return Ok(a[3] == "{{json .Config.Labels}}" ? labels : "sha256:1");
                 case "image" when a[1] == "ls":
                     return Ok(string.Join('\n', Images.Keys.Where(k => k.StartsWith(a[2] + ":", StringComparison.Ordinal))));
@@ -171,6 +176,8 @@ public sealed class ZeroDowntimeTests : IAsyncLifetime
                     if (Containers.RemoveAll(c => c.Name == a[^1]) == 0) return Fail("Error: No such container");
                     timeline.Add($"rm {a[^1]}");
                     return Ok();
+                case "volume" when a[1] == "ls":
+                    return Ok(string.Concat(Volumes.Order(StringComparer.Ordinal).Select(v => v + "\n")));
                 default:
                     return Fail("unknown command " + string.Join(' ', a));
             }
@@ -494,6 +501,61 @@ public sealed class ZeroDowntimeTests : IAsyncLifetime
         Assert.Equal(("gb-web", "gitberth/web:2", true), (web.Name, web.Image, web.Running));
         Assert.Equal("http://localhost:3001", TunnelService(Hostname));
         Assert.Contains("so visitors are served throughout", log);
+    }
+
+    [Fact]
+    public async Task A_VOLUME_the_image_declares_becomes_a_named_volume_of_the_app_kept_from_one_deploy_to_the_next()
+    {
+        // VOLUME /data and /var/cache/app/ in its Dockerfile: without mounts of their own, each container would get empty
+        // anonymous volumes, and the old ones would be left behind.
+        _docker.ImageVolumes["gitberth/web:2"] = """{"/data":{},"/var/cache/app/":{}}""";
+
+        var (dep, log) = await RedeployAsync();
+
+        Assert.Equal(DeployStatus.Succeeded, dep.Status);
+        var run = _docker.Runs.Last();
+        Assert.Contains("gb-web-data:/data", run);
+        Assert.Contains("gb-web-app:/var/cache/app", run);
+        // Two copies never write one volume at once: the old version stops first, as for any app with a volume.
+        Assert.DoesNotContain("run gb-web_next 127.0.0.1:8100", Timeline());
+        Assert.Contains("The image declares VOLUME /data: it's kept in the volume gb-web-data", log);
+        await using (var db = _db.CreateDbContext())
+        {
+            var app = await db.Apps.Include(a => a.Volumes).SingleAsync(a => a.Id == _appId);
+            Assert.Equal([("app", "/var/cache/app"), ("data", "/data")], app.Volumes.OrderBy(v => v.Source).Select(v => (v.Source, v.Target)));
+            // What runs is what's saved: nothing is left waiting to be applied.
+            Assert.False(app.ConfigChangePending);
+        }
+
+        // The next deploy finds them there: none is added again.
+        var (again, log2) = await RedeployAsync();
+
+        Assert.Equal(DeployStatus.Succeeded, again.Status);
+        Assert.Contains("gb-web-data:/data", _docker.Runs.Last());
+        Assert.DoesNotContain("The image declares VOLUME", log2);
+        await using (var db = _db.CreateDbContext())
+            Assert.Equal(2, await db.Volumes.CountAsync(v => v.AppId == _appId));
+    }
+
+    [Fact]
+    public async Task A_VOLUME_the_app_keeps_in_a_tmpfs_gets_no_volume_as_docker_takes_one_mount_at_a_path()
+    {
+        // VOLUME /data and /cache; the app's settings keep /cache in memory.
+        _docker.ImageVolumes["gitberth/web:2"] = """{"/data":{},"/cache":{}}""";
+        await using (var db = _db.CreateDbContext())
+            await db.Apps.Where(a => a.Id == _appId).ExecuteUpdateAsync(s => s.SetProperty(a => a.RuntimeExtras,
+                Gitberth.Apps.GitExtras.Write(new Gitberth.Apps.GitExtras { Tmpfs = [new Gitberth.Apps.GitTmpfs("/cache/")] })));
+
+        var (dep, log) = await RedeployAsync();
+
+        Assert.True(dep.Status == DeployStatus.Succeeded, dep.Error);
+        var run = _docker.Runs.Last();
+        Assert.Contains("gb-web-data:/data", run);
+        Assert.Equal("/cache/", run[run.IndexOf("--tmpfs") + 1]);
+        Assert.DoesNotContain(run, a => a.Contains(":/cache", StringComparison.Ordinal));
+        Assert.DoesNotContain("VOLUME /cache", log);
+        await using (var db = _db.CreateDbContext())
+            Assert.Equal(["data"], await db.Volumes.Where(v => v.AppId == _appId).Select(v => v.Source).ToListAsync());
     }
 
     [Fact]
@@ -1379,5 +1441,290 @@ public sealed class ZeroDowntimeTests : IAsyncLifetime
         Assert.Equal(1, Timeline().Count(step => step == "stop gb-web"));
         using var after = _db.CreateDbContext();
         Assert.Equal([first], after.Deployments.AsNoTracking().Select(d => (int?)d.Id).ToList());
+    }
+
+    [Fact]
+    public async Task A_forks_preview_runs_without_the_hosts_devices_or_what_reaches_the_host_and_its_log_says_so()
+    {
+        const string image = "gitberth/web-pr-7:1";
+        int previewId, deploymentId;
+        await using (var db = _db.CreateDbContext())
+        {
+            // Production has a serial stick, privileged mode and an added capability; forks are previewed.
+            var parent = await db.Apps.SingleAsync(a => a.Id == _appId);
+            parent.PreviewMode = PreviewMode.PullRequests;
+            parent.PreviewForks = true;
+            parent.RuntimeExtras = Gitberth.Apps.GitExtras.Write(new Gitberth.Apps.GitExtras
+            {
+                Devices = [new Gitberth.Apps.DeviceSetting("/dev/ttyUSB0", "/dev/ttyUSB0")], Privileged = true, CapAdd = ["SYS_ADMIN"], Init = true,
+            });
+            var preview = new AppDefinition { Name = "Web · PR #7", Slug = "web-pr-7", Owner = "acme", Repo = "web", ParentAppId = _appId, AutoDeploy = false, CurrentImage = image, CurrentCommit = "7777777" };
+            preview.Ports.Add(new PortMapping { HostPort = 3002, ContainerPort = 3000, IsWeb = true });
+            db.Apps.Add(preview);
+            await db.SaveChangesAsync();
+            db.Previews.Add(new PreviewInfo
+            {
+                AppId = preview.Id, ParentAppId = _appId, Kind = PreviewKind.PullRequest, Branch = "patch-1", PullRequest = 7, Ref = "refs/pull/7/head", HeadSha = "7777777", FromFork = true,
+            });
+            var deployment = new Deployment { AppId = preview.Id, Trigger = DeployTrigger.ConfigChange, ImageTag = image, CommitSha = "7777777" };
+            db.Deployments.Add(deployment);
+            await db.SaveChangesAsync();
+            (previewId, deploymentId) = (preview.Id, deployment.Id);
+        }
+        _docker.Images[image] = "{}";
+
+        await _pipeline.RunAsync(new DeployRequest(previewId, deploymentId, Build: false, Image: image), CancellationToken.None);
+
+        await using (var db = _db.CreateDbContext())
+        {
+            var done = await db.Deployments.SingleAsync(d => d.Id == deploymentId);
+            Assert.True(done.Status == DeployStatus.Succeeded, done.Error);
+        }
+        var log = File.ReadAllText(DeployPaths.LogFile(_options, deploymentId));
+        Assert.Contains("Not given the host's device, because a preview never takes production's: /dev/ttyUSB0.", log);
+        Assert.Contains("Runs without privileged mode, because it would give the preview every device of the host, and a preview never takes production's.", log);
+        Assert.Contains("Runs without added capabilities (SYS_ADMIN), because the pull request comes from a fork and its code mustn't reach the host.", log);
+        var run = _docker.Runs.Last();
+        Assert.Equal("gb-web-pr-7", run[run.IndexOf("--name") + 1]);
+        foreach (var flag in new[] { "--device", "--privileged", "--cap-add" }) Assert.DoesNotContain(flag, run);
+        // What doesn't reach the host is the parent's as usual.
+        Assert.Contains("--init", run);
+        // Production's own container is untouched.
+        Assert.Equal(["gb-web", "gb-web-pr-7"], _docker.Containers.Select(c => c.Name).Order(StringComparer.Ordinal));
+    }
+
+    // web's preview of the branch test, as PreviewService makes one (web-test), with copies of web's named volumes. Vercel's
+    // variables are off, so no deploy here asks GitHub which branch is the default one.
+    private async Task<int> AddTestPreviewAsync(string image, params string[] volumes)
+    {
+        await using var db = _db.CreateDbContext();
+        var parent = await db.Apps.SingleAsync(a => a.Id == _appId);
+        parent.PreviewMode = PreviewMode.PullRequestsAndBranches;
+        parent.VercelVariables = false;
+        var preview = new AppDefinition { Name = "Web · test", Slug = "web-test", Owner = "acme", Repo = "web", Branch = "test", ParentAppId = _appId, AutoDeploy = false, CurrentImage = image, CurrentCommit = "8888888", VercelVariables = false };
+        preview.Ports.Add(new PortMapping { HostPort = 3002, ContainerPort = 3000, IsWeb = true });
+        preview.Volumes.AddRange(volumes.Select(v => new VolumeMount { Source = v, Target = "/srv/" + v }));
+        db.Apps.Add(preview);
+        await db.SaveChangesAsync();
+        db.Previews.Add(new PreviewInfo { AppId = preview.Id, ParentAppId = _appId, Kind = PreviewKind.Branch, Branch = "test", Ref = "refs/heads/test", HeadSha = "8888888" });
+        await db.SaveChangesAsync();
+        _docker.Images[image] = "{}";
+        return preview.Id;
+    }
+
+    private async Task AddVolumeAsync(int appId, string source)
+    {
+        await using var db = _db.CreateDbContext();
+        db.Volumes.Add(new VolumeMount { AppId = appId, Source = source, Target = "/srv/" + source });
+        await db.SaveChangesAsync();
+    }
+
+    // A deploy of the app without a build, from the image given.
+    private async Task<Deployment> RecreateAsync(int appId, string image)
+    {
+        int id;
+        await using (var db = _db.CreateDbContext())
+        {
+            var dep = new Deployment { AppId = appId, Trigger = DeployTrigger.ConfigChange, ImageTag = image, CommitSha = "8888888" };
+            db.Deployments.Add(dep);
+            await db.SaveChangesAsync();
+            id = dep.Id;
+        }
+        await _pipeline.RunAsync(new DeployRequest(appId, id, Build: false, Image: image), CancellationToken.None);
+        await using var after = _db.CreateDbContext();
+        return await after.Deployments.AsNoTracking().SingleAsync(d => d.Id == id);
+    }
+
+    [Fact]
+    public async Task A_VOLUME_a_previews_image_declares_gets_a_name_no_other_app_has()
+    {
+        // web keeps gb-web-test-data at /srv/test-data; the preview's branch declares VOLUME /data, which as data would be
+        // gb-web-test-data too.
+        const string image = "gitberth/web-test:1";
+        await AddVolumeAsync(_appId, "test-data");
+        var previewId = await AddTestPreviewAsync(image, "test-data");
+        _docker.ImageVolumes[image] = """{"/data":{}}""";
+
+        var deploy = await RecreateAsync(previewId, image);
+
+        Assert.True(deploy.Status == DeployStatus.Succeeded, deploy.Error);
+        var run = _docker.Runs.Last();
+        Assert.Equal("gb-web-test", run[run.IndexOf("--name") + 1]);
+        Assert.Contains("gb-web-test-data-2:/data", run);
+        Assert.Contains("gb-web-test-test-data:/srv/test-data", run);
+        Assert.DoesNotContain(run, a => a.StartsWith("gb-web-test-data:", StringComparison.Ordinal));
+        Assert.Contains("The image declares VOLUME /data: it's kept in the volume gb-web-test-data-2", File.ReadAllText(DeployPaths.LogFile(_options, deploy.Id)));
+    }
+
+    [Fact]
+    public async Task A_deploy_never_starts_a_preview_and_another_app_on_one_volume_and_production_isnt_held_up_by_one_that_wasnt_started()
+    {
+        const string image = "gitberth/web-test:1";
+        await AddVolumeAsync(_appId, "test-cache");
+        var previewId = await AddTestPreviewAsync(image, "test-cache");
+        // web gets a volume cache past the Settings tab's check: the preview's copy would be gb-web-test-cache, web's test-cache.
+        await AddVolumeAsync(_appId, "cache");
+
+        var refused = await RecreateAsync(previewId, image);
+
+        Assert.Equal((DeployStatus.Failed, "The volume cache would be gb-web-test-cache, which is also Web's, so the preview isn't started: a preview never shares a volume with another app. Remove the preview: it comes back under another name with its next commit."),
+            (refused.Status, refused.Error));
+        Assert.DoesNotContain(_docker.Runs, r => r.Contains("gb-web-test"));
+        // Its copies weren't saved, so it holds no name of web's.
+        await using (var db = _db.CreateDbContext())
+            Assert.Equal(["test-cache"], await db.Volumes.Where(v => v.AppId == previewId).Select(v => v.Source).ToListAsync());
+
+        // So production deploys as usual.
+        var production = await RecreateAsync(_appId, "gitberth/web:2");
+        Assert.True(production.Status == DeployStatus.Succeeded, production.Error);
+        Assert.Equal("gitberth/web:2", _docker.Containers.Single(c => c.Name == "gb-web").Image);
+
+        // A volume of web's whose name the preview has: web's container isn't touched.
+        await AddVolumeAsync(previewId, "data");
+        await AddVolumeAsync(_appId, "test-data");
+        var steps = Timeline().Count;
+
+        var held = await RecreateAsync(_appId, "gitberth/web:2");
+
+        Assert.Equal((DeployStatus.Failed, "The volume test-data would be gb-web-test-data, which is also the preview Web · test's, so Web isn't started with it: a preview never shares a volume with another app. Remove that preview: it comes back under another name with its next commit."),
+            (held.Status, held.Error));
+        Assert.Equal(steps, Timeline().Count);
+        Assert.True(_docker.Containers.Single(c => c.Name == "gb-web").Running);
+    }
+
+    // An edit of the app's settings as the Settings tab makes one: as loaded, and as wanted.
+    private async Task<Gitberth.Apps.SettingsEdit> EditAsync(int appId, Func<Gitberth.Apps.ContainerSettings, Gitberth.Apps.ContainerSettings> change)
+    {
+        await using var db = _db.CreateDbContext();
+        var app = await db.Apps.AsNoTracking().Include(a => a.Ports).Include(a => a.EnvVars).Include(a => a.Volumes).Include(a => a.Networks).AsSplitQuery()
+            .SingleAsync(a => a.Id == appId);
+        var loaded = Gitberth.Apps.GitAppSettings.ToContainer(app, _protector);
+        var options = Gitberth.Apps.GitAppSettings.ToOptions(app, new HealthSettings(_settings), _restarts);
+        var git = Gitberth.Apps.GitAppSettings.ToGit(app);
+        return new Gitberth.Apps.SettingsEdit(null, loaded, change(loaded), options, options, git, git);
+    }
+
+    [Fact]
+    public async Task A_previews_own_volume_stays_through_a_failed_deploy_so_production_cant_take_its_name()
+    {
+        // web keeps data; its preview of the branch test has its copy, and the volume its image declared, cache. Its
+        // container runs with gb-web-test-cache.
+        const string image = "gitberth/web-test:1";
+        await AddVolumeAsync(_appId, "data");
+        var previewId = await AddTestPreviewAsync(image, "data", "cache");
+        _docker.Containers.Add(new Container { Name = "gb-web-test", Image = image, Ports = [("", 3002, 3000)] });
+
+        // Its next deploy fails before its container is touched (its image is gone here; a failed build is the same).
+        var failed = await RecreateAsync(previewId, "gitberth/web-test:gone");
+
+        Assert.Equal(DeployStatus.Failed, failed.Status);
+        Assert.True(_docker.Containers.Single(c => c.Name == "gb-web-test").Running);
+        // The old container still writes to gb-web-test-cache, and the preview's row still says so.
+        await using (var db = _db.CreateDbContext())
+            Assert.Equal(["data", "cache"], await db.Volumes.Where(v => v.AppId == previewId).OrderBy(v => v.Id).Select(v => v.Source).ToListAsync());
+
+        // So web can't take the name: test-cache is refused when it's saved…
+        var saved = await _apps.SaveSettingsAsync(_appId, await EditAsync(_appId, s => s with
+        {
+            Mounts = [.. s.Mounts, new Gitberth.Apps.MountSetting(Gitberth.Apps.MountKind.Volume, "test-cache", "/var/cache")],
+        }));
+        Assert.Equal("The volume test-cache would be gb-web-test-cache, which is also the preview Web · test's. Give it another name, or remove that preview first.",
+            Assert.Single(saved.Problems).Message);
+
+        // …and saved past that check, web isn't started on it.
+        await AddVolumeAsync(_appId, "test-cache");
+        var held = await RecreateAsync(_appId, "gitberth/web:2");
+
+        Assert.Equal((DeployStatus.Failed, "The volume test-cache would be gb-web-test-cache, which is also the preview Web · test's, so Web isn't started with it: a preview never shares a volume with another app. Remove that preview: it comes back under another name with its next commit."),
+            (held.Status, held.Error));
+        Assert.Equal("gitberth/web:1", _docker.Containers.Single(c => c.Name == "gb-web").Image);
+    }
+
+    [Fact]
+    public async Task A_preview_never_gets_a_new_volume_docker_has_already()
+    {
+        // web took test-cache out of its settings; Docker keeps gb-web-test-cache, with web's data in it.
+        const string image = "gitberth/web-test:1";
+        var previewId = await AddTestPreviewAsync(image);
+        _docker.Volumes.Add("gb-web-test-cache");
+
+        // web gets a volume cache: the preview's copy would be gb-web-test-cache.
+        await AddVolumeAsync(_appId, "cache");
+        var refused = await RecreateAsync(previewId, image);
+
+        Assert.Equal((DeployStatus.Failed, "The volume cache would be gb-web-test-cache, which Docker has already, so the preview isn't started: that volume holds another app's data, or a removed app's. Remove the preview: it comes back under another name with its next commit."),
+            (refused.Status, refused.Error));
+        Assert.DoesNotContain(_docker.Runs, r => r.Contains("gb-web-test"));
+        await using (var db = _db.CreateDbContext())
+            Assert.Empty(await db.Volumes.Where(v => v.AppId == previewId).ToListAsync());
+
+        // Nor does a VOLUME its image declares get that name: /cache gets a number.
+        await using (var db = _db.CreateDbContext())
+            await db.Volumes.Where(v => v.AppId == _appId).ExecuteDeleteAsync();
+        _docker.ImageVolumes[image] = """{"/cache":{}}""";
+        var deploy = await RecreateAsync(previewId, image);
+
+        Assert.True(deploy.Status == DeployStatus.Succeeded, deploy.Error);
+        var run = _docker.Runs.Last();
+        Assert.Contains("gb-web-test-cache-2:/cache", run);
+        Assert.DoesNotContain(run, a => a.StartsWith("gb-web-test-cache:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_preview_keeps_its_volume_where_web_now_has_a_tmpfs_and_runs_with_one_mount_there()
+    {
+        // web-test has its copy of web's volume cache at /srv/cache; web then keeps /srv/cache in memory instead.
+        const string image = "gitberth/web-test:1";
+        var previewId = await AddTestPreviewAsync(image, "cache");
+        await using (var db = _db.CreateDbContext())
+            await db.Apps.Where(a => a.Id == _appId).ExecuteUpdateAsync(s => s.SetProperty(a => a.RuntimeExtras, Gitberth.Apps.GitExtras.Write(new Gitberth.Apps.GitExtras
+            {
+                Tmpfs = [new Gitberth.Apps.GitTmpfs("/srv/cache"), new Gitberth.Apps.GitTmpfs("/tmp/scratch")],
+            })));
+
+        var deploy = await RecreateAsync(previewId, image);
+
+        Assert.True(deploy.Status == DeployStatus.Succeeded, deploy.Error);
+        var run = _docker.Runs.Last();
+        // Docker refuses a volume and a tmpfs at one path: the preview's volume stays, and web's other tmpfs comes along.
+        Assert.Contains("gb-web-test-cache:/srv/cache", run);
+        Assert.Equal(["/tmp/scratch"], run.Select((a, i) => (a, i)).Where(x => x.a == "--tmpfs").Select(x => run[x.i + 1]));
+        Assert.Contains("No tmpfs at /srv/cache: the preview keeps its volume gb-web-test-cache there", File.ReadAllText(DeployPaths.LogFile(_options, deploy.Id)));
+    }
+
+    [Fact]
+    public async Task A_promote_that_fails_lets_production_follow_its_branch_unless_a_newer_promote_waits()
+    {
+        // web was promoted over its branch's commit twice: the first promote runs while the second waits its turn.
+        const string head = "3333333333333333333333333333333333333333";
+        async Task<int> AddPromoteAsync(string sha)
+        {
+            await using var db = _db.CreateDbContext();
+            var dep = new Deployment { AppId = _appId, Trigger = DeployTrigger.Promote, CommitSha = sha };
+            db.Deployments.Add(dep);
+            await db.SaveChangesAsync();
+            return dep.Id;
+        }
+        async Task<string?> PromotedOverAsync()
+        {
+            await using var db = _db.CreateDbContext();
+            return await db.Apps.Where(a => a.Id == _appId).Select(a => a.PromotedOverCommit).SingleAsync();
+        }
+        await using (var db = _db.CreateDbContext())
+            await db.Apps.Where(a => a.Id == _appId).ExecuteUpdateAsync(s => s.SetProperty(a => a.PromotedOverCommit, head).SetProperty(a => a.VercelVariables, false));
+        var first = await AddPromoteAsync("4444444");
+        var second = await AddPromoteAsync("5555555");
+
+        // The first fails (its image is gone here; a failed build is the same): the second still holds production.
+        await _pipeline.RunAsync(new DeployRequest(_appId, first, Build: false, Image: "gitberth/web:gone"), CancellationToken.None);
+
+        await using (var db = _db.CreateDbContext())
+            Assert.Equal(DeployStatus.Failed, (await db.Deployments.SingleAsync(d => d.Id == first)).Status);
+        Assert.Equal(head, await PromotedOverAsync());
+
+        // The second fails too: nothing holds production off its branch any more.
+        await _pipeline.RunAsync(new DeployRequest(_appId, second, Build: false, Image: "gitberth/web:gone"), CancellationToken.None);
+
+        Assert.Null(await PromotedOverAsync());
     }
 }

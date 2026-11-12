@@ -60,7 +60,9 @@ public static class SettingFields
 /// <param name="FromImage">The image sets it to this value: it isn't the container's own.</param>
 /// <param name="Secret">Masked wherever it's shown (the owner's marking, else Gitberth's guess).</param>
 /// <param name="BuildTime">Git apps: passed to the build too.</param>
-public sealed record EnvSetting(string Key, string Value, bool FromImage = false, bool Secret = false, bool BuildTime = false);
+/// <param name="Scope">Git apps: which deploys get it (every one, production's, or previews'). Any other container's are All.</param>
+public sealed record EnvSetting(string Key, string Value, bool FromImage = false, bool Secret = false, bool BuildTime = false,
+    Data.EnvScope Scope = Data.EnvScope.All);
 
 public enum MountKind { Volume, Bind, Tmpfs }
 

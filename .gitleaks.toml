@@ -16,4 +16,5 @@ regexes = [
     '''eyJhIjoiUmV2U2FmZXR5U3RhbmRJbiIsInQiOiJ0dW5uZWwiLCJzIjoic2VjcmV0In0''',  # the same, as a tunnel token
     '''8cec7368141e768f44ed03e142576d0c''',                             # the Symfony sample's APP_SECRET
     '''b7ba75f379ba456c40dd863a6bc82abb9a220e3fc93fcf1c383cdcf0924d6d36e558d35f90999ccf5f2d8963feab2b70b72cb9a160f7975a4b8e40a1519b757e''',  # the Rails sample's SECRET_KEY_BASE
+    '''^(env=)?GITBERTH_SECRET_\d+$''',                                 # not a value: the variable a build secret is read from (docker build --secret id=…,env=GITBERTH_SECRET_0)
 ]

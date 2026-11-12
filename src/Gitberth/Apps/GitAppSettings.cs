@@ -189,7 +189,7 @@ public static class GitAppSettings
             WorkingDir = x.WorkingDir,
             User = x.User,
             Env = app.EnvVars.OrderBy(v => v.Id)
-                .Select(v => new EnvSetting(v.Key, protector.TryUnprotect(v.ProtectedValue), Secret: v.IsSecret, BuildTime: v.BuildTime)).ToList(),
+                .Select(v => new EnvSetting(v.Key, protector.TryUnprotect(v.ProtectedValue), Secret: v.IsSecret, BuildTime: v.BuildTime, Scope: v.Scope)).ToList(),
             Ports = app.Ports.OrderBy(p => p.Id).Select(RuleOf).ToList(),
             Mounts = mounts,
             NetworkMode = "",
@@ -348,7 +348,7 @@ public static class GitAppSettings
         SettingField.Command => J(s.Command),
         SettingField.WorkingDir => s.WorkingDir ?? "",
         SettingField.User => s.User ?? "",
-        SettingField.Env => J(s.Env.Where(e => !e.FromImage).Select(e => new[] { e.Key, e.Value, e.Secret ? "s" : "", e.BuildTime ? "b" : "" })),
+        SettingField.Env => J(s.Env.Where(e => !e.FromImage).Select(e => new[] { e.Key, e.Value, e.Secret ? "s" : "", e.BuildTime ? "b" : "", e.Scope == EnvScope.All ? "" : e.Scope.ToString() })),
         SettingField.Ports => J(s.Ports.Select(p => new object?[] { p.ContainerPort, p.Protocol, p.Access.ToString(), p.Access == PortAccess.Internal ? null : p.HostPort,
             p.Access == PortAccess.Custom ? p.HostIp : null })),
         SettingField.Mounts => J(s.Mounts),
@@ -383,17 +383,17 @@ public static class GitAppSettings
 
     private static PortRule RuleOf(PortMapping p) => new(p.ContainerPort, p.Protocol, p.Access, p.HostPort, p.HostIp);
 
-    // Variables are updated in place (the (AppId, Key) index is unique); a value is encrypted again only when it changed.
+    // Variables are updated in place (the (AppId, Key, Scope) index is unique); a value is encrypted again only when it changed.
     private static void ApplyEnv(AppDefinition app, IReadOnlyList<EnvSetting> env, SecretProtector protector)
     {
         var rows = env.Where(e => !e.FromImage && !string.IsNullOrWhiteSpace(e.Key)).ToList();
-        var keep = rows.Select(e => e.Key.Trim()).ToHashSet(StringComparer.Ordinal);
-        app.EnvVars.RemoveAll(v => !keep.Contains(v.Key));
+        var keep = rows.Select(e => (e.Key.Trim(), e.Scope)).ToHashSet();
+        app.EnvVars.RemoveAll(v => !keep.Contains((v.Key, v.Scope)));
         foreach (var e in rows)
         {
             var key = e.Key.Trim();
-            var existing = app.EnvVars.FirstOrDefault(v => v.Key == key);
-            if (existing is null) app.EnvVars.Add(existing = new EnvVar { Key = key });
+            var existing = app.EnvVars.FirstOrDefault(v => v.Key == key && v.Scope == e.Scope);
+            if (existing is null) app.EnvVars.Add(existing = new EnvVar { Key = key, Scope = e.Scope });
             if (existing.ProtectedValue.Length == 0 || protector.TryUnprotect(existing.ProtectedValue) != e.Value) existing.ProtectedValue = protector.Protect(e.Value);
             // Marked secret, or it looks it (a secret-sounding name, a URL with a password): the deploy keeps it off argv and out of its log.
             existing.IsSecret = e.Secret || Masking.IsSecret(key, e.Value);

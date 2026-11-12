@@ -13,6 +13,7 @@
 @inject ImageService Images
 @inject NetworkService Networks
 @inject DomainService DomainService
+@inject Gitberth.Previews.PreviewService Previews
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -47,7 +48,11 @@ else
 
     <nav class="gb-crumbs" aria-label="Breadcrumb">
         <a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
-        @if (familyPrefix is { } prefix)
+        @if (previewOf is { } of)
+        {
+            <a href="@($"apps/{Uri.EscapeDataString(of.ParentKey)}/previews")">@of.ParentName</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+        }
+        else if (familyPrefix is { } prefix)
         {
             <a href="@($"apps?q={Uri.EscapeDataString(prefix + "-")}")">@prefix-*</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
         }
@@ -83,9 +88,12 @@ else
         case "network":
             <NetworkTab App="view" Changed="ReloadAsync" />
             break;
+        case "previews":
+            <AppPreviewsTab View="view" LanHost="@lanHost" />
+            break;
         case "settings":
             <AppSettingsTab View="view" Settings="settings" Draft="draft" Options="options" Git="git" LoadError="@settingsError"
-                            Changed="DraftChanged" OnRemove="RemoveAsync" />
+                            Changed="DraftChanged" OnRemove="RemoveAsync" OnSaved="ReloadAsync" />
             @ApplySection()
             break;
         case "logs":
@@ -102,7 +110,7 @@ else
 }
 
 @code {
-    private static readonly string[] TabKeys = ["overview", "environment", "network", "settings", "logs", "activity"];
+    private static readonly string[] TabKeys = ["overview", "environment", "network", "previews", "settings", "logs", "activity"];
 
     [Parameter] public string Key { get; set; } = "";
     [Parameter] public string? Tab { get; set; }
@@ -120,6 +128,9 @@ else
     private string lanHost = "";
     private string? loadedKey;
     private string? whyNotStart;
+    // What a preview previews and of which app; null for any other app. Read once per page.
+    private Gitberth.Previews.PreviewOf? previewOf;
+    private int? previewOfFor;
     // A Git app whose container is gone: its last image, and whether that's still on this host (Start makes the container
     // again from it, or builds it again). Checked once each time the container goes, not on every refresh.
     private (string? Image, bool There)? lastImage;
@@ -138,9 +149,17 @@ else
     {
         "env" => "environment",
         "deployments" => "activity",
+        // A preview's settings and variables are its parent's: it has neither tab.
+        "environment" or "settings" when IsPreview => "overview",
+        "previews" when !HasPreviews => "overview",
         { } t when TabKeys.Contains(t) => t,
         _ => "overview",
     };
+
+    private bool IsPreview => view?.Row?.IsPreview == true;
+
+    // A Git app's Previews tab (a preview has no previews of its own).
+    private bool HasPreviews => view is { Summary.Source: AppSource.Git, Row: { IsPreview: false } };
 
     private string BaseHref => "apps/" + Uri.EscapeDataString(view?.Summary.Key ?? Key);
 
@@ -153,9 +172,10 @@ else
     private IReadOnlyList<TabItem> TabItems =>
     [
         new("overview", "Overview", Icons.Material.Outlined.GridView, BaseHref),
-        new("environment", "Environment", Icons.Material.Outlined.Key, $"{BaseHref}/environment", EnvChanges, Short: "Env"),
+        .. IsPreview ? [] : new TabItem[] { new("environment", "Environment", Icons.Material.Outlined.Key, $"{BaseHref}/environment", EnvChanges, Short: "Env") },
         new("network", "Network", Icons.Material.Outlined.Lan, $"{BaseHref}/network"),
-        new("settings", "Settings", Icons.Material.Outlined.Tune, $"{BaseHref}/settings", SettingsChanges),
+        .. HasPreviews ? new TabItem[] { new("previews", "Previews", Icons.Material.Outlined.Preview, $"{BaseHref}/previews") } : [],
+        .. IsPreview ? [] : new TabItem[] { new("settings", "Settings", Icons.Material.Outlined.Tune, $"{BaseHref}/settings", SettingsChanges) },
         new("logs", "Logs", Icons.Material.Outlined.Article, $"{BaseHref}/logs"),
         new("activity", "Activity", Icons.Material.Outlined.History, $"{BaseHref}/activity"),
     ];
@@ -228,6 +248,12 @@ else
             var next = await Catalog.GetAsync(Key, lanHost);
             notFound = next is null;
             view = next;
+            if (next?.Row is { IsPreview: true } previewRow && previewOfFor != previewRow.Id)
+            {
+                previewOf = await Previews.OfAsync(previewRow.Id);
+                previewOfFor = previewRow.Id;
+            }
+            else if (next?.Row is not { IsPreview: true }) (previewOf, previewOfFor) = (null, null);
             whyNotStart = next is { Summary.Running: false } ? await Changer.WhyNotStartAsync(next.Summary.Container) : null;
             if (next is { Summary: { State: AppState.Missing, Source: AppSource.Git }, Row: { } row })
             {
@@ -459,7 +485,10 @@ else
             </ActivatorContent>
             <ChildContent>
                 <MudMenuItem Icon="@(app.Pinned ? Icons.Material.Outlined.PushPin : Icons.Material.Outlined.PushPin)" OnClick="TogglePinAsync">@(app.Pinned ? "Unpin from the menu" : "Pin to the menu")</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Href="@($"{BaseHref}/settings#sec-general")">Rename…</MudMenuItem>
+                @if (!IsPreview)
+                {
+                    <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Href="@($"{BaseHref}/settings#sec-general")">Rename…</MudMenuItem>
+                }
                 @if (app.Source != AppSource.Git && app.Role != ContainerRole.Self)
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()">@(BuiltHere(app) ? "Check for a newer build" : "Check for update")</MudMenuItem>
@@ -537,6 +566,22 @@ else
     // ---- Banners ----
 
     private RenderFragment Banners(AppSummary app) => @<text>
+        @if (previewOf is { } of)
+        {
+            <Banner Tone="accent" Icon="@Icons.Material.Outlined.Preview" Title="@($"Preview of {of.ParentName} for {(of.Info.Kind == PreviewKind.PullRequest ? of.Label : $"the branch {of.Label}")}")">
+                <ChildContent>
+                    Its settings come from <a href="@($"apps/{Uri.EscapeDataString(of.ParentKey)}/settings")">@of.ParentName</a>, and so do its variables for previews.
+                    @if (of.LeftOut.Count > 0)
+                    {
+                        <span> @of.ParentName's host @(of.LeftOut.Count == 1 ? "folder" : "folders") (@string.Join(", ", of.LeftOut)) @(of.LeftOut.Count == 1 ? "isn't" : "aren't") mounted: a preview never writes into production's files.</span>
+                    }
+                </ChildContent>
+                <Actions>
+                    <Btn Size="BtnSize.Sm" Href="@of.Url" Target="_blank" Icon="@Icons.Custom.Brands.GitHub">@(of.Info.Kind == PreviewKind.PullRequest ? "Pull request" : "Branch")</Btn>
+                    <Btn Size="BtnSize.Sm" Href="@($"apps/{Uri.EscapeDataString(of.ParentKey)}/previews")" Icon="@Icons.Material.Outlined.Preview">All previews</Btn>
+                </Actions>
+            </Banner>
+        }
         @if (ChangeBanner.Of(view?.LatestChange) is { } change)
         {
             <Banner Tone="@(change.Warning ? "serious" : "info")" Title="@(change.Decide ? "A change is waiting for you" : "About the last change")">
@@ -594,7 +639,10 @@ else
                     {
                         <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@(missing && !git ? Icons.Material.Outlined.Replay : Icons.Material.Outlined.PlayArrow)"
                              OnClick="() => RunAsync(ContainerAction.Start)" Disabled="busy">@(missing && !git ? "Create it again" : "Start")</Btn>
-                        <Btn Size="BtnSize.Sm" Href="@($"{BaseHref}/settings")">Edit settings</Btn>
+                        @if (!IsPreview)
+                        {
+                            <Btn Size="BtnSize.Sm" Href="@($"{BaseHref}/settings")">Edit settings</Btn>
+                        }
                     }
                     @if (CanForget)
                     {
@@ -1030,6 +1078,31 @@ else
         if (AppCommands.Refusal(app, ContainerAction.Remove) is { } refusal)
         {
             Snackbar.Add(refusal, Severity.Warning);
+            return;
+        }
+        // A preview goes as its Previews tab removes it: everything of its own, noted on its parent's Activity.
+        if (previewOf is { } of && view.Row is { IsPreview: true } previewRow)
+        {
+            var confirmed = await Dialogs.ShowMessageBoxAsync($"Remove the preview of {of.Label}?",
+                $"Its container, images and volumes go{(previewRow.Domains.Count > 0 ? $", and {string.Join(", ", previewRow.Domains.Select(d => d.Hostname))} leaves the tunnel" : "")}. "
+                + $"A new commit on {(of.Info.Kind == PreviewKind.PullRequest ? "the pull request" : "the branch")} makes it again.",
+                yesText: "Remove", cancelText: "Cancel");
+            if (confirmed != true) return;
+            busy = true;
+            try
+            {
+                await Previews.RemoveAsync(previewRow.Id);
+                Snackbar.Add($"Removed the preview of {of.Label}.", Severity.Success);
+                Nav.NavigateTo($"apps/{Uri.EscapeDataString(of.ParentKey)}/previews");
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add(ex.Message, Severity.Error);
+            }
+            finally
+            {
+                busy = false;
+            }
             return;
         }
         if (app.Source == AppSource.Git && view.Row is { } row)

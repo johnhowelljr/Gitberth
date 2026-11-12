@@ -36,8 +36,14 @@ public sealed record AppTraits(string? Prefix, bool AuthJs, bool ChecksVercel = 
 /// <summary>What a deploy tells the app about itself.</summary>
 /// <param name="MainDomain">The app's main domain, or null when it has none.</param>
 /// <param name="Production">Deployed from the repo's default branch; any other branch is a preview, as on Vercel.</param>
+/// <param name="ProductionDomain">
+/// A preview's: its parent's main domain, for VERCEL_PROJECT_PRODUCTION_URL (its own domain is <paramref name="MainDomain"/>).
+/// Null for production, whose own main domain is the production one.
+/// </param>
+/// <param name="PullRequest">A pull request's preview: its number, for VERCEL_GIT_PULL_REQUEST_ID.</param>
+/// <param name="Preview">A preview deployment of a branch or pull request (a preview row's deploy), not an app on another branch.</param>
 public sealed record DeployFacts(string? MainDomain, string Owner, string Repo, string Branch, string? CommitSha, string? CommitMessage, string? CommitAuthor,
-    AppTraits Traits, bool Production = true);
+    AppTraits Traits, bool Production = true, string? ProductionDomain = null, int? PullRequest = null, bool Preview = false);
 
 /// <summary>
 /// Vercel's system environment variables, so code written for Vercel finds what it expects: where the app lives
@@ -94,7 +100,8 @@ public static partial class VercelEnv
             ("VERCEL_TARGET_ENV", environment),
             ("VERCEL_URL", url),
             ("VERCEL_BRANCH_URL", url),
-            ("VERCEL_PROJECT_PRODUCTION_URL", f.MainDomain),
+            // A preview's production URL is its parent's main domain, not its own.
+            ("VERCEL_PROJECT_PRODUCTION_URL", f.Preview ? f.ProductionDomain : f.MainDomain),
             ("VERCEL_GIT_PROVIDER", "github"),
             ("VERCEL_GIT_REPO_SLUG", f.Repo),
             ("VERCEL_GIT_REPO_OWNER", f.Owner),
@@ -102,6 +109,7 @@ public static partial class VercelEnv
             ("VERCEL_GIT_COMMIT_SHA", f.CommitSha),
             ("VERCEL_GIT_COMMIT_MESSAGE", f.CommitMessage),
             ("VERCEL_GIT_COMMIT_AUTHOR_NAME", f.CommitAuthor),
+            ("VERCEL_GIT_PULL_REQUEST_ID", f.PullRequest?.ToString(System.Globalization.CultureInfo.InvariantCulture)),
         ];
         var list = vars.Where(v => !string.IsNullOrEmpty(v.Value)).Select(v => new EnvValue(v.Key, v.Value!, false)).ToList();
         if (f.Traits.Prefix is { } prefix) list.AddRange(list.Select(v => v with { Key = prefix + v.Key }).ToList());

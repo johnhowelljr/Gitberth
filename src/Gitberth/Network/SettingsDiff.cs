@@ -190,19 +190,20 @@ public static class SettingsDiff
     private static string Key(IReadOnlyDictionary<string, string> map) =>
         Key(map.Select(kv => kv.Key + "=" + kv.Value), sort: true);
 
-    // The variables by key: the last of a key counts, as Docker reads them.
+    // The variables by key: the last of a key counts, as Docker reads them. A Git app's variable scoped to production or
+    // previews is one of its own, named with its scope (API_URL (Preview)).
     private static (List<string> Added, List<string> Removed, List<string> Changed) EnvChanges(IReadOnlyList<EnvSetting> before, IReadOnlyList<EnvSetting> after)
     {
         var a = Values(before);
         var b = Values(after);
         return (b.Keys.Where(k => !a.ContainsKey(k)).ToList(), a.Keys.Where(k => !b.ContainsKey(k)).ToList(),
-            b.Keys.Where(k => a.TryGetValue(k, out var v) && v != b[k]).ToList());
+            b.Keys.Where(k => a.TryGetValue(k, out var v) && v.Value != b[k].Value).ToList());
     }
 
-    private static Dictionary<string, string> Values(IReadOnlyList<EnvSetting> env)
+    private static Dictionary<string, (string Key, string Value)> Values(IReadOnlyList<EnvSetting> env)
     {
-        var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var e in env) values[e.Key] = e.Value;
+        var values = new Dictionary<string, (string Key, string Value)>(StringComparer.Ordinal);
+        foreach (var e in env) values[Apps.EnvScopes.Named(e.Key, e.Scope)] = (e.Key, e.Value);
         return values;
     }
 
@@ -213,9 +214,11 @@ public static class SettingsDiff
         var a = Values(before);
         var b = Values(after);
         var (added, removed, changed) = EnvChanges(before, after);
-        var lines = changed.Select(k => new SettingLine(SettingField.Env, k, Masking.Value(k, a[k], secretKeys), Masking.Value(k, b[k], secretKeys), kind))
-            .Concat(added.Select(k => new SettingLine(SettingField.Env, "Added " + k, "", Masking.Value(k, b[k], secretKeys), kind)))
-            .Concat(removed.Select(k => new SettingLine(SettingField.Env, "Removed " + k, Masking.Value(k, a[k], secretKeys), "", kind)))
+        // Masked by the variable's own name: its scope isn't part of it.
+        string Shown((string Key, string Value) v) => Masking.Value(v.Key, v.Value, secretKeys);
+        var lines = changed.Select(k => new SettingLine(SettingField.Env, k, Shown(a[k]), Shown(b[k]), kind))
+            .Concat(added.Select(k => new SettingLine(SettingField.Env, "Added " + k, "", Shown(b[k]), kind)))
+            .Concat(removed.Select(k => new SettingLine(SettingField.Env, "Removed " + k, Shown(a[k]), "", kind)))
             .ToList();
         if (lines.Count <= ListMost) return lines;
         var more = lines.Count - ListMost;

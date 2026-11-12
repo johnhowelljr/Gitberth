@@ -384,6 +384,166 @@ public static class TunnelRoutes
             ? uri.Port
             : null;
 
+    // ---- GitHub's webhook: one path of one host name goes to Gitberth itself ----
+
+    /// <summary>The path rule GitHub's webhook deliveries take to Gitberth: exactly /hooks/github, nothing else.</summary>
+    public const string WebhookPath = "^/hooks/github$";
+
+    /// <summary>What the tunnel answers for every other address of the webhook's host name.</summary>
+    public const string NotFoundService = "http_status:404";
+
+    /// <summary>
+    /// The ingress with GitHub's webhook routed: on <paramref name="host"/> only the path /hooks/github goes to Gitberth
+    /// (<paramref name="service"/>), and every other path gets a 404 of its own (unless someone else has rules on that host,
+    /// which then stay theirs). Never behind Access: the rule has no originRequest. On the hosts in <paramref name="drop"/>
+    /// (being removed) only the webhook's own rules go: its path rule when it goes to Gitberth, and on a host that was the
+    /// webhook's (<paramref name="earlier"/>, or with that path rule) its path rule and the 404 for the rest. Anyone else's
+    /// rules there stay, on the same path or not. With no service (Gitberth can't be reached from the tunnel) the host's
+    /// rules stay as they are.
+    /// </summary>
+    /// <param name="earlier">The host names the webhook had before (<see cref="SettingKeys.GitHubWebhookHostsBefore"/>).</param>
+    public static IngressPlan PlanWebhook(JsonArray current, string? host, string? service, IReadOnlyCollection<string> drop, IReadOnlyCollection<string>? earlier = null)
+    {
+        var rules = Rules(current).ToList();
+        var notes = new List<DomainNote>();
+        var output = new List<JsonObject>();
+        var leaving = drop.Where(d => !string.Equals(d, host, StringComparison.OrdinalIgnoreCase)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var hooks = new HashSet<string>(earlier ?? [], StringComparer.OrdinalIgnoreCase);
+        bool ToGitberth(JsonObject rule, string h) => IsWebhookRule(rule, h) && SameService(Service(rule), service);
+        bool WasWebhooks(string h) => hooks.Contains(h) || rules.Any(r => ToGitberth(r, h));
+        bool Webhooks(JsonObject rule, string h) =>
+            (IsWebhookRule(rule, h) && (hooks.Contains(h) || ToGitberth(rule, h))) || (IsNotFoundRule(rule, h) && WasWebhooks(h));
+        var gone = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var rule in rules)
+        {
+            if (Host(rule) is { } h && leaving.Contains(h) && Webhooks(rule, h))
+            {
+                gone.Add(h.ToLowerInvariant());
+                continue;
+            }
+            output.Add(rule);
+        }
+        foreach (var h in gone) notes.Add(new DomainNote(h, $"Removed the route GitHub's webhook took through {h}"));
+
+        if (host is not null && service is not null)
+        {
+            var own = output.Where(r => SameHost(r, host)).ToList();
+            var foreign = own.Where(r => !IsWebhookRule(r, host) && !IsNotFoundRule(r, host)).ToList();
+            var wanted = new List<JsonObject> { new() { ["hostname"] = host, ["path"] = WebhookPath, ["service"] = service } };
+            if (foreign.Count == 0) wanted.Add(new JsonObject { ["hostname"] = host, ["service"] = NotFoundService });
+            var mine = own.Except(foreign).ToList();
+            var inPlace = mine.Count == wanted.Count && mine.Zip(wanted).All(p => JsonNode.DeepEquals(p.First, p.Second))
+                && output.IndexOf(mine[0]) + mine.Count - 1 == output.IndexOf(mine[^1]) && !ShadowedByWildcard(output, host);
+            if (!inPlace)
+            {
+                output.RemoveAll(mine.Contains);
+                // Right after the rules for every host, like a new domain: ahead of any wildcard that would catch it.
+                var at = output.TakeWhile(r => Host(r) is null && !IsCatchAll(r)).Count();
+                output.InsertRange(at, wanted);
+                notes.Add(new DomainNote(host, $"Routed https://{host}{GitHubWebhookPathText} to Gitberth for GitHub's webhooks"));
+            }
+        }
+        if (output.Count == 0 || !IsCatchAll(output[^1])) output.Add(new JsonObject { ["service"] = NotFoundService });
+        var ingress = new JsonArray([.. output.Select(r => (JsonNode?)r.DeepClone())]);
+        return new IngressPlan(ingress, !JsonNode.DeepEquals(current, ingress), notes);
+    }
+
+    private const string GitHubWebhookPathText = "/hooks/github";
+
+    private static bool IsWebhookRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) == WebhookPath;
+
+    private static bool IsNotFoundRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) is null && Service(rule) == NotFoundService;
+
+    /// <summary>Whether the host has rules that aren't the webhook's: then it's someone else's, and can't be the webhook's host.</summary>
+    public static bool UsedByOthers(JsonArray ingress, string host) =>
+        Rules(ingress).Any(r => SameHost(r, host) && !IsWebhookRule(r, host) && !IsNotFoundRule(r, host));
+
+    // ---- Cloudflare Access on a domain's rules ----
+
+    /// <summary>What a rule's originRequest.access holds for cloudflared to check the visitor's Access sign-in.</summary>
+    public static JsonObject AccessBlock(string teamName, string aud) => new()
+    {
+        ["required"] = true,
+        ["teamName"] = teamName,
+        ["audTag"] = new JsonArray(aud),
+    };
+
+    /// <summary>A protected domain: the access block its rules get, and the services that make a rule for it Gitberth's.</summary>
+    public sealed record Protection(JsonObject Access, IReadOnlyList<string> Services);
+
+    /// <summary>
+    /// The ingress with every protected domain's own rules (the ones going to the app's service, now or before) carrying
+    /// its access block, and the access blocks of Gitberth's removed Access applications (by audience tag) taken off any
+    /// rule. Everything else about each rule stays.
+    /// </summary>
+    public static IngressPlan ApplyAccess(JsonArray current, IReadOnlyDictionary<string, Protection> protect, IReadOnlySet<string> stripAuds, IReadOnlyCollection<AppDefinition> apps)
+    {
+        var notes = new List<DomainNote>();
+        var output = new List<JsonNode?>();
+        foreach (var rule in Rules(current))
+        {
+            var copy = (JsonObject)rule.DeepClone();
+            var host = Host(rule);
+            if (host is not null && protect.TryGetValue(host, out var p) && p.Services.Any(s => apps.Any(a => SameService(Service(rule), s, a)) || SameService(Service(rule), s)))
+            {
+                var origin = copy["originRequest"] as JsonObject ?? [];
+                if (!JsonNode.DeepEquals(origin["access"], p.Access))
+                {
+                    origin["access"] = p.Access.DeepClone();
+                    copy["originRequest"] = origin.DeepClone();
+                    if (!notes.Any(n => n.Hostname == host.ToLowerInvariant()))
+                        notes.Add(new DomainNote(host.ToLowerInvariant(), $"{host} is behind Cloudflare Access now: visitors sign in first"));
+                }
+            }
+            else if (copy["originRequest"] is JsonObject origin && origin["access"] is JsonObject access && AudsOf(access).Any(stripAuds.Contains))
+            {
+                origin.Remove("access");
+                if (origin.Count == 0) copy.Remove("originRequest");
+                if (host is not null && !notes.Any(n => n.Hostname == host.ToLowerInvariant()))
+                    notes.Add(new DomainNote(host.ToLowerInvariant(), $"{host} isn't behind Cloudflare Access any more"));
+            }
+            output.Add(copy);
+        }
+        var ingress = new JsonArray([.. output]);
+        return new IngressPlan(ingress, !JsonNode.DeepEquals(current, ingress), notes);
+    }
+
+    /// <summary>Whether every rule for the host makes cloudflared check an Access sign-in.</summary>
+    public static bool BehindAccess(JsonArray ingress, string hostname)
+    {
+        var rules = Rules(ingress).Where(r => SameHost(r, hostname)).ToList();
+        return rules.Count > 0 && rules.All(ChecksSignIn);
+    }
+
+    /// <summary>
+    /// Whether a rule for the host that skips Cloudflare Access goes to one of these services: the app's, where Gitberth
+    /// sends the domain now or sent it before. Such a rule is Gitberth's, so a sync puts it behind Access; one going
+    /// anywhere else is someone else's, and no sync changes it.
+    /// </summary>
+    public static bool OpenTo(JsonArray ingress, string hostname, AppDefinition app, params string?[] services) =>
+        Rules(ingress).Any(r => SameHost(r, hostname) && !ChecksSignIn(r) && services.Any(s => SameService(Service(r), s, app)));
+
+    // Whether the rule makes cloudflared check an Access sign-in.
+    private static bool ChecksSignIn(JsonObject rule) =>
+        rule["originRequest"] is JsonObject o && o["access"] is JsonObject a && a["required"] is JsonValue v && v.TryGetValue<bool>(out var on) && on;
+
+    /// <summary>The audience tags an access block checks for.</summary>
+    public static IEnumerable<string> AudsOf(JsonObject access) =>
+        (access["audTag"] as JsonArray ?? []).OfType<JsonValue>().Select(v => v.TryGetValue<string>(out var aud) ? aud : null).OfType<string>();
+
+    /// <summary>The audience tags of the Access checks on each host's rules, by host name.</summary>
+    public static Dictionary<string, HashSet<string>> AccessChecks(JsonArray ingress)
+    {
+        var found = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in Rules(ingress))
+        {
+            if (Host(rule) is not { } host || rule["originRequest"] is not JsonObject origin || origin["access"] is not JsonObject access) continue;
+            if (!found.TryGetValue(host, out var auds)) found[host] = auds = new HashSet<string>(StringComparer.Ordinal);
+            auds.UnionWith(AudsOf(access));
+        }
+        return found;
+    }
+
     /// <summary>Whether a wildcard rule (*.example.com) covering the host comes before the host's own first rule.</summary>
     private static bool ShadowedByWildcard(List<JsonObject> rules, string hostname)
     {

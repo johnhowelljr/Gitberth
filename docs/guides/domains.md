@@ -17,6 +17,7 @@ Gitberth can give any app domains of its own, like `app.example.com`, served ove
   - **Account › Cloudflare Tunnel › Edit**
   - **Zone › DNS › Edit**
   - **Zone › Zone › Read**
+  - **Account › Access: Apps and Policies › Edit** and **Account › Access: Organizations, Identity Providers, and Groups › Read**, only to [protect domains](#protect-a-domain)
 
 cloudflared on the host's network (`--network host`, as above) reaches apps through their host ports. cloudflared on the `gitberth` network reaches them by name. If it's on neither, Gitberth joins it to `gitberth` when you save the token.
 
@@ -60,6 +61,34 @@ With cloudflared on the host's network, the tunnel reaches apps through a host p
 
 When an app has several domains, one is its main domain, tagged **Main**: the address Gitberth tells the app it has, in `VERCEL_URL` and, for apps that use Auth.js, `AUTH_URL` (see [Environment variables](environment-variables.md)). It's the shortest one unless you click **Make main** on another. Front ends build that address into their code, so a new main domain reaches the app with its next build.
 
+## Protect a domain
+
+A protected domain asks visitors to sign in before they reach the app, through Cloudflare Access: Cloudflare emails them a one-time code, and only the email addresses you list get in. Use it for a staging copy, an admin tool, or anything that shouldn't be open to the whole internet. [Previews](previews.md)' domains are protected unless their app says otherwise.
+
+### Set up protection once
+
+1. In Cloudflare, open [Zero Trust](https://one.dash.cloudflare.com/) once and choose a team name, if you never have. Its free plan is enough. Your team domain, like `acme.cloudflareaccess.com`, is where visitors sign in.
+2. Give Gitberth's Cloudflare token **Account › Access: Apps and Policies › Edit** and **Account › Access: Organizations, Identity Providers, and Groups › Read** too (edit the token in Cloudflare; it keeps its value). Cloudflare keeps the two apart: the first makes the Access applications, the second reads your team domain.
+3. In Gitberth, go to **Settings › Domains (Cloudflare) › Protection**, type the email addresses that may sign in, one per line, in **Who may sign in**, and click **Save**.
+   The tag next to **Protection** says **Ready**, with **Visitors sign in at acme.cloudflareaccess.com.** When something's missing, the **Protection isn't ready** banner says what: Zero Trust not set up, the token without the Access permission, or nobody listed. **Check again** asks Cloudflare again. When it finds that Gitberth may use Cloudflare Access while an Access application Gitberth made is still to be removed (see [Remove a domain](#remove-a-domain)), Gitberth tries to remove it again within 15 minutes.
+
+### Turn it on for a domain
+
+1. On the app's **Network** tab, in the **Domains** card, turn on **Protected** next to the domain.
+2. Confirm with **Protect**.
+   Gitberth makes a self-hosted Access application named **Gitberth: app.example.com** that allows the listed addresses, and sets the tunnel's route for the domain to require an Access sign-in (`originRequest.access`), so cloudflared checks it too. The line under the domain ends with **behind Cloudflare Access**.
+
+Changing **Who may sign in** updates every protected domain's application. Turning **Protected** off (confirm with **Stop protecting**) takes the check off the route first and then removes the application Gitberth made; removing the domain or its app does the same. Until the application is gone, visitors still have to sign in: if it can't be removed, Gitberth says **… still asks visitors to sign in: Gitberth couldn't remove its Cloudflare Access application.** with the reason (or **… may still ask visitors to sign in: …** when it couldn't see the account's Access applications at all) and how it tries again. While the app runs, the card says **Still behind Cloudflare Access, though it isn't protected any more.**, and **Fix** tries again. While it doesn't, the card has no **Fix**: when Cloudflare refused, the note asks you to click **Check again** in **Settings › Domains (Cloudflare) › Protection** once that's fixed, as for a removed domain (see [Remove a domain](#remove-a-domain)). For a domain you removed, or one whose app you deleted, Gitberth remembers the application and tries again until it's gone (see [Remove a domain](#remove-a-domain)), or until another tunnel on your Cloudflare account serves that name and uses the application (another Gitberth took the name over, say): removing it then would turn everyone away there, so Gitberth leaves it to that one. Gitberth only ever changes or removes applications it named **Gitberth: …**; your own stay as they are.
+
+While protection isn't set up, the switch is off and greyed out, and the card says why. A domain that's protected but can't be protected right now (the token lost the permission, or Zero Trust was turned off) isn't served at all rather than served open: its route is taken out of the tunnel and the card says **Not served until it's behind Cloudflare Access.** with the reason. It comes back once protection works again. When Cloudflare Access only failed for a moment (Cloudflare was busy or couldn't be reached), the note ends with **Gitberth tries again every 15 minutes.**, and it does. A problem that lasts, like the ones above, waits for you to fix it: Gitberth doesn't ask Cloudflare again every 15 minutes in vain.
+
+If Cloudflare can't take the change when you turn **Protected** on (it's busy, say), the domain stays marked protected but its old, open route is still there. Gitberth says so, the card says **Served without Cloudflare Access, so anyone can open it.**, and Gitberth tries again every 15 minutes until the domain is behind Access or out of the tunnel. **Fix** tries at once. Turning **Protected** off works the same way: until the tunnel takes the change, Gitberth says the domain **isn't open to everyone yet**, the card says **Still behind Cloudflare Access, though it isn't protected any more.**, and Gitberth tries again every 15 minutes. That carries on if Gitberth restarts meanwhile: within 15 minutes of starting, it syncs once by itself. Gitberth also remembers the Access check it put on each route, so turning protection off takes it off even when its application was deleted in Cloudflare's dashboard; a check you added yourself is never touched.
+
+Rules for a protected domain that you made in the tunnel yourself (a path rule to another service, say) aren't Gitberth's, so it never adds the Access check to them. If they skip it, anyone can open those addresses: the card says **Some of its rules in the tunnel aren't Gitberth's and skip Cloudflare Access: remove them in Cloudflare.** Delete them in the tunnel's settings in Cloudflare, or add the Access check to them yourself.
+
+> **Note**
+> Anything that calls a protected domain without a browser, such as another service's webhooks or a mobile app, can't sign in, so it stops getting through. Gitberth's own webhook host for GitHub (see [GitHub integration](github-integration.md#instant-deploys)) is never protected.
+
 ## Domains made in Cloudflare
 
 Gitberth works alongside routes and records you made yourself:
@@ -84,6 +113,12 @@ The line under a **Not working** domain says why. The button next to it fixes wh
 | Its DNS points somewhere else (…), so visitors don't reach the tunnel on the host. | Click **Point it here** to replace the record. |
 | Gitberth's token can't see a Cloudflare zone for it in the tunnel's account. … | Add the domain's zone to that Cloudflare account, or give the token access to it. |
 | Not serving: … isn't running, or its saved ports aren't live yet. | Start the app, or apply its saved settings. |
+| Protected: Gitberth puts it behind Cloudflare Access before it's served. | Click **Fix**. |
+| Served without Cloudflare Access, so anyone can open it. … | Click **Fix**: Gitberth puts it behind Access, or stops serving it until it can. When it got that way because Cloudflare couldn't take a change, Gitberth also tries every 15 minutes by itself. |
+| Some of its rules in the tunnel aren't Gitberth's and skip Cloudflare Access: remove them in Cloudflare. | Delete those rules in the tunnel's settings in Cloudflare, or add the Access check to them yourself. Gitberth never changes them. |
+| Not served until it's behind Cloudflare Access. … | Set up [protection](#set-up-protection-once), or turn **Protected** off. When the rest says Cloudflare was busy or couldn't be reached, click **Fix**, or leave it: Gitberth tries again every 15 minutes. |
+| Still behind Cloudflare Access, though it isn't protected any more. Fix takes it out. | Click **Fix**. When the tunnel couldn't take the change, or Cloudflare was busy, Gitberth also tries every 15 minutes by itself. When Cloudflare refused to remove the Access application (the token lost **Account › Access: Apps and Policies › Edit**, say), the note under the list says so: fix that first. |
+| Couldn't be checked. | Cloudflare didn't answer while Gitberth checked the domain; the banner above the list says why. A protected domain says this even while its app isn't running, since it may still be served without Cloudflare Access. Click **Check again** in a moment. |
 
 A domain two or more levels below the zone, like `a.b.example.com`, also shows **Cloudflare's free certificate covers example.com and *.example.com only, so a.b.example.com needs Total TLS or an advanced certificate in Cloudflare.**
 
@@ -94,6 +129,15 @@ A domain two or more levels below the zone, like `a.b.example.com`, also shows *
    Gitberth takes the route out of the tunnel, and removes the DNS record if Gitberth added it. A record you made yourself stays. The app keeps running.
 
 Deleting an app takes its domains out the same way. If Cloudflare can't be reached at that moment, the note says **…: … Gitberth tries again every 15 minutes until it's done.** Gitberth does that while domains are on, and also tries at every sync; the route is never taken over again in the meantime.
+
+A protected domain's Access application goes too. If it can't be removed, the note says **… still asks visitors to sign in: Gitberth couldn't remove its Cloudflare Access application. …**, or **… may still ask visitors to sign in: Gitberth couldn't remove its Cloudflare Access application or see whether it's gone. …** when Gitberth couldn't see the account's Access applications. Either way, it tries again until the application is gone:
+
+- When Cloudflare was busy or couldn't be reached, the note ends with **Gitberth tries again every 15 minutes.**, and it does.
+- When Cloudflare refused (the token lost its Access permission, say), give the token **Account › Access: Apps and Policies › Edit** again, then click **Check again** in **Settings › Domains (Cloudflare) › Protection**, as the note says: once Gitberth may use Cloudflare Access there, it tries again within 15 minutes. Gitberth doesn't ask every 15 minutes in vain meanwhile, but it also tries the next time it updates your domains in Cloudflare (when you add or change a domain, or deploy an app, say), and once within 15 minutes of starting. **Replace token** tries at once.
+- When the token may still see the application but not remove it, the note also offers to delete **Gitberth: …** in the Zero Trust dashboard yourself: Gitberth stops trying once it sees the application is gone (after **Check again**, within 15 minutes).
+- When Zero Trust isn't set up for the tunnel's Cloudflare account, that account has no Access applications, so there's nothing left to remove: Gitberth forgets it.
+
+It also stops, and leaves the application where it is, once another tunnel on your Cloudflare account serves that name with it (another Gitberth took the name over, say); the note then says **Left "Gitberth: …" in Cloudflare Access: … is served through another tunnel now, which uses it.**
 
 ## Turn domains off
 
@@ -122,6 +166,7 @@ For apps with a domain, a Git deploy starts the new version next to the old one 
 ## Related
 
 - [Networking](networking.md)
+- [GitHub integration](github-integration.md)
 - [Gitberth's settings](../reference/gitberth-settings.md#domains-cloudflare)
 - [Troubleshooting](troubleshooting.md#domains)
 - [Security](../concepts/security.md)

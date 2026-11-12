@@ -15,6 +15,9 @@
 @inject WatchState Watch
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject GitHubIntegrationState GitHubState
+@inject WebhookKeeper Webhooks
+@implements IDisposable
 
 <PageTitle>Settings · Gitberth</PageTitle>
 
@@ -67,9 +70,98 @@
                 </div>
                 <p class="gb-help">
                     A <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">fine-grained personal access token</a>
-                    with <strong>Contents: Read-only</strong> and <strong>Variables: Read and write</strong> on the repositories you deploy, or a classic token
-                    with the <strong>repo</strong> scope. Gitberth never changes your code; it only reads and saves the repo's variables.
+                    on the repositories you deploy, with <strong>Contents: Read-only</strong> and <strong>Variables: Read and write</strong>, and for
+                    <a href="settings#github-integration">GitHub integration</a> <strong>Commit statuses: Read and write</strong>,
+                    <strong>Pull requests: Read and write</strong> and <strong>Webhooks: Read and write</strong>. Or a classic token with the
+                    <strong>repo</strong> and <strong>admin:repo_hook</strong> scopes. Gitberth never changes your code: it reads it, saves the repo's
+                    variables, reports deploys on commits and pull requests, and adds its webhook.
                 </p>
+            </div>
+        </section>
+
+        <section class="gb-card gb-sec" id="github-integration" aria-labelledby="ghi-t">
+            @Head("ghi-t", Icons.Material.Outlined.Sync, "GitHub integration", "Deploys reported on GitHub, and deploys that start the moment you push.")
+            <div class="gb-sec-body">
+                @foreach (var problem in GitHubState.Problems)
+                {
+                    <Banner Tone="warn" Title="@ProblemTitle(problem)">@problem.Text</Banner>
+                }
+                <SwitchRow @key="@($"st{integrationKey}")" Title="Commit statuses" Value="statusesOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitHubStatuses, v)" Disabled="busy"
+                           Sub="Each deploy marks its commit on GitHub: pending while it builds, then live (with the app's address) or failed (with a link to the deploy log). Needs Commit statuses: Read and write." />
+                <SwitchRow @key="@($"cm{integrationKey}")" Title="Comments on pull requests" Value="commentsOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitHubComments, v)" Disabled="busy"
+                           Sub="A preview of a pull request keeps one comment on it up to date: its state, address, commit and time. Needs Pull requests: Read and write." />
+                @if (!tokenSaved)
+                {
+                    <p class="gb-help">Both need the GitHub token above; without one, GitHub hears nothing from Gitberth.</p>
+                }
+
+                <div class="gb-h3" style="margin-top:6px">Instant deploys</div>
+                @if (!domainsEnabled)
+                {
+                    <p class="gb-help">
+                        GitHub can tell Gitberth about a push the moment it happens, through your Cloudflare tunnel. That needs
+                        <a href="settings#domains">domains</a> turned on. Until then Gitberth checks for new commits every @interval seconds.
+                    </p>
+                }
+                else
+                {
+                    <div class="gb-setrow">
+                        <Field Label="Host name for GitHub's webhooks" For="hook-host" Help="Only its address /hooks/github goes to Gitberth, never behind Access; every other address on it answers 404. Use a name nothing else uses.">
+                            <input id="hook-host" class="gb-input gb-input--mono" placeholder="hooks.example.com" value="@hookHostInput" @oninput="e => hookHostInput = e.Value?.ToString()" autocomplete="off" spellcheck="false" />
+                        </Field>
+                        <div class="gb-row gb-row--wrap" style="padding-bottom:22px">
+                            <Btn Kind="BtnKind.Primary" OnClick="SaveHookHostAsync" Busy="hookBusy" Disabled="@(string.IsNullOrWhiteSpace(hookHostInput) || hookHostInput.Trim() == hookHost)">@(hookHost is null ? "Turn on" : "Save")</Btn>
+                            @if (hookHost is not null)
+                            {
+                                <Btn Kind="BtnKind.Danger" OnClick="RemoveHookHostAsync" Disabled="hookBusy">Turn off</Btn>
+                            }
+                        </div>
+                    </div>
+                    @if (hookHost is not null)
+                    {
+                        <dl class="gb-kv">
+                            <dt>Payload URL</dt>
+                            <dd><CopyText Text="@DomainService.WebhookUrl(hookHost)" Label="the payload URL" /></dd>
+                            <dt>Content type</dt>
+                            <dd><code>application/json</code></dd>
+                            <dt>Secret</dt>
+                            <dd>
+                                @if (hookSecret is not null)
+                                {
+                                    <span class="gb-row" style="gap:6px">
+                                        <code>@(showSecret ? hookSecret : new string('•', 16))</code>
+                                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => showSecret = !showSecret">@(showSecret ? "Hide" : "Show")</Btn>
+                                        <CopyButton Value="@hookSecret" Label="the webhook secret" />
+                                    </span>
+                                }
+                            </dd>
+                            <dt>Events</dt>
+                            <dd><code>@string.Join(", ", GitHubWrites.HookEvents)</code></dd>
+                        </dl>
+                        <p class="gb-help">
+                            Gitberth adds this webhook to every repo it deploys, which needs <strong>Webhooks: Read and write</strong> on the token. Without it,
+                            add it by hand on each repo: Settings › Webhooks › Add webhook, with the values above and "Let me select individual events".
+                        </p>
+                        @if (GitHubState.Hooks.Count > 0)
+                        {
+                            <ul class="gb-dnotes" style="padding-left:18px">
+                                @foreach (var hook in GitHubState.Hooks)
+                                {
+                                    <li style="@(hook.Ok ? null : "color:#ffd98a")"><code>@hook.Repo</code>: @hook.Text</li>
+                                }
+                            </ul>
+                        }
+                    }
+                    @if (hookNotes.Count > 0)
+                    {
+                        <ul class="gb-dnotes" style="padding-left:18px">
+                            @foreach (var note in hookNotes)
+                            {
+                                <li style="@(note.Problem ? "color:#ffd98a" : null)">@note.Text</li>
+                            }
+                        </ul>
+                    }
+                }
             </div>
         </section>
 
@@ -196,8 +288,9 @@
                     </div>
                     <p class="gb-help">
                         A <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare API token</a>: Create Token › Create Custom Token,
-                        with <strong>@CloudflareApi.Permissions</strong>, for your account and your domains' zones. Routes you already made in Cloudflare that go to an
-                        app become its domains.
+                        with <strong>@CloudflareApi.Permissions</strong>, for your account and your domains' zones. To protect domains, it also needs
+                        <strong>@CloudflareApi.AccessAppsPermission</strong> and <strong>@CloudflareApi.AccessOrganizationPermission</strong>.
+                        Routes you already made in Cloudflare that go to an app become its domains.
                     </p>
                     @if (cloudflareNotes.Count > 0)
                     {
@@ -207,6 +300,52 @@
                                 <li style="@(note.Problem ? "color:#ffd98a" : null)">@note.Text</li>
                             }
                         </ul>
+                    }
+                    @if (cloudflareSaved)
+                    {
+                        <div class="gb-h3 gb-row" style="margin-top:6px;gap:8px" id="protection">
+                            Protection
+                            @if (protection is { Ready: true })
+                            {
+                                <span class="gb-tag gb-tag--good">Ready</span>
+                            }
+                            else if (protection is not null)
+                            {
+                                <span class="gb-tag gb-tag--warn">Not set up</span>
+                            }
+                        </div>
+                        <p class="gb-help">
+                            A protected domain asks visitors to sign in through Cloudflare Access before they reach the app: Cloudflare emails a one-time code, and
+                            only the addresses below get in. Protect a domain with its switch on the app's Network tab; previews' domains are protected unless the
+                            app says otherwise. It needs Zero Trust turned on for your Cloudflare account (its free plan is enough).
+                        </p>
+                        @if (protection is { Ready: true, TeamDomain: { } team })
+                        {
+                            <p class="gb-help">Visitors sign in at <code>@team</code>. @ProtectedCount(protection.Protected)</p>
+                        }
+                        else if (protection?.Problem is { } why)
+                        {
+                            <Banner Tone="warn" Title="Protection isn't ready">@why</Banner>
+                        }
+                        <div class="gb-setrow">
+                            <Field Label="Who may sign in" For="protect-emails" Help="Email addresses, one per line." Error="@emailsError">
+                                <textarea id="protect-emails" class="gb-input gb-input--mono" rows="3" placeholder="you@example.com" value="@emailsInput"
+                                          @oninput="e => { emailsInput = e.Value?.ToString(); emailsError = null; }" spellcheck="false"></textarea>
+                            </Field>
+                            <div class="gb-row gb-row--wrap" style="padding-bottom:22px">
+                                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveEmailsAsync" Busy="protectBusy">Save</Btn>
+                                <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="CheckProtectionAsync" Disabled="protectBusy">Check again</Btn>
+                            </div>
+                        </div>
+                        @if (protectionNotes.Count > 0)
+                        {
+                            <ul class="gb-dnotes" style="padding-left:18px">
+                                @foreach (var note in protectionNotes)
+                                {
+                                    <li style="@(note.Problem ? "color:#ffd98a" : null)">@note.Text</li>
+                                }
+                            </ul>
+                        }
                     }
                 }
             </div>
@@ -399,6 +538,7 @@
     internal static readonly (string Id, string Text, string Icon)[] Toc =
     [
         ("github", "GitHub access", Icons.Custom.Brands.GitHub),
+        ("github-integration", "GitHub integration", Icons.Material.Outlined.Sync),
         ("registries", "Registries", Icons.Material.Outlined.Key),
         ("updates", "Updates", Icons.Material.Outlined.CloudDownload),
         ("domains", "Domains", Icons.Material.Outlined.Public),
@@ -453,6 +593,35 @@
     private string windowFrom = "03:00", windowTo = "05:00";
     private UpdatePolicy defaultPolicy = UpdatePolicy.Notify;
 
+    // GitHub integration: the two switches (bumped key: a failed save shows the saved state again), and instant deploys.
+    private bool statusesOn = true, commentsOn = true, hookBusy, showSecret;
+    private int integrationKey;
+    private string? hookHost, hookHostInput, hookSecret;
+    private IReadOnlyList<DomainNote> hookNotes = [];
+    // Protection: whether Cloudflare Access is ready, and who may sign in.
+    private ProtectionStatus? protection;
+    private string? emailsInput, emailsError;
+    private bool protectBusy;
+    private IReadOnlyList<DomainNote> protectionNotes = [];
+
+    // GitHub refused the token itself, or only on one repo (the others carry on).
+    private static string ProblemTitle(GitHubProblem problem) => (problem.Feature, problem.Repo) switch
+    {
+        (GitHubFeature.Statuses, null) => "Commit statuses aren't set: GitHub refused the token",
+        (GitHubFeature.Statuses, { } repo) => $"Commit statuses aren't set on {repo}",
+        (GitHubFeature.Comments, null) => "Pull request comments aren't made: GitHub refused the token",
+        (GitHubFeature.Comments, { } repo) => $"Pull request comments aren't made on {repo}",
+        (_, null) => "The webhook isn't added to your repos: GitHub refused the token",
+        (_, { } repo) => $"The webhook isn't added to {repo}",
+    };
+
+    private static string ProtectedCount(int count) => count switch
+    {
+        0 => "No domain is protected yet.",
+        1 => "1 domain is protected.",
+        _ => $"{count} domains are protected.",
+    };
+
     private bool ExpiresSoon => expires is not null && expires.Value < DateTimeOffset.UtcNow.AddDays(14);
 
     // What an empty field means: GITBERTH_PUBLIC_HOST, else the detected address, else the address in the browser.
@@ -487,7 +656,10 @@
     protected override async Task OnInitializedAsync()
     {
         browserHost = new Uri(Nav.BaseUri).Host;
+        GitHubState.Changed += OnGitHubChanged;
+        await RememberAddressAsync();
         await LoadAsync();
+        await LoadIntegrationAsync();
         await LoadRegistriesAsync();
         dockerInfo = await Docker.GetInfoAsync();
         gitVersion = await Git.VersionAsync();
@@ -499,6 +671,133 @@
         await LoadLanAsync();
         // Only looked for while domains are on: off, Gitberth doesn't read the tunnel's container at all.
         if (domainsEnabled) (tunnel, tunnelProblem) = await Domains.FindTunnelAsync();
+        if (domainsEnabled && cloudflareSaved) protection = await Domains.ProtectionAsync();
+    }
+
+    public void Dispose() => GitHubState.Changed -= OnGitHubChanged;
+
+    private void OnGitHubChanged() => _ = InvokeAsync(StateHasChanged);
+
+    // The address this page was opened at, for the deploy-log links GitHub shows; not one only this machine knows.
+    private async Task RememberAddressAsync()
+    {
+        var uri = new Uri(Nav.BaseUri);
+        if (uri.IsLoopback || uri.Host is "localhost") return;
+        if (await Settings.GetAsync(SettingKeys.UiAddress) != Nav.BaseUri) await Settings.SetAsync(SettingKeys.UiAddress, Nav.BaseUri);
+    }
+
+    private async Task LoadIntegrationAsync()
+    {
+        statusesOn = await Settings.GetAsync(SettingKeys.GitHubStatuses) != "false";
+        commentsOn = await Settings.GetAsync(SettingKeys.GitHubComments) != "false";
+        hookHost = await Domains.WebhookHostAsync();
+        hookHostInput ??= hookHost;
+        hookSecret = hookHost is null ? null : await Settings.GetSecretAsync(SettingKeys.GitHubWebhookSecret);
+        emailsInput ??= string.Join('\n', DomainService.ParseEmails(await Settings.GetAsync(SettingKeys.ProtectionEmails)).Emails);
+    }
+
+    // On unless turned off: off is saved as "false", on as nothing.
+    private async Task SetIntegrationAsync(string key, bool on)
+    {
+        busy = true;
+        try
+        {
+            await Settings.SetAsync(key, on ? null : "false");
+            if (key == SettingKeys.GitHubStatuses) statusesOn = on;
+            else commentsOn = on;
+            Snackbar.Add(key == SettingKeys.GitHubStatuses
+                ? on ? "Deploys set commit statuses on GitHub again." : "Deploys don't set commit statuses any more."
+                : on ? "Previews comment on their pull requests again." : "Previews don't comment on pull requests any more.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            integrationKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private Task SaveHookHostAsync() => ChangeHookHostAsync(hookHostInput);
+
+    private async Task RemoveHookHostAsync()
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Turn off instant deploys?",
+            $"Gitberth takes {hookHost}'s route out of your tunnel, and checks for new commits every {interval} seconds again. The webhooks on your repos stay; remove them on GitHub if you like.",
+            yesText: "Turn off", cancelText: "Cancel");
+        if (confirmed == true) await ChangeHookHostAsync(null);
+    }
+
+    private async Task ChangeHookHostAsync(string? input)
+    {
+        hookBusy = true;
+        try
+        {
+            var (error, report) = await Domains.SetWebhookHostAsync(input);
+            if (error is not null)
+            {
+                Snackbar.Add(error, Severity.Error);
+                return;
+            }
+            hookNotes = report.Notes;
+            hookHostInput = null;
+            await LoadIntegrationAsync();
+            Webhooks.Poke();
+            var problem = report.Notes.Any(n => n.Problem);
+            Snackbar.Add(hookHost is null ? "Instant deploys are off." : problem ? $"Saved. {hookHost} needs attention; see below." : $"GitHub's webhooks reach Gitberth at {hookHost} now.",
+                problem ? Severity.Warning : Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            hookBusy = false;
+        }
+    }
+
+    private async Task SaveEmailsAsync()
+    {
+        protectBusy = true;
+        try
+        {
+            var (error, report) = await Domains.SaveProtectionEmailsAsync(emailsInput);
+            if (error is not null)
+            {
+                emailsError = error;
+                return;
+            }
+            protectionNotes = report.Notes;
+            emailsInput = null;
+            await LoadIntegrationAsync();
+            protection = await Domains.ProtectionAsync();
+            Snackbar.Add(report.Notes.Any(n => n.Problem) ? "Saved. Some protected domains need attention; see below." : "Saved. Protected domains let in these addresses.",
+                report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            protectBusy = false;
+        }
+    }
+
+    private async Task CheckProtectionAsync()
+    {
+        protectBusy = true;
+        try
+        {
+            protection = await Domains.ProtectionAsync();
+        }
+        finally
+        {
+            protectBusy = false;
+        }
     }
 
     private static RenderFragment Head(string id, string icon, string title, string sub) => @<div class="gb-sec-head">
@@ -754,6 +1053,8 @@
             domainsEnabled = enabled;
             cloudflareNotes = report.Notes;
             (tunnel, tunnelProblem) = enabled ? await Domains.FindTunnelAsync() : (null, null);
+            protection = enabled && cloudflareSaved ? await Domains.ProtectionAsync() : null;
+            Webhooks.Poke();
             var problem = report.Notes.Any(n => n.Problem);
             Snackbar.Add(!enabled ? "Domains turned off. Your tunnel and DNS stay as they are."
                 : problem ? "Domains turned on. Some need attention; see below." : "Domains turned on.", problem ? Severity.Warning : Severity.Info);
@@ -792,6 +1093,7 @@
             newCloudflareToken = null;
             cloudflareSaved = true;
             cloudflareNotes = report.Notes;
+            protection = await Domains.ProtectionAsync();
             Snackbar.Add(report.Notes.Any(n => n.Problem) ? "Token saved. Some domains need attention; see below." : "Token saved. Domains are routed.",
                 report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
         }
@@ -841,6 +1143,9 @@
             newToken = null;
             await LoadAsync();
             Watch.CheckNow();
+            // A new token may have the permissions the old one lacked: everything is tried again.
+            GitHubState.Clear();
+            Webhooks.Poke();
             Snackbar.Add(check.Warning ?? $"Token saved{(check.Login is null ? "" : $" for {check.Login}")}", check.Warning is null ? Severity.Success : Severity.Warning);
         }
         finally
@@ -855,6 +1160,7 @@
         await Settings.SetAsync(SettingKeys.GitHubLogin, null);
         await Settings.SetAsync(SettingKeys.GitHubTokenExpires, null);
         await LoadAsync();
+        GitHubState.Clear();
         Snackbar.Add("Token removed", Severity.Info);
     }
 

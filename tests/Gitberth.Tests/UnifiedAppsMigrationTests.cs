@@ -166,7 +166,10 @@ public sealed class UnifiedAppsMigrationTests : IDisposable
 
         using (var db = Db())
         {
-            Assert.Equal([OldSchema.UnifiedApps], db.Database.GetPendingMigrations());
+            // Every migration since NetworkModel: UnifiedApps first, then any later one, all of which only add.
+            var pending = db.Database.GetPendingMigrations().ToList();
+            Assert.Equal(OldSchema.UnifiedApps, pending.First());
+            Assert.Equal(db.Database.GetMigrations().SkipWhile(m => m != OldSchema.NetworkModel).Skip(1), pending);
             db.Database.Migrate();
         }
 

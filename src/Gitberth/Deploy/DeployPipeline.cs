@@ -12,7 +12,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Gitberth.Deploy;
 
 /// <param name="Build">True: clone and build a new image. False: recreate the container from <paramref name="Image"/> (or the current image).</param>
-public sealed record DeployRequest(int AppId, int DeploymentId, bool Build, string? Image = null);
+/// <param name="GitRef">Build this ref rather than the app's branch: a preview promoted to production builds its refs/pull/12/head.</param>
+/// <param name="Commit">Build exactly this commit of <paramref name="GitRef"/> (the one the promoted preview ran), not its tip.</param>
+public sealed record DeployRequest(int AppId, int DeploymentId, bool Build, string? Image = null, string? GitRef = null, string? Commit = null);
 
 public sealed class DeployException(string message) : Exception(message);
 
@@ -47,8 +49,12 @@ public sealed class DeployPipeline(
     IHostApplicationLifetime lifetime,
     ILogger<DeployPipeline> logger,
     HostPortMap? hostPorts = null,
-    HostScanner? hostScanner = null)
+    HostScanner? hostScanner = null,
+    IDeployReporter? reporter = null)
 {
+    // How long a report may hold a deploy up: GitHub being slow never delays the next deploy for long.
+    private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
+
     private const string Restarted = "Gitberth restarted during this deploy. It's tried again automatically.";
 
     private const int KeepImages = 3;
@@ -100,8 +106,38 @@ public sealed class DeployPipeline(
             return;
         }
 
-        // Empty values mean "not set", so a suggested-but-unfilled variable never overrides the app's own default.
-        var env = app.EnvVars.OrderBy(v => v.Id)
+        // A preview is deployed with its parent's settings, copied again now, and its parent's variables for previews.
+        PreviewInfo? preview = null;
+        AppDefinition? parent = null;
+        if (app.ParentAppId is int parentId)
+        {
+            preview = await db.Previews.FirstOrDefaultAsync(p => p.AppId == app.Id, CancellationToken.None);
+            parent = await db.Apps.AsNoTracking().Include(a => a.Ports).Include(a => a.EnvVars).Include(a => a.Volumes).Include(a => a.Networks).AsSplitQuery()
+                .FirstOrDefaultAsync(a => a.Id == parentId, CancellationToken.None);
+            // A fork's code is never built or run again once its app stops previewing forks (its preview goes on the next look).
+            var forkRefused = preview is { FromFork: true } && parent is { PreviewForks: false };
+            // Its volumes as the copy leaves them never take a name another app has, nor a new one a volume Docker has.
+            // Checked before they're saved, so a preview that isn't started never holds such a name either, and nothing
+            // else's deploy stops for it.
+            var volumeProblem = preview is null || parent is null || forkRefused ? null : await PreviewVolumesProblemAsync(db, app, parent);
+            if (preview is null || parent is null || forkRefused || volumeProblem is not null)
+            {
+                dep.Status = DeployStatus.Failed;
+                dep.Error = forkRefused ? $"{parent!.Name} doesn't preview pull requests from forks any more, so this one isn't deployed."
+                    : volumeProblem ?? "The app this previews is gone, so the preview isn't deployed.";
+                dep.FinishedAt = DateTime.UtcNow;
+                await db.SaveChangesAsync(CancellationToken.None);
+                hub.Close(request.DeploymentId);
+                return;
+            }
+            await db.Entry(app).Collection(a => a.Networks).LoadAsync(CancellationToken.None);
+            Previews.PreviewCopy.Sync(app, parent, preview);
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        // Empty values mean "not set", so a suggested-but-unfilled variable never overrides the app's own default. Production
+        // gets the app's values for every deploy and for production; a preview its parent's for every deploy and for previews.
+        var env = Apps.EnvScopes.ForDeploy((parent ?? app).EnvVars, preview: parent is not null)
             .Select(v => (Var: v, Value: protector.TryUnprotect(v.ProtectedValue)))
             .Where(x => x.Value.Length > 0)
             .ToList();
@@ -123,7 +159,18 @@ public sealed class DeployPipeline(
             await ForgetVariablesIfDeletedAsync(db, app);
             var ownKeys = own.Select(e => e.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             // Marked secret in Gitberth, even when the value itself comes from GitHub.
-            var secretKeys = app.EnvVars.Where(v => v.IsSecret).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var secretKeys = (parent ?? app).EnvVars.Where(v => v.IsSecret).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (parent is not null && preview is not null)
+            {
+                log.Step($"A preview of {parent.Name} ({Previews.PreviewNames.Label(preview.Kind, preview.Branch, preview.PullRequest)}): its settings are {parent.Name}'s, and so are its variables for previews");
+                var leftOut = Previews.PreviewCopy.LeftOut(parent.Volumes);
+                if (leftOut.Count > 0)
+                    log.Line($"Not mounted, because a preview never writes into production's folders: {string.Join(", ", leftOut.Select(v => $"{v.Source} at {v.Target}"))}.");
+                // The host's devices, and for a fork what reaches the host, stay production's.
+                foreach (var line in Previews.PreviewCopy.ExtrasLeftOut(Apps.GitExtras.Parse(parent.RuntimeExtras), preview.FromFork)) log.Line(line);
+                foreach (var (tmpfs, volume) in Previews.PreviewCopy.TmpfsUnderVolumes(Apps.GitExtras.Parse(parent.RuntimeExtras), app.Volumes))
+                    log.Line($"No tmpfs at {tmpfs.Target}: the preview keeps its volume {VolumeNames.Resolve(app.Slug, volume.Source)} there, and Docker mounts one thing at a path.");
+            }
             var usable = repo.Variables.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
             var overridden = usable.Where(v => ownKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var listener = usable.Where(v => !ownKeys.Contains(v.Name) && ListenerKeys.Contains(v.Name)).Select(v => v.Name).ToList();
@@ -142,18 +189,25 @@ public sealed class DeployPipeline(
             var runtimeEnv = fromGitHub.Concat(own).ToList();
             var buildEnv = fromGitHub.Concat(env.Where(x => x.Var.BuildTime).Select(x => new EnvValue(x.Var.Key, x.Value, Secret(x.Var, x.Value)))).ToList();
             var gitHubKeys = fromGitHub.Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
-            // What Vercel's variables tell the app: its main domain, and whether its branch is the repo's production one.
-            var vercelFor = app.VercelVariables ? new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), await IsProductionBranchAsync(app)) : null;
+            // What Vercel's variables tell the app: its main domain, and whether its branch is the repo's production one. A
+            // preview is a preview whatever its branch: its own domain, and its parent's as the production one.
+            var vercelFor = !app.VercelVariables ? null
+                : preview is not null && parent is not null
+                    ? new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), Production: false,
+                        await domains.MainHostnameAsync(parent.Id, CancellationToken.None), preview.PullRequest, Preview: true)
+                    : new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), await IsProductionBranchAsync(app),
+                        Branch: request.GitRef is null ? null : await PromotedBranchAsync(db, app.Id, request.GitRef));
+            // What the build fetches: the preview's ref, or the promoted preview's exact commit; the app's branch otherwise.
+            var fetch = new BuildSource(request.GitRef ?? preview?.Ref, request.GitRef is null ? null : request.Commit, Promoted: request.GitRef is not null);
 
             var prepared = request.Build
-                ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), workDir, log, ct)
+                ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), fetch, workDir, log, ct)
                 : await PrepareImageAsync(app, request, dep, log);
 
             ct.ThrowIfCancellationRequested();
             if (vercelFor is not null)
             {
-                var facts = new DeployFacts(vercelFor.MainDomain, app.Owner, app.Repo, app.Branch, dep.CommitSha, dep.CommitMessage, dep.CommitAuthor,
-                    prepared.Traits, vercelFor.Production);
+                var facts = vercelFor.Facts(app, dep.CommitSha, dep.CommitMessage, dep.CommitAuthor, prepared.Traits);
                 foreach (var line in DescribeVercelVariables(runtimeEnv, facts)) log.Line(line);
                 runtimeEnv = VercelEnv.AddTo(runtimeEnv, VercelEnv.For(facts));
             }
@@ -161,6 +215,11 @@ public sealed class DeployPipeline(
             {
                 log.Line("Vercel's variables are turned off for this app.");
             }
+            var owners = await VolumeOwners.LoadAsync(db, CancellationToken.None);
+            await KeepDeclaredVolumesAsync(db, app, prepared.Image, owners, log);
+            // A preview never starts on another app's volume, nor another app on a preview's: the data would be both's, and
+            // removing the preview would delete it. Saves and the names above keep it from happening; this is the last word.
+            if (owners.SharedWithPreview(app, app.Volumes) is { } sharedNow) throw new DeployException(SharedVolume(app, sharedNow));
             await SetStatusAsync(db, dep, DeployStatus.Starting);
             var outcome = await SwapAsync(app, prepared.Image, runtimeEnv, PortsFor(app, prepared.Port), (dep.Id, dep.Trigger), log, ct);
             if (!outcome.Ok && lifetime.ApplicationStopping.IsCancellationRequested)
@@ -254,7 +313,100 @@ public sealed class DeployPipeline(
             DeployPaths.TryDeleteDirectory(workDir);
         }
 
+        // A preview's commit that didn't make it to production: production follows its branch again, unless a newer
+        // promote waits to run. Asked once this one's outcome is saved.
+        if (dep.Trigger == DeployTrigger.Promote && dep.Status != DeployStatus.Succeeded) await ForgetPromotionAsync(db, dep);
+        await ReportAsync(started: false, dep);
         if (dep.Status == DeployStatus.Succeeded) await PruneImagesAsync(db, app);
+    }
+
+    // A promote that didn't work lets production follow its branch again (RepoWatcher); when that can't be saved now, the
+    // watcher does it on its next look.
+    private async Task ForgetPromotionAsync(GitberthDb db, Deployment dep)
+    {
+        try
+        {
+            await RepoWatcher.ForgetUnheldPromotionAsync(db, dep.AppId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Couldn't let app {AppId} follow its branch again after deploy {DeploymentId}", dep.AppId, dep.Id);
+        }
+    }
+
+    /// <summary>
+    /// Why a preview isn't deployed with its volumes as its copy of the parent's leaves them
+    /// (<see cref="Previews.PreviewCopy.SyncVolumes"/>), or null: one would be another app's
+    /// (<see cref="VolumeOwners.SharedWithPreview"/>), or one it doesn't have yet would be a volume Docker has already,
+    /// which holds another app's data, or a removed app's.
+    /// </summary>
+    private async Task<string?> PreviewVolumesProblemAsync(GitberthDb db, AppDefinition preview, AppDefinition parent)
+    {
+        var after = Previews.PreviewCopy.VolumesAfterSync(preview.Volumes, parent.Volumes);
+        if ((await VolumeOwners.LoadAsync(db, CancellationToken.None)).SharedWithPreview(preview, after) is { } shared) return SharedVolume(preview, shared);
+        var added = after.Where(v => preview.Volumes.All(o => o.Source != v.Source)).Select(v => v.Source).Distinct(StringComparer.Ordinal).ToList();
+        if (added.Count == 0) return null;
+        if (await docker.VolumeNamesAsync(CancellationToken.None) is not { } existing)
+            return "Docker didn't say which volumes it has, so the preview's new volumes can't be checked, and it isn't started. Deploy it again in a moment.";
+        return added.FirstOrDefault(s => existing.Contains(VolumeNames.Resolve(preview.Slug, s))) is { } taken ? TakenVolume(preview, taken) : null;
+    }
+
+    /// <summary>
+    /// Each VOLUME the image declares that none of the app's mounts covers becomes a named volume of its own, saved in its
+    /// settings (<see cref="DeclaredVolumes"/>), before its container is made: otherwise Docker gives the new container an
+    /// empty anonymous volume and leaves the old one's behind. Saved on its own, at once, so the rest of the app's changes
+    /// still wait for the swap to work; read back into this deploy's copy, so what it runs matches what's saved. A name
+    /// another app has, or that a preview of this one would then share (<see cref="VolumeOwners.ClashOf"/>), gets a number;
+    /// so does a preview's new one that Docker has already, which holds another app's data, or a removed app's.
+    /// </summary>
+    private async Task KeepDeclaredVolumesAsync(GitberthDb db, AppDefinition app, string image, VolumeOwners owners, DeployLog log)
+    {
+        var declared = await docker.ImageVolumesAsync(image, CancellationToken.None);
+        // A path the app has a tmpfs at is mounted already (a preview's are its parent's, copied before this).
+        var tmpfs = (Apps.GitExtras.Parse(app.RuntimeExtras)?.Tmpfs ?? []).Select(t => t.Target).ToList();
+        var existing = app.IsPreview && DeclaredVolumes.Missing(app.Volumes, declared, tmpfs: tmpfs).Count > 0
+            ? await docker.VolumeNamesAsync(CancellationToken.None)
+                ?? throw new DeployException("Docker didn't say which volumes it has, so the volumes the image declares can't be named yet. Deploy it again in a moment.")
+            : null;
+        var added = DeclaredVolumes.Missing(app.Volumes, declared,
+            (source, sources) => owners.ClashOf(app, source, sources) is not null || existing?.Contains(VolumeNames.Resolve(app.Slug, source)) == true, tmpfs);
+        if (added.Count == 0) return;
+        await using (var save = await dbFactory.CreateDbContextAsync(CancellationToken.None))
+        {
+            foreach (var v in added) v.AppId = app.Id;
+            save.Volumes.AddRange(added);
+            await save.SaveChangesAsync(CancellationToken.None);
+        }
+        // A query, not the navigation's Load, which skips a collection that's loaded already: tracked, they join app.Volumes.
+        await db.Volumes.Where(v => v.AppId == app.Id).LoadAsync(CancellationToken.None);
+        foreach (var v in added)
+            log.Line($"The image declares VOLUME {v.Target}: it's kept in the volume {VolumeNames.Resolve(app.Slug, v.Source)}, so its data stays from one deploy to the next (Settings › Volumes).");
+    }
+
+    /// <summary>Why a deploy stops when a preview would share a volume with another app (<see cref="VolumeOwners.SharedWithPreview"/>).</summary>
+    private static string SharedVolume(AppDefinition app, VolumeOwners.Clash shared) => app.IsPreview
+        ? $"The volume {shared.Source} would be {shared.Name}, which is also {shared.Who}'s, so the preview isn't started: a preview never shares a volume with another app. Remove the preview: it comes back under another name with its next commit."
+        : $"The volume {shared.Source} would be {shared.Name}, which is also {shared.Who}'s, so {app.Name} isn't started with it: a preview never shares a volume with another app. Remove that preview: it comes back under another name with its next commit.";
+
+    /// <summary>Why a preview's deploy stops when a volume it doesn't have yet would be one Docker has already.</summary>
+    private static string TakenVolume(AppDefinition preview, string source) =>
+        $"The volume {source} would be {VolumeNames.Resolve(preview.Slug, source)}, which Docker has already, so the preview isn't started: that volume holds another app's data, or a removed app's. Remove the preview: it comes back under another name with its next commit.";
+
+    /// <summary>Tells the reporter (GitHub) about a deploy. Whatever goes wrong there is logged, never the deploy's problem.</summary>
+    private async Task ReportAsync(bool started, Deployment dep)
+    {
+        if (reporter is null) return;
+        var report = new DeployReport(dep.AppId, dep.Id, dep.Trigger, dep.CommitSha, started ? DeployStatus.Building : dep.Status, dep.Error);
+        using var timeout = new CancellationTokenSource(ReportTimeout);
+        try
+        {
+            if (started) await reporter.StartedAsync(report, timeout.Token);
+            else await reporter.FinishedAsync(report, timeout.Token);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Couldn't report deploy {DeploymentId}", dep.Id);
+        }
     }
 
     // Where generated Dockerfiles make the app listen. A GitHub variable shared by the repo's apps doesn't move it.
@@ -363,7 +515,23 @@ public sealed class DeployPipeline(
     }
 
     /// <summary>Where Vercel's variables say the app lives, and whether it's the production deploy; null when they're off for the app.</summary>
-    private sealed record VercelContext(string? MainDomain, bool Production);
+    /// <param name="ProductionDomain">A preview's parent's main domain.</param>
+    /// <param name="PullRequest">A pull request's preview: its number.</param>
+    /// <param name="Branch">The branch the commit comes from, when it isn't the app's: a promoted preview's.</param>
+    private sealed record VercelContext(string? MainDomain, bool Production, string? ProductionDomain = null, int? PullRequest = null, bool Preview = false,
+        string? Branch = null)
+    {
+        public DeployFacts Facts(AppDefinition app, string? sha, string? message, string? author, AppTraits traits) =>
+            new(MainDomain, app.Owner, app.Repo, Branch is { Length: > 0 } branch ? branch : app.Branch, sha, message, author, traits, Production, ProductionDomain, PullRequest, Preview);
+    }
+
+    /// <summary>
+    /// The branch of the preview a promote builds (a pull request's own branch), for VERCEL_GIT_COMMIT_REF: as on Vercel,
+    /// a promoted deployment keeps the branch its commit came from. Null when that preview is gone.
+    /// </summary>
+    private static Task<string?> PromotedBranchAsync(GitberthDb db, int appId, string gitRef) =>
+        db.Previews.AsNoTracking().Where(p => p.ParentAppId == appId && p.Ref == gitRef).Select(p => (string?)p.Branch)
+            .FirstOrDefaultAsync(CancellationToken.None);
 
     /// <summary>Whether the app deploys the repo's default branch, which is production on Vercel; any other branch is a preview there.</summary>
     private async Task<bool> IsProductionBranchAsync(AppDefinition app)
@@ -384,13 +552,16 @@ public sealed class DeployPipeline(
     internal static IEnumerable<string> DescribeVercelVariables(IReadOnlyList<EnvValue> env, DeployFacts facts)
     {
         var copies = facts.Traits.Prefix is { } prefix ? $", also as {prefix}VERCEL_…" : "";
-        var environment = facts.Production ? "production" : $"preview, because {facts.Branch} isn't the repo's default branch";
+        var environment = facts.Production ? "production" : facts.Preview ? "preview" : $"preview, because {facts.Branch} isn't the repo's default branch";
         var url = env.FirstOrDefault(e => e.Key == "VERCEL_URL")?.Value ?? (facts.Traits.ChecksVercel ? null : facts.MainDomain);
+        // A preview's production URL is its parent's main domain.
+        var productionUrl = facts.Preview ? facts.ProductionDomain : facts.MainDomain;
         yield return url is not null
             ? $"Vercel's variables are set, with VERCEL_URL={url} and VERCEL_ENV={environment}{copies}."
-            : facts.MainDomain is { } main
+            : productionUrl is { } main
                 ? $"Vercel's variables are set, with VERCEL_PROJECT_PRODUCTION_URL={main} and VERCEL_ENV={environment}{copies}. VERCEL_URL isn't: "
-                    + "the app's code checks process.env.VERCEL, and code like that takes VERCEL_URL to mean it runs on Vercel."
+                    + (facts.MainDomain is null ? "the preview has no domain of its own."
+                        : "the app's code checks process.env.VERCEL, and code like that takes VERCEL_URL to mean it runs on Vercel.")
                 : $"Vercel's variables are set, with VERCEL_ENV={environment}{copies}. VERCEL_URL isn't, because Gitberth doesn't route a domain to the app.";
         var own = env.FirstOrDefault(e => VercelEnv.AuthUrlKeys.Contains(e.Key));
         if (own is not null && facts.MainDomain is { } domain && IsLocal(own.Value))
@@ -416,11 +587,18 @@ public sealed class DeployPipeline(
             .ToList();
     }
 
+    /// <summary>What a build fetches when it isn't the app's branch tip.</summary>
+    /// <param name="Ref">A preview's ref (refs/pull/12/head, refs/heads/feature); null: the app's branch.</param>
+    /// <param name="Commit">The exact commit to build (a promoted preview's); null: the ref's tip.</param>
+    /// <param name="Promoted">Production builds a preview's commit.</param>
+    private sealed record BuildSource(string? Ref, string? Commit, bool Promoted);
+
     /// <param name="gitHubKeys">Which of <paramref name="buildEnv"/> come from the repo's GitHub variables rather than the app's own.</param>
     /// <param name="vercelFor">What Vercel's variables tell the app; null when they're off for it.</param>
     /// <param name="runtimeKeys">Every name the app or the repo sets, build-time or not: those win over Vercel's during the build too.</param>
+    /// <param name="fetch">What to fetch, when it isn't the app's branch tip.</param>
     private async Task<Prepared> BuildAsync(GitberthDb db, AppDefinition app, Deployment dep, List<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys,
-        VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, string workDir, DeployLog log, CancellationToken ct)
+        VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, BuildSource fetch, string workDir, DeployLog log, CancellationToken ct)
     {
         DeployPaths.TryDeleteDirectory(workDir);
         var srcDir = Path.Combine(workDir, "src");
@@ -428,11 +606,18 @@ public sealed class DeployPipeline(
         Directory.CreateDirectory(buildDir);
 
         await SetStatusAsync(db, dep, DeployStatus.Cloning);
-        log.Step($"Cloning {app.RepoFullName} ({app.Branch})");
+        log.Step(fetch switch
+        {
+            { Promoted: true, Commit: { Length: >= 7 } sha } => $"Fetching {sha[..7]} of {app.RepoFullName} from {fetch.Ref}, the preview promoted to production",
+            { Ref: { } named } => $"Fetching {app.RepoFullName} ({named})",
+            _ => $"Cloning {app.RepoFullName} ({app.Branch})",
+        });
         CommitInfo commit;
         try
         {
-            commit = await git.CloneAsync(new GitHubRepoRef(app.Owner, app.Repo), app.Branch, srcDir, log.Line, ct);
+            commit = fetch.Ref is { } gitRef
+                ? await git.FetchAsync(new GitHubRepoRef(app.Owner, app.Repo), gitRef, fetch.Commit, srcDir, log.Line, ct)
+                : await git.CloneAsync(new GitHubRepoRef(app.Owner, app.Repo), app.Branch, srcDir, log.Line, ct);
         }
         catch (GitException ex)
         {
@@ -441,10 +626,13 @@ public sealed class DeployPipeline(
         dep.CommitSha = commit.Sha;
         dep.CommitMessage = commit.Subject.Length > 500 ? commit.Subject[..500] : commit.Subject;
         dep.CommitAuthor = commit.Author;
-        app.LastAttemptedCommit = commit.Sha;
+        // A promoted preview's commit isn't its branch's: what the watcher knows about the branch stays as it was, so a
+        // promote that fails never makes the branch's commit look untried (and deployed over a rollback).
+        if (!fetch.Promoted) app.LastAttemptedCommit = commit.Sha;
         // Saved now, so a restart during the build still knows which commit was being tried.
         await db.SaveChangesAsync(CancellationToken.None);
         log.Step($"Commit {commit.Sha[..7]} by {commit.Author}: {commit.Subject}");
+        await ReportAsync(started: true, dep);
 
         var appDir = app.Subdirectory?.Trim().Trim('/') ?? "";
         var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist on {app.Branch}.");
@@ -454,7 +642,7 @@ public sealed class DeployPipeline(
         var traits = VercelEnv.Detect(folder, srcDir);
         var vercel = vercelFor is null
             ? []
-            : VercelEnv.ForBuild(new DeployFacts(vercelFor.MainDomain, app.Owner, app.Repo, app.Branch, commit.Sha, dep.CommitMessage, commit.Author, traits, vercelFor.Production));
+            : VercelEnv.ForBuild(vercelFor.Facts(app, commit.Sha, dep.CommitMessage, commit.Author, traits));
         var vercelKeys = vercel.Select(v => v.Key).ToHashSet(StringComparer.Ordinal);
         buildEnv = VercelEnv.AddTo(buildEnv, vercel, runtimeKeys);
         // vercel.json's cron jobs travel with the image too, so a rollback runs the jobs of the image it goes back to.
@@ -472,6 +660,8 @@ public sealed class DeployPipeline(
         string context;
         // The Dockerfile as written, before Gitberth fills in its marker lines: whether it has them decides how values go in.
         string source;
+        // Gitberth filled in its marker lines (a generated or custom Dockerfile; the repo's own is built as it is).
+        var filledIn = true;
         int? movedPort = null, detectedPort = null;
         if (app.DockerfileMode == DockerfileMode.Custom && !string.IsNullOrWhiteSpace(app.CustomDockerfile))
         {
@@ -508,6 +698,7 @@ public sealed class DeployPipeline(
                     dockerfilePath = Inside(srcDir, detection.RepoDockerfile!, mustBeFolder: false)
                         ?? throw new DeployException($"{detection.RepoDockerfile} isn't inside the repo.");
                     source = File.ReadAllText(dockerfilePath);
+                    filledIn = false;
                     break;
                 default:
                     log.Step($"Detected {detection.Title}");
@@ -533,38 +724,10 @@ public sealed class DeployPipeline(
             args.AddRange(["--label", $"{ImageLabels.Port}={published}"]);
         args.AddRange(traits.LabelArgs());
         if (cronLabel is not null) args.AddRange(["--label", $"{ImageLabels.Crons}={cronLabel}"]);
-        var processEnv = new Dictionary<string, string>(StringComparer.Ordinal);
-        var asSecrets = DockerfileMarkers.TakesSecrets(source);
-        // A hand-written Dockerfile's ARGs before its first FROM pick base images and tool versions; a GitHub variable
-        // shared by the whole repo (NODE_VERSION, say) shouldn't change them. The app's own build-time values still do.
-        IReadOnlySet<string> globalArgs = asSecrets ? new HashSet<string>() : DockerfileMarkers.GlobalArgs(source);
-        var skipped = buildEnv.Where(e => gitHubKeys.Contains(e.Key) && globalArgs.Contains(e.Key)).Select(e => e.Key).ToList();
-        if (skipped.Count > 0) log.Line($"Not passed to the build, because the Dockerfile sets them before its first FROM: {string.Join(", ", skipped)}");
-        // Without Gitberth's build-args line a Dockerfile only takes the ARGs it declares, and Docker warns about the rest.
-        var declared = asSecrets ? null : DeclaredArgs(source);
-        skipped.AddRange(buildEnv.Where(e => declared is not null && vercelKeys.Contains(e.Key) && !declared.Contains(e.Key)).Select(e => e.Key));
-        var secretCount = 0;
-        foreach (var e in buildEnv.Where(e => !skipped.Contains(e.Key)))
-        {
-            if (asSecrets && e.IsSecret)
-            {
-                // The docker CLI reads it from a neutral name, so no variable it uses itself can be shadowed.
-                var name = $"GITBERTH_SECRET_{secretCount++}";
-                args.AddRange(["--secret", $"id={e.Key},env={name}"]);
-                processEnv[name] = e.Value;
-                continue;
-            }
-            args.Add("--build-arg");
-            if (EnvPassing.CanPassViaEnvironment(e.Key))
-            {
-                args.Add(e.Key);
-                processEnv[e.Key] = e.Value;
-            }
-            else
-            {
-                args.Add($"{e.Key}={e.Value}");
-            }
-        }
+        var values = await BuildValuesAsync(source, filledIn, buildEnv, gitHubKeys, vercelKeys, () => BuildSecrets.KeyAsync(dbFactory, protector, ct));
+        if (values.SetBeforeFrom.Count > 0) log.Line($"Not passed to the build, because the Dockerfile sets them before its first FROM: {string.Join(", ", values.SetBeforeFrom)}");
+        args.AddRange(values.Args);
+        var processEnv = values.Environment;
 
         if (_buildGate.CurrentCount == 0) log.Step("Waiting for another build to finish…");
         await _buildGate.WaitAsync(ct);
@@ -592,6 +755,65 @@ public sealed class DeployPipeline(
             _buildGate.Release();
         }
         return new Prepared(tag, movedPort, detectedPort, traits);
+    }
+
+    /// <summary>What hands a build its values: docker build's arguments, and the environment the docker CLI reads values from.</summary>
+    /// <param name="SetBeforeFrom">The repo's GitHub values left out because the Dockerfile sets them before its first FROM.</param>
+    internal sealed record BuildValues(List<string> Args, Dictionary<string, string> Environment, IReadOnlyList<string> SetBeforeFrom);
+
+    /// <summary>
+    /// The build's values as docker build takes them. Plain ones go in as build args, their values through the CLI's
+    /// environment where they can. In a Dockerfile with Gitberth's build-args line, secret ones go in as BuildKit secrets,
+    /// which are never written into the image's history; and where Gitberth filled that line in, the steps that see them
+    /// are keyed to their values by <see cref="DockerfileMarkers.SecretsArg"/> (<see cref="BuildSecrets"/>), because
+    /// BuildKit leaves secrets out of its cache.
+    /// </summary>
+    /// <param name="source">The Dockerfile as written, before Gitberth fills in its marker lines: whether it has them decides how values go in.</param>
+    /// <param name="filledIn">Gitberth filled in its marker lines (a generated or custom Dockerfile); the repo's own is built as it is.</param>
+    /// <param name="gitHubKeys">Which of <paramref name="buildEnv"/> come from the repo's GitHub variables.</param>
+    /// <param name="vercelKeys">Which of <paramref name="buildEnv"/> are Vercel's.</param>
+    /// <param name="key">This installation's key for the secrets' stamp, asked for only when secrets are mounted.</param>
+    internal static async Task<BuildValues> BuildValuesAsync(string source, bool filledIn, IReadOnlyList<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys,
+        IReadOnlySet<string> vercelKeys, Func<Task<byte[]>> key)
+    {
+        var args = new List<string>();
+        var processEnv = new Dictionary<string, string>(StringComparer.Ordinal);
+        var asSecrets = DockerfileMarkers.TakesSecrets(source);
+        // A hand-written Dockerfile's ARGs before its first FROM pick base images and tool versions; a GitHub variable
+        // shared by the whole repo (NODE_VERSION, say) shouldn't change them. The app's own build-time values still do.
+        IReadOnlySet<string> globalArgs = asSecrets ? new HashSet<string>() : DockerfileMarkers.GlobalArgs(source);
+        var setBeforeFrom = buildEnv.Where(e => gitHubKeys.Contains(e.Key) && globalArgs.Contains(e.Key)).Select(e => e.Key).ToList();
+        // Without Gitberth's build-args line a Dockerfile only takes the ARGs it declares, and Docker warns about the rest.
+        var declared = asSecrets ? null : DeclaredArgs(source);
+        var skipped = setBeforeFrom.Concat(buildEnv.Where(e => declared is not null && vercelKeys.Contains(e.Key) && !declared.Contains(e.Key)).Select(e => e.Key)).ToList();
+        var mounted = new List<EnvValue>();
+        foreach (var e in buildEnv.Where(e => !skipped.Contains(e.Key)))
+        {
+            if (asSecrets && e.IsSecret)
+            {
+                // The docker CLI reads it from a neutral name, so no variable it uses itself can be shadowed.
+                var name = $"GITBERTH_SECRET_{mounted.Count}";
+                args.AddRange(["--secret", $"id={e.Key},env={name}"]);
+                processEnv[name] = e.Value;
+                mounted.Add(e);
+                continue;
+            }
+            args.Add("--build-arg");
+            if (EnvPassing.CanPassViaEnvironment(e.Key))
+            {
+                args.Add(e.Key);
+                processEnv[e.Key] = e.Value;
+            }
+            else
+            {
+                args.Add($"{e.Key}={e.Value}");
+            }
+        }
+        // BuildKit keeps secret values out of its cache, so the steps that see them are keyed to them by a build arg that
+        // gives nothing away (BuildSecrets): a changed value, or another scope's, builds them again.
+        if (filledIn && mounted.Count > 0)
+            args.AddRange(["--build-arg", $"{DockerfileMarkers.SecretsArg}={BuildSecrets.Stamp(await key(), mounted)}"]);
+        return new BuildValues(args, processEnv, setBeforeFrom);
     }
 
     /// <summary>Every ARG a Dockerfile declares, in any stage.</summary>

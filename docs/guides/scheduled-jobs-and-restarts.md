@@ -30,6 +30,9 @@ Scheduled jobs come from the `crons` list in the app's `vercel.json`. There's no
 The jobs travel with the image, so a rollback runs the jobs of the image it goes back to. An image built before Gitberth
 read crons has none: deploy again to pick them up.
 
+As on Vercel, only production runs the jobs: a [preview](previews.md) of the app has them in its image, but they never
+run there, and its card says so.
+
 ### See and run them
 
 The app's **Overview** tab shows a **Scheduled jobs** card when the app has any. Each job shows its path, its schedule

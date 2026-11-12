@@ -21,6 +21,7 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
     public DbSet<RegistryCredential> Registries => Set<RegistryCredential>();
     public DbSet<ImageCheck> ImageChecks => Set<ImageCheck>();
     public DbSet<ActivityEntry> Activity => Set<ActivityEntry>();
+    public DbSet<PreviewInfo> Previews => Set<PreviewInfo>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -34,6 +35,9 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
             e.Property(a => a.DesiredState).HasConversion<string>();
             e.Property(a => a.Source).HasConversion<string>().HasDefaultValue(Gitberth.Apps.AppSource.Git).HasSentinel(Gitberth.Apps.AppSource.Git);
             e.Property(a => a.UpdatePolicy).HasConversion<string>().HasDefaultValue(Gitberth.Apps.UpdatePolicy.Off).HasSentinel(Gitberth.Apps.UpdatePolicy.Off);
+            e.Property(a => a.PreviewMode).HasConversion<string>().HasDefaultValue(PreviewMode.Off).HasSentinel(PreviewMode.Off);
+            // A preview's row names its parent without a foreign key, for the same reason as RegistryId below.
+            e.HasIndex(a => a.ParentAppId);
             // RegistryId names a credential without a foreign key: adding one would make EF Core rebuild Apps, which five
             // tables reference (RegistryService clears it on the apps that name a credential it removes).
             e.HasMany(a => a.Ports).WithOne().HasForeignKey(p => p.AppId).OnDelete(DeleteBehavior.Cascade);
@@ -85,7 +89,21 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
             // An entry outlives its app's row: a forgotten app's history still reads by its container's name.
             e.HasOne<AppDefinition>().WithMany().HasForeignKey(a => a.AppId).OnDelete(DeleteBehavior.SetNull);
         });
-        b.Entity<EnvVar>().HasIndex(v => new { v.AppId, v.Key }).IsUnique();
+        b.Entity<EnvVar>(e =>
+        {
+            // One value per name and scope: All, Production and Preview can each have one.
+            e.HasIndex(v => new { v.AppId, v.Key, v.Scope }).IsUnique();
+            e.Property(v => v.Scope).HasConversion<string>().HasDefaultValue(EnvScope.All).HasSentinel(EnvScope.All);
+        });
+        b.Entity<PreviewInfo>(e =>
+        {
+            e.ToTable("Previews");
+            e.HasKey(p => p.AppId);
+            e.HasIndex(p => p.ParentAppId);
+            e.Property(p => p.Kind).HasConversion<string>();
+            // Goes with the preview's own row. The table that has the key changes, not Apps.
+            e.HasOne<AppDefinition>().WithOne().HasForeignKey<PreviewInfo>(p => p.AppId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<CustomDomain>(e =>
         {
             e.ToTable("Domains");

@@ -61,6 +61,12 @@ encrypted.
 
 [Security](../concepts/security.md) explains how the values are encrypted.
 
+## Production and previews (Git apps)
+
+A Git app's variable is for **All deploys**, for **Production** only, or for **Previews** only: choose it at the end of
+the variable's row. One name can have a value for each, and a **Production** or **Previews** value wins over an **All
+deploys** one. See [Preview deployments](previews.md#environments).
+
 ## Build-time variables (Git apps)
 
 A Git app's variables are passed to the running container. Turn on **Build time** for the ones the build needs too. Front
@@ -70,6 +76,9 @@ on by itself for those names when it suggests them for a Node.js app.
 - Changing a build-time variable needs a new build. Gitberth saves it, and the next deploy builds the app with it.
 - In the Dockerfiles Gitberth generates, secret values reach the build as BuildKit secrets, so they're never written into
   the image's history. Other values go in as build arguments.
+- Docker's build cache doesn't see secret values, so Gitberth gives the build steps that use them one more build
+  argument, `GITBERTH_SECRETS`, made from the values with a key only this Gitberth has: it gives none of them away, and
+  a changed secret (or a preview's own value) builds those steps again instead of reusing what an older value built.
 - A Dockerfile in your repo only gets build arguments, and only for the `ARG`s it declares.
 
 ## Variables kept in GitHub
@@ -118,7 +127,7 @@ To turn them all off for an app, turn off **Vercel's variables** in **Settings**
 | Variables | What they hold |
 |---|---|
 | `VERCEL_URL`, `VERCEL_BRANCH_URL`, `VERCEL_PROJECT_PRODUCTION_URL` | The app's main domain, as a bare host name such as `app.example.com`. Set only when Gitberth routes a domain to the app. |
-| `VERCEL_ENV`, `VERCEL_TARGET_ENV` | `production`, or `preview` when the app deploys another branch than the repo's default one. |
+| `VERCEL_ENV`, `VERCEL_TARGET_ENV` | `production`, or `preview` when the app deploys another branch than the repo's default one, and in every [preview](previews.md#vercels-variables-in-a-preview). |
 | `VERCEL_GIT_PROVIDER`, `VERCEL_GIT_REPO_OWNER`, `VERCEL_GIT_REPO_SLUG`, `VERCEL_GIT_COMMIT_REF`, `VERCEL_GIT_COMMIT_SHA`, `VERCEL_GIT_COMMIT_MESSAGE`, `VERCEL_GIT_COMMIT_AUTHOR_NAME` | The deployed commit: `github`, the owner, the repository, the branch, the commit, its first line, and its author. |
 | `AUTH_URL`, `NEXTAUTH_URL` | For apps that use Auth.js (`next-auth` or an `@auth/` package): `https://` and the main domain. If you set either one yourself, Gitberth sets neither. |
 

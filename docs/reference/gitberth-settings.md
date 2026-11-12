@@ -2,7 +2,7 @@
 
 The **Settings** page holds the settings for Gitberth as a whole: GitHub and registry access, image updates, domains, the network, deploys, the admin password, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
 
-The list on the left jumps to each section: **GitHub access**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Network**, **Own LAN addresses**, **Deploys**, **Admin password** and **System**. Each section saves on its own.
+The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Network**, **Own LAN addresses**, **Deploys**, **Admin password** and **System**. Each section saves on its own.
 
 ![The Settings page](../images/settings.webp)
 
@@ -16,13 +16,26 @@ For private repositories, and the repo variables apps keep their environment in.
 
 | Field or button | What it does |
 |---|---|
-| **Token** (**Replace the token** once one is saved) | A GitHub personal access token. A fine-grained token needs **Contents: Read-only** and **Variables: Read and write** on the repositories you deploy; a classic token needs the **repo** scope. Gitberth never changes your code; it only reads and saves the repo's variables. |
+| **Token** (**Replace the token** once one is saved) | A GitHub personal access token. A fine-grained token needs **Contents: Read-only** and **Variables: Read and write** on the repositories you deploy, and for [GitHub integration](#github-integration) **Commit statuses: Read and write**, **Pull requests: Read and write** and **Webhooks: Read and write**; a classic token needs the **repo** and **admin:repo_hook** scopes. Gitberth never changes your code. |
 | **Save token** / **Replace token** | Asks GitHub who owns the token, then saves it encrypted. An invalid or expired token isn't saved. |
 | **Remove** | Forgets the token. Private repos can't be cloned until you add one again. |
 
 Once saved, the section shows **Token saved**, the GitHub account it belongs to, and when it expires. In its last 14 days the expiry is highlighted with **renew it soon**. Without a token it shows **No token** and **Private repositories can't be cloned yet.** Public repos need no token.
 
-Default: no token. Saving a token makes Gitberth check every repo again right away. See [Deploy from GitHub](../guides/deploy-from-github.md) for how to create one.
+Default: no token. Saving a token makes Gitberth check every repo again right away, and try again whatever GitHub refused the last token. See [Deploy from GitHub](../guides/deploy-from-github.md) for how to create one.
+
+## GitHub integration
+
+Deploys reported on GitHub, and deploys that start the moment you push. See [GitHub integration](../guides/github-integration.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Commit statuses** | Each deploy that builds a commit marks it on GitHub: pending while it builds, then live (linking to the app) or failed (linking to the deploy log). One status per app, named **Gitberth: <app>**, and **Gitberth preview: <app>** for its previews. Needs **Commit statuses: Read and write**. | On |
+| **Comments on pull requests** | A preview of a pull request keeps one comment on it up to date: its state, address, commit and time. Needs **Pull requests: Read and write**. | On |
+| **Host name for GitHub's webhooks** | Instant deploys, shown while domains are on: a host name nothing else uses, like `hooks.example.com`. Only its address `/hooks/github` goes to Gitberth through the tunnel, never behind Access; every other address answers 404. **Turn on** routes it and adds the DNS record; **Save** moves it to another name; **Turn off** asks first, then takes its route out. | None: Gitberth checks every 30 seconds |
+| **Payload URL**, **Content type**, **Secret**, **Events** | What GitHub's webhook needs, to add it by hand when the token can't (no **Webhooks: Read and write**). **Show** reveals the secret; the copy buttons copy. | |
+
+When GitHub refuses one of these on a repo, a banner says which permission is missing (for example **Commit statuses aren't set on acme/web**) and Gitberth stops asking on that repo for an hour, or until a token is saved again; the banner goes with the hour, and comes back if GitHub refuses again. Other repos carry on. A token GitHub refuses outright stops it everywhere (**Commit statuses aren't set: GitHub refused the token**). A list under the webhook values says, per repo, **Webhook added**, **Webhook set up** or why not. With domains off, the section says instant deploys need them.
 
 ## Registries
 
@@ -65,11 +78,15 @@ Optional: apps on their own domains through the Cloudflare Tunnel on the host. S
 | Field or button | What it does |
 |---|---|
 | **Manage app domains through Cloudflare** | Off by default. Off, Gitberth doesn't contact Cloudflare or read your tunnel's settings, and your tunnel and DNS stay exactly as you set them. Turned on with a token saved, Gitberth routes every app's domains right away. |
-| **Cloudflare API token** (**Replace the API token** once one is saved) | A custom Cloudflare API token with **Account › Cloudflare Tunnel › Edit, Zone › DNS › Edit and Zone › Zone › Read**, for your account and your domains' zones. |
+| **Cloudflare API token** (**Replace the API token** once one is saved) | A custom Cloudflare API token with **Account › Cloudflare Tunnel › Edit, Zone › DNS › Edit and Zone › Zone › Read**, for your account and your domains' zones, and **Account › Access: Apps and Policies › Edit** plus **Account › Access: Organizations, Identity Providers, and Groups › Read** to protect domains. |
 | **Save token** / **Replace token** | Finds the cloudflared container on the host, checks the token against its tunnel, saves it encrypted, and routes the domains. Routes you already made in Cloudflare that go to an app become its domains. |
 | **Remove** | Forgets the token. Routes already in your tunnel stay as they are. |
+| **Who may sign in** (under **Protection**, once a token is saved) | The email addresses that may sign in to protected domains through Cloudflare Access, one per line. **Save** updates every protected domain's Access application. It refuses an address that isn't one, and an empty list while a domain is protected. Default: nobody. |
+| **Check again** | Asks Cloudflare again whether protection is ready. |
 
 With domains on, the section shows **Token saved** or **No token**, and the tunnel Gitberth uses, like **Tunnel 1a2b3c4d from the cloudflared container**, or why it can't use one. Notes under the help text say what the last sync did, and what needs attention. With domains off and a token saved, it shows **Token saved** with **Not used while domains are off.**
+
+**Protection** is tagged **Ready** (with where visitors sign in, like **Visitors sign in at acme.cloudflareaccess.com.**, and how many domains are protected) or **Not set up**, with a **Protection isn't ready** banner saying what's missing. A domain is protected with its **Protected** switch on the app's Network tab; see [Protect a domain](../guides/domains.md#protect-a-domain).
 
 ## Network
 

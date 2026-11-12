@@ -130,7 +130,8 @@ public sealed partial class AppService(
         GatherStatsLoaded = health.IsGathered(app.ContainerName),
         Ports = app.Ports.OrderBy(p => p.Id).Select(PortRow.From).ToList(),
         PortsLoaded = AppSettingsModel.PortsKey(app.Ports),
-        Env = app.EnvVars.OrderBy(v => v.Id)
+        // This form has no scopes: it edits the variables every deploy gets (Apply leaves the scoped ones as they are).
+        Env = app.EnvVars.Where(v => v.Scope == EnvScope.All).OrderBy(v => v.Id)
             .Select(v => new EnvRow { Key = v.Key, Value = protector.TryUnprotect(v.ProtectedValue), IsSecret = v.IsSecret, BuildTime = v.BuildTime }).ToList(),
         Volumes = app.Volumes.OrderBy(v => v.Id)
             .Select(v => new VolumeRow { Source = v.Source, Target = v.Target, ReadOnly = v.ReadOnly }).ToList(),
@@ -177,6 +178,14 @@ public sealed partial class AppService(
             else if (!targets.Add(target)) errors.Add($"Two volumes are mounted at {target}.");
             if (!VolumeNames.IsBind(source) && !VolumeName().IsMatch(source))
                 errors.Add($"'{source}' isn't a valid volume. Use a name made of letters, digits, - and _, or an absolute host path like /srv/myapp.");
+        }
+        // An app's named volumes, by the names they'd get, here and in its previews: none may be another app's (VolumeOwners).
+        if (appId is int id)
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            if (await db.Apps.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id, ct) is { } app)
+                errors.AddRange((await VolumeOwners.LoadAsync(db, ct)).Problems(app, m.Volumes
+                    .Where(v => !string.IsNullOrWhiteSpace(v.Source) && !string.IsNullOrWhiteSpace(v.Target)).Select(v => new VolumeMount { Source = v.Source })));
         }
         return errors;
     }
@@ -254,7 +263,8 @@ public sealed partial class AppService(
         var production = watch.DefaultBranch(app.Owner, app.Repo) is not { } main || main == app.Branch;
         var all = VercelEnv.For(new DeployFacts(await domains.MainHostnameAsync(app.Id, ct), app.Owner, app.Repo, app.Branch,
             app.CurrentCommit, deployed?.CommitMessage, deployed?.CommitAuthor, traits, production));
-        var own = app.EnvVars.Select(v => new EnvValue(v.Key, protector.TryUnprotect(v.ProtectedValue), v.IsSecret)).Where(e => e.Value.Length > 0).ToList();
+        var own = EnvScopes.ForDeploy(app.EnvVars, preview: false).Select(v => new EnvValue(v.Key, protector.TryUnprotect(v.ProtectedValue), v.IsSecret))
+            .Where(e => e.Value.Length > 0).ToList();
         var added = VercelEnv.AddTo(own, all).Skip(own.Count).ToList();
         return new VercelView(added, all.Select(v => v.Key).Except(added.Select(a => a.Key)).ToList(), Off: false);
     }
@@ -422,7 +432,7 @@ public sealed partial class AppService(
     /// <param name="vercel">Vercel's variables for the app, when the caller already has them (<see cref="VercelVariablesAsync"/>).</param>
     public async Task<string> DockerRunPreviewAsync(AppDefinition app, VercelView? vercel = null)
     {
-        var env = app.EnvVars.OrderBy(v => v.Id)
+        var env = EnvScopes.ForDeploy(app.EnvVars, preview: false)
             .Select(v => new EnvValue(v.Key, protector.TryUnprotect(v.ProtectedValue), v.IsSecret))
             .Where(e => e.Value.Length > 0)
             .ToList();
@@ -468,14 +478,15 @@ public sealed partial class AppService(
         app.AutoDeploy = m.AutoDeploy;
         app.VercelVariables = m.VercelVariables;
 
-        // Update env vars in place (the (AppId, Key) index is unique).
+        // Update env vars in place (the (AppId, Key, Scope) index is unique). This form edits the ones every deploy gets;
+        // a production or preview value stays as it is.
         var rows = m.Env.Where(e => !string.IsNullOrWhiteSpace(e.Key)).ToList();
         var keep = rows.Select(r => r.Key.Trim()).ToHashSet(StringComparer.Ordinal);
-        app.EnvVars.RemoveAll(v => !keep.Contains(v.Key));
+        app.EnvVars.RemoveAll(v => v.Scope == EnvScope.All && !keep.Contains(v.Key));
         foreach (var row in rows)
         {
             var key = row.Key.Trim();
-            var existing = app.EnvVars.FirstOrDefault(v => v.Key == key);
+            var existing = app.EnvVars.FirstOrDefault(v => v.Key == key && v.Scope == EnvScope.All);
             if (existing is null)
             {
                 existing = new EnvVar { Key = key };
@@ -500,7 +511,8 @@ public sealed partial class AppService(
     /// <param name="networks">The app's own networks, when they're read apart from the app (a deploy reads them under the app's lock).</param>
     internal static (string Runtime, string Build) Fingerprint(AppDefinition a, SecretProtector protector, string shared, IEnumerable<AppNetwork>? networks = null)
     {
-        var env = a.EnvVars.OrderBy(v => v.Key, StringComparer.Ordinal)
+        // Production's variables only: a value for previews never leaves the app's own container pending.
+        var env = EnvScopes.ForDeploy(a.EnvVars, preview: false).OrderBy(v => v.Key, StringComparer.Ordinal)
             .Select(v => (v.Key, Value: protector.TryUnprotect(v.ProtectedValue), v.IsSecret, v.BuildTime)).ToList();
         // The -p, --expose and --network arguments the container is created with; not the web marker, which needs no restart.
         // The settings beyond the classic ones only count once there are some: an app without any keeps the key it had.
@@ -520,7 +532,7 @@ public sealed partial class AppService(
     /// </summary>
     internal static (string Recreate, string Live) RuntimeKeys(AppDefinition a, SecretProtector protector, string shared, IEnumerable<AppNetwork>? networks = null)
     {
-        var env = a.EnvVars.OrderBy(v => v.Key, StringComparer.Ordinal)
+        var env = EnvScopes.ForDeploy(a.EnvVars, preview: false).OrderBy(v => v.Key, StringComparer.Ordinal)
             .Select(v => (v.Key, Value: protector.TryUnprotect(v.ProtectedValue), v.IsSecret, v.BuildTime)).ToList();
         var extras = GitExtras.Parse(a.RuntimeExtras);
         var live = extras is null ? null : GitExtras.Write(new GitExtras
@@ -569,7 +581,7 @@ public sealed partial class AppService(
             foreach (var e in edit.Wanted.Env.Where(e => !e.FromImage))
             {
                 if (!EnvRules.IsValidKey(e.Key.Trim())) problems.Add(new(SettingField.Env, $"'{e.Key}' isn't a valid variable name (letters, digits and _; it can't start with a digit)."));
-                else if (!keys.Add(e.Key.Trim())) problems.Add(new(SettingField.Env, $"The variable {e.Key.Trim()} is listed twice."));
+                else if (!keys.Add(EnvScopes.Named(e.Key.Trim(), e.Scope))) problems.Add(new(SettingField.Env, $"The variable {EnvScopes.Named(e.Key.Trim(), e.Scope)} is listed twice."));
             }
         }
         if (problems.Count > 0) return new GitSaved(false, false, new HashSet<SettingField>(), problems);
@@ -585,6 +597,10 @@ public sealed partial class AppService(
             var keysBefore = RuntimeKeys(app, protector, options.Network);
             var buildBefore = Fingerprint(app, protector, options.Network).Build;
             GitAppSettings.Apply(app, edit.Wanted, fields, protector);
+            // A named volume whose name another app has, here or in a preview's copy, isn't saved (VolumeOwners). The
+            // query reads what's saved, before this change.
+            if (fields.Contains(SettingField.Mounts) && (await VolumeOwners.LoadAsync(db, ct)).Problems(app, app.Volumes) is { Count: > 0 } clashes)
+                return new GitSaved(false, false, new HashSet<SettingField>(), clashes.Select(c => new SettingProblem(SettingField.Mounts, c)).ToList());
             if (edit.WantedGit is { } wantedGit && wantedGit != edit.LoadedGit) GitAppSettings.Apply(app, wantedGit);
             ApplyOptions(app, edit.LoadedOptions, edit.WantedOptions);
             var keysAfter = RuntimeKeys(app, protector, options.Network);

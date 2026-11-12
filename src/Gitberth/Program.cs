@@ -83,6 +83,15 @@ builder.Services.AddSingleton<DockerCli>();
 builder.Services.AddSingleton<ProjectAnalyzer>();
 builder.Services.AddSingleton<AppLocks>();
 builder.Services.AddSingleton<LiveLogHub>();
+// ---- GitHub integration (1.1): what deploys tell GitHub (commit statuses, pull request comments), and instant deploys
+// through GitHub's webhook. Each does nothing until a token (and, for the webhook, a host name) is set up.
+builder.Services.AddSingleton<GitHubWrites>();
+builder.Services.AddSingleton<GitHubIntegrationState>();
+builder.Services.AddSingleton<IDeployReporter, GitHubReporter>();
+builder.Services.AddSingleton<WebhookThrottle>();
+builder.Services.AddSingleton<GitHubWebhookEndpoint>();
+builder.Services.AddSingleton<WebhookKeeper>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookKeeper>());
 builder.Services.AddSingleton<DeployPipeline>();
 builder.Services.AddSingleton<DeployQueue>();
 builder.Services.AddSingleton<AppService>();
@@ -144,6 +153,11 @@ builder.Services.AddSingleton<LanAddresses>();
 builder.Services.AddSingleton<CronScheduler>();
 builder.Services.AddSingleton<RestartSchedules>();
 builder.Services.AddSingleton<RestartScheduler>();
+// Preview deployments: a Git app's branches and pull requests as apps of their own (the repo watcher drives them).
+builder.Services.AddSingleton<GitHubPulls>();
+// Shared by PreviewService and AppActions: deleting an app never races a watcher pass that would make its previews again.
+builder.Services.AddSingleton<Gitberth.Previews.PreviewGate>();
+builder.Services.AddSingleton<Gitberth.Previews.PreviewService>();
 builder.Services.AddHostedService<StartupTasks>();
 // Before the event watcher, so they hear its first starts.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NetworkKeeper>());
@@ -151,7 +165,8 @@ builder.Services.AddHostedService<AppSync>();
 builder.Services.AddHostedService<UpdateWatcher>();
 builder.Services.AddHostedService<PortChangeWatcher>();
 builder.Services.AddHostedService<RepoWatcher>();
-// Domains taken off an app whose route or DNS record couldn't be removed yet: tried again every 15 minutes.
+// What a sync couldn't finish (the tunnel, a removed domain's route or DNS record, a protected domain not behind
+// Cloudflare Access yet, an Access application Cloudflare couldn't remove for the moment): tried again every 15 minutes.
 builder.Services.AddHostedService<RemovalRetry>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerEventWatcher>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerStatsCollector>());
@@ -185,6 +200,10 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+// GitHub's webhook (instant deploys): anonymous, signed by GitHub with Gitberth's secret instead of a sign-in or a form token.
+// Every method is mapped, so its host answers a bare status code and never shows Gitberth's pages.
+GitHubWebhookEndpoint.Map(app);
 
 app.MapPost("/logout", async (HttpContext context, IAntiforgery antiforgery) =>
 {

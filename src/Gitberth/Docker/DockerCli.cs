@@ -439,6 +439,27 @@ public sealed partial class DockerCli(GitberthOptions options)
         return labels;
     }
 
+    /// <summary>The paths an image declares as VOLUMEs; empty when it declares none or the image can't be read.</summary>
+    public async Task<IReadOnlyList<string>> ImageVolumesAsync(string image, CancellationToken ct = default)
+    {
+        var r = await RunAsync(["image", "inspect", "--format", "{{json .Config.Volumes}}", image], null, ct);
+        return r.Ok ? ParseVolumesJson(r.StdOut) : [];
+    }
+
+    /// <summary>Docker's {"/data":{}} (or null): the paths.</summary>
+    internal static IReadOnlyList<string> ParseVolumesJson(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json.Trim());
+            return doc.RootElement.ValueKind == JsonValueKind.Object ? doc.RootElement.EnumerateObject().Select(v => v.Name).ToList() : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
     public Task<ProcessResult> StartAsync(string name, CancellationToken ct = default) => RunAsync(["start", name], null, ct);
 
     public Task<ProcessResult> StopAsync(string name, int timeoutSeconds = 20, CancellationToken ct = default) =>
@@ -531,6 +552,13 @@ public sealed partial class DockerCli(GitberthOptions options)
         RunAsync(["image", "prune", "-f", "--filter", $"label=gitberth.app={slug}"], null, ct);
 
     public Task<ProcessResult> RemoveVolumeAsync(string name, CancellationToken ct = default) => RunAsync(["volume", "rm", name], null, ct);
+
+    /// <summary>The names of the volumes Docker has; null when Docker can't be asked.</summary>
+    public async Task<IReadOnlySet<string>?> VolumeNamesAsync(CancellationToken ct = default)
+    {
+        var r = await RunAsync(["volume", "ls", "--quiet"], null, ct);
+        return r.Ok ? r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal) : null;
+    }
 
     /// <summary>
     /// The bindings in a `docker ps` Ports column ("0.0.0.0:3001->3000/tcp, [::]:3001->3000/tcp, 9000/udp"), IPv4

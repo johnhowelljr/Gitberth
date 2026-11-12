@@ -351,6 +351,47 @@ public sealed class GitAppSettingsTests : IDisposable
     }
 
     [Fact]
+    public async Task A_named_volume_whose_name_a_preview_would_share_with_another_app_is_refused_and_nothing_is_saved()
+    {
+        // orb keeps data and test-cache; its preview of the branch test, orb-test, has its copies of them.
+        var orb = await AddAsync(new AppDefinition
+        {
+            Name = "orb", Slug = "orb", Owner = "acme", Repo = "orb",
+            Volumes = [new VolumeMount { Source = "data", Target = "/data" }, new VolumeMount { Source = "test-cache", Target = "/cache" }],
+        });
+        await AddAsync(new AppDefinition
+        {
+            Name = "orb · test", Slug = "orb-test", Owner = "acme", Repo = "orb", Branch = "test", ParentAppId = orb,
+            Volumes = [new VolumeMount { Source = "data", Target = "/data" }, new VolumeMount { Source = "test-cache", Target = "/cache" }],
+        });
+        var before = await LoadAsync(orb);
+
+        // test-data would be gb-orb-test-data: the preview's data.
+        var own = await _apps.SaveSettingsAsync(orb, await EditAsync(orb, s => s with { Mounts = [.. s.Mounts, new MountSetting(MountKind.Volume, "test-data", "/srv/test")] }));
+        var problem = Assert.Single(own.Problems);
+        Assert.Equal((SettingField.Mounts, "The volume test-data would be gb-orb-test-data, which is also the preview orb · test's. Give it another name, or remove that preview first."),
+            (problem.Field, problem.Message));
+        // cache would be gb-orb-test-cache in the preview: production's test-cache.
+        var copy = await _apps.SaveSettingsAsync(orb, await EditAsync(orb, s => s with { Mounts = [.. s.Mounts, new MountSetting(MountKind.Volume, "cache", "/var/cache")] }));
+        Assert.Equal("The volume cache would be gb-orb-test-cache in the preview orb · test, which is also orb's. Give it another name, or remove that preview first.",
+            Assert.Single(copy.Problems).Message);
+        var after = await LoadAsync(orb);
+        Assert.Equal(before.Volumes.OrderBy(v => v.Id).Select(v => (v.Source, v.Target)), after.Volumes.OrderBy(v => v.Id).Select(v => (v.Source, v.Target)));
+        Assert.Equal((before.UpdatedAt, false), (after.UpdatedAt, after.ConfigChangePending));
+
+        // The older Settings form's check says the same.
+        var model = _apps.ToModel(before);
+        model.Volumes.Add(new VolumeRow { Source = "test-data", Target = "/srv/test" });
+        Assert.Contains("The volume test-data would be gb-orb-test-data, which is also the preview orb · test's. Give it another name, or remove that preview first.",
+            await _apps.ValidateAsync(orb, model));
+
+        // A free name saves as usual, and so do the ones it has.
+        var fine = await _apps.SaveSettingsAsync(orb, await EditAsync(orb, s => s with { Mounts = [.. s.Mounts, new MountSetting(MountKind.Volume, "logs", "/logs")] }));
+        Assert.Empty(fine.Problems);
+        Assert.Equal(["data", "test-cache", "logs"], (await LoadAsync(orb)).Volumes.OrderBy(v => v.Id).Select(v => v.Source));
+    }
+
+    [Fact]
     public async Task Problems_save_nothing_and_another_source_isnt_saved_here()
     {
         var id = await AddAsync(Kanban());

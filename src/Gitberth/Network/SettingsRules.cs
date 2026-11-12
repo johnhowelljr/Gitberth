@@ -49,8 +49,9 @@ public static partial class SettingsRules
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var e in s.Env)
         {
+            // A Git app's name may have a value for every deploy, one for production and one for previews.
             if (!EnvRules.IsValidKey(e.Key)) Add(SettingField.Env, $"\"{e.Key}\" isn't a variable name: use letters, digits and _, not starting with a digit.");
-            else if (!keys.Add(e.Key)) Add(SettingField.Env, $"{e.Key} is listed twice.");
+            else if (!keys.Add(Apps.EnvScopes.Named(e.Key, e.Scope))) Add(SettingField.Env, $"{Apps.EnvScopes.Named(e.Key, e.Scope)} is listed twice.");
             if (e.Value.Contains('\0')) Add(SettingField.Env, $"{e.Key}'s value has a null character in it.");
         }
 

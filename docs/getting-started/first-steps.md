@@ -69,7 +69,9 @@ Gitberth a GitHub token.
 1. On GitHub, create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new).
 2. Under **Repository access**, choose **Only select repositories** and pick the repos you'll deploy.
 3. Under **Permissions**, set **Contents** to **Read-only** and **Variables** to **Read and write**. Variables are where
-   apps from a repo keep their environment (see [Environment variables](../guides/environment-variables.md)).
+   apps from a repo keep their environment (see [Environment variables](../guides/environment-variables.md)). For
+   deploys reported on GitHub and instant deploys, also set **Commit statuses**, **Pull requests** and **Webhooks** to
+   **Read and write** (see [GitHub integration](../guides/github-integration.md)).
 4. Copy the token.
 5. In Gitberth, go to **Settings** › **GitHub access**, paste it into **Token** and click **Save token**.
 
@@ -77,8 +79,9 @@ Gitberth a GitHub token.
 
 ![Settings, GitHub access, where the token is pasted and verified](../images/settings-github.webp)
 
-A classic token with the `repo` scope works too. To change the token later, paste a new one into **Replace the token**
-and click **Replace token**. Gitberth never changes your code: it only reads the repo and reads and saves its variables.
+A classic token with the `repo` scope (and `admin:repo_hook` for the webhook) works too. To change the token later, paste a
+new one into **Replace the token** and click **Replace token**. Gitberth never changes your code: it reads the repo, reads
+and saves its variables, and reports deploys on its commits and pull requests.
 
 ## Check the LAN address
 

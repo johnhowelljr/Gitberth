@@ -1642,6 +1642,8 @@ public sealed class UpgradeRehearsalTests(RehearsalSnapshot snapshot, ITestOutpu
             if (owner is null) return Fail($"Error response from daemon: No such image: {image}");
             var labels = owner["Config"]?["Labels"] as JsonObject ?? new JsonObject();
             if (format == "{{json .Config.Labels}}") return Ok(labels.ToJsonString() + "\n");
+            // The VOLUMEs the image declares, as the container that runs it carries them.
+            if (format == "{{json .Config.Volumes}}") return Ok((owner["Config"]?["Volumes"]?.ToJsonString() ?? "null") + "\n");
             if (format == "{{.Id}}") return Ok(RehearsalSnapshot.Text(owner, "Image") + "\n");
             if (Regex.Match(format, """^\{\{index \.Config\.Labels "(.+)"\}\}$""") is { Success: true } m)
                 return Ok((RehearsalSnapshot.Text(labels, m.Groups[1].Value) is { Length: > 0 } value ? value : "<no value>") + "\n");

@@ -259,6 +259,8 @@ public static class Format
         DeployTrigger.Poll => "New commit",
         DeployTrigger.Retry => "Automatic retry",
         DeployTrigger.Restart => "Scheduled restart",
+        DeployTrigger.Webhook => "Push on GitHub",
+        DeployTrigger.Promote => "Promoted",
         _ => trigger.ToString(),
     };
 

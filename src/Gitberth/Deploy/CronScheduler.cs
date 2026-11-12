@@ -40,6 +40,7 @@ public sealed record AppCronJobs(IReadOnlyList<CronJobStatus> Jobs, string? Prob
 /// <summary>
 /// Runs the cron jobs in apps' images the way Vercel runs a project's crons: in each minute a schedule matches (UTC), a
 /// GET of the job's path on the app's running container, with Authorization: Bearer CRON_SECRET when the app has one.
+/// As on Vercel, only production runs them: a preview never does.
 /// As on Vercel, a failed run isn't retried, a redirect isn't followed, and minutes missed while Gitberth wasn't running
 /// aren't caught up. Unlike Vercel, a run that comes due while the job's previous run is still going is skipped.
 /// </summary>
@@ -59,6 +60,9 @@ public sealed class CronScheduler(
     private const int KeepRuns = 10;
 
     internal const string NoPort = "The app has no web port, so Gitberth can't call its jobs. Set one on the Network tab.";
+
+    /// <summary>As on Vercel, only production runs a project's cron jobs.</summary>
+    internal const string PreviewProblem = "Previews don't run these jobs: only production does, as on Vercel.";
 
     /// <summary>Prints only the CRON_SECRET line of a container's environment, never the app's other secrets.</summary>
     internal const string SecretFormat = """{{range .Config.Env}}{{if eq (index (split . "=") 0) "CRON_SECRET"}}{{.}}{{"\n"}}{{end}}{{end}}""";
@@ -117,9 +121,10 @@ public sealed class CronScheduler(
             if (DateTime.UtcNow - image.ReadAt >= LabelsFor) _images.TryRemove(key, out _);
 
         List<AppDefinition> apps;
+        // Production apps only: a preview's image carries the jobs too, but as on Vercel only production runs them.
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
             apps = await db.Apps.AsNoTracking().Include(a => a.Ports)
-                .Where(a => a.DesiredState == DesiredState.Running && a.CurrentImage != null)
+                .Where(a => a.DesiredState == DesiredState.Running && a.CurrentImage != null && a.ParentAppId == null)
                 .ToListAsync(ct);
 
         var runs = new List<Task<CronRun>>();
@@ -149,7 +154,8 @@ public sealed class CronScheduler(
             var (since, recent) = _jobs.TryGetValue((app.Id, j.Job.Path, j.Job.Schedule), out var state) ? state.Snapshot() : default;
             return new CronJobStatus(j.Job.Path, j.Job.Schedule, j.Schedule.Describe(), j.Schedule.Next(now), since, recent ?? []);
         }).ToList();
-        var problem = app.DesiredState == DesiredState.Stopped ? "The app is stopped, so its jobs don't run until you start it."
+        var problem = app.ParentAppId is not null ? PreviewProblem
+            : app.DesiredState == DesiredState.Stopped ? "The app is stopped, so its jobs don't run until you start it."
             : PortRules.WebOf(app.Ports) is null ? NoPort
             : null;
         return new AppCronJobs(list, problem);
@@ -162,6 +168,7 @@ public sealed class CronScheduler(
     public async Task<CronRun> RunNowAsync(int appId, string path, string schedule)
     {
         var app = await LoadAppAsync(appId, CancellationToken.None) ?? throw new InvalidOperationException("This app doesn't exist anymore.");
+        if (app.ParentAppId is not null) throw new InvalidOperationException(PreviewProblem);
         IReadOnlyList<Entry> jobs = app.CurrentImage is null ? [] : await JobsAsync(app, CancellationToken.None);
         var job = jobs.FirstOrDefault(j => j.Job.Path == path && j.Job.Schedule == schedule)?.Job
             ?? throw new InvalidOperationException($"The app's current image has no cron job {path} ({schedule}).");
