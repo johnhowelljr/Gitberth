@@ -128,6 +128,7 @@ else
                                     </ActivatorContent>
                                     <ChildContent>
                                         <MudMenuItem Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="() => RedeployAsync(p)" Disabled="@(busy || p.State == PreviewState.Building)">Redeploy</MudMenuItem>
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.LayersClear" OnClick="() => RedeployAsync(p, noCache: true)" Disabled="@(busy || p.State == PreviewState.Building)">Redeploy without the build cache</MudMenuItem>
                                         <MudMenuItem Icon="@Icons.Material.Outlined.Upgrade" OnClick="() => PromoteAsync(p)" Disabled="@(busy || !p.CanPromote)">Promote to production…</MudMenuItem>
                                         <MudDivider />
                                         <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="() => RemoveAsync(p)" Disabled="busy">Remove…</MudMenuItem>
@@ -219,12 +220,12 @@ else
     // Its domain, else its LAN address; only while it runs.
     private static string? OpenUrl(PreviewRow p) => !p.Running ? null : p.Domain is { } domain ? $"https://{domain}/" : p.LanUrl;
 
-    private async Task RedeployAsync(PreviewRow p)
+    private async Task RedeployAsync(PreviewRow p, bool noCache = false)
     {
         busy = true;
         try
         {
-            var deployment = await Actions.DeployAsync(p.AppId);
+            var deployment = await Actions.DeployAsync(p.AppId, noCache: noCache);
             Nav.NavigateTo($"apps/{p.AppId}/deployments/{deployment}");
         }
         catch (Exception ex)

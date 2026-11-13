@@ -572,7 +572,9 @@ public sealed class PreviewService(
             var ids = infos.Select(i => i.AppId).ToList();
             var rows = await db.Apps.AsNoTracking().Include(a => a.Ports).Include(a => a.Domains).AsSplitQuery().Where(a => ids.Contains(a.Id)).ToListAsync(ct);
             mine = infos.Join(rows, i => i.AppId, r => r.Id, (i, r) => (r, i)).ToList();
-            var newest = await db.Deployments.AsNoTracking().Where(d => ids.Contains(d.AppId)).GroupBy(d => d.AppId).Select(g => g.Max(d => d.Id)).ToListAsync(ct);
+            // A skipped commit left the preview as it was: its state, commit and log are its newest real deploy's.
+            var newest = await db.Deployments.AsNoTracking().Where(d => ids.Contains(d.AppId) && d.Status != DeployStatus.Skipped)
+                .GroupBy(d => d.AppId).Select(g => g.Max(d => d.Id)).ToListAsync(ct);
             latest = (await db.Deployments.AsNoTracking().Where(d => newest.Contains(d.Id)).ToListAsync(ct)).ToDictionary(d => d.AppId);
         }
         if (mine.Count == 0) return [];

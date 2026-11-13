@@ -136,8 +136,9 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
 A webhook delivery reaches Gitberth only the way it would in real life:
 
 1. A proxied CNAME for the hook's host leads to the tunnel.
-2. The first tunnel rule matching the host and path (`^/hooks/github$`) goes to Gitberth's service. With cloudflared on
-   the host's network that's `http://localhost:8080`, Gitberth's published port.
+2. The first tunnel rule matching the host and path (`^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$`, which deploy
+   hooks' calls take too) goes to Gitberth's service. With cloudflared on the host's network that's
+   `http://localhost:8080`, Gitberth's published port.
 
 Gitberth writes both itself once instant deploys have a host name. Until then, or when either is wrong (no record, a
 missing or shadowed rule, a host that moved away), the delivery's record shows what happened instead:

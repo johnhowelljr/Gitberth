@@ -37,7 +37,11 @@ else
         <ChildContent>
             <div class="gb-hero-meta">
                 <DeployPill Deployment="dep" />
-                <span class="gb-tag">@Format.Trigger(dep.Trigger)</span>
+                <span class="gb-tag">@Format.Trigger(dep)</span>
+                @if (dep.NoCache)
+                {
+                    <span class="gb-tag" title="Every step ran again, and the base images were pulled">Without the build cache</span>
+                }
                 @if (dep.CommitSha is not null)
                 {
                     <span><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@dep.ShortSha</span><span class="gb-ellipsis" style="max-width:420px">@dep.CommitMessage@(dep.CommitAuthor is null ? "" : $" · {dep.CommitAuthor}")</span></span>
@@ -66,6 +70,12 @@ else
         </Actions>
     </PageHead>
 
+    @if (dep.Status == DeployStatus.Skipped)
+    {
+        <Banner Tone="info" Icon="@Icons.Material.Outlined.SkipNext" Title="Skipped: the running version stays">
+            @SkipLine(dep) Nothing was built. Deploy by hand to build it anyway.
+        </Banner>
+    }
     @if (dep.Error is not null && !dep.IsActive)
     {
         <Banner Tone="@(dep.Status == DeployStatus.RolledBack ? "warn" : "critical")" Title="@(dep.Status == DeployStatus.RolledBack ? "Rolled back: the old version kept running" : "The deploy failed")">@dep.Error</Banner>
@@ -135,6 +145,9 @@ else
             }
         }
     }
+
+    // Why a skipped deploy was skipped, as a sentence.
+    private static string SkipLine(Deployment d) => d.SkipReason is { Length: > 0 } why ? why.TrimEnd('.') + "." : "This commit wasn't deployed.";
 
     // The main domain while it's live, and the app's LAN addresses while it answers there: never a host-only one.
     private List<Address> LiveAt() =>

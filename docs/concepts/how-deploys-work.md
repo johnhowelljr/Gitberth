@@ -4,7 +4,7 @@ Gitberth changes a running app in three ways: a Git deploy builds a new image fr
 
 ## A Git deploy
 
-A deploy starts when Gitberth sees a new commit on the app's branch (**New commit**), when you click **Deploy** (**Manual**), when a failed build is tried again (**Automatic retry**), and for an app's **First deploy**. The deploy's page shows these on its tag, and its state as it goes: **Queued**, **Cloning**, **Building**, **Starting**, then **Succeeded**, **Failed**, **Rolled back** or **Cancelled**.
+A deploy starts when Gitberth sees a new commit on the app's branch (**New commit**), when you click **Deploy** (**Manual**), when a failed build is tried again (**Automatic retry**), and for an app's **First deploy**. The deploy's page shows these on its tag, and its state as it goes: **Queued**, **Cloning**, **Building**, **Starting**, then **Succeeded**, **Failed**, **Rolled back**, **Cancelled** or **Skipped**.
 
 ```mermaid
 flowchart TD
@@ -12,6 +12,7 @@ flowchart TD
     queue --> vars["Read the repo's GitHub variables"]
     vars --> clone["Clone the branch tip"]
     vars -->|"rollback, settings change, restart"| built["Use an image already built"]
+    clone -->|"build filters or [skip ci]"| skipped["Skipped: the running container is untouched"]
     clone --> dockerfile["Detect the project, write the Dockerfile"]
     dockerfile --> build["Build the image"]
     build -->|"build fails"| untouched["Failed: the running container is untouched"]
@@ -27,9 +28,9 @@ flowchart TD
 
 1. **Queue.** Each app has its own queue and runs one deploy at a time. A deploy queued while another waits replaces it; the one replaced says **Superseded by a newer deploy**.
 2. **Variables.** Gitberth reads the repo's GitHub Actions variables, and the app's own values in Gitberth win over them. If GitHub can't be reached, it uses an encrypted copy of the last successful read, and the log says so. `PORT`, `HOST`, `HOSTNAME`, `ASPNETCORE_URLS` and `ASPNETCORE_HTTP_PORTS` from GitHub are ignored, because Gitberth sets where the app listens.
-3. **Clone.** A shallow clone of the branch's newest commit, into a work folder in Gitberth's volume. The log names the commit and its author.
+3. **Clone.** A shallow clone of the branch's newest commit, into a work folder in Gitberth's volume. The log names the commit and its author. For a new commit (not **Deploy** or a retry), its message is read for `[skip ci]` and the like, and when the app has build filters, Gitberth fetches the commit the app runs too and lists the files that changed since. A commit they leave out ends here as **Skipped**, before GitHub hears of a build, and the running container isn't touched. See [Skip commits that don't need a deploy](../guides/deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
 4. **Dockerfile.** Your custom Dockerfile when the app has one, else the repo's own Dockerfile, else one Gitberth writes for what it detected (see [How Gitberth builds](../reference/build-detection.md)). It's written outside the clone, so your repo is never changed. When the app now listens on another port than before, its container port moves with it, unless you set that port yourself. `vercel.json` cron jobs are read here too.
-5. **Build.** `docker build` with BuildKit, one build at a time across all apps. The build runs on the host's network with every container on `gitberth` added by name, so a build step can reach `postgres:5432`. In a Dockerfile Gitberth writes, secret values go in as BuildKit secrets, so they're never written into the image's history, and other values as build arguments; a Dockerfile in your repo gets build arguments for the `ARG`s it declares. The image is `gitberth/<app>:<commit>`. A build that fails ends the deploy here, and the running container isn't touched.
+5. **Build.** `docker build` with BuildKit, one build at a time across all apps. The build runs on the host's network with every container on `gitberth` added by name, so a build step can reach `postgres:5432`. In a Dockerfile Gitberth writes, secret values go in as BuildKit secrets, so they're never written into the image's history, and other values as build arguments; a Dockerfile in your repo gets build arguments for the `ARG`s it declares. The image is `gitberth/<app>:<commit>`. **Deploy without the build cache** adds `--no-cache --pull`: every step runs again, and the base images are pulled. A build that fails ends the deploy here, and the running container isn't touched.
 6. **Swap.** If the app has a domain and can swap without downtime, the new version starts next to the old one (see [Deploys without downtime](#deploys-without-downtime)). Otherwise the old container stops and is renamed `gb-<app>_prev`, and the new one starts as `gb-<app>`. An app that was stopped while the deploy waited isn't started again.
 7. **Checks.** The new container has to stay up for 15 seconds: no exit, no restart, not out of memory. A container with a Docker health check has to report healthy, within 60 seconds after that. Then, if the app has a health URL, it has to answer below 400 within 60 seconds.
 8. **Done.** Gitberth records the new image and commit, makes the app's domains point at the running container, and keeps the images of the last 3 successful deploys for rollbacks.

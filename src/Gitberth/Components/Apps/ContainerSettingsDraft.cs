@@ -699,6 +699,9 @@ public sealed class GitOptionsDraft
     public string ProjectHint { get; set; }
     public bool AutoDeploy { get; set; }
     public bool VercelVariables { get; set; }
+    /// <summary>Build filters, one pattern per line, as typed.</summary>
+    public string WatchPaths { get; set; }
+    public string IgnoredPaths { get; set; }
 
     private GitOptionsDraft(GitOptions g)
     {
@@ -710,13 +713,47 @@ public sealed class GitOptionsDraft
         ProjectHint = g.ProjectHint ?? "";
         AutoDeploy = g.AutoDeploy;
         VercelVariables = g.VercelVariables;
+        WatchPaths = g.WatchPaths ?? "";
+        IgnoredPaths = g.IgnoredPaths ?? "";
     }
 
     public static GitOptionsDraft From(GitOptions options) => new(options);
 
     public GitOptions ToOptions() => new(Branch.Trim().Length == 0 ? Loaded.Branch : Branch.Trim(),
         Subdirectory.Trim().Trim('/') is { Length: > 0 } sub ? sub : null, DockerfileMode,
-        CustomDockerfile.Length == 0 ? null : CustomDockerfile, ProjectHint.Trim().Length == 0 ? null : ProjectHint.Trim(), AutoDeploy, VercelVariables);
+        CustomDockerfile.Length == 0 ? null : CustomDockerfile, ProjectHint.Trim().Length == 0 ? null : ProjectHint.Trim(), AutoDeploy, VercelVariables,
+        Deploy.BuildFilters.Normalize(WatchPaths), Deploy.BuildFilters.Normalize(IgnoredPaths));
+
+    /// <summary>Whether the Watch paths field changed from what was loaded.</summary>
+    public bool WatchChanged => Deploy.BuildFilters.Normalize(WatchPaths) != Loaded.WatchPaths;
+
+    public bool IgnoredChanged => Deploy.BuildFilters.Normalize(IgnoredPaths) != Loaded.IgnoredPaths;
+
+    /// <summary>What's wrong with a build filter field as it's typed, said under it; null when it can be saved.</summary>
+    public string? WatchProblem => WatchChanged ? Deploy.BuildFilters.Problem(WatchPaths, "Watch paths") : null;
+
+    public string? IgnoredProblem => IgnoredChanged ? Deploy.BuildFilters.Problem(IgnoredPaths, "Ignored paths") : null;
+
+    /// <summary>
+    /// The pattern that watches the app's subfolder (website/), offered on its own rather than as a default: an app in a
+    /// subfolder can build from the repo's root and use the rest of it. Null without a subfolder, or once it's there.
+    /// </summary>
+    public string? SubfolderSuggestion
+    {
+        get
+        {
+            if (ToOptions().Subdirectory is not { } sub) return null;
+            var pattern = sub + "/";
+            return Deploy.BuildFilters.Patterns(WatchPaths).Any(p => p.Trim('/') == sub) ? null : pattern;
+        }
+    }
+
+    /// <summary>Adds the subfolder's pattern to Watch paths.</summary>
+    public void UseSubfolderSuggestion()
+    {
+        if (SubfolderSuggestion is not { } pattern) return;
+        WatchPaths = Deploy.BuildFilters.Normalize(WatchPaths) is { } existing ? existing + "\n" + pattern : pattern;
+    }
 
     public bool Dirty => ToOptions() != Loaded;
 

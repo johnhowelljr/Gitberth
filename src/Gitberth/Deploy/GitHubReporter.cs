@@ -33,16 +33,19 @@ public static class GitHubReports
     /// <summary>
     /// The commit status for a deploy that started or ended: pending while it builds; success with the app's address once
     /// it runs; failure when its build or checks failed; error when it was cancelled or Gitberth restarted during it (not
-    /// the commit's fault). The text never repeats the deploy's error, which a public repo would show to everyone: the
-    /// link goes to the log instead.
+    /// the commit's fault). A commit that was skipped (its message asked, or nothing the app builds from changed) gets
+    /// success too, so branch protection that requires the status still passes. The text never repeats the deploy's
+    /// error, which a public repo would show to everyone: the link goes to the log instead.
     /// </summary>
-    public static CommitStatus Status(DeployStatus status, string? error, string context, string? address, string? logUrl, bool preview)
+    /// <param name="skip">Why a skipped deploy was skipped.</param>
+    public static CommitStatus Status(DeployStatus status, string? error, string context, string? address, string? logUrl, bool preview, SkipKind? skip = null)
     {
         var what = preview ? "Preview" : "Deploy";
         var (state, text, link) = status switch
         {
             DeployStatus.Queued or DeployStatus.Cloning or DeployStatus.Building or DeployStatus.Starting => ("pending", $"Building and deploying on Gitberth", logUrl),
             DeployStatus.Succeeded => ("success", address is null ? $"{what} is live" : $"{what} is live at {Bare(address)}", address ?? logUrl),
+            DeployStatus.Skipped => ("success", skip == SkipKind.Asked ? "Skipped: the commit asked not to be deployed" : "Skipped: nothing the app builds from changed", logUrl),
             DeployStatus.RolledBack => ("failure", "The new version didn't pass its checks; the previous one still runs", logUrl),
             DeployStatus.Cancelled => ("error", $"{what} cancelled", logUrl),
             _ when error?.StartsWith("Gitberth restarted", StringComparison.Ordinal) == true => ("error", "Gitberth restarted during the deploy; it's tried again", logUrl),
@@ -141,12 +144,15 @@ public sealed class GitHubReporter(
     public Task FinishedAsync(DeployReport report, CancellationToken ct)
     {
         var started = _started.TryRemove(report.DeploymentId, out _);
+        // A skipped commit never started a build: it gets its success status, and a preview's comment stays as it is,
+        // still about the version that runs.
+        if (report.Status == DeployStatus.Skipped) return ReportAsync(report, ended: true, ct, comment: false);
         // A preview whose deploy failed before its commit was known still says so on its pull request.
         if (!started && !(report.CommitSha is null && report.Status == DeployStatus.Failed)) return Task.CompletedTask;
         return ReportAsync(report, ended: true, ct, statuses: started);
     }
 
-    private async Task ReportAsync(DeployReport report, bool ended, CancellationToken ct, bool statuses = true)
+    private async Task ReportAsync(DeployReport report, bool ended, CancellationToken ct, bool statuses = true, bool comment = true)
     {
         if (await settings.GetSecretAsync(SettingKeys.GitHubToken, ct) is not { } token) return;
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -166,11 +172,12 @@ public sealed class GitHubReporter(
         if (statuses && report.CommitSha is { } sha && await OnAsync(SettingKeys.GitHubStatuses, ct) && !state.Paused(GitHubFeature.Statuses, repo, Now()))
         {
             var context = GitHubReports.Context(parentName, app.IsPreview);
-            var commitStatus = GitHubReports.Status(status, report.Error, context, address, logUrl, app.IsPreview);
+            var commitStatus = GitHubReports.Status(status, report.Error, context, address, logUrl, app.IsPreview, report.Skip);
             await TryAsync(GitHubFeature.Statuses, repo, () => github.SetStatusAsync(token, app.Owner, app.Repo, sha, commitStatus, ct));
         }
 
-        if (preview is { Kind: PreviewKind.PullRequest, PullRequest: int number } && await OnAsync(SettingKeys.GitHubComments, ct) && !state.Paused(GitHubFeature.Comments, repo, Now()))
+        if (comment && preview is { Kind: PreviewKind.PullRequest, PullRequest: int number } && await OnAsync(SettingKeys.GitHubComments, ct)
+            && !state.Paused(GitHubFeature.Comments, repo, Now()))
         {
             var body = GitHubReports.CommentBody(new PreviewComment(parentName, GitHubReports.CommentState(status),
                 status == DeployStatus.Succeeded || app.CurrentImage is not null ? address : null, report.CommitSha ?? preview.HeadSha, logUrl, Now()));

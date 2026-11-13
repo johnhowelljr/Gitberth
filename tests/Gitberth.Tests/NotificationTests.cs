@@ -464,6 +464,21 @@ public sealed class NotificationTests : IDisposable
         var long_ = DeployNotifier.Build(new DeployReport(1, 8, DeployTrigger.Poll, null, DeployStatus.Failed, new string('x', 2000)),
             NotifyEvent.DeployFailed, "web", "gb-web", false, null, null, at);
         Assert.True(long_.Text.Length < DeployNotifier.ErrorLimit + 100);
+        Assert.Null(long_.Hook);
+    }
+
+    [Fact]
+    public void A_deploy_a_hook_started_is_told_by_the_hooks_name()
+    {
+        var report = new DeployReport(1, 12, DeployTrigger.Hook, "abc1234def5678", DeployStatus.Succeeded, null) { HookName = "Contentful" };
+
+        var live = DeployNotifier.Build(report, NotifyEvent.DeploySucceeded, "web", "gb-web", false, null, null, DateTime.UtcNow);
+
+        Assert.Equal("Deploy #12 (Deploy hook \"Contentful\", commit abc1234) succeeded.", live.Text);
+        Assert.Equal(("Hook", "Contentful"), (live.Trigger, live.Hook));
+        var json = JsonDocument.Parse(NotificationFormats.Webhook(live, null).Body).RootElement;
+        Assert.Equal(("Hook", "Contentful"), (json.GetProperty("trigger").GetString(), json.GetProperty("hook").GetString()));
+        Assert.Equal(JsonValueKind.Null, JsonDocument.Parse(NotificationFormats.Webhook(Sample(), null).Body).RootElement.GetProperty("hook").ValueKind);
     }
 
     [Fact]

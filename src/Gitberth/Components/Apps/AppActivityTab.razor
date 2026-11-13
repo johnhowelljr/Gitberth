@@ -32,7 +32,7 @@
                             {
                                 <span class="gb-mono gb-t3" style="font-size:12px">@dep.ShortSha</span>
                             }
-                            <span class="gb-t3" style="font-size:12px">@Format.Trigger(dep.Trigger) · took @Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
+                            <span class="gb-t3" style="font-size:12px">@Format.Trigger(dep)@(dep.NoCache ? " · without the build cache" : "") · took @Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
                             <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Href="@($"apps/{dep.AppId}/deployments/{dep.Id}")" Icon="@Icons.Material.Outlined.Article">Log</Btn>
                             @if (CanRollBackTo(dep, View.Row?.CurrentImage, kept))
                             {

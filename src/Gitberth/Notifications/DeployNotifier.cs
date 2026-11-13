@@ -30,9 +30,10 @@ public sealed class DeployNotifier(IDbContextFactory<GitberthDb> dbFactory, Noti
         notifier.Publish(Build(report, kind, app.Name, app.ContainerName, app.IsPreview, main, link, DateTime.UtcNow));
     }
 
-    /// <summary>What a finished deploy is told as, or null when it isn't told.</summary>
+    /// <summary>What a finished deploy is told as, or null when it isn't told. A skipped commit changed nothing that runs, so it isn't.</summary>
     public static NotifyEvent? EventFor(DeployReport report) => report.Status switch
     {
+        DeployStatus.Skipped => null,
         DeployStatus.Failed when report.Error?.StartsWith("Gitberth restarted", StringComparison.Ordinal) == true => null,
         DeployStatus.Failed or DeployStatus.RolledBack => NotifyEvent.DeployFailed,
         DeployStatus.Succeeded when report.Trigger is DeployTrigger.Restart or DeployTrigger.ConfigChange or DeployTrigger.Start => null,
@@ -44,7 +45,7 @@ public sealed class DeployNotifier(IDbContextFactory<GitberthDb> dbFactory, Noti
     public static Notice Build(DeployReport report, NotifyEvent kind, string app, string container, bool preview, string? mainDomain, string? link, DateTime at)
     {
         var commit = report.CommitSha is { Length: >= 7 } sha ? sha[..7] : null;
-        var what = $"{Format.Trigger(report.Trigger)}{(commit is null ? "" : $", commit {commit}")}";
+        var what = $"{Format.Trigger(report.Trigger, report.HookName)}{(commit is null ? "" : $", commit {commit}")}";
         var (level, title, text) = (kind, report.Status) switch
         {
             (NotifyEvent.DeploySucceeded, _) => (NoticeLevel.Good, $"{app} is live",
@@ -57,6 +58,7 @@ public sealed class DeployNotifier(IDbContextFactory<GitberthDb> dbFactory, Noti
         return new Notice(kind, level, title, text.TrimEnd(), link, app, container, at)
         {
             AppId = report.AppId, DeploymentId = report.DeploymentId, Commit = report.CommitSha, Trigger = report.Trigger.ToString(), Preview = preview,
+            Hook = report.Trigger == DeployTrigger.Hook ? report.HookName : null,
         };
     }
 

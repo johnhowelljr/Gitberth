@@ -52,6 +52,12 @@ detected. The app's image is built from the repository, so it has no **Image** f
 | **Build** | **Detect automatically** generates the Dockerfile on every deploy (or uses the repository's own). **Custom Dockerfile** uses the one you write here. | **Detect automatically** | Build |
 | **Dockerfile** | With **Custom Dockerfile**: your Dockerfile. Keep the `# gitberth:build-args` and `# gitberth:volumes` lines; Gitberth fills them in. | The generated one | Build |
 | **Project to run** | .NET only: which project of the solution runs, such as `src/MyApp/MyApp.csproj`. | The one Gitberth picked | Build |
+| **Watch paths** | Build filters, one pattern per line, like a `.gitignore`: a new commit deploys by itself only when it changes a file one of these matches. An app in a subfolder offers **Watch website/** to fill in its folder. | Empty: any file | At once |
+| **Ignored paths** | A new commit whose changed files all match these doesn't deploy by itself, such as `*.md` and `docs/`. | Empty | At once |
+
+A commit the build filters leave out, or whose message says `[skip ci]`, ends **Skipped** and the app keeps running
+its version; **Deploy** still builds it. Patterns starting with `!` aren't supported, and each field takes at most 50
+patterns of at most 200 characters. See [Skip commits that don't need a deploy](../guides/deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
 
 ### Previews
 
@@ -75,6 +81,21 @@ updates come from.
 |---|---|---|---|
 | **Image** | A name and tag, such as `postgres:18`, or a digest. Changing it pulls the new image first, then recreates the app on it; what the old image set is left behind. If the image isn't on the host, **Pull it** appears in the bar. | The image it was created from | Recreate |
 | **Updates** | **When I ask**: nothing's checked until you ask, and no badge shows. **Tell me**: a badge appears on the app when its registry has a newer image. **Automatically**: Gitberth pulls and recreates it when the tag moves, in the hours set in **Settings** › **Updates**. For an image no registry is known to have, the lines speak of a newer build of its tag on this host instead. Never automatic for a database. See [Image updates](../guides/updates.md). | For an app Gitberth created, **New apps from an image** in **Settings** › **Updates** (**Tell me** unless changed); **When I ask** for an image pinned by digest or ID; never **Automatically** for a database | At once |
+
+### Deploy hooks
+
+Git apps, and apps that run a registry's tag: secret URLs that deploy the app when something calls them, such as a CMS,
+a scheduled job or CI. A Git app's hook builds its branch's newest commit again; an image app's pulls its tag and updates
+it when the image moved. Saved on its own; nothing here restarts the app. See [Deploy hooks](../guides/deploy-hooks.md).
+
+| Field or button | What it does | Default | Applies |
+|---|---|---|---|
+| **New hook's name** and **Create hook** | Makes a hook named for what will call it, like `Contentful`, from 1 to 50 characters, one of each name per app and at most 10 hooks. The new hook shows a `curl` line to try it. | No hooks | At once |
+| **On your network** | The hook's URL on Gitberth's own address, with a copy button. | | |
+| **From the internet** | The hook's URL on the host name in **Settings** › **GitHub integration**, shown once instant deploys have one. | | |
+| Bin | Deletes the hook, after asking. Its URL answers 404 from then on. | | At once |
+
+Each hook also says when it was last used.
 
 ### Command
 

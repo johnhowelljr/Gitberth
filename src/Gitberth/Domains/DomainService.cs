@@ -648,7 +648,7 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
             targets = services;
             containers = picked.ToDictionary(p => p.Key, p => p.Value.Container);
 
-            // GitHub's webhook host, which goes to Gitberth itself (path /hooks/github only), and where that is.
+            // GitHub's webhook host, which goes to Gitberth itself (paths /hooks/github and /hooks/deploy/<token> only), and where that is.
             var webhookHost = await WebhookHostAsync(ct);
             var known = apps.SelectMany(a => a.Domains).Select(d => d.Hostname).Concat(removals.Select(r => r.Hostname)).ToHashSet();
             if (webhookHost is not null) known.Add(webhookHost);

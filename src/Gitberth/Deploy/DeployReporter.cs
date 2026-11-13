@@ -11,7 +11,13 @@ namespace Gitberth.Deploy;
 /// <param name="CommitSha">The commit built or run; null when the deploy ended before it was known (a failed clone).</param>
 /// <param name="Status">Building while it runs; how it ended in <see cref="IDeployReporter.FinishedAsync"/>.</param>
 /// <param name="Error">Why it failed, as the deploy log says it; never a secret value (the log masks them).</param>
-public sealed record DeployReport(int AppId, int DeploymentId, DeployTrigger Trigger, string? CommitSha, DeployStatus Status, string? Error);
+/// <param name="Skip">Why it was skipped, when <paramref name="Status"/> is Skipped.</param>
+public sealed record DeployReport(int AppId, int DeploymentId, DeployTrigger Trigger, string? CommitSha, DeployStatus Status, string? Error,
+    SkipKind? Skip = null)
+{
+    /// <summary>The deploy hook that started it, by name, when <see cref="Trigger"/> is Hook.</summary>
+    public string? HookName { get; init; }
+}
 
 /// <summary>What the pipeline tells about each deploy. It must never throw into a deploy, nor hold one up for long.</summary>
 public interface IDeployReporter

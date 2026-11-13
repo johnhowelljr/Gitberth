@@ -73,7 +73,7 @@ public sealed class ActivityLog(IDbContextFactory<GitberthDb> dbFactory, StatsSt
             var row = byId.GetValueOrDefault(d.AppId);
             var item = Deploy(d);
             all.Add(new RecentDeploy(row?.ContainerName ?? "", row?.Name ?? $"App {d.AppId}",
-                item with { Text = DeployWords(d), Href = $"apps/{d.AppId}/deployments/{d.Id}" }));
+                item with { Text = DeployWords(d), Href = $"apps/{d.AppId}/deployments/{d.Id}" }, Skipped: d.Status == DeployStatus.Skipped));
         }
         var created = await db.Activity.AsNoTracking().Where(a => a.At >= since && a.Kind == ActivityKind.Created).ToListAsync(ct);
         foreach (var e in created)
@@ -98,10 +98,11 @@ public sealed class ActivityLog(IDbContextFactory<GitberthDb> dbFactory, StatsSt
     // A deploy in a line that sits after its app's name.
     private static string DeployWords(Deployment d) => d.Status switch
     {
-        DeployStatus.Succeeded => $"deployed {d.ShortSha} · {Format.Trigger(d.Trigger).ToLowerInvariant()}",
+        DeployStatus.Succeeded => $"deployed {d.ShortSha} · {Format.TriggerInLine(d)}",
         DeployStatus.Failed => $"deploy #{d.Id} failed",
         DeployStatus.RolledBack => $"deploy #{d.Id} failed, and the running version stayed",
         DeployStatus.Cancelled => $"deploy #{d.Id} cancelled",
+        DeployStatus.Skipped => $"deploy #{d.Id} skipped" + (d.SkipReason is { Length: > 0 } why ? $": {LowerFirst(why)}" : ""),
         _ => $"deploy #{d.Id} is running",
     };
 
@@ -118,10 +119,12 @@ public sealed class ActivityLog(IDbContextFactory<GitberthDb> dbFactory, StatsSt
             DeployStatus.Failed => ("failed", ActivityTone.Danger),
             DeployStatus.RolledBack => ("failed, and the running version stayed", ActivityTone.Warning),
             DeployStatus.Cancelled => ("cancelled", ActivityTone.Neutral),
+            // Nothing was built and the running version stayed: neither good nor bad news.
+            DeployStatus.Skipped => ("skipped" + (d.SkipReason is { Length: > 0 } why ? $": {LowerFirst(why)}" : ""), ActivityTone.Neutral),
             _ => ("running", ActivityTone.Neutral),
         };
         var commit = d.ShortSha is { Length: > 0 } sha ? $" · {sha}" + (d.CommitMessage is { Length: > 0 } m ? " " + FirstLine(m) : "") : "";
-        return new ActivityItem(d.FinishedAt ?? d.StartedAt ?? d.QueuedAt, ActivityKind.Deploy, $"Deploy #{d.Id} ({Format.Trigger(d.Trigger)}) {outcome}{commit}", tone,
+        return new ActivityItem(d.FinishedAt ?? d.StartedAt ?? d.QueuedAt, ActivityKind.Deploy, $"Deploy #{d.Id} ({Format.Trigger(d)}) {outcome}{commit}", tone,
             $"deployments/{d.Id}", DeploymentId: d.Id);
     }
 

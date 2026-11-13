@@ -77,7 +77,7 @@ public sealed class AppSettingsService
         var secrets = edit.WantedOptions.SecretKeys;
         var own = OptionLines(edit.LoadedOptions, edit.WantedOptions).Concat(GitLines(edit.LoadedGit, edit.WantedGit)).ToList();
         // Gitberth's own fields are checked whatever else changed, so Apply never meets them as an error halfway.
-        var ownProblems = OptionProblems(edit.LoadedOptions, edit.WantedOptions);
+        var ownProblems = OptionProblems(edit.LoadedOptions, edit.WantedOptions).Concat(GitProblems(edit.LoadedGit, edit.WantedGit)).ToList();
         var plan = new SettingsPlan { Key = key, Edit = edit, Lines = own, Problems = ownProblems, Consequence = own.Count > 0 ? "Saved at once: nothing restarts." : null };
         if (fields.Count == 0) return plan;
         var context = await ContextAsync(app.Source == AppSource.Git, ct);
@@ -408,6 +408,32 @@ public sealed class AppSettingsService
         if (before.ProjectHint != after.ProjectHint) yield return Line("Project to run", before.ProjectHint ?? "detected", after.ProjectHint ?? "detected");
         if (before.AutoDeploy != after.AutoDeploy) yield return new SettingLine(null, "Deploy on push", before.AutoDeploy ? "on" : "off", after.AutoDeploy ? "on" : "off", ApplyKind.Gitberth);
         if (before.VercelVariables != after.VercelVariables) yield return Line("Vercel's variables", before.VercelVariables ? "on" : "off", after.VercelVariables ? "on" : "off");
+        // Build filters only decide whether a new commit deploys by itself: nothing restarts, and nothing is built again.
+        if (Deploy.BuildFilters.Normalize(before.WatchPaths) != Deploy.BuildFilters.Normalize(after.WatchPaths))
+            yield return new SettingLine(null, "Watch paths", FilterWords(before.WatchPaths, "any file"), FilterWords(after.WatchPaths, "any file"), ApplyKind.Gitberth);
+        if (Deploy.BuildFilters.Normalize(before.IgnoredPaths) != Deploy.BuildFilters.Normalize(after.IgnoredPaths))
+            yield return new SettingLine(null, "Ignored paths", FilterWords(before.IgnoredPaths, "none"), FilterWords(after.IgnoredPaths, "none"), ApplyKind.Gitberth);
+    }
+
+    /// <summary>What's wrong with a Git app's build filters, when they changed: each field's first problem.</summary>
+    internal static List<SettingProblem> GitProblems(GitOptions? before, GitOptions? after)
+    {
+        var problems = new List<SettingProblem>();
+        if (after is null) return problems;
+        if (Deploy.BuildFilters.Normalize(after.WatchPaths) != Deploy.BuildFilters.Normalize(before?.WatchPaths)
+            && Deploy.BuildFilters.Problem(after.WatchPaths, "Watch paths") is { } watch)
+            problems.Add(new(null, watch));
+        if (Deploy.BuildFilters.Normalize(after.IgnoredPaths) != Deploy.BuildFilters.Normalize(before?.IgnoredPaths)
+            && Deploy.BuildFilters.Problem(after.IgnoredPaths, "Ignored paths") is { } ignored)
+            problems.Add(new(null, ignored));
+        return problems;
+    }
+
+    // A filter field in a change's line: its first few patterns.
+    private static string FilterWords(string? text, string empty)
+    {
+        var patterns = Deploy.BuildFilters.Patterns(text);
+        return patterns.Count == 0 ? empty : string.Join(", ", patterns.Take(3)) + (patterns.Count > 3 ? $" and {patterns.Count - 3} more" : "");
     }
 
     private static string BuildWords(DockerfileMode mode) => mode == DockerfileMode.Custom ? "Custom Dockerfile" : "Detect automatically";

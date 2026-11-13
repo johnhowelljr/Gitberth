@@ -574,6 +574,7 @@ public sealed partial class AppService(
         {
             if (string.IsNullOrWhiteSpace(git.Branch)) problems.Add(new(null, "Pick a branch."));
             if (git.DockerfileMode == DockerfileMode.Custom && string.IsNullOrWhiteSpace(git.CustomDockerfile)) problems.Add(new(null, "The custom Dockerfile is empty."));
+            problems.AddRange(AppSettingsService.GitProblems(edit.LoadedGit, git));
         }
         if (fields.Contains(SettingField.RestartPolicy) && !RestartPolicies.Contains(edit.Wanted.Restart.Name))
             problems.Add(new(SettingField.RestartPolicy, "Pick a restart policy."));

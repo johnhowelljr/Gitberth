@@ -107,6 +107,7 @@ builder.Services.AddSingleton<GitHubWebhookEndpoint>();
 builder.Services.AddSingleton<WebhookKeeper>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookKeeper>());
 builder.Services.AddSingleton<DeployPipeline>();
+builder.Services.AddSingleton<BuildCache>();
 builder.Services.AddSingleton<DeployQueue>();
 builder.Services.AddSingleton<AppService>();
 builder.Services.AddSingleton<AppActions>();
@@ -153,7 +154,11 @@ builder.Services.AddSingleton<AppSettingsService>();
 builder.Services.AddSingleton<RegistryService>();
 builder.Services.AddSingleton<ImageService>();
 builder.Services.AddSingleton<UpdateService>();
+builder.Services.AddSingleton<IHookUpdates>(sp => sp.GetRequiredService<UpdateService>());
 builder.Services.AddSingleton<AppCreator>();
+// Deploy hooks (1.2): secret URLs that build a Git app again or update an image app, for a CMS, a scheduled job or CI.
+builder.Services.AddSingleton<DeployHooks>();
+builder.Services.AddSingleton<DeployHookEndpoint>();
 // AppActions starts, stops and removes any app through ContainerService and applies a non-Git app's ports through
 // AppSettingsService, which both depend on it; the catalog's update badges come from UpdateService, which depends on the
 // catalog. Each gets the other when it first needs it.
@@ -221,6 +226,9 @@ app.MapRazorComponents<App>()
 // GitHub's webhook (instant deploys): anonymous, signed by GitHub with Gitberth's secret instead of a sign-in or a form token.
 // Every method is mapped, so its host answers a bare status code and never shows Gitberth's pages.
 GitHubWebhookEndpoint.Map(app);
+// Deploy hooks: anonymous too, the token in the path being the secret; every method and path under /hooks/deploy is mapped
+// for the same reason.
+DeployHookEndpoint.Map(app);
 
 app.MapPost("/logout", async (HttpContext context, IAntiforgery antiforgery) =>
 {

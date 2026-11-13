@@ -128,7 +128,8 @@ public sealed class RepoWatcher(
     /// Whether to try the branch tip again after its build failed: once, <see cref="RetryDelay"/> after a failure that
     /// wasn't itself a retry, and once after each Gitberth update, which may have changed how the repo is built. Only
     /// failed builds are retried: a deploy that started and was rolled back would take the running app down again, and
-    /// a manual rollback is never undone.
+    /// a manual rollback is never undone. A skipped commit (build filters, or its message) isn't either: nothing failed,
+    /// and building it would undo the skip.
     /// </summary>
     public static bool ShouldRetry(AppDefinition app, string remoteSha, LastAttempt? last, string build, DateTime now) =>
         last is { Status: DeployStatus.Failed } && last.Trigger != DeployTrigger.Rollback
@@ -256,7 +257,8 @@ public sealed class RepoWatcher(
 
     /// <summary>
     /// The latest build of this commit of the app, for <see cref="ShouldRetry"/> (previews' too). Settings changes in between
-    /// (which recreate the running container) don't hide it, but a manual rollback afterwards means it's left alone.
+    /// (which recreate the running container) don't hide it, but a manual rollback afterwards means it's left alone. When
+    /// the commit was skipped, that's what it says, so it's never retried.
     /// </summary>
     internal static async Task<LastAttempt?> LastAttemptAsync(IDbContextFactory<GitberthDb> dbFactory, int appId, string sha, CancellationToken ct)
     {

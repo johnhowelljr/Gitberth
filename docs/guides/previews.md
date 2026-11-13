@@ -54,6 +54,10 @@ A preview is an app of its own, made from its parent's settings:
 - **Its parent's settings**, copied again before each of its deploys: the subfolder, how it's built, the health URL,
   memory and CPU limits, restart policy, Vercel's variables, and its command, labels, logging and other advanced
   settings. Its ports are the parent's container ports; only the web port is published.
+- **Its parent's build filters.** A new commit on the pull request or branch that changes only files the parent's
+  **Watch paths** and **Ignored paths** leave out, compared with the commit the preview runs, or whose message says
+  `[skip ci]`, is skipped: the preview keeps running, and its comment on the pull request stays as it was. A preview's
+  first deploy always builds. See [Skip commits that don't need a deploy](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
 - **Its own volumes.** A named volume of the parent (`data`) is the preview's own (`gb-orb-pr-12-data`), so a preview
   starts with empty data and never touches production's. It keeps every volume it has until it's removed: one added to
   the parent is added to the preview with its next deploy (unless the preview has one at that path already), and one
@@ -106,7 +110,10 @@ A Git app's **Previews** tab lists its previews, newest activity first. For each
 - the pull request (its number and title, linking to GitHub) or the branch;
 - its state: **Building**, **Ready**, **Failed**, **Waiting** or **Stopped**;
 - its commit, its domain and LAN address, its last commit, and when it's removed without a new one;
-- **Open**, **Log** (its newest deploy), and in **⋯**: **Redeploy**, **Promote to production…** and **Remove…**.
+- **Open**, **Log** (its newest deploy that wasn't skipped), and in **⋯**: **Redeploy**, **Redeploy without the build
+  cache**, **Promote to production…** and **Remove…**.
+
+A skipped commit never changes a preview's state: it shows as its deploy before left it.
 
 ## The limit, and how previews go
 

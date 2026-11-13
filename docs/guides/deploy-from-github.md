@@ -113,7 +113,8 @@ created yet** box, and creates nothing.
 ## What happens next
 
 - **New commits deploy by themselves.** Gitberth checks the branch every 30 seconds and deploys a new commit within about
-  that long. The interval is in **Settings** › **Deploys**.
+  that long. The interval is in **Settings** › **Deploys**. A commit whose message says `[skip ci]`, or that changes only
+  files the app's build filters leave out, is skipped.
 - **The Dockerfile follows the repo.** Unless you customized it, Gitberth generates it again on every deploy, so a new
   Node.js or .NET version in the repo is picked up by itself.
 - **The container port follows the app.** When a deploy finds the app now listens on another port, Gitberth moves the
@@ -128,6 +129,8 @@ On the app's **Settings** tab, the **Source** section holds:
 - **Vercel's variables**: see [Environment variables](environment-variables.md#variables-gitberth-sets-like-vercel).
 - **Build**: **Detect automatically** or **Custom Dockerfile**, with the Dockerfile to edit.
 - **Project to run**, for a .NET solution.
+- **Watch paths** and **Ignored paths**: build filters, so a commit that only changes the docs isn't deployed. See
+  [Skip commits that don't need a deploy](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
 
 A change of branch, folder or build is saved for the next build. The page then says **Saved, not live yet**; click
 **Rebuild and deploy** to build it now. See [App settings](../reference/app-settings.md#source).

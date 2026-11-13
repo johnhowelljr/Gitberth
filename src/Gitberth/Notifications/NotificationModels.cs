@@ -59,6 +59,8 @@ public sealed record Notice(NotifyEvent Event, NoticeLevel Level, string Title, 
     public int? DeploymentId { get; init; }
     public string? Commit { get; init; }
     public string? Trigger { get; init; }
+    /// <summary>The deploy hook that started the deploy, by name; null for any other trigger.</summary>
+    public string? Hook { get; init; }
     public bool Preview { get; init; }
 }
 

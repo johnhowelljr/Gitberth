@@ -475,4 +475,73 @@ public class UpdateServiceTests : IDisposable
         Assert.DoesNotContain(_engine.Calls, c => c.StartsWith("remove", StringComparison.Ordinal));
         Assert.Contains(_engine.Images, i => (string)i["Id"]! == rolledBack);
     }
+
+    // ---- A deploy hook's update ----
+
+    [Fact]
+    public async Task A_deploy_hook_pulls_the_tag_and_updates_the_app_as_an_automatic_update_does()
+    {
+        NewerOnDockerHub();
+
+        var update = await _updates.UpdateFromHookAsync("postgres", "CI");
+        Assert.NotNull(update);
+        await update;
+
+        Assert.Equal(["adopt postgres", "plan Update postgres postgres:18", "start Update postgres"], _steps.Calls.Where(c => !c.StartsWith("sync", StringComparison.Ordinal)));
+        Assert.Contains("pull docker.io/library/postgres:18", _engine.Calls);
+        await using (var db = _db.CreateDbContext())
+            Assert.Equal(Old, (await db.Apps.SingleAsync()).PreviousImage);
+        Assert.Equal([("postgres", ActivityKind.Updated, "Deploy hook \"CI\" updated it to the newest postgres:18", ActivityTone.Good)], _steps.Activity);
+    }
+
+    [Fact]
+    public async Task A_deploy_hook_on_an_app_that_runs_its_tags_newest_image_says_its_up_to_date()
+    {
+        KnownOnDockerHub();
+        _engine.Pulls["docker.io/library/postgres:18"] = (ImageKit.Fixture("Images", "pull-up-to-date.jsonl").Split('\n'), null);
+
+        await (await _updates.UpdateFromHookAsync("postgres", "CI"))!;
+
+        Assert.DoesNotContain(_steps.Calls, c => c.StartsWith("start", StringComparison.Ordinal));
+        Assert.Equal([("postgres", ActivityKind.Updated, "Deploy hook \"CI\": it's up to date", ActivityTone.Neutral)], _steps.Activity);
+    }
+
+    [Fact]
+    public async Task A_deploy_hook_whose_pull_failed_says_why()
+    {
+        KnownOnDockerHub();
+
+        await (await _updates.UpdateFromHookAsync("postgres", "CI"))!;
+
+        var (_, kind, text, tone) = Assert.Single(_steps.Activity);
+        Assert.Equal((ActivityKind.Updated, ActivityTone.Warning), (kind, tone));
+        Assert.StartsWith("Deploy hook \"CI\": nothing was updated. ", text);
+        Assert.DoesNotContain(_steps.Calls, c => c.StartsWith("start", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_deploy_hook_waits_for_nothing_while_the_app_updates_or_changes()
+    {
+        // A change of it the engine runs (a settings change, an update from its page).
+        _steps.Busy = "Settings change";
+        Assert.Null(await _updates.UpdateFromHookAsync("postgres", "CI"));
+        Assert.Empty(_engine.Calls);
+
+        // The hook's own update, still pulling: the engine doesn't know of it yet.
+        _steps.Busy = null;
+        NewerOnDockerHub();
+        _engine.PullGate = new TaskCompletionSource();
+        var first = await _updates.UpdateFromHookAsync("postgres", "CI");
+        Assert.NotNull(first);
+        Assert.Null(await _updates.UpdateFromHookAsync("postgres", "Nightly"));
+
+        _engine.PullGate.SetResult();
+        await first;
+        Assert.Single(_steps.Activity);
+        // Once it's done, the next call goes ahead.
+        var next = await _updates.UpdateFromHookAsync("postgres", "Nightly");
+        Assert.NotNull(next);
+        await next;
+        Assert.Equal(2, _steps.Activity.Count);
+    }
 }

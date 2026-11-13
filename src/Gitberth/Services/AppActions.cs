@@ -38,9 +38,10 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     /// A promote's: the branch's commit production stays off while the promote holds, saved with its deploy so the
     /// watcher never sees one without the other.
     /// </param>
+    /// <param name="noCache">Build without the build cache: every step runs again, and the base images are pulled.</param>
     public async Task<int> DeployAsync(int appId, DeployTrigger trigger = DeployTrigger.Manual, CancellationToken ct = default, string? expectedSha = null,
-        string? gitRef = null, string? commit = null, string? promotedOver = null) =>
-        await QueueDeployAsync(appId, trigger, onlyIfRunning: false, ct, expectedSha, gitRef, commit, promotedOver)
+        string? gitRef = null, string? commit = null, string? promotedOver = null, bool noCache = false) =>
+        await QueueDeployAsync(appId, trigger, onlyIfRunning: false, ct, expectedSha, gitRef, commit, promotedOver, noCache)
         ?? throw new InvalidOperationException("The app is being deleted, so it isn't deployed.");
 
     /// <summary>
@@ -50,13 +51,21 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     public Task<int?> DeployWatchedAsync(int appId, DeployTrigger trigger, string sha, CancellationToken ct = default) =>
         QueueDeployAsync(appId, trigger, onlyIfRunning: true, ct, expectedSha: sha);
 
+    /// <summary>
+    /// A deploy hook's deploy: a full build of the branch's newest commit, even when that commit runs already, since what
+    /// changed is usually outside the repo (a CMS's content). None (null) for an app that's stopped or being deleted: a hook
+    /// never starts one. Calls in quick succession leave one build running and the newest queued (<see cref="DeployQueue"/>).
+    /// </summary>
+    public Task<int?> DeployFromHookAsync(int appId, string hookName, CancellationToken ct = default) =>
+        QueueDeployAsync(appId, DeployTrigger.Hook, onlyIfRunning: true, ct, hookName: hookName);
+
     // Apps being deleted, which no deploy may start for. Set under _deployGate, which a deploy holds from its check to its
     // queueing, so once delete has set it every deploy is either refused or queued already (and delete cancels those).
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, byte> _deleting = new();
     private readonly SemaphoreSlim _deployGate = new(1, 1);
 
     private async Task<int?> QueueDeployAsync(int appId, DeployTrigger trigger, bool onlyIfRunning, CancellationToken ct, string? expectedSha = null,
-        string? gitRef = null, string? commit = null, string? promotedOver = null)
+        string? gitRef = null, string? commit = null, string? promotedOver = null, bool noCache = false, string? hookName = null)
     {
         await _deployGate.WaitAsync(ct);
         try
@@ -66,7 +75,7 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
             var app = await db.Apps.FirstAsync(a => a.Id == appId, ct);
             if (!app.Deployed) throw NotGit(app);
             if (onlyIfRunning && app.DesiredState != DesiredState.Running) return null;
-            return await QueueAsync(db, app, appId, trigger, expectedSha, gitRef, commit, promotedOver, ct);
+            return await QueueAsync(db, app, appId, trigger, expectedSha, gitRef, commit, promotedOver, ct, noCache, hookName);
         }
         finally
         {
@@ -75,19 +84,24 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     }
 
     private async Task<int> QueueAsync(GitberthDb db, AppDefinition app, int appId, DeployTrigger trigger, string? expectedSha, string? gitRef, string? commit,
-        string? promotedOver, CancellationToken ct)
+        string? promotedOver, CancellationToken ct, bool noCache = false, string? hookName = null)
     {
         app.DesiredState = DesiredState.Running;
         // A promote's commit isn't its branch's: a promote that never runs, or fails, leaves what the watcher knows about
         // the branch as it was, so a rollback stays.
         if (expectedSha is not null && trigger != DeployTrigger.Promote) app.LastAttemptedCommit = expectedSha;
-        // A manual deploy builds the branch again: production stops staying on a promoted preview's commit.
-        if (trigger == DeployTrigger.Manual) app.PromotedOverCommit = null;
+        // A manual deploy, or a hook's, builds the branch again: production stops staying on a promoted preview's commit.
+        if (trigger is DeployTrigger.Manual or DeployTrigger.Hook) app.PromotedOverCommit = null;
         else if (trigger == DeployTrigger.Promote && promotedOver is not null) app.PromotedOverCommit = promotedOver;
-        var dep = new Deployment { AppId = appId, Trigger = trigger, CommitSha = expectedSha };
+        // Saved with the deploy, so its page and the app's history say it from the moment it's queued.
+        var dep = new Deployment
+        {
+            AppId = appId, Trigger = trigger, CommitSha = expectedSha, NoCache = noCache,
+            HookName = trigger == DeployTrigger.Hook ? hookName : null,
+        };
         db.Deployments.Add(dep);
         await db.SaveChangesAsync(ct);
-        queue.Enqueue(new DeployRequest(appId, dep.Id, Build: true, GitRef: gitRef, Commit: commit));
+        queue.Enqueue(new DeployRequest(appId, dep.Id, Build: true, GitRef: gitRef, Commit: commit, NoCache: noCache));
         return dep.Id;
     }
 

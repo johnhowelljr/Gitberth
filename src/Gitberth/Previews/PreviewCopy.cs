@@ -8,7 +8,7 @@ namespace Gitberth.Previews;
 
 /// <summary>
 /// A preview's settings, copied from its parent when it's made and again before each of its deploys: the source, the
-/// build, the limits, the health URL, Vercel's switch, the settings beyond the classic ones, the ports, the volumes and
+/// build, the build filters, the limits, the health URL, Vercel's switch, the settings beyond the classic ones, the ports, the volumes and
 /// the networks. Some are never copied, so a preview can't take anything production holds: bind mounts (host folders
 /// production writes into), host devices and privileged mode, which gives a container every device (a serial stick is
 /// one container's at a time), fixed addresses on networks and own LAN addresses (two containers can't hold one), the
@@ -38,6 +38,9 @@ public static class PreviewCopy
         preview.CpuLimit = parent.CpuLimit;
         preview.HealthCheckPath = parent.HealthCheckPath;
         preview.VercelVariables = parent.VercelVariables;
+        // A preview's new commits go through its parent's build filters: copied before each deploy, which reads them.
+        preview.WatchPaths = parent.WatchPaths;
+        preview.IgnoredPaths = parent.IgnoredPaths;
 
         var ports = Ports(parent.Ports, preview.Ports, preview.DetectedPort);
         if (PortsKey(ports) != PortsKey(preview.Ports.OrderBy(p => p.Id)))

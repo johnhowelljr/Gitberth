@@ -70,9 +70,10 @@ def tunnel_failed(world, gitberth, cloudflare, standins):
     finally:
         standins.clear_failures(rule)
     fix(gitberth, w.page, w.app, w.host)
-    cloudflare.wait_runs()
     w.rule_after_fix = until(lambda: (lambda r: r if behind_access(r) else None)(service_rule(cloudflare, w.host)), 60,
                              "the domain to be behind Access after Fix", seen=lambda: cloudflare.rules_for(w.host))
+    # Only now: Fix's click returns before its sync writes the tunnel, and the version before it is the one without Access.
+    cloudflare.wait_runs()
     w.application = access_app(cloudflare, w.host)
     w.anonymous_after_fix = visit(cloudflare, w.url)
     w.row_after_fix = until(lambda: (lambda t: t if "behind Cloudflare Access" in t else None)(row_text(gitberth, w.page, w.app, w.host)), 60,
@@ -95,9 +96,11 @@ def access_failed(tunnel_failed, gitberth, cloudflare, standins):
     finally:
         standins.clear_failures(rule)
     fix(gitberth, w.page, w.app, w.host)
-    cloudflare.wait_runs()
     w.back_rule = until(lambda: (lambda r: r if behind_access(r) else None)(service_rule(cloudflare, w.host)), 60,
                         "the domain to be served behind Access again", seen=lambda: cloudflare.rules_for(w.host))
+    # Only now: Fix's click returns before its sync writes the tunnel, and the version before it holds the domain out.
+    # Waiting earlier let a signed-in visit reach a cloudflared still running that one (its catch-all 404).
+    cloudflare.wait_runs()
     w.back_anonymous = visit(cloudflare, w.url)
     w.back_allowed = visit(cloudflare, w.url, ALLOWED)
     return w

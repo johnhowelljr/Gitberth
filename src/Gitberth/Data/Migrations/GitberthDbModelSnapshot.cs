@@ -15,7 +15,7 @@ namespace Gitberth.Data.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.14");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
             modelBuilder.Entity("Gitberth.Data.ActivityEntry", b =>
                 {
@@ -109,6 +109,9 @@ namespace Gitberth.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("HealthCheckPath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IgnoredPaths")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ImageRef")
@@ -208,6 +211,9 @@ namespace Gitberth.Data.Migrations
 
                     b.Property<bool>("VercelVariables")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("WatchPaths")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -393,6 +399,43 @@ namespace Gitberth.Data.Migrations
                     b.ToTable("Domains", (string)null);
                 });
 
+            modelBuilder.Entity("Gitberth.Data.DeployHook", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AppId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProtectedToken")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppId");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("DeployHooks", (string)null);
+                });
+
             modelBuilder.Entity("Gitberth.Data.Deployment", b =>
                 {
                     b.Property<int>("Id")
@@ -420,10 +463,19 @@ namespace Gitberth.Data.Migrations
                     b.Property<string>("GitberthBuild")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("HookName")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ImageTag")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("NoCache")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("QueuedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SkipReason")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("StartedAt")
@@ -719,6 +771,15 @@ namespace Gitberth.Data.Migrations
                 {
                     b.HasOne("Gitberth.Data.AppDefinition", null)
                         .WithMany("Domains")
+                        .HasForeignKey("AppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Gitberth.Data.DeployHook", b =>
+                {
+                    b.HasOne("Gitberth.Data.AppDefinition", null)
+                        .WithMany()
                         .HasForeignKey("AppId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

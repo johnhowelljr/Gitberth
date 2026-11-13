@@ -384,22 +384,33 @@ public static class TunnelRoutes
             ? uri.Port
             : null;
 
-    // ---- GitHub's webhook: one path of one host name goes to Gitberth itself ----
+    // ---- GitHub's webhook and deploy hooks: two paths of one host name go to Gitberth itself ----
 
-    /// <summary>The path rule GitHub's webhook deliveries take to Gitberth: exactly /hooks/github, nothing else.</summary>
-    public const string WebhookPath = "^/hooks/github$";
+    /// <summary>
+    /// The path rule GitHub's webhook deliveries and deploy hooks' calls take to Gitberth: exactly /hooks/github, or
+    /// /hooks/deploy/ and a token, nothing else.
+    /// </summary>
+    public const string WebhookPath = "^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$";
+
+    /// <summary>
+    /// The rule Gitberth wrote before deploy hooks (1.1): /hooks/github alone. It's still Gitberth's own wherever the webhook's
+    /// rules are, and is rewritten to <see cref="WebhookPath"/> where it stands.
+    /// </summary>
+    public const string OldWebhookPath = "^/hooks/github$";
 
     /// <summary>What the tunnel answers for every other address of the webhook's host name.</summary>
     public const string NotFoundService = "http_status:404";
 
     /// <summary>
-    /// The ingress with GitHub's webhook routed: on <paramref name="host"/> only the path /hooks/github goes to Gitberth
-    /// (<paramref name="service"/>), and every other path gets a 404 of its own (unless someone else has rules on that host,
-    /// which then stay theirs). Never behind Access: the rule has no originRequest. On the hosts in <paramref name="drop"/>
-    /// (being removed) only the webhook's own rules go: its path rule when it goes to Gitberth, and on a host that was the
-    /// webhook's (<paramref name="earlier"/>, or with that path rule) its path rule and the 404 for the rest. Anyone else's
-    /// rules there stay, on the same path or not. With no service (Gitberth can't be reached from the tunnel) the host's
-    /// rules stay as they are.
+    /// The ingress with GitHub's webhook and deploy hooks routed: on <paramref name="host"/> only the paths /hooks/github and
+    /// /hooks/deploy/&lt;token&gt; go to Gitberth (<paramref name="service"/>), and every other path gets a 404 of its own
+    /// (unless someone else has rules on that host, which then stay theirs). Never behind Access: the rule has no
+    /// originRequest. The rule from before deploy hooks (<see cref="OldWebhookPath"/>) is Gitberth's: it gets the new path
+    /// where it stands, and is never left behind or written twice. On the hosts in <paramref name="drop"/> (being removed)
+    /// only the webhook's own rules go: its path rule when it goes to Gitberth, and on a host that was the webhook's
+    /// (<paramref name="earlier"/>, or with that path rule) its path rule and the 404 for the rest. Anyone else's rules there
+    /// stay, on the same path or not. With no service (Gitberth can't be reached from the tunnel) the host's rules stay as
+    /// they are.
     /// </summary>
     /// <param name="earlier">The host names the webhook had before (<see cref="SettingKeys.GitHubWebhookHostsBefore"/>).</param>
     public static IngressPlan PlanWebhook(JsonArray current, string? host, string? service, IReadOnlyCollection<string> drop, IReadOnlyCollection<string>? earlier = null)
@@ -423,7 +434,7 @@ public static class TunnelRoutes
             }
             output.Add(rule);
         }
-        foreach (var h in gone) notes.Add(new DomainNote(h, $"Removed the route GitHub's webhook took through {h}"));
+        foreach (var h in gone) notes.Add(new DomainNote(h, $"Removed the route GitHub's webhook and deploy hooks took through {h}"));
 
         if (host is not null && service is not null)
         {
@@ -432,15 +443,28 @@ public static class TunnelRoutes
             var wanted = new List<JsonObject> { new() { ["hostname"] = host, ["path"] = WebhookPath, ["service"] = service } };
             if (foreign.Count == 0) wanted.Add(new JsonObject { ["hostname"] = host, ["service"] = NotFoundService });
             var mine = own.Except(foreign).ToList();
-            var inPlace = mine.Count == wanted.Count && mine.Zip(wanted).All(p => JsonNode.DeepEquals(p.First, p.Second))
+            // The rule from before deploy hooks, with today's path: when that's all that differs, it's rewritten where it stands.
+            var upgraded = mine.Select(r => Path(r) == OldWebhookPath ? WithPath(r, WebhookPath) : r).ToList();
+            var inPlace = upgraded.Count == wanted.Count && upgraded.Zip(wanted).All(p => JsonNode.DeepEquals(Bare(p.First), p.Second))
                 && output.IndexOf(mine[0]) + mine.Count - 1 == output.IndexOf(mine[^1]) && !ShadowedByWildcard(output, host);
-            if (!inPlace)
+            if (inPlace)
+            {
+                var rewritten = false;
+                for (var i = 0; i < mine.Count; i++)
+                {
+                    if (ReferenceEquals(mine[i], upgraded[i])) continue;
+                    output[output.IndexOf(mine[i])] = upgraded[i];
+                    rewritten = true;
+                }
+                if (rewritten) notes.Add(new DomainNote(host, $"https://{host}{DeployHookPathText} goes to Gitberth now too, for deploy hooks"));
+            }
+            else
             {
                 output.RemoveAll(mine.Contains);
                 // Right after the rules for every host, like a new domain: ahead of any wildcard that would catch it.
                 var at = output.TakeWhile(r => Host(r) is null && !IsCatchAll(r)).Count();
                 output.InsertRange(at, wanted);
-                notes.Add(new DomainNote(host, $"Routed https://{host}{GitHubWebhookPathText} to Gitberth for GitHub's webhooks"));
+                notes.Add(new DomainNote(host, $"Routed https://{host}{GitHubWebhookPathText} and {DeployHookPathText} to Gitberth, for GitHub's webhooks and deploy hooks"));
             }
         }
         if (output.Count == 0 || !IsCatchAll(output[^1])) output.Add(new JsonObject { ["service"] = NotFoundService });
@@ -450,9 +474,28 @@ public static class TunnelRoutes
 
     private const string GitHubWebhookPathText = "/hooks/github";
 
-    private static bool IsWebhookRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) == WebhookPath;
+    private const string DeployHookPathText = "/hooks/deploy/…";
+
+    // The webhook's path rule on the host, as Gitberth writes it now or wrote it before deploy hooks.
+    private static bool IsWebhookRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) is WebhookPath or OldWebhookPath;
 
     private static bool IsNotFoundRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) is null && Service(rule) == NotFoundService;
+
+    private static JsonObject WithPath(JsonObject rule, string path)
+    {
+        var copy = (JsonObject)rule.DeepClone();
+        copy["path"] = path;
+        return copy;
+    }
+
+    // A rule as Gitberth writes it: Cloudflare may give one back with an empty originRequest, which says nothing more.
+    private static JsonObject Bare(JsonObject rule)
+    {
+        if (rule["originRequest"] is not JsonObject { Count: 0 }) return rule;
+        var copy = (JsonObject)rule.DeepClone();
+        copy.Remove("originRequest");
+        return copy;
+    }
 
     /// <summary>Whether the host has rules that aren't the webhook's: then it's someone else's, and can't be the webhook's host.</summary>
     public static bool UsedByOthers(JsonArray ingress, string host) =>

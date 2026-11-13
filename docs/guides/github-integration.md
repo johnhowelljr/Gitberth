@@ -28,10 +28,13 @@ On by default (**Settings › GitHub integration › Commit statuses**). Each de
 | It's live | success | **Deploy is live at app.example.com** | The app: its main domain, else its LAN address |
 | The build or the new version's checks failed | failure | **Deploy failed: see the deploy log on Gitberth**, or **The new version didn't pass its checks; the previous one still runs** | The deploy log |
 | Cancelled, or Gitberth restarted during it | error | **Deploy cancelled**, or **Gitberth restarted during the deploy; it's tried again** | The deploy log |
+| Skipped by the [build filters](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy), or its message | success | **Skipped: nothing the app builds from changed**, or **Skipped: the commit asked not to be deployed** | The deploy log |
 
 Each app has its own status, named **Gitberth: Web** (the app's name), because one repo can hold several apps; a preview's is **Gitberth preview: Web**. The text never repeats the deploy's error, since anyone who can see the repo sees it: the deploy log has the details.
 
-Only deploys that build a commit report one. Restarts and settings changes, which run the same commit again, don't.
+Only deploys that build a commit report one. Restarts and settings changes, which run the same commit again, don't. A
+skipped commit gets only its success, never a pending status, so branch protection that requires Gitberth's status
+still passes.
 
 > **Note**
 > The deploy log link goes to Gitberth's own page, at the address you last opened **Settings** at (for example `http://192.168.50.10:8080`). It works from your LAN. Open **Settings** once from another machine so Gitberth knows it.
@@ -51,6 +54,7 @@ Deploy log (on your network)
 ```
 
 The state is **Building**, **Ready**, **Failed** or **Cancelled**. If someone deletes the comment, the next deploy makes a new one.
+A skipped commit leaves the comment as it is: the preview still runs the commit it names.
 
 ## Instant deploys
 
@@ -60,7 +64,7 @@ GitHub has to reach Gitberth from the internet, so instant deploys need [domains
 
 1. Go to **Settings › GitHub integration**.
 2. Under **Instant deploys**, type a host name nothing else uses, like `hooks.example.com`, in **Host name for GitHub's webhooks**, and click **Turn on**.
-   Gitberth routes **only** `https://hooks.example.com/hooks/github` to itself through the tunnel, adds the DNS record, and makes a secret for the webhook. Every other address on that host name answers 404, and it's never behind Cloudflare Access (GitHub can't sign in).
+   Gitberth routes **only** `https://hooks.example.com/hooks/github` to itself through the tunnel, and its [deploy hooks](deploy-hooks.md)' addresses (`/hooks/deploy/<token>`), adds the DNS record, and makes a secret for the webhook. Every other address on that host name answers 404, and it's never behind Cloudflare Access (GitHub can't sign in, and neither can a CMS calling a deploy hook).
 3. Gitberth adds the webhook to every repo it deploys, and to new ones as you add them. The list under the section says, per repo, **Webhook added** or why not. It only ever changes its own webhook: the one it added to the repo, or one that has exactly its payload URL (one you added by hand, say). It remembers which one that is, so when you change the host name, that webhook moves to the new one right away. If it can't move it then (there's no token, GitHub refuses the token or the repo, or GitHub fails), Gitberth leaves that webhook on the old host name and forgets it was its own, since another Gitberth may take that name over, and adds a new one as soon as GitHub lets it; delete the old one on GitHub if you like. Any other webhook is left alone, even one on the same path or on a host name Gitberth had before (another Gitberth's, say), and so is its own once someone points it somewhere else. Once no app deploys a repo, Gitberth forgets which webhook there was its own: the webhook stays on the repo as it was, and another Gitberth may take it over in the meantime. If you deploy the repo again, Gitberth takes up the webhook that has exactly its payload URL, or adds a new one. An earlier host name you later give to an app as a domain is the app's from then on: its rules in the tunnel are never taken for Gitberth's.
 
 Without **Webhooks: Read and write** on the token, add the webhook by hand on each repo, from the values the section shows: on GitHub, open the repo's **Settings › Webhooks › Add webhook** and fill in
@@ -92,10 +96,11 @@ Every delivery is signed by GitHub with the secret (`X-Hub-Signature-256`), and 
 | `429` | Another wrong signature from an address that sent 10 in 10 minutes. |
 | `405` | Anything but a `POST`. The host only ever answers with a status code, never with Gitberth's pages. |
 
-To stop, click **Turn off** next to the host name. Gitberth takes the route out of your tunnel and the DNS record it added, and goes back to checking every 30 seconds. The webhooks stay on your repos (their deliveries fail); delete them on GitHub if you like. Gitberth forgets which ones were its own, since another Gitberth may take over that host name and them meanwhile: turned on again with the same host name, Gitberth takes up the webhooks that have exactly its payload URL; with another host name, it adds new ones and leaves the old ones as they are.
+To stop, click **Turn off** next to the host name. Gitberth takes the route out of your tunnel and the DNS record it added, and goes back to checking every 30 seconds. Deploy hooks then work on your network only. The webhooks stay on your repos (their deliveries fail); delete them on GitHub if you like. Gitberth forgets which ones were its own, since another Gitberth may take over that host name and them meanwhile: turned on again with the same host name, Gitberth takes up the webhooks that have exactly its payload URL; with another host name, it adds new ones and leaves the old ones as they are.
 
 ## Related
 
+- [Deploy hooks](deploy-hooks.md)
 - [Previews](previews.md)
 - [Deploy from GitHub](deploy-from-github.md)
 - [Domains](domains.md)

@@ -1,0 +1,65 @@
+@inject BuildCache Cache
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@* Settings › Deploys: Docker's build cache, how big it is, and clearing it (asked first, refused while a build runs). *@
+<div class="gb-row gb-row--wrap" id="build-cache" style="justify-content:space-between;gap:10px 18px">
+    <div class="gb-stack" style="gap:2px">
+        <span class="gb-label" style="margin:0">Build cache</span>
+        <span class="gb-help" style="margin:0">
+            @if (problem is not null)
+            {
+                @($"Docker didn't say how big it is: {problem.TrimEnd('.')}.")
+            }
+            else if (usage is null)
+            {
+                @("Adding it up…")
+            }
+            else
+            {
+                @($"{AppFacts.Bytes(usage.Bytes)} on this host. It makes builds quick: steps that didn't change aren't run again.")
+            }
+        </span>
+    </div>
+    <Btn Icon="@Icons.Material.Outlined.LayersClear" OnClick="ClearAsync" Busy="busy" Disabled="busy">Clear build cache</Btn>
+</div>
+
+@code {
+    private BuildCacheUsage? usage;
+    private string? problem;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await ReadAsync();
+
+    private async Task ReadAsync()
+    {
+        try
+        {
+            usage = await Cache.UsageAsync();
+            problem = null;
+        }
+        catch (Exception ex) when (ex is DockerApiException or HttpRequestException or TimeoutException or IOException or System.Text.Json.JsonException)
+        {
+            problem = ex.Message;
+        }
+    }
+
+    private async Task ClearAsync()
+    {
+        var size = usage is null ? "" : $" ({AppFacts.Bytes(usage.Bytes)})";
+        if (await Dialogs.ShowMessageBoxAsync("Clear the build cache?",
+                $"Docker deletes every app's build cache{size}. Nothing that runs changes, but the next build of each app runs every step again, so it takes longer.",
+                yesText: "Clear build cache", cancelText: "Cancel") != true) return;
+        busy = true;
+        try
+        {
+            var cleared = await Cache.ClearAsync();
+            Snackbar.Add(cleared.Message, cleared.Ok ? Severity.Success : Severity.Warning);
+            await ReadAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

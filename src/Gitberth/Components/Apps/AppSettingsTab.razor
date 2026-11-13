@@ -128,6 +128,40 @@ else
                             <input id="set-project" class="gb-input gb-input--mono" placeholder="src/MyApp/MyApp.csproj" @bind="Git.ProjectHint" @bind:event="oninput" @bind:after="Notify" />
                         </Field>
                     }
+                    @* Build filters only decide whether a new commit deploys by itself; a preview takes its parent's with every deploy. *@
+                    @if (!row.IsPreview)
+                    {
+                        <div class="gb-fgrid">
+                            <Field Label="Watch paths" For="set-watch" Changed="Git.WatchChanged" Was="@FilterWas(Git.Loaded.WatchPaths, "any file")"
+                                   OnUndo="() => Undo(() => Git.WatchPaths = Git.Loaded.WatchPaths ?? string.Empty)" Error="@Git.WatchProblem">
+                                <ChildContent>
+                                    <textarea id="set-watch" class="gb-input gb-input--mono @(Git.WatchChanged ? "gb-input--changed" : null)" rows="4" spellcheck="false"
+                                              placeholder="Any file" @bind="Git.WatchPaths" @bind:event="oninput" @bind:after="Notify"></textarea>
+                                    @if (Git.SubfolderSuggestion is { } suggestion)
+                                    {
+                                        <div style="margin-top:6px">
+                                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Add" OnClick="() => Set(Git.UseSubfolderSuggestion)">Watch @suggestion</Btn>
+                                        </div>
+                                    }
+                                </ChildContent>
+                                <HelpContent>A new commit deploys by itself only when it changes a file one of these matches. Empty: any file.</HelpContent>
+                            </Field>
+                            <Field Label="Ignored paths" For="set-ignored" Changed="Git.IgnoredChanged" Was="@FilterWas(Git.Loaded.IgnoredPaths, "none")"
+                                   OnUndo="() => Undo(() => Git.IgnoredPaths = Git.Loaded.IgnoredPaths ?? string.Empty)" Error="@Git.IgnoredProblem">
+                                <ChildContent>
+                                    <textarea id="set-ignored" class="gb-input gb-input--mono @(Git.IgnoredChanged ? "gb-input--changed" : null)" rows="4" spellcheck="false"
+                                              placeholder="*.md&#10;docs/" @bind="Git.IgnoredPaths" @bind:event="oninput" @bind:after="Notify"></textarea>
+                                </ChildContent>
+                                <HelpContent>A new commit whose changed files all match these doesn't deploy by itself.</HelpContent>
+                            </Field>
+                        </div>
+                        <p class="gb-help">
+                            One pattern per line, from the repo's root, like a .gitignore: <span class="gb-mono">*.md</span> anywhere,
+                            <span class="gb-mono">docs/</span> a folder and everything in it, <span class="gb-mono">/website/</span> only at the root,
+                            <span class="gb-mono">**</span> any number of folders. A commit whose message says <span class="gb-mono">[skip ci]</span>
+                            or <span class="gb-mono">[skip deploy]</span> doesn't deploy by itself either. Deploy by hand always builds.
+                        </p>
+                    }
                 </SettingsSection>
 
                 @* Previews are saved on their own: none of it touches the app's container. *@
@@ -179,6 +213,12 @@ else
                         </Field>
                     }
                 </SettingsSection>
+            }
+
+            @* Saved on its own too: a hook is Gitberth's own data, and calling one is what deploys. *@
+            @if (DeployHooks.KindOf(app, View.Row) is not null)
+            {
+                <DeployHooksSection View="View" Saved="OnSaved" />
             }
 
             <SettingsSection Id="sec-command" Title="Command" Icon="@Icons.Material.Outlined.Terminal" Changed="@(changed.Overlaps([SettingField.Entrypoint, SettingField.Command, SettingField.WorkingDir, SettingField.User]))"
@@ -416,6 +456,7 @@ else
             : ("sec-source", "Image", Icons.Material.Outlined.Layers, c.Contains(SettingField.Image) || o.Contains("updates"));
         if (View.Summary.Source == AppSource.Git && Git is not null && View.Row is { IsPreview: false })
             yield return ("sec-previews", "Previews", Icons.Material.Outlined.Preview, false);
+        if (DeployHooks.KindOf(View.Summary, View.Row) is not null) yield return ("sec-hooks", "Deploy hooks", Icons.Material.Outlined.Webhook, false);
         yield return ("sec-command", "Command", Icons.Material.Outlined.Terminal, c.Overlaps([SettingField.Entrypoint, SettingField.Command, SettingField.WorkingDir, SettingField.User]));
         yield return ("sec-env", "Environment", Icons.Material.Outlined.Key, c.Contains(SettingField.Env));
         yield return ("sec-volumes", "Volumes", Icons.Material.Outlined.Storage, c.Contains(SettingField.Mounts));
@@ -481,6 +522,9 @@ else
     }
 
     private Task Undo(Action undo) => Set(undo);
+
+    // A build filter field's saved patterns on one line, for "was …".
+    private static string FilterWas(string? text, string empty) => BuildFilters.Patterns(text) is { Count: > 0 } patterns ? string.Join(", ", patterns) : empty;
 
     private Task SetMount(Action change) => Set(change);
 

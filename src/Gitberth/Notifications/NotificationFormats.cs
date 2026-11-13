@@ -81,6 +81,7 @@ public static class NotificationFormats
             ["deployment"] = n.DeploymentId,
             ["commit"] = n.Commit,
             ["trigger"] = n.Trigger,
+            ["hook"] = n.Hook,
             ["time"] = n.At.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
         };
         var headers = new List<KeyValuePair<string, string>> { new("X-Gitberth-Event", EventName(n.Event)) };

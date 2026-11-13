@@ -9,9 +9,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Gitberth.Domains;
 
 /// <summary>
-/// GitHub's webhook: with domains on, a host name chosen in Settings (hooks.example.com) sends only its path /hooks/github
-/// through the tunnel to Gitberth itself, never behind Access, and gets its DNS record like any domain. Every other path of
-/// that host gets a 404 from the tunnel.
+/// GitHub's webhook and deploy hooks: with domains on, a host name chosen in Settings (hooks.example.com) sends only its
+/// paths /hooks/github and /hooks/deploy/&lt;token&gt; through the tunnel to Gitberth itself, never behind Access, and gets
+/// its DNS record like any domain. Every other path of that host gets a 404 from the tunnel.
 /// </summary>
 public sealed partial class DomainService
 {

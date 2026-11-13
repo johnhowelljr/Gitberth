@@ -25,6 +25,16 @@ internal interface IUpdateSteps
     Task ActivityAsync(string container, int? appId, ActivityKind kind, string text, ActivityTone tone, CancellationToken ct);
 }
 
+/// <summary>What a deploy hook asks of an app that runs a registry's tag (<see cref="UpdateService"/>; tests stand in for it).</summary>
+public interface IHookUpdates
+{
+    /// <summary>
+    /// Starts pulling the app's tag and updating it when the image moved, in the background. Null when an update or change
+    /// of the app is under way already: nothing starts then. Otherwise the update's task, which never throws.
+    /// </summary>
+    Task<Task?> UpdateFromHookAsync(string key, string hookName, CancellationToken ct = default);
+}
+
 /// <summary>
 /// Updates for every app that isn't built from a repo (section 4). What "update" means goes by where the image comes from:
 /// <list type="bullet">
@@ -41,7 +51,7 @@ internal interface IUpdateSteps
 /// once nothing uses it, and so does the one the tag named on the host before the pull moved it (after a rollback, the
 /// image the app was rolled back from).
 /// </summary>
-public sealed partial class UpdateService
+public sealed partial class UpdateService : IHookUpdates
 {
     /// <summary>How long a tag's image is kept between looks: the Apps list asks for every container at once.</summary>
     private static readonly TimeSpan TagKept = TimeSpan.FromSeconds(15);
@@ -55,6 +65,8 @@ public sealed partial class UpdateService
     private readonly ConcurrentDictionary<string, (DateTime At, JsonObject? Image)> _byTag = new(StringComparer.Ordinal);
     private readonly ConditionalWeakTable<PortChangePlan, Prepared> _prepared = new();
     private readonly ConcurrentDictionary<string, Task> _followUps = new(StringComparer.Ordinal);
+    // The apps a deploy hook is updating, from its call to the update's end: the engine doesn't know of one while it pulls.
+    private readonly ConcurrentDictionary<string, byte> _hooked = new(StringComparer.Ordinal);
 
     /// <summary>An update or rollback as prepared: what the follow-up needs once the engine is done.</summary>
     private sealed record Prepared(string Key, int AppId, ChangeKind Kind, string OldImageId, string NewImageId, string Tracked, string? Digest)
@@ -194,7 +206,7 @@ public sealed partial class UpdateService
             if (newId != runningId && Older(local, running))
                 return Blocked($"{reference.Familiar} names an older image ({Built(local)}) than the one {key} runs, so there's nothing to update.");
         }
-        if (newId == runningId) return new UpdatePrepared(pull, null, $"It's up to date: {key} runs the image {reference.Familiar} names.");
+        if (newId == runningId) return new UpdatePrepared(pull, null, $"It's up to date: {key} runs the image {reference.Familiar} names.") { UpToDate = true };
 
         if (await _steps.LoadAsync(key, ct) is not { ContainerId: { } containerId } view) return new UpdatePrepared(pull, null, $"{key}'s settings couldn't be read.");
         var request = new ContainerEditRequest
@@ -265,6 +277,101 @@ public sealed partial class UpdateService
 
     /// <summary>The follow-up of the container's last update or rollback; done when there's none.</summary>
     internal Task FollowUpOf(string container) => _followUps.TryGetValue(container, out var task) ? task : Task.CompletedTask;
+
+    /// <summary>
+    /// A deploy hook's call: the app's tag is pulled and the app updated when the image moved, the way an automatic update
+    /// applies (<see cref="PrepareAsync"/>, then the plan's start), in the background. One line on the app's Activity says
+    /// what came of it. Refused (null) while the engine runs a change of the container, or a hook's update of it is under way.
+    /// </summary>
+    public async Task<Task?> UpdateFromHookAsync(string key, string hookName, CancellationToken ct = default)
+    {
+        if (!_hooked.TryAdd(key, 0)) return null;
+        try
+        {
+            if (await _steps.BusyWithAsync(key, ct) is not null)
+            {
+                _hooked.TryRemove(key, out _);
+                return null;
+            }
+        }
+        catch
+        {
+            _hooked.TryRemove(key, out _);
+            throw;
+        }
+        // Not on the caller's time: a pull can take minutes, and the hook's answer doesn't wait for it.
+        return Task.Run(async () =>
+        {
+            try
+            {
+                await HookUpdateAsync(key, hookName);
+            }
+            finally
+            {
+                _hooked.TryRemove(key, out _);
+            }
+        });
+    }
+
+    private async Task HookUpdateAsync(string key, string hookName)
+    {
+        var hook = $"Deploy hook \"{hookName}\"";
+        string text;
+        var tone = ActivityTone.Neutral;
+        try
+        {
+            var prepared = await PrepareAsync(key, null, CancellationToken.None);
+            if (prepared.UpToDate)
+            {
+                text = $"{hook}: it's up to date";
+            }
+            else if (prepared.Plan is not { CanApply: true } plan || prepared.Blocked is not null)
+            {
+                text = $"{hook}: nothing was updated. {prepared.Blocked ?? prepared.Plan?.Blocked ?? "Gitberth can't apply the update here."}";
+                tone = ActivityTone.Warning;
+            }
+            else
+            {
+                var tag = plan.Request?.Wanted.Image ?? plan.ImageAfter;
+                var job = Start(plan);
+                var result = await job.Completion;
+                await FollowUpOf(key);
+                // Another change of it was running after all: the engine gave that one back, and this update never ran.
+                if (!ReferenceEquals(job.Plan, plan))
+                {
+                    text = $"{hook}: another change of it was under way, so nothing was updated";
+                }
+                else if (result.Ok)
+                {
+                    text = $"{hook} updated it to the newest {(ImageReference.Parse(tag) is { } named ? named.Familiar : tag)}";
+                    tone = ActivityTone.Good;
+                }
+                else if (result.Outcome == PortChangeOutcome.NothingChanged)
+                {
+                    text = $"{hook}: nothing changed. {result.Message}";
+                }
+                else
+                {
+                    text = $"{hook}: the update didn't work. {result.Message}";
+                    tone = ActivityTone.Warning;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Deploy hook {Hook} couldn't update {Container}", hookName, key);
+            text = $"{hook}: the update failed. {ex.Message}";
+            tone = ActivityTone.Warning;
+        }
+        try
+        {
+            await _steps.ActivityAsync(key, (await RowAsync(key, CancellationToken.None))?.Id, ActivityKind.Updated, text.TrimEnd(), tone, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Couldn't write what deploy hook {Hook} did to {Container}", hookName, key);
+        }
+    }
 
     /// <summary>
     /// Asks registries about the references due a check: each one once however many apps follow it, not before its

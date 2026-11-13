@@ -8,8 +8,8 @@ at that repo at once instead of at its next check (the rig's watcher looks every
   on, is refused and nothing changes; one in no zone the token can see is routed, and the page says its DNS record
   can't be made; one Cloudflare's free certificate doesn't cover (two levels below the zone) is said, since GitHub
   checks the certificate.
-- Turned on, the tunnel routes only ^/hooks/github$ of the host to Gitberth plus a 404 rule for the rest of it, never
-  behind Access, and the host gets its DNS record. The keeper adds Gitberth's webhook to each deployed repo (the payload
+- Turned on, the tunnel routes only /hooks/github of the host to Gitberth (and /hooks/deploy/<token>, deploy hooks', in
+  the same path rule) plus a 404 rule for the rest of it, never behind Access, and the host gets its DNS record. The keeper adds Gitberth's webhook to each deployed repo (the payload
   URL, the secret Settings shows, push, pull_request and delete) and records it; GitHub's ping for it is answered. The
   page shows the payload URL, content type, secret (Show, Hide, copy) and events, and each repo's webhook.
 - A signed push deploys at once, with the trigger "Push on GitHub" (on its deploy page, Activity and the app page):
@@ -46,9 +46,11 @@ from e2e.wait import stays, until
 # Settings › Domains on with a Cloudflare token, and off again afterwards: scenario 12's, shared rather than copied.
 from test_12_commit_statuses import domains_turned_on
 
-# The tunnel's rule for GitHub's deliveries: exactly this path of the webhook's host, to Gitberth's published port, as the
-# fake cloudflared (on the host's network, like the live install's) reaches it.
-PATH_RULE = "^/hooks/github$"
+# The tunnel's rule for GitHub's deliveries (and deploy hooks' calls): exactly these paths of the webhook's host, to
+# Gitberth's published port, as the fake cloudflared (on the host's network, like the live install's) reaches it.
+PATH_RULE = "^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$"
+# The rule another service has for its own webhooks on a host of its own: the path Gitberth's rule had before deploy hooks.
+THEIR_PATH = "^/hooks/github$"
 OWN_SERVICE = "http://localhost:8080"
 NOT_FOUND = "http_status:404"
 EVENTS = ["push", "pull_request", "delete"]
@@ -335,8 +337,8 @@ def test_instant_deploys_need_domains_and_a_host_name_of_their_own(page, new_pag
         assert flat(section.locator("label[for='hook-host']").inner_text()) == "Host name for GitHub's webhooks"
         assert box.get_attribute("placeholder") == "hooks.example.com"
         field = section.locator(".gb-field").filter(has=page.locator("#hook-host"))
-        assert flat(field.locator(".gb-help").inner_text()) == ("Only its address /hooks/github goes to Gitberth, never behind Access; every other "
-                                                                 "address on it answers 404. Use a name nothing else uses.")
+        assert flat(field.locator(".gb-help").inner_text()) == ("Only its addresses /hooks/github and /hooks/deploy/… (deploy hooks) go to Gitberth, "
+                                                                 "never behind Access; every other address on it answers 404. Use a name nothing else uses.")
         turn_on = section.get_by_role("button", name="Turn on", exact=True)
         assert turn_on.is_disabled(), "Turn on works without a host name"
         assert section.get_by_role("button", name="Turn off", exact=True).count() == 0
@@ -408,7 +410,7 @@ def test_turning_on_routes_only_the_hook_path_and_adds_the_webhook_to_each_repo(
 
             # ---- Settings: what the change did, and the values to paste by hand.
             shown = notes(settings)
-            for note in (f"Routed https://{host}/hooks/github to Gitberth for GitHub's webhooks", f"Added a DNS record sending {host} to the tunnel"):
+            for note in (f"Routed https://{host}/hooks/github and /hooks/deploy/… to Gitberth, for GitHub's webhooks and deploy hooks", f"Added a DNS record sending {host} to the tunnel"):
                 assert note in shown, shown
             assert all(not (li.get_attribute("style") or "") for li in settings.locator(f"{SECTION} ul.gb-dnotes li").all()), \
                 "a line shows as a problem"
@@ -676,7 +678,7 @@ def test_changing_the_host_name_moves_gitberths_webhook_and_route(page, new_page
     # Another service's webhook and route, on another host of the zone, with the same path.
     foreign = repo.add_foreign_hook(payload_url(other), events=("push",), secret="the-ci-services-own-secret")
 
-    with domains_turned_on(gitberth, new_page, cloudflare), someone_elses_route(cloudflare, zone, other, path=PATH_RULE) as (their_rule, their_record):
+    with domains_turned_on(gitberth, new_page, cloudflare), someone_elses_route(cloudflare, zone, other, path=THEIR_PATH) as (their_rule, their_record):
         with instant_deploys(gitberth, new_page, first) as (settings, said):
             assert said == TURNED_ON.format(first), said
             hook = wait_hook(repo, first)
@@ -696,7 +698,7 @@ def test_changing_the_host_name_moves_gitberths_webhook_and_route(page, new_page
             assert [r["id"] for r in cloudflare.dns_records(other)] == [their_record["id"]]
             assert first in (gitberth.db.setting("github.webhookHostsBefore") or "").split("\n")
             shown = notes(settings)
-            for note in (f"Removed the route GitHub's webhook took through {first}", f"Routed https://{second}/hooks/github to Gitberth for GitHub's webhooks",
+            for note in (f"Removed the route GitHub's webhook and deploy hooks took through {first}", f"Routed https://{second}/hooks/github and /hooks/deploy/… to Gitberth, for GitHub's webhooks and deploy hooks",
                          f"Added a DNS record sending {second} to the tunnel", f"Removed the DNS record Gitberth added for {first}"):
                 assert note in shown, shown
 
@@ -723,7 +725,7 @@ def test_changing_the_host_name_moves_gitberths_webhook_and_route(page, new_page
             assert (two["CommitSha"], two["Trigger"]) == (pushed["sha"], "Webhook"), two
             theirs = delivery_through(repo, looked["seq"], foreign["id"], "push")
             cf = (theirs.get("route") or {}).get("cloudflared") or {}
-            assert (theirs["status"], cf.get("rule_host"), cf.get("rule_path"), cf.get("service")) == (502, other, PATH_RULE, THEIR_SERVICE), theirs
+            assert (theirs["status"], cf.get("rule_host"), cf.get("rule_path"), cf.get("service")) == (502, other, THEIR_PATH, THEIR_SERVICE), theirs
             # The first name leads nowhere now.
             gone = repo.send_delivery(url=payload_url(first), secret=secret, event="ping")
             assert gone["status"] is None and "resolve" in (gone["error"] or ""), gone
@@ -739,7 +741,7 @@ def test_turning_off_takes_the_route_away_and_leaves_the_webhooks(page, new_page
     one = gitberth.wait_deploy(app.id, timeout=420)
     foreign = repo.add_foreign_hook(payload_url(other), events=("push",), secret="the-ci-services-own-secret")
 
-    with domains_turned_on(gitberth, new_page, cloudflare), someone_elses_route(cloudflare, zone, other, path=PATH_RULE) as (their_rule, their_record):
+    with domains_turned_on(gitberth, new_page, cloudflare), someone_elses_route(cloudflare, zone, other, path=THEIR_PATH) as (their_rule, their_record):
         with instant_deploys(gitberth, new_page, host) as (settings, said):
             assert said == TURNED_ON.format(host), said
             hook = wait_hook(repo, host)
@@ -774,7 +776,7 @@ def test_turning_off_takes_the_route_away_and_leaves_the_webhooks(page, new_page
             assert gitberth.db.setting("github.webhookHost") is None
             # ---- The page says so, and offers to turn it on again.
             shown = notes(settings)
-            for note in (f"Removed the route GitHub's webhook took through {host}", f"Removed the DNS record Gitberth added for {host}"):
+            for note in (f"Removed the route GitHub's webhook and deploy hooks took through {host}", f"Removed the DNS record Gitberth added for {host}"):
                 assert note in shown, shown
             section = settings.locator(SECTION)
             assert section.locator("#hook-host").input_value() == ""
