@@ -31,6 +31,12 @@ public sealed class ContainerEventWatcher(DockerApi docker, StatsStore store, IL
     /// </summary>
     public event Action<string>? Started;
 
+    /// <summary>
+    /// Every event it hears of for the first time, as it happens or replayed after Gitberth was away (so a handler looks at
+    /// <see cref="ContainerEvent.Time"/>). Same rules as <see cref="Started"/>: hand the work off and return at once.
+    /// </summary>
+    public event Action<ContainerEvent>? Happened;
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
@@ -89,6 +95,18 @@ public sealed class ContainerEventWatcher(DockerApi docker, StatsStore store, IL
     internal bool Heard(ContainerEvent e, DateTime now)
     {
         if (!Remember(e, now)) return false;
+        if (Happened is { } happened)
+            foreach (var handler in happened.GetInvocationList().Cast<Action<ContainerEvent>>())
+            {
+                try
+                {
+                    handler(e);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Handling an event of {Container} failed", e.Name);
+                }
+            }
         if (e.Action == "start" && Started is { } started)
             // Each on its own: one that throws doesn't keep the start from the others.
             foreach (var handler in started.GetInvocationList().Cast<Action<string>>())

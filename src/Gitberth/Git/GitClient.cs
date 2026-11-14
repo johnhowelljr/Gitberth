@@ -18,11 +18,22 @@ public sealed record RemoteInfo(string? DefaultBranch, IReadOnlyList<RemoteBranc
     public IReadOnlyList<RemotePull> PullHeads => Pulls ?? [];
 }
 
-public sealed record CommitInfo(string Sha, string Author, DateTime Date, string Subject);
+/// <param name="Message">The whole message, subject and body; null when it wasn't read (the subject is all there is).</param>
+public sealed record CommitInfo(string Sha, string Author, DateTime Date, string Subject, string? Message = null)
+{
+    /// <summary>The whole message, or the subject when that's all that was read.</summary>
+    public string FullMessage => Message ?? Subject;
+}
 
 /// <summary>Plain git (no GitHub API) for checking access, listing branches and cloning.</summary>
 public sealed class GitClient(GitberthOptions options, SettingsService settings)
 {
+    /// <summary>The most a diff's list of files may take; a longer one counts as unknown, so the commit is built.</summary>
+    internal const int DiffLimit = 8 * 1024 * 1024;
+
+    /// <summary>Runs git's commands (without its -c options) in place of the git CLI, in tests.</summary>
+    internal Func<IReadOnlyList<string>, ProcessOptions, CancellationToken, Task<ProcessResult>>? Runner { get; init; }
+
     public async Task<RemoteInfo> LsRemoteAsync(GitHubRepoRef repo, CancellationToken ct = default)
     {
         var (result, hasToken) = await RunAsync(["ls-remote", "--symref", repo.CloneUrl], null, null, ct);
@@ -104,11 +115,53 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
 
     private async Task<CommitInfo> ReadCommitAsync(string dir, CancellationToken ct)
     {
-        var (log, _) = await RunAsync(["log", "-1", "--format=%H%x1f%an%x1f%aI%x1f%s"], dir, null, ct);
+        // The body too (%B is the whole message), for the markers that ask a commit not to be deployed.
+        var (log, _) = await RunAsync(["log", "-1", "--format=%H%x1f%an%x1f%aI%x1f%s%x1f%B"], dir, null, ct);
         if (!log.Ok) throw new GitException("Cloned, but couldn't read the commit: " + log.ErrorText);
-        var f = log.StdOut.Trim().Split('\x1f');
+        return ParseCommit(log.StdOut);
+    }
+
+    /// <summary>`git log -1 --format=%H%x1f%an%x1f%aI%x1f%s%x1f%B`: the commit, with its whole message.</summary>
+    internal static CommitInfo ParseCommit(string output)
+    {
+        var f = output.Trim().Split('\x1f', 5);
         var date = DateTime.TryParse(f.ElementAtOrDefault(2), CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal, out var d) ? d : DateTime.UtcNow;
-        return new CommitInfo(f[0], f.ElementAtOrDefault(1) ?? "", date, f.ElementAtOrDefault(3) ?? "");
+        var subject = f.ElementAtOrDefault(3) ?? "";
+        return new CommitInfo(f[0], f.ElementAtOrDefault(1) ?? "", date, subject, f.Length > 4 ? f[4].Trim() : null);
+    }
+
+    /// <summary>
+    /// Fetches one more commit, by its SHA, into a shallow copy <see cref="CloneAsync"/> or <see cref="FetchAsync"/> made:
+    /// only that commit, so its files can be compared with the checked-out one's (<see cref="ChangedFilesAsync"/>).
+    /// </summary>
+    /// <exception cref="GitException">GitHub doesn't have it (a force-push removed it), or can't be reached.</exception>
+    public async Task FetchCommitAsync(GitHubRepoRef repo, string sha, string dir, CancellationToken ct = default)
+    {
+        if (!IsSha(sha)) throw new GitException($"'{sha}' isn't a commit.");
+        var (fetched, hasToken) = await RunAsync(["fetch", "--depth", "1", "--no-tags", repo.CloneUrl, sha], dir, null, ct);
+        if (!fetched.Ok) throw new GitException(Explain(fetched.ErrorText, repo, null, hasToken));
+    }
+
+    /// <summary>
+    /// The files that differ between <paramref name="baseSha"/> (fetched already) and the checked-out commit, as paths from
+    /// the repo's root. A rename counts as both its old and its new path.
+    /// </summary>
+    /// <exception cref="GitException">git couldn't compare them, or the list is too long to read whole.</exception>
+    public async Task<IReadOnlyList<string>> ChangedFilesAsync(string dir, string baseSha, CancellationToken ct = default)
+    {
+        if (!IsSha(baseSha)) throw new GitException($"'{baseSha}' isn't a commit.");
+        // -z: every name as it is, never quoted; the -- keeps a file called HEAD from making git ask which is meant.
+        var (diff, _) = await RunAsync(["diff", "--name-only", "--no-renames", "-z", baseSha, "HEAD", "--"], dir, null, ct, DiffLimit);
+        if (!diff.Ok) throw new GitException("git couldn't compare the commits: " + diff.ErrorText);
+        if (diff.StdOut.Length >= DiffLimit) throw new GitException("the commits differ in too many files to list.");
+        return ParseNames(diff.StdOut);
+    }
+
+    /// <summary>`git diff --name-only -z`'s names (each ends with a NUL; the output is read as lines, so a newline follows).</summary>
+    internal static IReadOnlyList<string> ParseNames(string output)
+    {
+        var text = output.EndsWith('\n') ? output[..^1] : output;
+        return text.Split('\0', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal).ToList();
     }
 
     /// <summary>Shallow clone of the branch tip into <paramref name="targetDir"/>.</summary>
@@ -133,7 +186,8 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
         }
     }
 
-    private async Task<(ProcessResult Result, bool HasToken)> RunAsync(IEnumerable<string> args, string? workDir, Action<string>? onLine, CancellationToken ct)
+    private async Task<(ProcessResult Result, bool HasToken)> RunAsync(IReadOnlyList<string> args, string? workDir, Action<string>? onLine, CancellationToken ct,
+        int maxCapture = 4 * 1024 * 1024)
     {
         var env = new Dictionary<string, string>
         {
@@ -153,11 +207,10 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
 
         try
         {
-            var result = await ProcessRunner.RunAsync(
-                options.GitPath,
-                ["-c", "credential.helper=", .. args],
-                new ProcessOptions { WorkingDirectory = workDir, Environment = env, OnLine = onLine },
-                ct);
+            var processOptions = new ProcessOptions { WorkingDirectory = workDir, Environment = env, OnLine = onLine, MaxCapture = maxCapture };
+            var result = Runner is not null
+                ? await Runner(args, processOptions, ct)
+                : await ProcessRunner.RunAsync(options.GitPath, ["-c", "credential.helper=", .. args], processOptions, ct);
             return (result, !string.IsNullOrEmpty(token));
         }
         catch (System.ComponentModel.Win32Exception)

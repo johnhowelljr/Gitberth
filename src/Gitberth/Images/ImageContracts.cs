@@ -199,7 +199,11 @@ public sealed record UpdateStatus(ImageOrigin Origin, string? Tracked, bool Avai
 }
 
 /// <param name="Plan">The engine's plan for the update or rollback, ready for the dialog; null with Blocked.</param>
-public sealed record UpdatePrepared(PullResult? Pull, PortChangePlan? Plan, string? Blocked);
+public sealed record UpdatePrepared(PullResult? Pull, PortChangePlan? Plan, string? Blocked)
+{
+    /// <summary>Nothing to update: the app runs the image its tag names (after the pull, for a registry's).</summary>
+    public bool UpToDate { get; init; }
+}
 
 public sealed record RegistryInfo(int Id, string Host, string Username, DateTime CreatedAt, DateTime? VerifiedAt)
 {

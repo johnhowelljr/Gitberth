@@ -1,0 +1,199 @@
+@using Gitberth.Notifications
+@inject NotificationSettings Notify
+@inject Notifier Notifier
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@* Settings › Notifications: where they go (each with its last delivery and a test), and what they're about. *@
+<section class="gb-card gb-sec" id="notifications" aria-labelledby="notify-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.NotificationsActive" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3" id="notify-t">Notifications</div>
+            <p>Failed deploys, crashes and failing health checks, by email, Discord, Slack, ntfy or a webhook.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        @if (Notify.Destinations.Count == 0)
+        {
+            <EmptyState Small="true" Title="Nothing is sent yet" Icon="@Icons.Material.Outlined.NotificationsNone">Add where Gitberth should tell you when something goes wrong.</EmptyState>
+        }
+        else
+        {
+            <div class="gb-reglist" role="list" aria-label="Where notifications go">
+                @foreach (var d in Notify.Destinations)
+                {
+                    var last = Notifier.LastFor(d.Id);
+                    <div class="gb-notirow" role="listitem" @key="d.Id">
+                        <span class="gb-notirow-icon"><SvgIcon Icon="@KindIcon(d.Kind)" /></span>
+                        <div style="min-width:0">
+                            <div class="gb-regrow-t">@d.Title</div>
+                            <div class="gb-regrow-s">@DestinationText.KindName(d.Kind) · @DestinationText.Target(d)</div>
+                            @if (last is not null)
+                            {
+                                <div class="gb-regrow-s @(last.Ok ? "gb-notirow-ok" : "gb-notirow-bad")">@LastText(last)</div>
+                            }
+                        </div>
+                        <div class="gb-row gb-row--wrap gb-notirow-go">
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Send" OnClick="() => TestAsync(d)" Busy="@(testing == d.Id)"
+                                 Disabled="@(testing is not null)" Label="@($"Send a test to {d.Title}")">Send a test</Btn>
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Edit" OnClick="() => EditAsync(d)" Label="@($"Edit {d.Title}")">Edit</Btn>
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveAsync(d)" Label="@($"Remove {d.Title}")">Remove</Btn>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        <div class="gb-row gb-row--wrap">
+            <Btn Kind="@(Notify.Destinations.Count == 0 ? BtnKind.Primary : BtnKind.Secondary)" Icon="@Icons.Material.Outlined.Add" OnClick="() => EditAsync(null)"
+                 Disabled="@(busy || Notify.Destinations.Count >= NotificationSettings.MaxDestinations)">Add a destination</Btn>
+        </div>
+
+        <div class="gb-h3" style="margin-top:6px">Tell me when</div>
+        <SwitchRow @key="@($"df{switchKey}")" Title="A deploy fails" Value="@Notify.IsOn(NotifyEvent.DeployFailed)" ValueChanged="v => SetAsync(NotifyEvent.DeployFailed, v)" Disabled="busy"
+                   Sub="Its build or its new version's checks failed (the previous version keeps running), or a scheduled restart didn't work." />
+        <SwitchRow @key="@($"ds{switchKey}")" Title="A deploy succeeds" Value="@Notify.IsOn(NotifyEvent.DeploySucceeded)" ValueChanged="v => SetAsync(NotifyEvent.DeploySucceeded, v)" Disabled="busy"
+                   Sub="Deploys that build a commit: a push, Deploy, a promote, a rollback. Not restarts or settings changes." />
+        <SwitchRow @key="@($"cr{switchKey}")" Title="An app crashes" Value="@Notify.IsOn(NotifyEvent.Crashed)" ValueChanged="v => SetAsync(NotifyEvent.Crashed, v)" Disabled="busy"
+                   Sub="Its process exits with an error, or it runs out of memory. A crash loop sends one message, then a count every 30 minutes." />
+        <SwitchRow @key="@($"hc{switchKey}")" Title="A health check fails" Value="@Notify.IsOn(NotifyEvent.Unhealthy)" ValueChanged="v => SetAsync(NotifyEvent.Unhealthy, v)" Disabled="busy"
+                   Sub="Docker marks it unhealthy; and again once it passes." />
+        <SwitchRow @key="@($"pv{switchKey}")" Title="Previews too" Value="@Notify.Previews" ValueChanged="SetPreviewsAsync" Disabled="busy"
+                   Sub="Deploys of previews. Off, only production apps are told about." />
+        <p class="gb-help">
+            @(Notify.Muted.Count switch { 0 => "Every app is told about.", 1 => "1 app is left out.", var n => $"{n} apps are left out." })
+            Leave an app out on its Settings tab, under General. A message's link goes to Gitberth at the address this page was last opened at, so it works on your LAN.
+        </p>
+    </div>
+</section>
+
+@code {
+    private bool busy;
+    private string? testing;
+    private int switchKey;
+
+    protected override void OnInitialized()
+    {
+        Notify.Changed += Refresh;
+        Notifier.Delivered += Refresh;
+    }
+
+    public void Dispose()
+    {
+        Notify.Changed -= Refresh;
+        Notifier.Delivered -= Refresh;
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private static string KindIcon(DestinationKind kind) => kind switch
+    {
+        DestinationKind.Email => Icons.Material.Outlined.Email,
+        DestinationKind.Discord => Icons.Material.Outlined.Forum,
+        DestinationKind.Slack => Icons.Material.Outlined.Tag,
+        DestinationKind.Ntfy => Icons.Material.Outlined.NotificationsActive,
+        _ => Icons.Material.Outlined.Webhook,
+    };
+
+    private static string LastText(Delivery d)
+    {
+        var when = Ago(DateTime.UtcNow - d.At);
+        return d.Ok ? $"Sent {when}: {d.Title}" : $"Failed {when}: {d.Error}";
+    }
+
+    private static string Ago(TimeSpan t) => t.TotalSeconds < 60 ? "just now"
+        : t.TotalMinutes < 60 ? $"{(int)t.TotalMinutes} min ago"
+        : t.TotalHours < 24 ? $"{(int)t.TotalHours} h ago"
+        : $"{(int)t.TotalDays} d ago";
+
+    private async Task EditAsync(Destination? current)
+    {
+        var dialog = await Dialogs.ShowAsync<DestinationDialog>(null, new DialogParameters<DestinationDialog> { { d => d.Current, current } },
+            new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not Destination destination) return;
+        busy = true;
+        try
+        {
+            await Notify.SaveDestinationAsync(destination);
+            if (current is not null)
+            {
+                Snackbar.Add($"Saved {destination.Title}.", Severity.Success);
+                return;
+            }
+            testing = destination.Id;
+            StateHasChanged();
+            var problem = await Notifier.SendTestAsync(destination);
+            Snackbar.Add(problem is null ? $"Added {destination.Title}, and a test went there." : $"Added {destination.Title}, but the test didn't go: {problem}",
+                problem is null ? Severity.Success : Severity.Warning);
+        }
+        catch (ArgumentException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+            testing = null;
+        }
+    }
+
+    private async Task TestAsync(Destination destination)
+    {
+        testing = destination.Id;
+        try
+        {
+            var problem = await Notifier.SendTestAsync(destination);
+            Snackbar.Add(problem is null ? $"A test went to {destination.Title}." : $"The test didn't go: {problem}", problem is null ? Severity.Success : Severity.Error);
+        }
+        finally
+        {
+            testing = null;
+        }
+    }
+
+    private async Task RemoveAsync(Destination destination)
+    {
+        if (await Dialogs.ShowMessageBoxAsync($"Remove {destination.Title}?", "Gitberth stops sending notifications there. Its URL, token or password is forgotten.",
+                yesText: "Remove", cancelText: "Cancel") != true) return;
+        await Notify.RemoveDestinationAsync(destination.Id);
+        Snackbar.Add($"Removed {destination.Title}.", Severity.Info);
+    }
+
+    private async Task SetAsync(NotifyEvent kind, bool on)
+    {
+        busy = true;
+        try
+        {
+            await Notify.SetEventAsync(kind, on);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SetPreviewsAsync(bool on)
+    {
+        busy = true;
+        try
+        {
+            await Notify.SetPreviewsAsync(on);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -1,0 +1,194 @@
+@inject DeployHooks Hooks
+@inject SettingsService Settings
+@inject DomainService Domains
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@*
+    An app's Deploy hooks section on its Settings tab, saved on its own (none of it touches the container): secret URLs
+    that deploy the app when something calls them. Each hook shows its URL on the LAN, and through the tunnel when GitHub's
+    webhooks have a host name, with copy buttons, and when it was last used. A new one shows a curl line to try it. Delete
+    asks first: whatever calls the URL gets 404 from then on.
+*@
+<SettingsSection Id="sec-hooks" Title="Deploy hooks" Icon="@Icons.Material.Outlined.Webhook" Description="@Description">
+    @if (hooks is null)
+    {
+        <div class="gb-skel" style="height:64px"></div>
+    }
+    else
+    {
+        @if (hooks.Count == 0)
+        {
+            <EmptyState Small="true" Title="No deploy hooks">Make one for each thing that should deploy it, so you can tell their calls apart and delete one on its own.</EmptyState>
+        }
+        else
+        {
+            <div class="gb-envtbl" role="list" aria-label="Deploy hooks">
+                @foreach (var hook in hooks)
+                {
+                    <div class="gb-hook" role="listitem" @key="hook.Id">
+                        <div class="gb-hook-head">
+                            <strong class="gb-grow gb-ellipsis">@hook.Name</strong>
+                            <span class="gb-t3" title="@(hook.LastUsedAt is { } at ? Format.Local(at) : null)">@(hook.LastUsedAt is { } used ? $"Last used {Format.Ago(used)}" : "Never used")</span>
+                            <button type="button" class="gb-iconbtn" title="Delete" aria-label="@($"Delete the deploy hook {hook.Name}")" disabled="@busy" @onclick="() => DeleteAsync(hook)">
+                                <SvgIcon Icon="@Icons.Material.Outlined.Delete" />
+                            </button>
+                        </div>
+                        @if (hook.Token is { } token)
+                        {
+                            <dl class="gb-kv">
+                                <dt>On your network</dt>
+                                <dd><CopyText Text="@DeployHooks.LanUrl(root, token)" Label="@($"{hook.Name}'s URL on your network")" /></dd>
+                                @if (publicHost is not null)
+                                {
+                                    <dt>From the internet</dt>
+                                    <dd><CopyText Text="@DeployHooks.PublicUrl(publicHost, token)" Label="@($"{hook.Name}'s URL from the internet")" /></dd>
+                                }
+                            </dl>
+                        }
+                        else
+                        {
+                            <p class="gb-help" style="margin:0">Its URL can't be shown: the key it was kept with is gone. Delete it and make another.</p>
+                        }
+                    </div>
+                }
+            </div>
+        }
+        @if (created is { Token: { } newToken } made)
+        {
+            <Banner Tone="good" Title="@($"Deploy hook {made.Name} is ready")" OnDismiss="() => created = null">
+                A POST to its URL @(IsGit ? "deploys" : "updates") @View.Summary.Title. Try it from this network:
+            </Banner>
+            <CodeBlock Title="Try it" Icon="@Icons.Material.Outlined.Terminal" Code="@($"curl -X POST '{DeployHooks.LanUrl(root, newToken)}'")" />
+        }
+        @if (hooks.Count < DeployHooks.MaxPerApp)
+        {
+            <div class="gb-setrow">
+                <Field Label="New hook's name" For="hook-name" Error="@problem" Help="What will call it, like Contentful or Nightly build. The deploy's history shows it.">
+                    <input id="hook-name" class="gb-input" maxlength="@DeployHooks.MaxName" placeholder="Contentful" value="@name" autocomplete="off"
+                           @oninput="e => { name = e.Value?.ToString() ?? string.Empty; problem = null; }" />
+                </Field>
+                <div class="gb-row" style="padding-bottom:22px">
+                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="CreateAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(name)">Create hook</Btn>
+                </div>
+            </div>
+        }
+        else
+        {
+            <p class="gb-help">It has @DeployHooks.MaxPerApp deploy hooks, the most an app can have. Delete one to make another.</p>
+        }
+        <p class="gb-help" style="margin:0">
+            Anyone with a hook's URL can @(IsGit ? "deploy" : "update") @View.Summary.Title, so keep it as you would a password.
+            @if (publicHost is not null)
+            {
+                <span>From the internet, hooks go through @publicHost, the host name in <a href="settings#github-integration">Settings › GitHub integration</a>.</span>
+            }
+            else
+            {
+                <span>These URLs work on your network. To call them from the internet (a CMS in the cloud, GitHub Actions), give GitHub's webhooks a host name in <a href="settings#github-integration">Settings › GitHub integration</a>, which needs domains: deploy hooks go through it too.</span>
+            }
+        </p>
+    }
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>Raised after a hook was made for a container that had no row yet, so the page reads the app again.</summary>
+    [Parameter] public EventCallback Saved { get; set; }
+
+    private IReadOnlyList<HookView>? hooks;
+    private HookView? created;
+    private string name = "";
+    private string? problem;
+    private bool busy;
+    private int? loadedFor = -1;
+    // Gitberth's own address, as the links GitHub and notifications show use it; the page's own when that isn't known.
+    private string root = "";
+    // GitHub's webhook host, which takes deploy hooks too, while domains are on.
+    private string? publicHost;
+
+    private bool IsGit => View.Summary.Source == AppSource.Git;
+
+    private string Description => IsGit
+        ? "Secret URLs that deploy it when something calls them: a CMS whose content changed, a scheduled job, CI. Each call builds the branch's newest commit again."
+        : $"Secret URLs that update it when something calls them, like CI once it pushed a new image: Gitberth pulls {View.Row?.ImageRef ?? View.Summary.Image} and recreates the app when the image moved.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == View.Summary.AppId && hooks is not null) return;
+        loadedFor = View.Summary.AppId;
+        root = await Settings.GetAsync(SettingKeys.UiAddress) is { Length: > 0 } saved && Uri.TryCreate(saved, UriKind.Absolute, out _) ? saved : Nav.BaseUri;
+        publicHost = await Domains.EnabledAsync() ? await Domains.WebhookHostAsync() : null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            hooks = View.Summary.AppId is int appId ? await Hooks.ListAsync(appId) : [];
+        }
+        catch (Exception ex)
+        {
+            hooks = [];
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        busy = true;
+        try
+        {
+            var made = await Hooks.CreateAsync(View.Summary.Key, name);
+            if (made.Problem is { } why)
+            {
+                problem = why;
+                return;
+            }
+            created = made.Hook;
+            name = "";
+            hooks = made.AppId is int appId ? await Hooks.ListAsync(appId) : hooks;
+            Snackbar.Add($"Deploy hook {made.Hook!.Name} is ready.", Severity.Success);
+            // A container without a row got one just now: the page reads it again, with its row.
+            if (View.Summary.AppId is null)
+            {
+                loadedFor = made.AppId;
+                await Saved.InvokeAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task DeleteAsync(HookView hook)
+    {
+        if (View.Summary.AppId is not int appId) return;
+        if (await Dialogs.ShowMessageBoxAsync($"Delete the deploy hook {hook.Name}?",
+                "Whatever calls its URL gets 404 from then on, and deploys nothing. This can't be undone: a new hook gets a new URL.",
+                yesText: "Delete", cancelText: "Cancel") != true) return;
+        busy = true;
+        try
+        {
+            await Hooks.DeleteAsync(appId, hook.Id);
+            if (created?.Id == hook.Id) created = null;
+            hooks = await Hooks.ListAsync(appId);
+            Snackbar.Add($"Deploy hook {hook.Name} is deleted.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

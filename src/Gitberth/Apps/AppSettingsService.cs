@@ -27,8 +27,9 @@ public sealed class AppSettingsService
 
     public AppSettingsService(AppCatalog catalog, AppService apps, Lazy<AppActions> actions, PortChanger changer, ContainerUpdater updater,
         IContainerEngine engine, AppLocks appLocks, DomainService domains, HealthSettings health, RestartSchedules restarts, SecretProtector protector,
-        IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity, ILogger<AppSettingsService> logger)
-        : this(new AppSettingsHost(catalog, apps, actions, appLocks, domains, health, restarts, protector, dbFactory, options, activity), changer, updater, engine, options,
+        IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity, ILogger<AppSettingsService> logger,
+        Notifications.NotificationSettings? notify = null)
+        : this(new AppSettingsHost(catalog, apps, actions, appLocks, domains, health, restarts, protector, dbFactory, options, activity, notify), changer, updater, engine, options,
             logger)
     {
     }
@@ -76,7 +77,7 @@ public sealed class AppSettingsService
         var secrets = edit.WantedOptions.SecretKeys;
         var own = OptionLines(edit.LoadedOptions, edit.WantedOptions).Concat(GitLines(edit.LoadedGit, edit.WantedGit)).ToList();
         // Gitberth's own fields are checked whatever else changed, so Apply never meets them as an error halfway.
-        var ownProblems = OptionProblems(edit.LoadedOptions, edit.WantedOptions);
+        var ownProblems = OptionProblems(edit.LoadedOptions, edit.WantedOptions).Concat(GitProblems(edit.LoadedGit, edit.WantedGit)).ToList();
         var plan = new SettingsPlan { Key = key, Edit = edit, Lines = own, Problems = ownProblems, Consequence = own.Count > 0 ? "Saved at once: nothing restarts." : null };
         if (fields.Count == 0) return plan;
         var context = await ContextAsync(app.Source == AppSource.Git, ct);
@@ -376,6 +377,7 @@ public sealed class AppSettingsService
         if (before.WebPort != after.WebPort) yield return Line("Web port", before.WebPort?.ToString() ?? "none", after.WebPort?.ToString() ?? "none");
         if (before.HealthCheckPath != after.HealthCheckPath) yield return Line("Health URL", before.HealthCheckPath ?? "none", after.HealthCheckPath ?? "none");
         if (before.GatherStats != after.GatherStats) yield return Line("Gather stats", before.GatherStats ? "on" : "off", after.GatherStats ? "on" : "off");
+        if (before.Notify != after.Notify) yield return Line("Notifications", before.Notify ? "on" : "off", after.Notify ? "on" : "off");
         if (before.ScheduledRestart != after.ScheduledRestart)
             yield return Line("Scheduled restart", before.ScheduledRestart?.ToString() ?? "never", after.ScheduledRestart?.ToString() ?? "never");
         if (before.Updates != after.Updates) yield return Line("Updates", PolicyWords(before.Updates), PolicyWords(after.Updates));
@@ -406,6 +408,32 @@ public sealed class AppSettingsService
         if (before.ProjectHint != after.ProjectHint) yield return Line("Project to run", before.ProjectHint ?? "detected", after.ProjectHint ?? "detected");
         if (before.AutoDeploy != after.AutoDeploy) yield return new SettingLine(null, "Deploy on push", before.AutoDeploy ? "on" : "off", after.AutoDeploy ? "on" : "off", ApplyKind.Gitberth);
         if (before.VercelVariables != after.VercelVariables) yield return Line("Vercel's variables", before.VercelVariables ? "on" : "off", after.VercelVariables ? "on" : "off");
+        // Build filters only decide whether a new commit deploys by itself: nothing restarts, and nothing is built again.
+        if (Deploy.BuildFilters.Normalize(before.WatchPaths) != Deploy.BuildFilters.Normalize(after.WatchPaths))
+            yield return new SettingLine(null, "Watch paths", FilterWords(before.WatchPaths, "any file"), FilterWords(after.WatchPaths, "any file"), ApplyKind.Gitberth);
+        if (Deploy.BuildFilters.Normalize(before.IgnoredPaths) != Deploy.BuildFilters.Normalize(after.IgnoredPaths))
+            yield return new SettingLine(null, "Ignored paths", FilterWords(before.IgnoredPaths, "none"), FilterWords(after.IgnoredPaths, "none"), ApplyKind.Gitberth);
+    }
+
+    /// <summary>What's wrong with a Git app's build filters, when they changed: each field's first problem.</summary>
+    internal static List<SettingProblem> GitProblems(GitOptions? before, GitOptions? after)
+    {
+        var problems = new List<SettingProblem>();
+        if (after is null) return problems;
+        if (Deploy.BuildFilters.Normalize(after.WatchPaths) != Deploy.BuildFilters.Normalize(before?.WatchPaths)
+            && Deploy.BuildFilters.Problem(after.WatchPaths, "Watch paths") is { } watch)
+            problems.Add(new(null, watch));
+        if (Deploy.BuildFilters.Normalize(after.IgnoredPaths) != Deploy.BuildFilters.Normalize(before?.IgnoredPaths)
+            && Deploy.BuildFilters.Problem(after.IgnoredPaths, "Ignored paths") is { } ignored)
+            problems.Add(new(null, ignored));
+        return problems;
+    }
+
+    // A filter field in a change's line: its first few patterns.
+    private static string FilterWords(string? text, string empty)
+    {
+        var patterns = Deploy.BuildFilters.Patterns(text);
+        return patterns.Count == 0 ? empty : string.Join(", ", patterns.Take(3)) + (patterns.Count > 3 ? $" and {patterns.Count - 3} more" : "");
     }
 
     private static string BuildWords(DockerfileMode mode) => mode == DockerfileMode.Custom ? "Custom Dockerfile" : "Detect automatically";
@@ -464,7 +492,8 @@ internal interface IAppSettingsHost
 
 /// <summary>The seam over Gitberth's services: the catalog (A), the Git apps' records and deploys, domains and Activity.</summary>
 internal sealed class AppSettingsHost(AppCatalog catalog, AppService apps, Lazy<AppActions> actions, AppLocks appLocks, DomainService domains, HealthSettings health,
-    RestartSchedules restarts, SecretProtector protector, IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity) : IAppSettingsHost
+    RestartSchedules restarts, SecretProtector protector, IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity,
+    Notifications.NotificationSettings? notify = null) : IAppSettingsHost
 {
     public Task<AppView?> ViewAsync(string key, CancellationToken ct) => catalog.GetAsync(key, options.PublicHost ?? "", ct);
 
@@ -484,7 +513,7 @@ internal sealed class AppSettingsHost(AppCatalog catalog, AppService apps, Lazy<
 
     public GitOptions GitOptions(AppDefinition app) => GitAppSettings.ToGit(app);
 
-    public AppOptions GitAppOptions(AppDefinition app) => GitAppSettings.ToOptions(app, health, restarts);
+    public AppOptions GitAppOptions(AppDefinition app) => GitAppSettings.ToOptions(app, health, restarts) with { Notify = notify?.IsMuted(app.ContainerName) != true };
 
     public Task<GitSaved> SaveGitAsync(int appId, SettingsEdit edit, CancellationToken ct) => apps.SaveSettingsAsync(appId, edit, ct);
 

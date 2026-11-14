@@ -1,0 +1,163 @@
+@using Gitberth.Notifications
+
+@* Adds or edits where notifications go. A saved secret (a webhook URL, a token, the mail password) is never shown again:
+   left empty, the saved one stays. *@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.NotificationsActive" />
+            <span>@(Current is null ? "Add a destination" : $"Edit {Current.Title}")</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="gb-stack" style="gap:14px">
+            @if (Current is null)
+            {
+                <Field Label="Send to">
+                    <Seg T="DestinationKind" Options="KindOptions" Value="kind" ValueChanged="v => { kind = v; error = null; }" Label="Kind of destination" />
+                </Field>
+            }
+            <Field Label="Name" For="nd-name" Help="What the list calls it. Optional.">
+                <input id="nd-name" class="gb-input" placeholder="@DestinationText.KindName(kind)" @bind="name" @bind:event="oninput" maxlength="60" />
+            </Field>
+            @if (kind == DestinationKind.Email)
+            {
+                <div class="gb-fgrid">
+                    <Field Label="Mail server" For="nd-host" Help="Like smtp.gmail.com or smtp.fastmail.com.">
+                        <input id="nd-host" class="gb-input gb-input--mono" placeholder="smtp.example.com" @bind="smtpHost" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+                    </Field>
+                    <Field Label="Port" For="nd-port" Help="587 with STARTTLS is what every big provider has.">
+                        <input id="nd-port" type="number" min="1" max="65535" class="gb-input gb-input--mono" @bind="smtpPort" />
+                    </Field>
+                </div>
+                <Field Label="Security">
+                    <Seg T="SmtpSecurity" Options="SecurityOptions" Value="security" ValueChanged="v => security = v" Label="Connection security" />
+                </Field>
+                <div class="gb-fgrid">
+                    <Field Label="User name" For="nd-user" Help="Often your mail address. Leave empty for a server that needs no sign-in.">
+                        <input id="nd-user" class="gb-input gb-input--mono" @bind="smtpUser" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+                    </Field>
+                    <Field Label="Password" For="nd-pass" Help="@(HasSaved(Current?.SmtpPassword) ? "Leave empty to keep the saved one." : "An app password, for Gmail and other providers with two-step sign-in.")">
+                        <input id="nd-pass" type="password" class="gb-input" placeholder="@(HasSaved(Current?.SmtpPassword) ? "••••••••" : null)" @bind="smtpPassword" @bind:event="oninput" autocomplete="new-password" />
+                    </Field>
+                </div>
+                <div class="gb-fgrid">
+                    <Field Label="From" For="nd-from" Help="The address the mail comes from: one your mail server lets you send as.">
+                        <input id="nd-from" class="gb-input gb-input--mono" placeholder="gitberth@example.com" @bind="from" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+                    </Field>
+                    <Field Label="To" For="nd-to" Help="Separate several addresses with commas.">
+                        <input id="nd-to" class="gb-input gb-input--mono" placeholder="you@example.com" @bind="to" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+                    </Field>
+                </div>
+            }
+            else
+            {
+                <Field Label="@UrlLabel" For="nd-url" Help="@UrlHelp">
+                    <input id="nd-url" class="gb-input gb-input--mono" placeholder="@UrlPlaceholder" @bind="url" @bind:event="oninput" spellcheck="false" autocomplete="off" />
+                </Field>
+                @if (kind is DestinationKind.Ntfy or DestinationKind.Webhook)
+                {
+                    <Field Label="@(kind == DestinationKind.Ntfy ? "Access token" : "Bearer token")" For="nd-token"
+                           Help="@(HasSaved(Current?.Token) ? "Leave empty to keep the saved one." : kind == DestinationKind.Ntfy ? "For a topic that needs signing in: a token from your ntfy server (tk_…). Optional." : "Sent as Authorization: Bearer …. Optional.")">
+                        <input id="nd-token" type="password" class="gb-input gb-input--mono" placeholder="@(HasSaved(Current?.Token) ? "••••••••" : null)" @bind="token" @bind:event="oninput" autocomplete="new-password" />
+                    </Field>
+                }
+            }
+            @if (error is not null)
+            {
+                <Banner Tone="critical" Title="Not saved">@error</Banner>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">@(Current is null ? "Add and send a test" : "Save")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The destination being edited; null to add one.</summary>
+    [Parameter] public Destination? Current { get; set; }
+
+    private static readonly List<SegOption<DestinationKind>> KindOptions =
+    [
+        new(DestinationKind.Email, "Email", Icons.Material.Outlined.Email),
+        new(DestinationKind.Discord, "Discord", Icons.Material.Outlined.Forum),
+        new(DestinationKind.Slack, "Slack", Icons.Material.Outlined.Tag),
+        new(DestinationKind.Ntfy, "ntfy", Icons.Material.Outlined.NotificationsActive),
+        new(DestinationKind.Webhook, "Webhook", Icons.Material.Outlined.Webhook),
+    ];
+
+    private static readonly List<SegOption<SmtpSecurity>> SecurityOptions =
+    [
+        new(SmtpSecurity.StartTls, "STARTTLS", Icons.Material.Outlined.Lock),
+        new(SmtpSecurity.None, "None", Icons.Material.Outlined.LockOpen),
+    ];
+
+    private DestinationKind kind = DestinationKind.Discord;
+    private string name = "", url = "", token = "", smtpHost = "", smtpUser = "", smtpPassword = "", from = "", to = "";
+    private int smtpPort = 587;
+    private SmtpSecurity security = SmtpSecurity.StartTls;
+    private string? error;
+
+    protected override void OnInitialized()
+    {
+        if (Current is not { } c) return;
+        (kind, name, smtpHost, smtpPort, security, smtpUser, from, to) = (c.Kind, c.Name, c.SmtpHost ?? "", c.SmtpPort, c.Security, c.SmtpUser ?? "", c.From ?? "", c.To ?? "");
+        // A Discord or Slack URL is the key to the channel, and an ntfy topic's or a webhook's can hold one too: never shown again.
+    }
+
+    private static bool HasSaved(string? secret) => !string.IsNullOrEmpty(secret);
+
+    private string UrlLabel => kind switch
+    {
+        DestinationKind.Ntfy => "Topic URL",
+        DestinationKind.Webhook => "URL",
+        _ => "Webhook URL",
+    };
+
+    private string UrlPlaceholder => HasSaved(Current?.Url) ? "Saved: " + DestinationText.Target(Current!) : kind switch
+    {
+        DestinationKind.Discord => "https://discord.com/api/webhooks/…",
+        DestinationKind.Slack => "https://hooks.slack.com/services/…",
+        DestinationKind.Ntfy => "https://ntfy.sh/your-topic",
+        _ => "https://example.com/hooks/gitberth",
+    };
+
+    private string UrlHelp => (HasSaved(Current?.Url) ? "Leave empty to keep the saved one. " : "") + kind switch
+    {
+        DestinationKind.Discord => "In Discord: the channel's settings › Integrations › Webhooks › New Webhook › Copy Webhook URL.",
+        DestinationKind.Slack => "In Slack: an app with Incoming Webhooks turned on, and its webhook URL for the channel.",
+        DestinationKind.Ntfy => "ntfy.sh or your own ntfy server, then a topic. Pick one nobody can guess: anyone who knows it can read it.",
+        _ => "Gitberth POSTs one JSON object to it: event, level, title, text, url, app, container, deployment, commit and time.",
+    };
+
+    private void Save()
+    {
+        var saved = Current;
+        var destination = new Destination
+        {
+            Id = saved?.Id ?? Destination.NewId(),
+            Kind = kind,
+            Name = name,
+            Url = url.Trim().Length > 0 ? url : saved?.Url ?? "",
+            Token = token.Trim().Length > 0 ? token : saved?.Token,
+            SmtpHost = smtpHost,
+            SmtpPort = smtpPort,
+            Security = security,
+            SmtpUser = smtpUser,
+            // A user name taken away takes the saved password with it.
+            SmtpPassword = smtpPassword.Length > 0 ? smtpPassword : string.IsNullOrWhiteSpace(smtpUser) ? null : saved?.SmtpPassword,
+            From = from,
+            To = to,
+        };
+        var clean = NotificationSettings.Clean(destination);
+        if (DestinationText.Problem(clean) is { } problem)
+        {
+            error = problem;
+            return;
+        }
+        MudDialog.Close(DialogResult.Ok(clean));
+    }
+}

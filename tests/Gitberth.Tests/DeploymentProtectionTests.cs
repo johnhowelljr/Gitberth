@@ -39,9 +39,9 @@ public sealed class DeploymentProtectionTests : IDisposable
 
         Assert.True(plan.Changed);
         Assert.Equal(
-            """[{"hostname":"hooks.example.com","path":"^/hooks/github$","service":"http://localhost:8080"},{"hostname":"hooks.example.com","service":"http_status:404"},{"hostname":"app.example.com","service":"http://localhost:3001"},{"service":"http_status:404"}]""",
+            """[{"hostname":"hooks.example.com","path":"^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$","service":"http://localhost:8080"},{"hostname":"hooks.example.com","service":"http_status:404"},{"hostname":"app.example.com","service":"http://localhost:3001"},{"service":"http_status:404"}]""",
             plan.Ingress.ToJsonString());
-        Assert.Contains(plan.Notes, n => n.Text == "Routed https://hooks.example.com/hooks/github to Gitberth for GitHub's webhooks");
+        Assert.Contains(plan.Notes, n => n.Text == "Routed https://hooks.example.com/hooks/github and /hooks/deploy/… to Gitberth, for GitHub's webhooks and deploy hooks");
         // Never behind Access, and nothing to change the second time.
         Assert.DoesNotContain("originRequest", plan.Ingress.ToJsonString());
         Assert.False(TunnelRoutes.PlanWebhook(plan.Ingress, "hooks.example.com", "http://localhost:8080", []).Changed);
@@ -58,7 +58,7 @@ public sealed class DeploymentProtectionTests : IDisposable
         var gone = TunnelRoutes.PlanWebhook(moved.Ingress, "gh.example.com", "http://localhost:8090", ["hooks.example.com"]);
         Assert.DoesNotContain("hooks.example.com", gone.Ingress.ToJsonString());
         Assert.Contains("gh.example.com", gone.Ingress.ToJsonString());
-        Assert.Contains(gone.Notes, n => n.Text == "Removed the route GitHub's webhook took through hooks.example.com");
+        Assert.Contains(gone.Notes, n => n.Text == "Removed the route GitHub's webhook and deploy hooks took through hooks.example.com");
     }
 
     [Fact]
@@ -67,7 +67,7 @@ public sealed class DeploymentProtectionTests : IDisposable
         var plan = TunnelRoutes.PlanWebhook(Ingress("""[{"hostname":"hooks.example.com","service":"http://localhost:9000"},{"service":"http_status:404"}]"""),
             "hooks.example.com", "http://localhost:8080", []);
         Assert.Equal(
-            """[{"hostname":"hooks.example.com","path":"^/hooks/github$","service":"http://localhost:8080"},{"hostname":"hooks.example.com","service":"http://localhost:9000"},{"service":"http_status:404"}]""",
+            """[{"hostname":"hooks.example.com","path":"^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$","service":"http://localhost:8080"},{"hostname":"hooks.example.com","service":"http://localhost:9000"},{"service":"http_status:404"}]""",
             plan.Ingress.ToJsonString());
         Assert.True(TunnelRoutes.UsedByOthers(plan.Ingress, "hooks.example.com"));
         Assert.False(TunnelRoutes.UsedByOthers(TunnelRoutes.PlanWebhook(Ingress("[]"), "hooks.example.com", "http://localhost:8080", []).Ingress, "hooks.example.com"));
@@ -98,11 +98,119 @@ public sealed class DeploymentProtectionTests : IDisposable
         Assert.Equal(
             """[{"hostname":"app.example.com","path":"^/hooks/github$","service":"http://localhost:9000"},{"hostname":"app.example.com","service":"http_status:404"},{"service":"http_status:404"}]""",
             plan.Ingress.ToJsonString());
-        Assert.Equal(["Removed the route GitHub's webhook took through old.example.com"], plan.Notes.Select(n => n.Text));
+        Assert.Equal(["Removed the route GitHub's webhook and deploy hooks took through old.example.com"], plan.Notes.Select(n => n.Text));
         // Not remembered as the webhook's, a host still counts when its rule on the path goes to Gitberth.
         var mine = TunnelRoutes.PlanWebhook(current, null, "http://localhost:8070", ["app.example.com", "old.example.com"]);
         Assert.Contains("app.example.com", mine.Ingress.ToJsonString());
         Assert.DoesNotContain("old.example.com", mine.Ingress.ToJsonString());
+    }
+
+    // ---- Deploy hooks on the webhook's host ----
+
+    [Theory]
+    [InlineData("/hooks/github", true)]
+    [InlineData("/hooks/deploy/abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE", true)]
+    [InlineData("/hooks/deploy/short", false)]
+    [InlineData("/hooks/deploy/abcdefghijklmnopqrstuvwxyz/0123456789", false)]
+    [InlineData("/hooks/deploy/abcdefghijklmnopqrstuvwxyz0123456789.x", false)]
+    [InlineData("/hooks/github/", false)]
+    [InlineData("/hooks/githubx", false)]
+    [InlineData("/hooks", false)]
+    [InlineData("/settings", false)]
+    public void The_webhook_path_takes_github_and_deploy_hooks_only(string path, bool routed) =>
+        Assert.Equal(routed, System.Text.RegularExpressions.Regex.IsMatch(path, TunnelRoutes.WebhookPath));
+
+    [Fact]
+    public void A_new_token_always_fits_the_tunnels_path()
+    {
+        for (var i = 0; i < 50; i++)
+            Assert.Matches(TunnelRoutes.WebhookPath, DeployHooks.PathPrefix + DeployHooks.NewToken());
+    }
+
+    [Fact]
+    public void The_rule_from_before_deploy_hooks_gets_their_path_where_it_stands()
+    {
+        // As 1.1 left it: the webhook's rule and its 404 between two apps' domains.
+        var current = Ingress("""
+            [{"hostname":"app.example.com","service":"http://localhost:3001"},
+             {"hostname":"hooks.example.com","path":"^/hooks/github$","service":"http://localhost:8080"},
+             {"hostname":"hooks.example.com","service":"http_status:404"},
+             {"hostname":"web.example.com","service":"http://localhost:3002"},
+             {"service":"http_status:404"}]
+            """);
+
+        var plan = TunnelRoutes.PlanWebhook(current, "hooks.example.com", "http://localhost:8080", []);
+
+        Assert.True(plan.Changed);
+        Assert.Equal(
+            """[{"hostname":"app.example.com","service":"http://localhost:3001"},{"hostname":"hooks.example.com","path":"^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$","service":"http://localhost:8080"},{"hostname":"hooks.example.com","service":"http_status:404"},{"hostname":"web.example.com","service":"http://localhost:3002"},{"service":"http_status:404"}]""",
+            plan.Ingress.ToJsonString());
+        Assert.Equal(["https://hooks.example.com/hooks/deploy/… goes to Gitberth now too, for deploy hooks"], plan.Notes.Select(n => n.Text));
+        Assert.False(TunnelRoutes.UsedByOthers(current, "hooks.example.com"));
+        Assert.False(TunnelRoutes.PlanWebhook(plan.Ingress, "hooks.example.com", "http://localhost:8080", []).Changed);
+        // As Cloudflare may give it back, with an empty originRequest: still in place, and left as it is.
+        var given = Ingress(plan.Ingress.ToJsonString().Replace("\"service\":\"http://localhost:8080\"", "\"service\":\"http://localhost:8080\",\"originRequest\":{}", StringComparison.Ordinal));
+        Assert.False(TunnelRoutes.PlanWebhook(given, "hooks.example.com", "http://localhost:8080", []).Changed);
+    }
+
+    [Fact]
+    public void The_rule_from_before_deploy_hooks_is_replaced_never_written_twice_when_gitberth_moved()
+    {
+        var current = Ingress("""
+            [{"hostname":"app.example.com","service":"http://localhost:3001"},
+             {"hostname":"hooks.example.com","path":"^/hooks/github$","service":"http://localhost:8080"},
+             {"hostname":"hooks.example.com","service":"http_status:404"},
+             {"service":"http_status:404"}]
+            """);
+
+        var plan = TunnelRoutes.PlanWebhook(current, "hooks.example.com", "http://localhost:8090", []);
+
+        Assert.Equal(
+            """[{"hostname":"hooks.example.com","path":"^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$","service":"http://localhost:8090"},{"hostname":"hooks.example.com","service":"http_status:404"},{"hostname":"app.example.com","service":"http://localhost:3001"},{"service":"http_status:404"}]""",
+            plan.Ingress.ToJsonString());
+        Assert.DoesNotContain("^/hooks/github$", plan.Ingress.ToJsonString());
+    }
+
+    [Fact]
+    public void The_rule_from_before_deploy_hooks_goes_with_its_host()
+    {
+        var current = Ingress("""
+            [{"hostname":"old.example.com","path":"^/hooks/github$","service":"http://localhost:8080"},
+             {"hostname":"old.example.com","service":"http_status:404"},
+             {"hostname":"ci.example.com","path":"^/hooks/github$","service":"http://localhost:9000"},
+             {"service":"http_status:404"}]
+            """);
+
+        // Moved to another name: the old one's rules go, whether it's remembered as the webhook's or found going to Gitberth.
+        foreach (var earlier in new[] { new[] { "old.example.com" }, Array.Empty<string>() })
+        {
+            var plan = TunnelRoutes.PlanWebhook(current, "gh.example.com", "http://localhost:8080", ["old.example.com"], earlier);
+            Assert.DoesNotContain("old.example.com", plan.Ingress.ToJsonString());
+            Assert.Contains("Removed the route GitHub's webhook and deploy hooks took through old.example.com", plan.Notes.Select(n => n.Text));
+            // Another service's rule on its own host, on the same path, stays as it was.
+            Assert.Contains(plan.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == "ci.example.com" && r["path"]?.GetValue<string>() == "^/hooks/github$"
+                && r["service"]?.GetValue<string>() == "http://localhost:9000");
+            Assert.Single(plan.Ingress.OfType<JsonObject>(), r => r["path"]?.GetValue<string>() == TunnelRoutes.WebhookPath);
+        }
+    }
+
+    [Fact]
+    public void Someone_elses_rules_on_the_host_stay_when_the_old_rule_is_rewritten()
+    {
+        // Someone routed the rest of the webhook's host to a service of their own after 1.1 set it up.
+        var current = Ingress("""
+            [{"hostname":"hooks.example.com","path":"^/hooks/github$","service":"http://localhost:8080"},
+             {"hostname":"hooks.example.com","service":"http://localhost:9000"},
+             {"service":"http_status:404"}]
+            """);
+        Assert.True(TunnelRoutes.UsedByOthers(current, "hooks.example.com"));
+
+        var plan = TunnelRoutes.PlanWebhook(current, "hooks.example.com", "http://localhost:8080", []);
+
+        // Their rule stays theirs, and no 404 comes ahead of it.
+        Assert.Equal(
+            """[{"hostname":"hooks.example.com","path":"^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$","service":"http://localhost:8080"},{"hostname":"hooks.example.com","service":"http://localhost:9000"},{"service":"http_status:404"}]""",
+            plan.Ingress.ToJsonString());
     }
 
     [Theory]
@@ -241,6 +349,8 @@ public sealed class DeploymentProtectionTests : IDisposable
         public Func<HttpRequestMessage, HttpStatusCode?>? Fail { get; set; }
         /// <summary>Where app.example.com's DNS record sends it: this tunnel, unless another has it now.</summary>
         public string AppTarget { get; set; } = $"{TunnelId}.cfargotunnel.com";
+        /// <summary>The note on app.example.com's DNS record; null for none.</summary>
+        public string? AppComment { get; set; }
         /// <summary>The routes of the account's other tunnels (another Gitberth's, say), by tunnel ID.</summary>
         public Dictionary<string, JsonArray> OtherTunnels { get; } = new();
         private int _next = 1;
@@ -279,11 +389,19 @@ public sealed class DeploymentProtectionTests : IDisposable
             }
             if (path.EndsWith("/zones", StringComparison.Ordinal))
                 return Ok(JsonNode.Parse(query.Contains("name=example.com&", StringComparison.Ordinal) ? """[{"id":"z1","name":"example.com"}]""" : "[]"));
+            if (path.EndsWith("/zones/z1/dns_records/r1", StringComparison.Ordinal) && request.Method == HttpMethod.Patch)
+            {
+                AppComment = body!["comment"]!.GetValue<string>();
+                return Ok(new JsonObject { ["id"] = "r1" });
+            }
             if (path.EndsWith("/zones/z1/dns_records", StringComparison.Ordinal))
-                return request.Method == HttpMethod.Post ? Ok(new JsonObject { ["id"] = "r-new" })
-                    : Ok(query.Contains("name=app.example.com&", StringComparison.Ordinal)
-                        ? JsonNode.Parse($$"""[{"id":"r1","type":"CNAME","name":"app.example.com","content":"{{AppTarget}}","proxied":true}]""")
-                        : new JsonArray());
+            {
+                if (request.Method == HttpMethod.Post) return Ok(new JsonObject { ["id"] = "r-new" });
+                if (!query.Contains("name=app.example.com&", StringComparison.Ordinal)) return Ok(new JsonArray());
+                var record = new JsonObject { ["id"] = "r1", ["type"] = "CNAME", ["name"] = "app.example.com", ["content"] = AppTarget, ["proxied"] = true };
+                if (AppComment is not null) record["comment"] = AppComment;
+                return Ok(new JsonArray(record));
+            }
             if (path.EndsWith("/access/organizations", StringComparison.Ordinal))
                 return TeamDomain is null ? new HttpResponseMessage(HttpStatusCode.NotFound) : Ok(new JsonObject { ["auth_domain"] = TeamDomain });
             if (path.EndsWith("/access/apps", StringComparison.Ordinal))
@@ -1471,12 +1589,56 @@ public sealed class DeploymentProtectionTests : IDisposable
         // Routed as asked, but GitHub checks the certificate, so no delivery would get there: a problem, never "done".
         Assert.Null(error);
         Assert.Contains(report.Notes, n => n.Problem && n.Text == "GitHub's webhooks can't reach Gitberth at hooks.gitberth.example.com yet: "
-            + "Cloudflare's free certificate covers example.com and *.example.com only, so hooks.gitberth.example.com needs Total TLS or an advanced certificate in Cloudflare.");
+            + "Cloudflare's free certificate covers example.com and *.example.com only, so hooks.gitberth.example.com needs Total TLS or an advanced certificate in Cloudflare. "
+            + "Once a delivery from GitHub gets through, this goes.");
+
+        // A delivery signed with Gitberth's secret came in at that name: the zone has a certificate for it (Total TLS), so
+        // the next sync doesn't say it again.
+        var endpoint = new GitHubWebhookEndpoint(_db, _settings, new Gitberth.Deploy.WatchState(), new WebhookThrottle(), NullLogger<GitHubWebhookEndpoint>.Instance);
+        var secret = (await _settings.GetSecretAsync(SettingKeys.GitHubWebhookSecret))!;
+        var body = Encoding.UTF8.GetBytes("""{"zen":"Keep it logically awesome."}""");
+        Assert.Equal(200, await endpoint.HandleAsync("ping", WebhookSignature.Sign(secret, body), body, "203.0.113.5", default, "Hooks.Gitberth.Example.com"));
+        Assert.DoesNotContain((await _domains.SyncAsync()).Notes, n => n.Text.StartsWith("GitHub's webhooks can't reach Gitberth", StringComparison.Ordinal));
+        // A bad signature proves nothing.
+        await _settings.SetAsync(SettingKeys.GitHubWebhookDelivered, null);
+        Assert.Equal(401, await endpoint.HandleAsync("ping", "sha256=00", body, "203.0.113.5", default, "hooks.gitberth.example.com"));
+        Assert.Null(await _settings.GetAsync(SettingKeys.GitHubWebhookDelivered));
 
         // One level below the zone is covered.
         var (_, covered) = await _domains.SetWebhookHostAsync("hooks.example.com");
         Assert.DoesNotContain(covered.Notes, n => n.Text.StartsWith("GitHub's webhooks can't reach Gitberth", StringComparison.Ordinal));
     }
+
+    [Fact]
+    public async Task Its_own_dns_record_from_before_the_rename_gets_todays_note_and_nobody_elses_is_touched()
+    {
+        _cloudflare.AppComment = CloudflareApi.AddedByGitDock;
+        var report = await _domains.SyncAsync();
+        Assert.Equal(CloudflareApi.AddedByGitberth, _cloudflare.AppComment);
+        Assert.Contains(report.Notes, n => !n.Problem && n.Text == "Changed the note on app.example.com's DNS record from \"Added by GitDock\" to \"Added by Gitberth\"");
+        // Once.
+        await _domains.SyncAsync();
+        Assert.Single(_cloudflare.Calls, c => c == "PATCH /client/v4/zones/z1/dns_records/r1");
+
+        // Someone else's note stays as it is.
+        _cloudflare.AppComment = "Made by hand";
+        await _domains.SyncAsync();
+        Assert.Equal("Made by hand", _cloudflare.AppComment);
+
+        // A refusal (an older token) is no problem: the record works either way, and it's tried again next time.
+        _cloudflare.AppComment = CloudflareApi.AddedByGitDock;
+        _cloudflare.Fail = r => r.Method == HttpMethod.Patch ? HttpStatusCode.Forbidden : null;
+        Assert.DoesNotContain((await _domains.SyncAsync()).Notes, n => n.Problem);
+        Assert.Equal(CloudflareApi.AddedByGitDock, _cloudflare.AppComment);
+    }
+
+    [Theory]
+    [InlineData("application/json", 1024 * 1024)]
+    [InlineData("application/x-www-form-urlencoded", 3 * 1024 * 1024)]
+    [InlineData("application/x-www-form-urlencoded; charset=utf-8", 3 * 1024 * 1024)]
+    [InlineData(null, 1024 * 1024)]
+    public void A_form_encoded_delivery_may_be_three_times_the_size_of_its_json(string? contentType, long limit) =>
+        Assert.Equal(limit, GitHubWebhookEndpoint.MaxBodyFor(contentType));
 
     [Fact]
     public async Task A_new_webhook_host_takes_the_route_from_the_old_one_and_keeps_the_secret()
@@ -1529,6 +1691,27 @@ public sealed class DeploymentProtectionTests : IDisposable
 
         var left = Assert.Single(_cloudflare.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == "hooks.example.com");
         Assert.Equal("http://localhost:9000", left["service"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_sync_after_the_update_gives_the_webhooks_rule_from_before_deploy_hooks_their_path()
+    {
+        await _domains.SetWebhookHostAsync("hooks.example.com");
+        // The tunnel as 1.1 left it: the same rule, on /hooks/github alone.
+        var rule = _cloudflare.Ingress.OfType<JsonObject>().Single(r => r["path"]?.GetValue<string>() == TunnelRoutes.WebhookPath);
+        var at = _cloudflare.Ingress.IndexOf(rule);
+        rule["path"] = TunnelRoutes.OldWebhookPath;
+        var count = _cloudflare.Ingress.Count;
+
+        var report = await _domains.SyncAsync();
+
+        var now = (JsonObject)_cloudflare.Ingress[at]!;
+        Assert.Equal(("hooks.example.com", TunnelRoutes.WebhookPath), (now["hostname"]!.GetValue<string>(), now["path"]!.GetValue<string>()));
+        Assert.Equal(count, _cloudflare.Ingress.Count);
+        Assert.DoesNotContain(TunnelRoutes.OldWebhookPath, _cloudflare.Ingress.ToJsonString());
+        Assert.Contains(report.Notes, n => n.Text == "https://hooks.example.com/hooks/deploy/… goes to Gitberth now too, for deploy hooks");
+        // The host is still the webhook's own, never someone else's.
+        Assert.False(TunnelRoutes.UsedByOthers(_cloudflare.Ingress, "hooks.example.com"));
     }
 
     [Fact]

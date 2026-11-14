@@ -67,7 +67,11 @@ Gitberth keeps a route's settings when it rewrites the route, Cloudflare Access 
 
 ## GitHub's webhook
 
-With [instant deploys](../guides/github-integration.md#instant-deploys) on, one address is open to the internet without a sign-in: `https://<the host name you chose>/hooks/github`, and nothing else on that host name. It only accepts deliveries signed with the secret Gitberth made (HMAC-SHA256, compared in fixed time), refuses bodies over 1 MB, answers a sender that keeps getting the signature wrong with `429` for 10 minutes, and never deploys anything by itself: it only makes Gitberth check the repo now, as it would anyway within 30 seconds.
+With [instant deploys](../guides/github-integration.md#instant-deploys) on, one address is open to the internet without a sign-in: `https://<the host name you chose>/hooks/github`, and nothing else on that host name but deploy hooks' (below). It only accepts deliveries signed with the secret Gitberth made (HMAC-SHA256, compared in fixed time), refuses bodies over 1 MB, answers a sender that keeps getting the signature wrong with `429` for 10 minutes, and never deploys anything by itself: it only makes Gitberth check the repo now, as it would anyway within 30 seconds.
+
+## Deploy hooks
+
+A [deploy hook](../guides/deploy-hooks.md)'s URL, `/hooks/deploy/<token>`, does deploy, with no sign-in: its token is all that guards it, so keep it as you would a password. The token is 32 random bytes; Gitberth keeps it encrypted, and finds a call's hook by the token's SHA-256. An unknown token gets `404`, and after 10 of them in 10 minutes from one address, that address gets `429`. The URLs answer on your network, and from the internet only on the host name above. A hook whose URL got out is deleted in a click; a new one gets a new URL.
 
 ## Related
 

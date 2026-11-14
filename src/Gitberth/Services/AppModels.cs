@@ -261,8 +261,19 @@ public static class Format
         DeployTrigger.Restart => "Scheduled restart",
         DeployTrigger.Webhook => "Push on GitHub",
         DeployTrigger.Promote => "Promoted",
+        DeployTrigger.Hook => "Deploy hook",
         _ => trigger.ToString(),
     };
+
+    /// <summary>What started a deploy, with the deploy hook's name when a hook did: Deploy hook "Contentful".</summary>
+    public static string Trigger(DeployTrigger trigger, string? hookName) =>
+        trigger == DeployTrigger.Hook && hookName is { Length: > 0 } name ? $"Deploy hook \"{name}\"" : Trigger(trigger);
+
+    public static string Trigger(Deployment d) => Trigger(d.Trigger, d.HookName);
+
+    /// <summary>The same in the middle of a line ("2 min ago · deploy hook "Contentful""): lower case, but never the hook's own name.</summary>
+    public static string TriggerInLine(Deployment d) =>
+        d.Trigger == DeployTrigger.Hook && d.HookName is { Length: > 0 } name ? $"deploy hook \"{name}\"" : Trigger(d.Trigger).ToLowerInvariant();
 
     /// <summary>Up to two initials for an app avatar.</summary>
     public static string Initials(string name)

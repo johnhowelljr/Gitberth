@@ -309,15 +309,16 @@ def test_deliveries_go_where_their_url_leads(github, gh_token, cloudflare, engin
     assert record["status"] is None and "resolve" in record["error"], record
     assert all(r["status"] is None for r in records), records
 
-    # Routed the way Gitberth routes its webhook host: a proxied CNAME to the tunnel, and in the tunnel only
-    # ^/hooks/github$ to Gitberth's published port (cloudflared is on the host's network), the rest of the host a 404.
+    # Routed the way Gitberth routes its webhook host: a proxied CNAME to the tunnel, and in the tunnel only /hooks/github
+    # (and deploy hooks' /hooks/deploy/<token>) to Gitberth's published port (cloudflared is on the host's network), the
+    # rest of the host a 404.
     tunnel = cloudflare.state()["tunnel_id"]
     cloudflare.zone(zone)
     cloudflare.add_dns_record(zone, "CNAME", host, f"{tunnel}.cfargotunnel.com", proxied=True)
     before = cloudflare.tunnel()["config"]
     try:
         routed = cloudflare.set_tunnel_config({"ingress": [
-            {"hostname": host, "path": "^/hooks/github$", "service": "http://localhost:8080"},
+            {"hostname": host, "path": "^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$", "service": "http://localhost:8080"},
             {"hostname": host, "service": "http_status:404"},
             {"service": "http_status:404"}]})["version"]
         cloudflare.wait_runs(routed)

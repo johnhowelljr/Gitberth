@@ -30,7 +30,8 @@ public sealed partial class AppService(
     WatchState watch,
     HostScanner? hostScanner = null,
     HostPortMap? hostPorts = null,
-    NetworkService? network = null)
+    NetworkService? network = null,
+    Notifications.NotificationSettings? notify = null)
 {
     public static readonly string[] RestartPolicies = ["unless-stopped", "always", "on-failure", "no"];
 
@@ -309,6 +310,7 @@ public sealed partial class AppService(
         // Also clears choices left over from an older container with the same name.
         await health.SetGatheredAsync(app.ContainerName, m.GatherStats, ct);
         await restarts.SetAsync(app.ContainerName, m.RestartInterval, ct);
+        if (notify is not null) await notify.SetMutedAsync(app.ContainerName, false, ct);
         return app.Id;
     }
 
@@ -572,6 +574,7 @@ public sealed partial class AppService(
         {
             if (string.IsNullOrWhiteSpace(git.Branch)) problems.Add(new(null, "Pick a branch."));
             if (git.DockerfileMode == DockerfileMode.Custom && string.IsNullOrWhiteSpace(git.CustomDockerfile)) problems.Add(new(null, "The custom Dockerfile is empty."));
+            problems.AddRange(AppSettingsService.GitProblems(edit.LoadedGit, git));
         }
         if (fields.Contains(SettingField.RestartPolicy) && !RestartPolicies.Contains(edit.Wanted.Restart.Name))
             problems.Add(new(SettingField.RestartPolicy, "Pick a restart policy."));
@@ -623,6 +626,7 @@ public sealed partial class AppService(
         // Not part of the fingerprint: gathering stats or a restart schedule never needs a restart to apply.
         if (edit.WantedOptions.GatherStats != edit.LoadedOptions.GatherStats) await health.SetGatheredAsync(app.ContainerName, edit.WantedOptions.GatherStats, ct);
         if (edit.WantedOptions.ScheduledRestart != edit.LoadedOptions.ScheduledRestart) await restarts.SetAsync(app.ContainerName, edit.WantedOptions.ScheduledRestart, ct);
+        if (edit.WantedOptions.Notify != edit.LoadedOptions.Notify && notify is not null) await notify.SetMutedAsync(app.ContainerName, !edit.WantedOptions.Notify, ct);
         return new GitSaved(recreate, rebuild, liveChanged, []);
     }
 

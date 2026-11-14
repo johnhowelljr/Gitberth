@@ -4379,6 +4379,17 @@ a.gb-arow-title:focus-visible::after { box-shadow: inset 0 0 0 2px #7aa9ff; bord
 
 .gb-tbl-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
+/* A deploy hook on an app's Settings tab (Apps/DeployHooksSection.razor): its name and last use, then its URLs to copy. */
+.gb-hook { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 9px 10px 10px 12px; border-top: 1px solid var(--gb-line-1); background: var(--gb-surface-1); }
+
+.gb-hook:first-child { border-top: 0; }
+
+.gb-hook-head { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13.5px; }
+
+.gb-hook-head .gb-t3 { font-size: 12.5px; white-space: nowrap; }
+
+.gb-hook .gb-kv { grid-template-columns: 130px minmax(0, 1fr); gap: 4px 12px; font-size: 13px; }
+
 /* ---------- Apply bar (Shared/ApplyBar.razor): sticky under the editor ---------- */
 
 .gb-applybar {
@@ -4804,7 +4815,7 @@ a.gb-arow-title:focus-visible::after { box-shadow: inset 0 0 0 2px #7aa9ff; bord
 
     .gb-tabbar-item .gb-i { display: none; }
 
-    .gb-kv { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
+    .gb-kv, .gb-hook .gb-kv { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
 
     .gb-kv dd { margin-bottom: 10px; }
 

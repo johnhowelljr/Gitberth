@@ -648,7 +648,7 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
             targets = services;
             containers = picked.ToDictionary(p => p.Key, p => p.Value.Container);
 
-            // GitHub's webhook host, which goes to Gitberth itself (path /hooks/github only), and where that is.
+            // GitHub's webhook host, which goes to Gitberth itself (paths /hooks/github and /hooks/deploy/<token> only), and where that is.
             var webhookHost = await WebhookHostAsync(ct);
             var known = apps.SelectMany(a => a.Domains).Select(d => d.Hostname).Concat(removals.Select(r => r.Hostname)).ToHashSet();
             if (webhookHost is not null) known.Add(webhookHost);
@@ -766,8 +766,10 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                     if (!dns.Ok) notes.Add(new DomainNote(hostname, $"{hostname}: {dns.Summary}", Problem: true));
                     // GitHub checks the webhook host's certificate (Gitberth's webhooks never skip that): a name Cloudflare's
                     // free certificate doesn't cover gets none of their deliveries.
-                    if (hostname == webhookHost && dns.Zone is { } zone && DomainNames.CertificateWarning(hostname, zone.Name) is { } warning)
-                        notes.Add(new DomainNote(hostname, $"GitHub's webhooks can't reach Gitberth at {hostname} yet: {warning}", Problem: true));
+                    // Unless a signed delivery came in there already: then the zone has a certificate for it (Total TLS, say).
+                    if (hostname == webhookHost && dns.Zone is { } zone && DomainNames.CertificateWarning(hostname, zone.Name) is { } warning
+                        && await settings.GetAsync(SettingKeys.GitHubWebhookDelivered, ct) != hostname)
+                        notes.Add(new DomainNote(hostname, $"GitHub's webhooks can't reach Gitberth at {hostname} yet: {warning} Once a delivery from GitHub gets through, this goes.", Problem: true));
                 }
                 catch (CloudflareApiException ex)
                 {
@@ -1201,6 +1203,20 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         }
         if (records is [var only] && (PointsAtTunnel(only, tunnel) || await ReachesTunnelAsync(token, tunnel, only, zones, ct)))
         {
+            // Gitberth's own record from before it was renamed: its note says so in today's name. Only a note, so a refusal
+            // (an older token) leaves it as it is, and tries again next time.
+            if (notes is not null && only.Comment == CloudflareApi.AddedByGitDock && PointsAtTunnel(only, tunnel))
+            {
+                try
+                {
+                    await cloudflare.SetCommentAsync(token, zone.Id, only.Id, hostname, CloudflareApi.AddedByGitberth, ct);
+                    notes.Add(new DomainNote(hostname, $"Changed the note on {hostname}'s DNS record from \"{CloudflareApi.AddedByGitDock}\" to \"{CloudflareApi.AddedByGitberth}\""));
+                }
+                catch (CloudflareApiException ex)
+                {
+                    logger.LogInformation("Couldn't update the note on {Host}'s DNS record: {Problem}", hostname, ex.Message);
+                }
+            }
             if (only.Proxied) return (true, "", DomainFix.None, zone);
             if (notes is null) return (false, "Its DNS record leads to the tunnel, but Cloudflare's proxy is off for it.", DomainFix.Sync, zone);
             await cloudflare.SetProxiedAsync(token, zone.Id, only.Id, hostname, ct);

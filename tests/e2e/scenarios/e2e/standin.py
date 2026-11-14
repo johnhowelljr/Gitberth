@@ -80,6 +80,38 @@ class StandIns:
         return self.api("POST", "/reset", {})
 
 
+class Notify:
+    """Where Gitberth's notifications go: Discord's and Slack's webhooks, an ntfy server and any webhook (each POST is a
+    recorded call of kind "notify"), and the mail server smtp.e2e.test:2525 (every mail kept)."""
+
+    DISCORD = "https://discord.com/api/webhooks/1234567/e2e-discord-secret"
+    SLACK = "https://hooks.slack.com/services/T0E2E/B0E2E/e2e-slack-secret"
+    NTFY = "https://ntfy.e2e.test/gitberth-e2e"
+    WEBHOOK = "https://notify.e2e.test/hooks/gitberth"
+    SMTP_HOST, SMTP_PORT = "smtp.e2e.test", 2525
+
+    def __init__(self, standins):
+        self.s = standins
+
+    def received(self, since=0, host=None):
+        return self.s.calls(since, host=host, kind="notify")
+
+    def mails(self, since=0):
+        return self.s.api("GET", "/notify/mail", query={"since": since})["mails"]
+
+    def answer(self, host, status, times=None):
+        """How the host answers from now on (times: that many calls); status None puts it back."""
+        self.s.api("POST", "/notify/answer", {"host": host, "status": status, "times": times})
+
+    def wait(self, since, host, check=lambda calls: bool(calls), what=None, timeout=60):
+        """The calls to the host since the marker, once check(calls) holds."""
+        return until(lambda: (lambda c: c if check(c) else None)(self.received(since, host)), timeout,
+                     what or f"a notification at {host}", seen=lambda: [(c["path"], c.get("body") or c.get("body_text")) for c in self.received(since, host)])
+
+    def wait_mail(self, since, check=lambda mails: bool(mails), what="a mail", timeout=60):
+        return until(lambda: (lambda m: m if check(m) else None)(self.mails(since)), timeout, what, seen=lambda: self.mails(since))
+
+
 class GitHub:
     """The GitHub stand-in, as the people using GitHub see it."""
 

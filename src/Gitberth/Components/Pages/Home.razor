@@ -46,7 +46,7 @@
     <div class="gb-hs">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.RocketLaunch" />Deploys</span>
         <span class="gb-hs-v">@(loaded ? Deploys24h.ToString(CultureInfo.InvariantCulture) : "–") <small>in 24 hours</small></span>
-        <span class="gb-hs-sub">@(recent.Count > 0 ? $"Last: {recent[0].App}, {Format.Ago(recent[0].Item.At)}" : "None yet")</span>
+        <span class="gb-hs-sub">@(LastDeploy is { } last ? $"Last: {last.App}, {Format.Ago(last.Item.At)}" : "None yet")</span>
     </div>
     <a class="gb-hs" href="apps?show=updates">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Updates</span>
@@ -161,7 +161,10 @@
 
     private List<AppSummary> Pinned => list.Apps.Where(a => a.Pinned).ToList();
 
-    private int Deploys24h => recent.Count(r => r.Item.At > DateTime.UtcNow.AddDays(-1));
+    // A skipped commit is listed below, but it deployed nothing, so it isn't counted or named as the last deploy.
+    private int Deploys24h => recent.Count(r => !r.Skipped && r.Item.At > DateTime.UtcNow.AddDays(-1));
+
+    private RecentDeploy? LastDeploy => recent.FirstOrDefault(r => !r.Skipped);
 
     // The last few deploys of every app, newest first. A link to an app that's gone is left out.
     private IReadOnlyList<ActivityItem> Deploys => recent.Take(6)

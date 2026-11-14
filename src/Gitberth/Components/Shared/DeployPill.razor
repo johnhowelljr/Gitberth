@@ -15,15 +15,17 @@
         DeployStatus.Failed => "Failed",
         DeployStatus.RolledBack => "Rolled back",
         DeployStatus.Cancelled => "Cancelled",
+        DeployStatus.Skipped => "Skipped",
         _ => Deployment.Status.ToString(),
     };
 
+    // A skipped commit is neither good nor bad news: the running version simply stayed.
     private string Tone => Deployment.Status switch
     {
         DeployStatus.Succeeded => "success",
         DeployStatus.Failed => "danger",
         DeployStatus.RolledBack => "warning",
-        DeployStatus.Cancelled => "secondary",
+        DeployStatus.Cancelled or DeployStatus.Skipped => "secondary",
         _ => "info",
     };
 }

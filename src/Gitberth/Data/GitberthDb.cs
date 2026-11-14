@@ -22,6 +22,7 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
     public DbSet<ImageCheck> ImageChecks => Set<ImageCheck>();
     public DbSet<ActivityEntry> Activity => Set<ActivityEntry>();
     public DbSet<PreviewInfo> Previews => Set<PreviewInfo>();
+    public DbSet<DeployHook> DeployHooks => Set<DeployHook>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -120,6 +121,14 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
             e.Property(d => d.Status).HasConversion<string>();
             e.Property(d => d.Trigger).HasConversion<string>();
             e.HasOne<AppDefinition>().WithMany().HasForeignKey(d => d.AppId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<DeployHook>(e =>
+        {
+            e.ToTable("DeployHooks");
+            e.HasIndex(h => h.TokenHash).IsUnique();
+            e.HasIndex(h => h.AppId);
+            // Goes with its app. The table that has the key changes, not Apps.
+            e.HasOne<AppDefinition>().WithMany().HasForeignKey(h => h.AppId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<Setting>().HasKey(s => s.Key);
 

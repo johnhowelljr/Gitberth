@@ -8,10 +8,12 @@ public enum DockerfileMode { Auto, Custom }
 public enum DesiredState { Running, Stopped }
 
 // Stored as strings: values are only ever added, never renamed. Webhook: started by GitHub telling Gitberth about a push;
-// Promote: a preview's commit made the production version.
-public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart, Webhook, Promote }
+// Promote: a preview's commit made the production version. Hook: a deploy hook's URL was called.
+public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart, Webhook, Promote, Hook }
 
-public enum DeployStatus { Queued, Cloning, Building, Starting, Succeeded, Failed, RolledBack, Cancelled }
+// Skipped: a new commit that changed only files the app's build filters leave out, or that asked not to be deployed;
+// the running version stays, and nothing was built.
+public enum DeployStatus { Queued, Cloning, Building, Starting, Succeeded, Failed, RolledBack, Cancelled, Skipped }
 
 /// <summary>Which branches and pull requests of a Git app get a preview of their own.</summary>
 public enum PreviewMode { Off, PullRequests, PullRequestsAndBranches }
@@ -107,6 +109,13 @@ public class AppDefinition
     public bool PreviewForks { get; set; }
     /// <summary>Put previews' domains behind Cloudflare Access, when it's set up. On unless turned off.</summary>
     public bool ProtectPreviews { get; set; } = true;
+    /// <summary>
+    /// Build filters, gitignore-style patterns one per line, relative to the repo's root: a new commit deploys by itself
+    /// only when it changes a file one of these matches. Empty: any file.
+    /// </summary>
+    public string? WatchPaths { get; set; }
+    /// <summary>Build filters: a new commit whose changed files all match one of these patterns doesn't deploy by itself.</summary>
+    public string? IgnoredPaths { get; set; }
     /// <summary>
     /// The production branch's commit when a preview was promoted over it: production stays on the promoted commit, and the
     /// watcher doesn't deploy this one. The next new commit on the branch, or a manual deploy, clears it; so does a promote
@@ -368,9 +377,32 @@ public class Deployment
     public DateTime? FinishedAt { get; set; }
     /// <summary>The Gitberth build that ran it (<see cref="BuildStamp"/>), so a failure can be retried after an update.</summary>
     public string? GitberthBuild { get; set; } = BuildStamp.Current;
+    /// <summary>Why it was skipped, when <see cref="Status"/> is Skipped.</summary>
+    public string? SkipReason { get; set; }
+    /// <summary>The name of the deploy hook that started it, when <see cref="Trigger"/> is Hook.</summary>
+    public string? HookName { get; set; }
+    /// <summary>Built without the build cache: every step ran again, and the base images were pulled.</summary>
+    public bool NoCache { get; set; }
 
     public bool IsActive => Status is DeployStatus.Queued or DeployStatus.Cloning or DeployStatus.Building or DeployStatus.Starting;
     public string ShortSha => CommitSha is { Length: >= 7 } ? CommitSha[..7] : CommitSha ?? "";
+}
+
+/// <summary>
+/// A secret URL that deploys an app when something calls it (a CMS, a scheduled job, CI): a Git app's branch is built
+/// again from its newest commit, an image app's tag is pulled and the app updated when it moved.
+/// </summary>
+public class DeployHook
+{
+    public int Id { get; set; }
+    public int AppId { get; set; }
+    public string Name { get; set; } = "";
+    /// <summary>SHA-256 of the token, as lowercase hex: how a call finds its hook.</summary>
+    public string TokenHash { get; set; } = "";
+    /// <summary>The token, encrypted (SecretProtector), so the hook's URL can be shown again.</summary>
+    public string ProtectedToken { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastUsedAt { get; set; }
 }
 
 public class Setting

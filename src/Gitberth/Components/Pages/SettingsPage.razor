@@ -21,7 +21,7 @@
 
 <PageTitle>Settings · Gitberth</PageTitle>
 
-<PageHead Title="Settings" Lead="GitHub and registry access, domains, the network, updates, and this Gitberth installation.">
+<PageHead Title="Settings" Lead="GitHub and registry access, notifications, domains, the network, updates, and this Gitberth installation.">
     <Crumbs><a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /><span>Settings</span></Crumbs>
 </PageHead>
 
@@ -106,7 +106,7 @@
                 else
                 {
                     <div class="gb-setrow">
-                        <Field Label="Host name for GitHub's webhooks" For="hook-host" Help="Only its address /hooks/github goes to Gitberth, never behind Access; every other address on it answers 404. Use a name nothing else uses.">
+                        <Field Label="Host name for GitHub's webhooks" For="hook-host" Help="Only its addresses /hooks/github and /hooks/deploy/… (deploy hooks) go to Gitberth, never behind Access; every other address on it answers 404. Use a name nothing else uses.">
                             <input id="hook-host" class="gb-input gb-input--mono" placeholder="hooks.example.com" value="@hookHostInput" @oninput="e => hookHostInput = e.Value?.ToString()" autocomplete="off" spellcheck="false" />
                         </Field>
                         <div class="gb-row gb-row--wrap" style="padding-bottom:22px">
@@ -164,6 +164,8 @@
                 }
             </div>
         </section>
+
+        <NotificationsSection />
 
         <section class="gb-card gb-sec" id="registries" aria-labelledby="registries-t">
             @Head("registries-t", Icons.Material.Outlined.Key, "Registries", "Sign-ins for private images: used to pull them and to check them for updates.")
@@ -471,7 +473,7 @@
         </section>
 
         <section class="gb-card gb-sec" id="deploys" aria-labelledby="deploys-t">
-            @Head("deploys-t", Icons.Material.Outlined.RocketLaunch, "Deploys", "How often Gitberth looks for new commits.")
+            @Head("deploys-t", Icons.Material.Outlined.RocketLaunch, "Deploys", "How often Gitberth looks for new commits, and Docker's build cache.")
             <div class="gb-sec-body">
                 <div class="gb-setrow">
                     <Field Label="Check for new commits every" For="watch-interval" Help="10 to 3600 seconds.">
@@ -479,6 +481,7 @@
                     </Field>
                     <div style="padding-bottom:22px"><Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveDeploysAsync" Disabled="busy">Save</Btn></div>
                 </div>
+                <BuildCacheRow />
             </div>
         </section>
 
@@ -539,6 +542,7 @@
     [
         ("github", "GitHub access", Icons.Custom.Brands.GitHub),
         ("github-integration", "GitHub integration", Icons.Material.Outlined.Sync),
+        ("notifications", "Notifications", Icons.Material.Outlined.NotificationsActive),
         ("registries", "Registries", Icons.Material.Outlined.Key),
         ("updates", "Updates", Icons.Material.Outlined.CloudDownload),
         ("domains", "Domains", Icons.Material.Outlined.Public),

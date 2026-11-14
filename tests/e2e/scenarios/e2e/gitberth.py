@@ -15,8 +15,8 @@ from .engine import Engine, gitberth_logs
 from .net import get, get_json
 from .wait import until
 
-# A deploy's states once it's over (DeployStatus).
-FINAL = ("Succeeded", "Failed", "RolledBack", "Cancelled")
+# A deploy's states once it's over (DeployStatus). Skipped: a new commit the build filters, or its message, left alone.
+FINAL = ("Succeeded", "Failed", "RolledBack", "Cancelled", "Skipped")
 
 
 @dataclass

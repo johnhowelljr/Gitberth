@@ -1,8 +1,8 @@
 # Gitberth's settings
 
-The **Settings** page holds the settings for Gitberth as a whole: GitHub and registry access, image updates, domains, the network, deploys, the admin password, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
+The **Settings** page holds the settings for Gitberth as a whole: GitHub and registry access, notifications, image updates, domains, the network, deploys, the admin password, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
 
-The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Network**, **Own LAN addresses**, **Deploys**, **Admin password** and **System**. Each section saves on its own.
+The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Network**, **Own LAN addresses**, **Deploys**, **Admin password** and **System**. Each section saves on its own.
 
 ![The Settings page](../images/settings.webp)
 
@@ -30,12 +30,30 @@ Deploys reported on GitHub, and deploys that start the moment you push. See [Git
 
 | Field or button | What it does | Default |
 |---|---|---|
-| **Commit statuses** | Each deploy that builds a commit marks it on GitHub: pending while it builds, then live (linking to the app) or failed (linking to the deploy log). One status per app, named **Gitberth: <app>**, and **Gitberth preview: <app>** for its previews. Needs **Commit statuses: Read and write**. | On |
+| **Commit statuses** | Each deploy that builds a commit marks it on GitHub: pending while it builds, then live (linking to the app) or failed (linking to the deploy log). A commit that was skipped gets success, saying why. One status per app, named **Gitberth: <app>**, and **Gitberth preview: <app>** for its previews. Needs **Commit statuses: Read and write**. | On |
 | **Comments on pull requests** | A preview of a pull request keeps one comment on it up to date: its state, address, commit and time. Needs **Pull requests: Read and write**. | On |
-| **Host name for GitHub's webhooks** | Instant deploys, shown while domains are on: a host name nothing else uses, like `hooks.example.com`. Only its address `/hooks/github` goes to Gitberth through the tunnel, never behind Access; every other address answers 404. **Turn on** routes it and adds the DNS record; **Save** moves it to another name; **Turn off** asks first, then takes its route out. | None: Gitberth checks every 30 seconds |
+| **Host name for GitHub's webhooks** | Instant deploys, shown while domains are on: a host name nothing else uses, like `hooks.example.com`. Only its addresses `/hooks/github` and `/hooks/deploy/<token>` ([deploy hooks](../guides/deploy-hooks.md)) go to Gitberth through the tunnel, never behind Access; every other address answers 404. **Turn on** routes it and adds the DNS record; **Save** moves it to another name; **Turn off** asks first, then takes its route out. | None: Gitberth checks every 30 seconds, and deploy hooks work on your network only |
 | **Payload URL**, **Content type**, **Secret**, **Events** | What GitHub's webhook needs, to add it by hand when the token can't (no **Webhooks: Read and write**). **Show** reveals the secret; the copy buttons copy. | |
 
 When GitHub refuses one of these on a repo, a banner says which permission is missing (for example **Commit statuses aren't set on acme/web**) and Gitberth stops asking on that repo for an hour, or until a token is saved again; the banner goes with the hour, and comes back if GitHub refuses again. Other repos carry on. A token GitHub refuses outright stops it everywhere (**Commit statuses aren't set: GitHub refused the token**). A list under the webhook values says, per repo, **Webhook added**, **Webhook set up** or why not. With domains off, the section says instant deploys need them.
+
+## Notifications
+
+Failed deploys, crashes and failing health checks, by email, Discord, Slack, ntfy or a webhook. See [Notifications](../guides/notifications.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Add a destination** | Opens a dialog for one place messages go: **Email** (mail server, port, **STARTTLS** or **None**, user name and password, **From**, **To**), **Discord** or **Slack** (the channel's webhook URL), **ntfy** (the topic's URL, and an access token for a topic that needs one) or **Webhook** (a URL, and a bearer token if it wants one). **Add and send a test** saves it encrypted and sends a test. Up to 10. | None: nothing is sent |
+| **Send a test** | Sends a test to that destination now. | |
+| **Edit** | The same dialog. A secret field (a webhook URL, a token, the password) left empty keeps the saved one; saved secrets are never shown again. | |
+| **Remove** | Asks first, then forgets the destination and its secrets. | |
+| **A deploy fails** | A failed build, a new version that didn't pass its checks, a scheduled restart that didn't work. | On |
+| **A deploy succeeds** | Deploys that build a commit; not restarts, settings changes or starts. | Off |
+| **An app crashes** | An error exit or running out of memory, of any container. A crash loop sends one message, then a count every 30 minutes. | On |
+| **A health check fails** | Docker marks an app unhealthy, and again once it passes. | On |
+| **Previews too** | Deploys of previews as well. | Off |
+
+Each destination's row shows where it goes without its secret (`https://discord.com/…`), and how its last message went: **Sent 2 min ago** or **Failed 2 min ago** with the reason. An app's own **Notifications** switch (its Settings tab, **General**) leaves it out; the line under the switches counts the apps left out.
 
 ## Registries
 
@@ -123,7 +141,7 @@ While it's on, the section shows the **Block**, the **Containers** that have an 
 
 ## Deploys
 
-How often Gitberth looks for new commits.
+How often Gitberth looks for new commits, and Docker's build cache.
 
 ![Settings, Deploys](../images/settings-deploys.webp)
 
@@ -132,6 +150,14 @@ How often Gitberth looks for new commits.
 | **Check for new commits every** | How many seconds apart Gitberth runs one `git ls-remote` per repo, 10 to 3600. | 30 seconds | Longer for fewer requests to GitHub; each app also has its own **Deploy on push** switch. |
 
 Click **Save** to save it. Gitberth checks right away with the new interval.
+
+**Build cache** shows how much room Docker's build cache takes on the host, such as **1.2 GiB on this host**. The cache
+keeps each step of every app's builds, so a step whose files didn't change isn't run again and builds are quick.
+
+**Clear build cache** asks first, then deletes all of it. Nothing that runs changes, but the next build of each app runs
+every step again, so it takes longer. Afterwards Gitberth says how much it freed. While a build runs, it's refused:
+clear it once the build is done. To build one app without the cache instead, use **Deploy without the build cache**; see
+[Deploys and rollbacks](../guides/deploys-and-rollbacks.md#without-the-build-cache).
 
 ## Admin password
 

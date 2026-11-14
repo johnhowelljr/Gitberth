@@ -9,6 +9,8 @@ State that has to outlive a restart (the test CA, the admin password, the Cloudf
 configuration's version) is in /state; the CA certificate is copied to /trust for the CA bundles. Everything else is in
 memory and goes on reset."""
 import base64
+import email
+import email.policy
 import json
 import os
 import re
@@ -81,11 +83,162 @@ CF = Cloudflare(RIG["cf_account_id"], RIG["cf_tunnel_id"], STATE)
 GH = GitHub(REPOS, TEMPLATES, REC, GITBERTH_URL, edge=CF.edge)
 
 
+# ---- notifications: where Gitberth sends them ----
+
+# Discord's and Slack's webhooks, an ntfy server and any webhook: each POST is recorded (kind "notify") and answered as
+# the service does, or with what a scenario set (/__control/notify/answer).
+NOTIFY_HOSTS = {"discord.com": 204, "hooks.slack.com": 200, "ntfy.e2e.test": 200, "notify.e2e.test": 200}
+NOTIFY_ANSWERS = {}  # host -> [status, times left or None]
+NOTIFY_LOCK = threading.Lock()
+
+
+def notify_answer(req):
+    with NOTIFY_LOCK:
+        answer = NOTIFY_ANSWERS.get(req.host)
+        if answer:
+            status, left = answer
+            if left is not None:
+                answer[1] = left - 1
+                if answer[1] <= 0:
+                    NOTIFY_ANSWERS.pop(req.host, None)
+            return Response.json(status, {"message": "set by the scenario"})
+    status = NOTIFY_HOSTS[req.host]
+    if req.method != "POST":
+        return Response.json(405, {"message": "405: Method Not Allowed"})
+    if status == 204:
+        return Response(204)
+    return Response.text(200, "ok") if req.host == "hooks.slack.com" else Response.json(200, {"id": secrets.token_hex(6)})
+
+
+class Mailbox:
+    """The rig's mail server (smtp.e2e.test:2525): plain SMTP, any sign-in taken (and kept, so a scenario sees it came),
+    every mail kept with its envelope and text."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.mails = []
+
+    def add(self, mail):
+        with self.lock:
+            mail["seq"] = REC.next_seq()
+            self.mails.append(mail)
+
+    def since(self, seq=0):
+        with self.lock:
+            return [m for m in self.mails if m["seq"] > seq]
+
+    def clear(self):
+        with self.lock:
+            self.mails.clear()
+
+
+MAIL = Mailbox()
+
+
+def smtp_session(conn, addr):
+    conn.settimeout(30)
+    f = conn.makefile("rwb")
+
+    def say(line):
+        f.write((line + "\r\n").encode())
+        f.flush()
+
+    mail = {"from": None, "to": [], "auth": None, "client": addr[0]}
+    try:
+        say("220 smtp.e2e.test ESMTP gbe2e")
+        while True:
+            line = f.readline()
+            if not line:
+                return
+            text = line.decode("utf-8", "replace").rstrip("\r\n")
+            verb = text.split(" ", 1)[0].upper()
+            if verb in ("EHLO", "HELO"):
+                f.write(b"250-smtp.e2e.test\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n")
+                f.flush()
+            elif verb == "AUTH":
+                parts = text.split(" ")
+                mech = parts[1].upper() if len(parts) > 1 else ""
+                if mech == "PLAIN":
+                    if len(parts) >= 3:
+                        creds = parts[2]
+                    else:
+                        say("334 ")
+                        creds = f.readline().strip().decode()
+                    raw = base64.b64decode(creds).split(b"\0")
+                    mail["auth"] = raw[1].decode() if len(raw) > 1 else None
+                    say("235 2.7.0 Authentication successful")
+                elif mech == "LOGIN":
+                    if len(parts) >= 3:
+                        user = base64.b64decode(parts[2]).decode()
+                    else:
+                        say("334 VXNlcm5hbWU6")
+                        user = base64.b64decode(f.readline().strip()).decode()
+                    say("334 UGFzc3dvcmQ6")
+                    f.readline()
+                    mail["auth"] = user
+                    say("235 2.7.0 Authentication successful")
+                else:
+                    say("504 5.5.4 Unrecognized authentication type")
+            elif verb == "MAIL":
+                mail["from"] = text.split(":", 1)[1].strip().strip("<>").split(">")[0]
+                say("250 2.1.0 OK")
+            elif verb == "RCPT":
+                mail["to"].append(text.split(":", 1)[1].strip().strip("<>").split(">")[0])
+                say("250 2.1.5 OK")
+            elif verb == "DATA":
+                say("354 End data with <CR><LF>.<CR><LF>")
+                data = []
+                while True:
+                    l = f.readline()
+                    if not l or l in (b".\r\n", b".\n"):
+                        break
+                    data.append(l[1:] if l.startswith(b"..") else l)
+                mail["data"] = b"".join(data).decode("utf-8", "replace")
+                # As a mail program shows it: the subject and the text, decoded (base64, quoted-printable, encoded words).
+                try:
+                    parsed = email.message_from_string(mail["data"], policy=email.policy.default)
+                    mail["subject"] = str(parsed["subject"] or "")
+                    body = parsed.get_body(preferencelist=("plain",))
+                    mail["text"] = body.get_content() if body is not None else ""
+                except Exception as e:  # noqa: BLE001 - a mail the rig can't read is still kept, with why
+                    mail["subject"], mail["text"] = None, f"(unreadable: {e})"
+                MAIL.add(dict(mail))
+                mail = {"from": None, "to": [], "auth": mail["auth"], "client": addr[0]}
+                say("250 2.0.0 OK: queued")
+            elif verb == "RSET":
+                mail = {"from": None, "to": [], "auth": mail["auth"], "client": addr[0]}
+                say("250 2.0.0 OK")
+            elif verb == "NOOP":
+                say("250 2.0.0 OK")
+            elif verb == "QUIT":
+                say("221 2.0.0 Bye")
+                return
+            else:
+                say("502 5.5.2 Command not recognized")
+    except (OSError, ValueError):
+        return
+    finally:
+        try:
+            conn.close()
+        except OSError:
+            pass
+
+
+def serve_smtp(port=2525):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("0.0.0.0", port))
+    s.listen(16)
+    while True:
+        conn, addr = s.accept()
+        threading.Thread(target=smtp_session, args=(conn, addr), daemon=True).start()
+
+
 # ---- the HTTPS side: what Gitberth calls ----
 
 def handle_api(req):
     kind = "git" if req.host in ("github.com", "www.github.com") else "github" if req.host == "api.github.com" \
-        else "cloudflare" if req.host == "api.cloudflare.com" else "other"
+        else "cloudflare" if req.host == "api.cloudflare.com" else "notify" if req.host in NOTIFY_HOSTS else "other"
     call = REC.start(req, kind)
     try:
         # Which repo the call is about (and for git, what it asked for), before anything answers it: a call an injected
@@ -110,6 +263,8 @@ def handle_api(req):
             resp = GH.api(req, call)
         elif kind == "cloudflare":
             resp = CF.api(req, call)
+        elif kind == "notify":
+            resp = notify_answer(req)
         else:
             call["unrouted"] = True
             log(f"no stand-in route: {req.method} {req.host}{req.path}")
@@ -167,7 +322,30 @@ def c_reset(req):
     CF.reset()
     FAILS.remove()
     REC.clear()
+    MAIL.clear()
+    with NOTIFY_LOCK:
+        NOTIFY_ANSWERS.clear()
     return {"ok": True, "seq": REC.seq, "tunnel_version": CF.version}
+
+
+@route("POST", "/notify/answer")
+def c_notify_answer(req):
+    """How a notification host answers from now on: {host, status, times} (times: that many calls, else until reset); status null puts it back."""
+    b = body_of(req)
+    host = b["host"]
+    if host not in NOTIFY_HOSTS:
+        raise ApiError(400, f"{host} isn't a notification host: {', '.join(NOTIFY_HOSTS)}")
+    with NOTIFY_LOCK:
+        if b.get("status") is None:
+            NOTIFY_ANSWERS.pop(host, None)
+        else:
+            NOTIFY_ANSWERS[host] = [int(b["status"]), b.get("times")]
+    return {"ok": True}
+
+
+@route("GET", "/notify/mail")
+def c_notify_mail(req):
+    return {"mails": MAIL.since(int(req.query.get("since") or 0)), "seq": REC.seq}
 
 
 def ls_remote_attempt(call):
@@ -717,8 +895,9 @@ def main():
     https = TlsServer(("0.0.0.0", 443), make_handler(handle_api, "https"), context)
     control = PlainServer(("0.0.0.0", 8099), make_handler(handle_control, "control"))
     threading.Thread(target=https.serve_forever, name="https", daemon=True).start()
-    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com; control on 8099; deliveries go through "
-        f"the tunnel's connector (or straight to {GITBERTH_URL} when a scenario asks)")
+    threading.Thread(target=serve_smtp, name="smtp", daemon=True).start()
+    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com and the notification hosts; SMTP on 2525; "
+        f"control on 8099; deliveries go through the tunnel's connector (or straight to {GITBERTH_URL} when a scenario asks)")
     control.serve_forever()
 
 

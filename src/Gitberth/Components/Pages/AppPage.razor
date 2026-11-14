@@ -484,6 +484,11 @@ else
                 <button type="button" class="gb-btn gb-btn--icon" aria-label="More actions" title="More" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
             </ActivatorContent>
             <ChildContent>
+                @if (app.Source == AppSource.Git && view?.Row is not null)
+                {
+                    @* For a build the cache got wrong, or a base image that moved: every step runs again. *@
+                    <MudMenuItem Icon="@Icons.Material.Outlined.LayersClear" OnClick="DeployWithoutCacheAsync" Disabled="@(busy || app.State == AppState.Deploying)">Deploy without the build cache</MudMenuItem>
+                }
                 <MudMenuItem Icon="@(app.Pinned ? Icons.Material.Outlined.PushPin : Icons.Material.Outlined.PushPin)" OnClick="TogglePinAsync">@(app.Pinned ? "Unpin from the menu" : "Pin to the menu")</MudMenuItem>
                 @if (!IsPreview)
                 {
@@ -517,7 +522,8 @@ else
         var d = view?.Details;
         var cpu = Health?.Recent.Select(p => p.Cpu).ToList() ?? [];
         var schedule = Restarts.For(app.Container);
-        var lastDeploy = view?.Git?.Deployments.FirstOrDefault();
+        // A skipped commit changed nothing that runs: the last deploy is the last one that did something.
+        var lastDeploy = view?.Git?.Deployments.FirstOrDefault(d => d.Status != DeployStatus.Skipped);
         return @<text>
             <HeroStat Label="Uptime" Small="@(app.Running && d?.StartedAt is { } s ? $"since {AppFacts.When(s)}" : null)">
                 @(app.Running && (d?.StartedAt ?? app.StartedAt) is { } started ? AppStatus.Long(DateTime.UtcNow - started)[4..] : "Not running")
@@ -531,7 +537,7 @@ else
             </HeroStat>
             @if (lastDeploy is not null)
             {
-                <HeroStat Label="Last deploy" Small="@($"{Format.Ago(lastDeploy.QueuedAt)} · {Format.Trigger(lastDeploy.Trigger).ToLowerInvariant()}")">
+                <HeroStat Label="Last deploy" Small="@($"{Format.Ago(lastDeploy.QueuedAt)} · {Format.TriggerInLine(lastDeploy)}")">
                     <a href="@($"apps/{lastDeploy.AppId}/deployments/{lastDeploy.Id}")" style="color:inherit">#@lastDeploy.Id</a>
                 </HeroStat>
             }
@@ -904,13 +910,17 @@ else
         }
     }
 
-    private async Task DeployAsync()
+    private Task DeployAsync() => StartDeployAsync(noCache: false);
+
+    private Task DeployWithoutCacheAsync() => StartDeployAsync(noCache: true);
+
+    private async Task StartDeployAsync(bool noCache)
     {
         if (view?.Summary.AppId is not int id) return;
         busy = true;
         try
         {
-            var deploymentId = await Actions.DeployAsync(id);
+            var deploymentId = await Actions.DeployAsync(id, noCache: noCache);
             Nav.NavigateTo($"apps/{id}/deployments/{deploymentId}");
         }
         catch (Exception ex)

@@ -67,6 +67,10 @@ A Git app's variable is for **All deploys**, for **Production** only, or for **P
 the variable's row. One name can have a value for each, and a **Production** or **Previews** value wins over an **All
 deploys** one. See [Preview deployments](previews.md#environments).
 
+A variable that says where a database is (`DATABASE_URL`, a `postgres://…` value, and the like) has to have a **Previews**
+value before previews deploy: a preview never gets production's database by accident. See
+[Production's database](previews.md#productions-database).
+
 ## Build-time variables (Git apps)
 
 A Git app's variables are passed to the running container. Turn on **Build time** for the ones the build needs too. Front

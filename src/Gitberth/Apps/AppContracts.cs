@@ -158,6 +158,8 @@ public sealed record AppOptions
     public int? WebPort { get; init; }
     public string? HealthCheckPath { get; init; }
     public bool GatherStats { get; init; } = true;
+    /// <summary>Whether Settings › Notifications tells about this app (kept by its container's name, like GatherStats).</summary>
+    public bool Notify { get; init; } = true;
     public RestartInterval? ScheduledRestart { get; init; }
     public UpdatePolicy Updates { get; init; } = UpdatePolicy.Notify;
     /// <summary>The reference updates follow; null: Config.Image.</summary>
@@ -169,8 +171,10 @@ public sealed record AppOptions
 }
 
 /// <summary>Git apps only: where the code comes from and how it's built (AppSettingsModel's Git fields).</summary>
+/// <param name="WatchPaths">Build filters (<see cref="Deploy.BuildFilters"/>): a new commit deploys by itself only when it changes a file these match. Null: any file.</param>
+/// <param name="IgnoredPaths">Build filters: a new commit whose changed files all match these doesn't deploy by itself.</param>
 public sealed record GitOptions(string Branch, string? Subdirectory, DockerfileMode DockerfileMode, string? CustomDockerfile, string? ProjectHint,
-    bool AutoDeploy, bool VercelVariables);
+    bool AutoDeploy, bool VercelVariables, string? WatchPaths = null, string? IgnoredPaths = null);
 
 /// <summary>What an encrypted snapshot holds: enough to create the container again.</summary>
 public sealed record AppSnapshot(ContainerSettings Settings, IReadOnlyList<NetworkJoin> Networks);
@@ -366,7 +370,8 @@ public sealed record ActivityItem(DateTime At, ActivityKind Kind, string Text, A
 /// <summary>One line of the dashboard's Recent deploys: which app, and what was deployed.</summary>
 /// <param name="Key">The app's container name, its key in Apps; empty when its row is gone.</param>
 /// <param name="App">The app's name, as Apps shows it.</param>
-public sealed record RecentDeploy(string Key, string App, ActivityItem Item);
+/// <param name="Skipped">A new commit that wasn't deployed (build filters, or its message): listed, but not counted as a deploy.</param>
+public sealed record RecentDeploy(string Key, string App, ActivityItem Item, bool Skipped = false);
 
 /// <summary>What the update badge of one app is worked out from.</summary>
 /// <param name="Tracked">The reference updates follow: App.ImageRef, else Config.Image when it's a tag; null: pinned.</param>

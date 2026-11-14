@@ -6,7 +6,10 @@ namespace Gitberth.Previews;
 public enum PreviewState { Building, Ready, Failed, Waiting, Stopped }
 
 /// <summary>What a preview's state is worked out from.</summary>
-/// <param name="Deploy">Its newest deploy; null before the first.</param>
+/// <param name="Deploy">
+/// Its newest deploy that wasn't skipped (<see cref="PreviewService.ListAsync"/>); null before the first. A skipped commit
+/// left the preview as it was, so it never says anything about its state.
+/// </param>
 /// <param name="Running">Its container runs.</param>
 /// <param name="Occupied">How many of the parent's previews have their place (<see cref="PreviewPlanner.Occupies"/>).</param>
 public sealed record PreviewFacts(Deployment? Deploy, bool Running, DesiredState DesiredState, string? CurrentImage, int Occupied, int Limit);
@@ -16,6 +19,8 @@ public static class PreviewStates
     /// <summary>Building while a deploy runs; Stopped when someone stopped it; Ready while it runs; Failed when its deploy failed and nothing runs; Waiting before its first deploy.</summary>
     public static (PreviewState State, string Text) Of(PreviewFacts f)
     {
+        // A skipped deploy changed nothing: the preview is as its deploy before left it.
+        if (f.Deploy is { Status: DeployStatus.Skipped }) f = f with { Deploy = null };
         if (f.Deploy is { IsActive: true } active)
             return (PreviewState.Building, active.Status switch
             {

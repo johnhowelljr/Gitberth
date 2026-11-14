@@ -14,9 +14,17 @@ namespace Gitberth.Deploy;
 /// <param name="Build">True: clone and build a new image. False: recreate the container from <paramref name="Image"/> (or the current image).</param>
 /// <param name="GitRef">Build this ref rather than the app's branch: a preview promoted to production builds its refs/pull/12/head.</param>
 /// <param name="Commit">Build exactly this commit of <paramref name="GitRef"/> (the one the promoted preview ran), not its tip.</param>
-public sealed record DeployRequest(int AppId, int DeploymentId, bool Build, string? Image = null, string? GitRef = null, string? Commit = null);
+/// <param name="NoCache">Build without the build cache: every step runs again, and the base images are pulled.</param>
+public sealed record DeployRequest(int AppId, int DeploymentId, bool Build, string? Image = null, string? GitRef = null, string? Commit = null,
+    bool NoCache = false);
 
 public sealed class DeployException(string message) : Exception(message);
+
+/// <summary>A new commit the build filters, or its message, leave alone: the deploy ends Skipped and the running version stays.</summary>
+internal sealed class DeploySkippedException(SkipVerdict verdict) : Exception(verdict.Reason)
+{
+    public SkipVerdict Verdict { get; } = verdict;
+}
 
 /// <summary>Whether a deploy can keep the app's domains' visitors on a running version throughout (<see cref="DeployPipeline.CanBridgeAsync"/>).</summary>
 /// <param name="Ok">The new version starts next to the running one, so domain visitors aren't affected.</param>
@@ -73,6 +81,22 @@ public sealed class DeployPipeline(
 
     // A variable is secret when it's marked so, or when its name or value looks it.
     private static bool Secret(EnvVar v, string value) => v.IsSecret || Masking.IsSecret(v.Key, value);
+
+    /// <summary>
+    /// Holds builds off while the build cache is cleared (<see cref="BuildCache"/>), or null when a build runs now. A deploy
+    /// that gets to its build meanwhile waits for it, as it waits for another build.
+    /// </summary>
+    public IDisposable? TryHoldBuilds() => _buildGate.Wait(0) ? new GateHold(_buildGate) : null;
+
+    private sealed class GateHold(SemaphoreSlim gate) : IDisposable
+    {
+        private int _released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0) gate.Release();
+        }
+    }
 
     /// <summary>How long a new container has to stay up before it counts as working.</summary>
     internal TimeSpan StableFor { get; set; } = TimeSpan.FromSeconds(15);
@@ -151,6 +175,9 @@ public sealed class DeployPipeline(
         using var log = new DeployLog(DeployPaths.LogFile(options, dep.Id), live, own.Where(e => e.IsSecret).Select(e => e.Value));
         var workDir = Path.Combine(options.WorkDir, $"dep-{dep.Id}");
         dep.StartedAt = DateTime.UtcNow;
+        // Without the cache only when it builds: a recreate has nothing to build.
+        dep.NoCache = request.Build && (request.NoCache || dep.NoCache);
+        SkipVerdict? skipped = null;
         try
         {
             // The repo's variables in GitHub come first; the app's own values in Gitberth win. Like on Vercel, the GitHub
@@ -172,6 +199,12 @@ public sealed class DeployPipeline(
                     log.Line($"No tmpfs at {tmpfs.Target}: the preview keeps its volume {VolumeNames.Resolve(app.Slug, volume.Source)} there, and Docker mounts one thing at a path.");
             }
             var usable = repo.Variables.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
+            // A preview never gets production's database without being told to: stopped before anything is built, since a
+            // build can run migrations.
+            if (parent is not null && preview is not null
+                && Previews.PreviewDatabases.Find(parent.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)),
+                    usable.Select(v => (v.Name, v.Value))) is { Count: > 0 } shared)
+                throw new DeployException(Previews.PreviewDatabases.Refusal(shared, parent.Name));
             var overridden = usable.Where(v => ownKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var listener = usable.Where(v => !ownKeys.Contains(v.Name) && ListenerKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var fromGitHub = usable
@@ -292,6 +325,18 @@ public sealed class DeployPipeline(
             dep.Error = "Cancelled";
             log.Step("Cancelled. The running container wasn't touched.");
         }
+        catch (DeploySkippedException skip)
+        {
+            // Nothing was built and nothing changed: the commit counts as tried (LastAttemptedCommit, saved after the
+            // clone), so the watcher doesn't start it again, and the next commit is compared with the running one.
+            skipped = skip.Verdict;
+            dep.Status = DeployStatus.Skipped;
+            dep.SkipReason = skip.Verdict.Reason;
+            log.Step($"Skipped: {LowerFirst(skip.Verdict.Reason)}.");
+            log.Line(app.CurrentCommit is { Length: >= 7 } running
+                ? $"Nothing was built, and {app.Name} keeps running {running[..7]}. Deploy it by hand to build this commit anyway."
+                : $"Nothing was built, and {app.Name} keeps running its current version. Deploy it by hand to build this commit anyway.");
+        }
         catch (DeployException ex)
         {
             dep.Status = DeployStatus.Failed;
@@ -316,9 +361,12 @@ public sealed class DeployPipeline(
         // A preview's commit that didn't make it to production: production follows its branch again, unless a newer
         // promote waits to run. Asked once this one's outcome is saved.
         if (dep.Trigger == DeployTrigger.Promote && dep.Status != DeployStatus.Succeeded) await ForgetPromotionAsync(db, dep);
-        await ReportAsync(started: false, dep);
+        await ReportAsync(started: false, dep, skipped?.Kind);
         if (dep.Status == DeployStatus.Succeeded) await PruneImagesAsync(db, app);
     }
+
+    private static string LowerFirst(string text) =>
+        text.Length > 1 && char.IsUpper(text[0]) && !char.IsUpper(text[1]) ? char.ToLowerInvariant(text[0]) + text[1..] : text;
 
     // A promote that didn't work lets production follow its branch again (RepoWatcher); when that can't be saved now, the
     // watcher does it on its next look.
@@ -393,10 +441,10 @@ public sealed class DeployPipeline(
         $"The volume {source} would be {VolumeNames.Resolve(preview.Slug, source)}, which Docker has already, so the preview isn't started: that volume holds another app's data, or a removed app's. Remove the preview: it comes back under another name with its next commit.";
 
     /// <summary>Tells the reporter (GitHub) about a deploy. Whatever goes wrong there is logged, never the deploy's problem.</summary>
-    private async Task ReportAsync(bool started, Deployment dep)
+    private async Task ReportAsync(bool started, Deployment dep, SkipKind? skip = null)
     {
         if (reporter is null) return;
-        var report = new DeployReport(dep.AppId, dep.Id, dep.Trigger, dep.CommitSha, started ? DeployStatus.Building : dep.Status, dep.Error);
+        var report = new DeployReport(dep.AppId, dep.Id, dep.Trigger, dep.CommitSha, started ? DeployStatus.Building : dep.Status, dep.Error, skip) { HookName = dep.HookName };
         using var timeout = new CancellationTokenSource(ReportTimeout);
         try
         {
@@ -441,7 +489,9 @@ public sealed class DeployPipeline(
                 .SetProperty(d => d.CommitSha, dep.CommitSha)
                 .SetProperty(d => d.CommitMessage, dep.CommitMessage)
                 .SetProperty(d => d.CommitAuthor, dep.CommitAuthor)
-                .SetProperty(d => d.ImageTag, dep.ImageTag), CancellationToken.None);
+                .SetProperty(d => d.ImageTag, dep.ImageTag)
+                .SetProperty(d => d.SkipReason, dep.SkipReason)
+                .SetProperty(d => d.NoCache, dep.NoCache), CancellationToken.None);
             await db.Apps.Where(a => a.Id == app.Id).ExecuteUpdateAsync(s => s
                 .SetProperty(a => a.CurrentImage, app.CurrentImage)
                 .SetProperty(a => a.CurrentCommit, app.CurrentCommit)
@@ -632,6 +682,8 @@ public sealed class DeployPipeline(
         // Saved now, so a restart during the build still knows which commit was being tried.
         await db.SaveChangesAsync(CancellationToken.None);
         log.Step($"Commit {commit.Sha[..7]} by {commit.Author}: {commit.Subject}");
+        // Before GitHub hears of a build: a skipped commit never gets a pending status, only the success its skip reports.
+        if (BuildFilters.CanSkip(dep.Trigger) && await SkipVerdictAsync(app, commit, srcDir, log, ct) is { } skip) throw new DeploySkippedException(skip);
         await ReportAsync(started: true, dep);
 
         var appDir = app.Subdirectory?.Trim().Trim('/') ?? "";
@@ -719,6 +771,8 @@ public sealed class DeployPipeline(
             "build", "--progress=plain", "-f", dockerfilePath, "-t", tag,
             "--label", $"gitberth.app={app.Slug}", "--label", $"gitberth.commit={commit.Sha}",
         };
+        // Every step runs again, and the base images are pulled: for a build the cache got wrong, or a base image that moved.
+        if (dep.NoCache) args.AddRange(["--no-cache", "--pull"]);
         // The port the image's app listens on: its web port.
         if ((movedPort ?? PortRules.WebOf(app.Ports)?.ContainerPort) is int published)
             args.AddRange(["--label", $"{ImageLabels.Port}={published}"]);
@@ -734,18 +788,30 @@ public sealed class DeployPipeline(
         try
         {
             await SetStatusAsync(db, dep, DeployStatus.Building);
-            log.Step($"Building {tag}");
+            log.Step(dep.NoCache ? $"Building {tag} without the build cache: every step runs again, and the base images are pulled" : $"Building {tag}");
             // A build can't join Gitberth's network, so it runs on the host's network with every container on Gitberth's
             // network added by name: the build reaches the same database or API the app uses when it runs.
             var hosts = await docker.NetworkHostsAsync(CancellationToken.None);
             if (hosts.Count > 0) log.Line("Reachable by name while building: " + string.Join(", ", hosts.Select(h => h.Host)));
             List<string> reach = ["--network", "host", .. hosts.SelectMany(h => new[] { "--add-host", $"{h.Host}:{h.Ip}" })];
-            var result = await docker.RunAsync([.. args, .. reach, context], new ProcessOptions { Environment = processEnv, OnLine = log.Line, MaxCapture = 16 * 1024 }, ct);
+            var reachable = true;
+            Task<ProcessResult> Build() => docker.RunAsync(reachable ? [.. args, .. reach, context] : [.. args, context],
+                new ProcessOptions { Environment = processEnv, OnLine = log.Line, MaxCapture = 16 * 1024 }, ct);
+            var result = await Build();
             // "granting entitlement network.host is not allowed": a Docker host set up to refuse it.
             if (!result.Ok && (result.StdOut + result.StdErr).Contains("entitlement network.host", StringComparison.Ordinal))
             {
                 log.Step("This Docker host doesn't let builds use its network, so the build can't reach the other containers. Building without them…");
-                result = await docker.RunAsync([.. args, context], new ProcessOptions { Environment = processEnv, OnLine = log.Line, MaxCapture = 16 * 1024 }, ct);
+                reachable = false;
+                result = await Build();
+            }
+            // --pull asks a registry for every base image, and one only this host has (built or loaded here) is in none: it's
+            // built again with the host's copy, still without the cache.
+            if (!result.Ok && dep.NoCache && BasePullFailed(result.StdOut + result.StdErr))
+            {
+                log.Step("A base image is only on this host, not in a registry, so it's built again without pulling the base images…");
+                args.Remove("--pull");
+                result = await Build();
             }
             if (!result.Ok)
                 throw new DeployException(result.ExitCode == -1 ? result.ErrorText : "The image build failed; the log above shows why. The running container wasn't touched.");
@@ -756,6 +822,71 @@ public sealed class DeployPipeline(
         }
         return new Prepared(tag, movedPort, detectedPort, traits);
     }
+
+    /// <summary>
+    /// Whether a new commit is left alone (<see cref="BuildFilters"/>): its message asks not to be deployed, or none of the
+    /// files it changed since the commit the app runs is one the app's build filters watch. Null: it's built. When the
+    /// filters can't tell (nothing ran yet, the running commit can't be fetched, git can't compare them) or there's no
+    /// image to keep running, it's built, and the log says why. Without filters only the message is read, and nothing
+    /// more is fetched.
+    /// </summary>
+    private async Task<SkipVerdict?> SkipVerdictAsync(AppDefinition app, CommitInfo commit, string srcDir, DeployLog log, CancellationToken ct)
+    {
+        var asked = BuildFilters.ForMessage(commit.FullMessage);
+        var filtered = BuildFilters.Any(app.WatchPaths, app.IgnoredPaths);
+        if (asked is null && !filtered) return null;
+        // A skip keeps the running version: without one, the commit is built whatever it says.
+        var why = asked is not null ? $"The commit message says {BuildFilters.MarkerIn(commit.FullMessage)}, but" : "The build filters can't skip it:";
+        if (app.CurrentImage is not { } image)
+        {
+            log.Line($"{why} nothing runs yet, so it's built.");
+            return null;
+        }
+        if (!await docker.ImageExistsAsync(image, CancellationToken.None))
+        {
+            log.Line($"{why} the running version's image {image} is gone, so it's built.");
+            return null;
+        }
+        if (asked is not null) return asked;
+
+        // The files that changed since the commit that runs, so changes add up across skipped commits.
+        if (app.CurrentCommit is not { } running)
+        {
+            log.Line("The build filters can't tell what changed: no commit has run yet. Building it.");
+            return null;
+        }
+        IReadOnlyList<string> changed;
+        try
+        {
+            var repo = new GitHubRepoRef(app.Owner, app.Repo);
+            if (!string.Equals(running, commit.Sha, StringComparison.OrdinalIgnoreCase)) await git.FetchCommitAsync(repo, running, srcDir, ct);
+            changed = await git.ChangedFilesAsync(srcDir, running, ct);
+        }
+        catch (GitException ex)
+        {
+            log.Line($"The build filters can't tell what changed since {Short(running)}, the commit that runs ({ex.Message.TrimEnd('.')}). Building it.");
+            return null;
+        }
+        if (BuildFilters.Relevant(changed, app.WatchPaths, app.IgnoredPaths) is { } watched)
+        {
+            var more = changed.Count - 1;
+            log.Line($"The build filters let it through: {watched} changed since {Short(running)}{(more > 0 ? $", with {more} more file{(more == 1 ? "" : "s")}" : "")}.");
+            return null;
+        }
+        return BuildFilters.ForChanges(changed, app.WatchPaths, app.IgnoredPaths);
+    }
+
+    private static string Short(string sha) => sha.Length > 7 ? sha[..7] : sha;
+
+    /// <summary>
+    /// Whether a build failed because BuildKit couldn't find a base image in its registry ("failed to resolve source
+    /// metadata for docker.io/library/base:1: pull access denied…" or "…: not found"), as --pull makes it look for one only
+    /// this host has.
+    /// </summary>
+    internal static bool BasePullFailed(string output) =>
+        output.Contains("failed to resolve source metadata", StringComparison.OrdinalIgnoreCase)
+        && (output.Contains("pull access denied", StringComparison.OrdinalIgnoreCase) || output.Contains("not found", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("repository does not exist", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>What hands a build its values: docker build's arguments, and the environment the docker CLI reads values from.</summary>
     /// <param name="SetBeforeFrom">The repo's GitHub values left out because the Dockerfile sets them before its first FROM.</param>

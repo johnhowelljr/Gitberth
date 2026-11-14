@@ -224,7 +224,8 @@ public static class GitAppSettings
     }
 
     public static GitOptions ToGit(AppDefinition app) =>
-        new(app.Branch, app.Subdirectory, app.DockerfileMode, app.CustomDockerfile, app.ProjectHint, app.AutoDeploy, app.VercelVariables);
+        new(app.Branch, app.Subdirectory, app.DockerfileMode, app.CustomDockerfile, app.ProjectHint, app.AutoDeploy, app.VercelVariables,
+            Deploy.BuildFilters.Normalize(app.WatchPaths), Deploy.BuildFilters.Normalize(app.IgnoredPaths));
 
     public static AppOptions ToOptions(AppDefinition app, HealthSettings health, RestartSchedules restarts) => new()
     {
@@ -332,6 +333,9 @@ public static class GitAppSettings
         app.ProjectHint = string.IsNullOrWhiteSpace(git.ProjectHint) ? null : git.ProjectHint;
         app.AutoDeploy = git.AutoDeploy;
         app.VercelVariables = git.VercelVariables;
+        // Build filters only decide whether a new commit deploys by itself: nothing that runs or builds changes with them.
+        app.WatchPaths = Deploy.BuildFilters.Normalize(git.WatchPaths);
+        app.IgnoredPaths = Deploy.BuildFilters.Normalize(git.IgnoredPaths);
     }
 
     /// <summary>
