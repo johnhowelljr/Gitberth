@@ -14,6 +14,7 @@
 @inject NetworkService Networks
 @inject DomainService DomainService
 @inject Gitberth.Previews.PreviewService Previews
+@inject DatabaseService Dbs
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -97,7 +98,16 @@ else
             @ApplySection()
             break;
         case "logs":
-            <ContainerLogs @key="app.Container" ContainerName="@app.Container" />
+            @if (ComposeServices is { Count: > 1 } services)
+            {
+                @* A Compose app's services each have their own log: the web service's first. *@
+                <div class="gb-row gb-row--wrap" style="margin-bottom:12px;gap:10px">
+                    <span class="gb-t3" style="font-size:13px">Service</span>
+                    <Seg T="string" Options="@(services.Select(s => new SegOption<string>(s, s == view.Row?.WebService ? $"{s} (web)" : s)).ToList())"
+                         Value="LogService" ValueChanged="ShowServiceLog" Label="Service" />
+                </div>
+            }
+            <ContainerLogs @key="LogContainer" ContainerName="@LogContainer" />
             break;
         case "activity":
             <AppActivityTab View="view" Changed="ReloadAsync" />
@@ -114,6 +124,23 @@ else
 
     [Parameter] public string Key { get; set; } = "";
     [Parameter] public string? Tab { get; set; }
+    /// <summary>A Compose app's service whose log the Logs tab shows (?service=worker); its web service's when none is given.</summary>
+    [SupplyParameterFromQuery(Name = "service")] public string? Service { get; set; }
+
+    // A Compose app's services, as its current release runs them, the web service first; empty for any other app.
+    private IReadOnlyList<string> ComposeServices => view?.Row is { IsCompose: true } row
+        ? Gitberth.Deploy.DeployPipeline.ParseImages(view.Git?.Deployments.FirstOrDefault(d => d.Status == DeployStatus.Succeeded)?.Images).Keys
+            .OrderBy(s => s == row.WebService ? 0 : 1).ThenBy(s => s, StringComparer.Ordinal).ToList()
+        : [];
+
+    private string LogService => Service is { } s && ComposeServices.Contains(s) ? s : view?.Row?.WebService ?? "";
+
+    private void ShowServiceLog(string service) => Nav.NavigateTo($"{BaseHref}/logs?service={Uri.EscapeDataString(service)}");
+
+    // The container whose log shows: the app's own, or the chosen service's.
+    private string LogContainer => view?.Row is { IsCompose: true } row && LogService.Length > 0 && LogService != row.WebService
+        ? Gitberth.Compose.ComposeNames.Member(row.Slug, LogService)
+        : view?.Summary.Container ?? Key;
 
     private AppView? view;
     private SettingsView? settings;
@@ -255,7 +282,7 @@ else
             }
             else if (next?.Row is not { IsPreview: true }) (previewOf, previewOfFor) = (null, null);
             whyNotStart = next is { Summary.Running: false } ? await Changer.WhyNotStartAsync(next.Summary.Container) : null;
-            if (next is { Summary: { State: AppState.Missing, Source: AppSource.Git }, Row: { } row })
+            if (next is { Summary.State: AppState.Missing, Row: { Deployed: true } row })
             {
                 if (lastImage?.Image != row.CurrentImage || lastImage is null) lastImage = (row.CurrentImage, await Actions.HasLastImageAsync(row));
             }
@@ -277,7 +304,7 @@ else
     /// </summary>
     private async Task LoadUpdateAsync(bool force = false)
     {
-        if (view is not { } v || v.Summary.Source == AppSource.Git || v.Summary.Role == ContainerRole.Self)
+        if (view is not { } v || v.Summary.Source == AppSource.Git || v.Row?.Deployed == true || v.Summary.Role == ContainerRole.Self)
         {
             (update, updateFor) = (null, null);
             return;
@@ -360,6 +387,24 @@ else
                     }
                 </span>
             }
+            @if (r.ComposeFile is { } composeFile)
+            {
+                <span class="gb-tag gb-tag--outline" title="Deployed with Compose: its services are one app"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @composeFile</span>
+            }
+        }
+        else if (view?.Row is { Source: AppSource.Compose } inline)
+        {
+            <span><SvgIcon Icon="@Icons.Material.Outlined.Description" />A Compose file Gitberth keeps</span>
+            @if (inline.TemplateId is { } template)
+            {
+                <a class="gb-tag gb-tag--outline" href="@($"apps/new?template={Uri.EscapeDataString(template)}")" title="Installed from this template: its page has its notes and links">
+                    <SvgIcon Icon="@Icons.Material.Outlined.AutoAwesomeMosaic" />Template: @(Gitberth.Templates.TemplateCatalog.Bundled.Find(template)?.Name ?? template)
+                </a>
+            }
+            @if (LastDeployedAt is { } at)
+            {
+                <span><SvgIcon Icon="@Icons.Material.Outlined.RocketLaunch" />Deployed @Format.Ago(at)</span>
+            }
         }
         else
         {
@@ -374,7 +419,7 @@ else
         {
             <span title="The container's name"><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" /><span class="gb-mono">@app.Container</span></span>
         }
-        @if (view?.Details?.Labels.GetValueOrDefault("com.docker.compose.project") is { } project)
+        @if (view?.Row?.IsCompose != true && view?.Details?.Labels.GetValueOrDefault("com.docker.compose.project") is { } project)
         {
             <span class="gb-tag gb-tag--outline"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @project</span>
         }
@@ -391,6 +436,11 @@ else
     private static bool BuiltHere(AppSummary app) => AppOverviewTab.BuiltHere(app);
 
     private string? LastCommitMessage => view?.Git?.Deployments.FirstOrDefault(d => d.Status == DeployStatus.Succeeded)?.CommitMessage;
+
+    private DateTime? LastDeployedAt => view?.Git?.Deployments.FirstOrDefault(d => d.Status == DeployStatus.Succeeded)?.FinishedAt;
+
+    // Gitberth deploys it (a Git app, or an inline Compose app): Deploy, the deploy history and the pending banner are its.
+    private bool Deployed => view?.Row?.Deployed == true;
 
     private RenderFragment HeroAddresses(AppSummary app)
     {
@@ -455,7 +505,7 @@ else
         {
             <Btn Kind="BtnKind.Primary" Href="@($"{BaseHref}/logs")" Icon="@Icons.Material.Outlined.Article">Logs</Btn>
         }
-        @if (app.Source == AppSource.Git && view?.Row is not null)
+        @if (Deployed)
         {
             <Btn Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="DeployAsync" Busy="busy" Disabled="@(app.State == AppState.Deploying)">Deploy</Btn>
         }
@@ -484,7 +534,7 @@ else
                 <button type="button" class="gb-btn gb-btn--icon" aria-label="More actions" title="More" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
             </ActivatorContent>
             <ChildContent>
-                @if (app.Source == AppSource.Git && view?.Row is not null)
+                @if (Deployed)
                 {
                     @* For a build the cache got wrong, or a base image that moved: every step runs again. *@
                     <MudMenuItem Icon="@Icons.Material.Outlined.LayersClear" OnClick="DeployWithoutCacheAsync" Disabled="@(busy || app.State == AppState.Deploying)">Deploy without the build cache</MudMenuItem>
@@ -494,7 +544,7 @@ else
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Href="@($"{BaseHref}/settings#sec-general")">Rename…</MudMenuItem>
                 }
-                @if (app.Source != AppSource.Git && app.Role != ContainerRole.Self)
+                @if (app.Source != AppSource.Git && !Deployed && app.Role != ContainerRole.Self)
                 {
                     <MudMenuItem Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()">@(BuiltHere(app) ? "Check for a newer build" : "Check for update")</MudMenuItem>
                     @if (update?.Previous is { } previous)
@@ -605,7 +655,7 @@ else
                 </Actions>
             </Banner>
         }
-        @if (view?.Row is { } row && app.Source == AppSource.Git && (row.ConfigChangePending || row.RebuildPending) && app.State != AppState.Deploying)
+        @if (view?.Row is { Deployed: true } row && (row.ConfigChangePending || row.RebuildPending) && app.State != AppState.Deploying)
         {
             <Banner Tone="info" Icon="@Icons.Material.Outlined.Sync" Title="Saved, not live yet">
                 <ChildContent>@(row.RebuildPending ? "Some saved changes only take effect after a new build." : $"{app.Title} still runs with its old settings.")</ChildContent>
@@ -637,7 +687,7 @@ else
         else if (app.State is AppState.Missing or AppState.NotCreated)
         {
             var missing = app.State == AppState.Missing;
-            var git = app.Source == AppSource.Git;
+            var git = app.Source == AppSource.Git || Deployed;
             <Banner Tone="@(missing ? "critical" : "info")" Title="@(missing ? "Its container is gone" : git ? "Not deployed yet" : "Not created yet")">
                 <ChildContent>@MissingLine(app, lastImage?.There == true, view?.Row?.Branch)</ChildContent>
                 <Actions>
@@ -665,7 +715,7 @@ else
 
     // A record with no container of its own (gone, never made, or renamed outside Gitberth) can be forgotten. A Git app is
     // deleted instead, with its builds.
-    private bool CanForget => view is { Row: not null } v && v.Summary.Source != AppSource.Git
+    private bool CanForget => view is { Row: { Deployed: false } } v && v.Summary.Source != AppSource.Git
         && (v.Summary.State is AppState.Missing or AppState.NotCreated || v.Summary.State == AppState.Renamed);
 
     /// <summary>
@@ -676,6 +726,9 @@ else
     {
         (AppState.Missing, AppSource.Git) when lastImage => "Gitberth still has its settings and its last image. Start makes its container again from that image, without a build.",
         (AppState.Missing, AppSource.Git) => $"Gitberth still has its settings, but its last image isn't on this host any more. Start builds it again from {(branch is { Length: > 0 } b ? b : "its branch")} and deploys it.",
+        (AppState.Missing, AppSource.Compose) when lastImage => "Gitberth still has its Compose file and its last release. Start brings its services up again from that release.",
+        (AppState.Missing, AppSource.Compose) => "Gitberth still has its Compose file. Start deploys it again.",
+        (_, AppSource.Compose) => "Start it to deploy it.",
         (AppState.Missing, AppSource.Existing) => $"{app.Container} was removed outside Gitberth. Gitberth kept its record (its name, ports and domains); forget it if it's gone for good.",
         (AppState.Missing, _) => "Gitberth still has its settings. Create it again makes the container from them; Forget drops the record.",
         (_, AppSource.Git) => "Start it to deploy it.",
@@ -690,8 +743,22 @@ else
         var domains = row.Domains.OrderBy(d => d.Id).Select(d => d.Hostname).ToList();
         var what = domains.Count == 0 ? "its settings and saved ports"
             : $"its settings, saved ports and {(domains.Count == 1 ? $"its domain {domains[0]}" : $"its {domains.Count} domains ({string.Join(", ", domains)})")}, which leave the tunnel";
+        // Its databases go with its record, their data kept (a Redis's container goes, rather than run on with no app).
+        IReadOnlyList<ManagedDatabase> databases;
+        try
+        {
+            databases = await Dbs.RowsAsync(row.Id);
+        }
+        catch (Exception)
+        {
+            databases = [];
+        }
+        var touched = databases.Count == 0 ? "No container, volume or image is touched" : "Its container, volumes and image aren't touched";
+        var letGo = databases.Count == 0 ? ""
+            : $" Gitberth lets go of its databases ({string.Join(", ", databases.Select(DatabaseService.From))}), their data kept"
+              + (databases.Any(d => d.Kind == DatabaseKind.Redis) ? ": its Redis's container goes, and its data stays in its volume." : ".");
         var confirmed = await Dialogs.ShowMessageBoxAsync($"Forget {app.Title}?",
-            $"Gitberth deletes its record: {what}. No container, volume or image is touched{(app.RenamedTo is { } other ? $", and {other} carries on as an app of its own" : "")}.",
+            $"Gitberth deletes its record: {what}. {touched}{(app.RenamedTo is { } other ? $", and {other} carries on as an app of its own" : "")}.{letGo}",
             yesText: "Forget it", cancelText: "Cancel");
         if (confirmed != true) return;
         busy = true;
@@ -1079,6 +1146,19 @@ else
         if (await dialog.Result is { Canceled: false, Data: true }) Nav.NavigateTo($"{BaseHref}/network");
     }
 
+    // The app's databases (Settings › Databases), as the delete dialogs list them.
+    private async Task<IReadOnlyList<string>> DatabasesOfAsync(int appId)
+    {
+        try
+        {
+            return (await Dbs.RowsAsync(appId)).Select(DatabaseService.From).ToList();
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
+
     // Remove: a Git app's delete (its images and volumes are a choice); any other app's container, its volumes a choice
     // too, with the name typed in since they may hold a database.
     private async Task RemoveAsync()
@@ -1093,8 +1173,10 @@ else
         // A preview goes as its Previews tab removes it: everything of its own, noted on its parent's Activity.
         if (previewOf is { } of && view.Row is { IsPreview: true } previewRow)
         {
+            var own = await DatabasesOfAsync(previewRow.Id);
             var confirmed = await Dialogs.ShowMessageBoxAsync($"Remove the preview of {of.Label}?",
-                $"Its container, images and volumes go{(previewRow.Domains.Count > 0 ? $", and {string.Join(", ", previewRow.Domains.Select(d => d.Hostname))} leaves the tunnel" : "")}. "
+                $"Its container, images and volumes go{(own.Count > 0 ? ", and its own databases with their data" : "")}"
+                + $"{(previewRow.Domains.Count > 0 ? $", and {string.Join(", ", previewRow.Domains.Select(d => d.Hostname))} leaves the tunnel" : "")}. "
                 + $"A new commit on {(of.Info.Kind == PreviewKind.PullRequest ? "the pull request" : "the branch")} makes it again.",
                 yesText: "Remove", cancelText: "Cancel");
             if (confirmed != true) return;
@@ -1115,7 +1197,7 @@ else
             }
             return;
         }
-        if (app.Source == AppSource.Git && view.Row is { } row)
+        if (view.Row is { Deployed: true } row)
         {
             // With domains off, their routes stay in the tunnel until domains are on again: the dialog says which.
             var domainsOn = row.Domains.Count > 0 && await DomainService.EnabledAsync();
@@ -1124,12 +1206,14 @@ else
                 { d => d.AppName, app.Title },
                 { d => d.Domains, row.Domains.OrderBy(d => d.Id).Select(d => d.Hostname).ToList() },
                 { d => d.DomainsEnabled, domainsOn },
+                { d => d.Databases, await DatabasesOfAsync(row.Id) },
+                { d => d.Compose, row.IsCompose },
             });
             if (await dialog.Result is not { Canceled: false, Data: DeleteAppDialog.Choice choice }) return;
             busy = true;
             try
             {
-                var report = await Actions.DeleteAsync(row.Id, choice.RemoveImages, choice.RemoveVolumes);
+                var report = await Actions.DeleteAsync(row.Id, choice.RemoveImages, choice.RemoveVolumes, choice.RemoveDatabases);
                 Snackbar.Add(report.Notes.Any(n => n.Problem) ? $"Deleted {app.Title}. Its domains couldn't all be taken out of the tunnel yet." : $"Deleted {app.Title}.",
                     report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
                 Nav.NavigateTo("apps");
@@ -1151,6 +1235,7 @@ else
             { d => d.Container, app.Container },
             { d => d.Volumes, volumes },
             { d => d.Warnings, await Actions.RemoveWarningsAsync(app.Key, new RemoveOptions(false, false)) },
+            { d => d.Databases, app.AppId is int appId ? await DatabasesOfAsync(appId) : [] },
         };
         var confirm = await Dialogs.ShowAsync<RemoveAppDialog>(null, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
         if (await confirm.Result is not { Canceled: false, Data: RemoveOptions options }) return;

@@ -1,6 +1,7 @@
 @inject DomainService Domains
 @inject AppService Apps
 @inject AppCatalog Catalog
+@inject Gitberth.Uptime.UptimeSettings Uptime
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
 
@@ -75,17 +76,26 @@
                                 }
                             </div>
                         </div>
-                        <span class="gb-pill2 @(d.Working ? "gb-tone-good" : "gb-tone-warn")">
-                            @if (d.Working)
-                            {
-                                <i class="gb-st-dot gb-st-dot--running"></i>
-                            }
-                            else
-                            {
-                                <SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />
-                            }
-                            @(d.Working ? "Live" : "Not working")
-                        </span>
+                        @if (d.DownPage)
+                        {
+                            <span class="gb-pill2 gb-tone-info" title="Visitors get Gitberth's down page instead of Cloudflare's error">
+                                <SvgIcon Icon="@Icons.Material.Outlined.WebAssetOff" />Down page
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="gb-pill2 @(d.Working ? "gb-tone-good" : "gb-tone-warn")">
+                                @if (d.Working)
+                                {
+                                    <i class="gb-st-dot gb-st-dot--running"></i>
+                                }
+                                else
+                                {
+                                    <SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />
+                                }
+                                @(d.Working ? "Live" : "Not working")
+                            </span>
+                        }
                         <div class="gb-drow-acts d-acts">
                             @if (d.Fix == DomainFix.Sync)
                             {
@@ -109,6 +119,8 @@
                             {
                                 <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeMainAsync(d.Hostname)" Disabled="busy">Make main<span class="gb-sr">: @d.Hostname</span></Btn>
                             }
+                            <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.WebAssetOff" Href="@($"down-page/preview?host={Uri.EscapeDataString(d.Hostname)}")" Target="_blank"
+                                 Label="@($"Preview the down page of {d.Hostname}")" />
                             <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.OpenInNew" Href="@($"https://{d.Hostname}/")" Target="_blank" Label="@($"Open {d.Hostname}")" />
                             <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveAsync(d.Hostname)" Disabled="busy" Label="@($"Remove {d.Hostname}")" />
                         </div>
@@ -125,6 +137,22 @@
                     <a href="settings#protection">Settings › Domains › Protection</a>.@(overview.ProtectionProblem is { } why ? $" Not available yet: {why}" : "")
                 </p>
             </div>
+            @if (AppId is not null)
+            {
+                @* The app's down page: on by default, saved on its own (outside the app's other settings). *@
+                <div class="gb-card-body gb-downset">
+                    <SwitchRow @key="@($"dp{downKey}")" Title="Down page" Value="downPage" ValueChanged="SetDownPageAsync" Disabled="savingDown"
+                               Sub="@($"While {AppName} can't be served (stopped, its container down, a deploy replacing it, or its protection not applied yet), its domains show a plain \"temporarily unavailable\" page instead of Cloudflare's error. A protected domain's shows only its name.")" />
+                    @if (downPage)
+                    {
+                        <div class="gb-downset-msg">
+                            <input class="gb-input gb-input--sm" id="down-message" maxlength="280" placeholder="A message for visitors (optional), like: Back by 9:00 UTC."
+                                   aria-label="Down page message" value="@downMessage" @oninput="e => downMessage = e.Value?.ToString()" disabled="@savingDown" />
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Secondary" OnClick="SaveMessageAsync" Disabled="@(savingDown || (downMessage ?? "").Trim() == (savedMessage ?? ""))">Save message</Btn>
+                        </div>
+                    }
+                </div>
+            }
         }
         @if (notes.Count > 0)
         {
@@ -193,6 +221,11 @@
     private bool needsHost;
     private int? previewPort;
     private string previewFor = "";
+    // The app's down page, as saved.
+    private bool downPage = true;
+    private string? downMessage, savedMessage;
+    private bool savingDown;
+    private int downKey;
 
     // Adding a domain publishes the web port on the host only first: it's Internal, and cloudflared reaches apps by host port.
     private bool PublishFirst => web is { Access: PortAccess.Internal } && (needsHost || overview?.Tunnel is { HostNetwork: true });
@@ -226,6 +259,7 @@
             var loaded = await Domains.GetOverviewAsync(appId);
             if (appId != AppId) return;
             overview = loaded;
+            if (await Uptime.OfAsync(appId) is { } saved) (downPage, downMessage, savedMessage) = (saved.DownPage, saved.Message, saved.Message);
             await OnLoaded.InvokeAsync(loaded);
         }
         catch (Exception ex)
@@ -355,6 +389,49 @@
     }
 
     private Task FixAsync() => RunAsync(async () => await Domains.SyncAsync());
+
+    private async Task SetDownPageAsync(bool on)
+    {
+        if (AppId is not int appId) return;
+        savingDown = true;
+        try
+        {
+            if (await Uptime.SetDownPageAsync(appId, on, savedMessage) is { } error)
+            {
+                Snackbar.Add(error, Severity.Error);
+                downKey++;
+                return;
+            }
+            downPage = on;
+            Snackbar.Add(on ? $"The down page is on: {AppName}'s domains show it while it can't be served." : $"The down page is off: {AppName}'s domains show Cloudflare's error page while it can't be served.", Severity.Success);
+        }
+        finally
+        {
+            savingDown = false;
+        }
+        await LoadAsync();
+    }
+
+    private async Task SaveMessageAsync()
+    {
+        if (AppId is not int appId) return;
+        savingDown = true;
+        try
+        {
+            if (await Uptime.SetDownPageAsync(appId, downPage, downMessage) is { } error)
+            {
+                Snackbar.Add(error, Severity.Error);
+                return;
+            }
+            savedMessage = string.IsNullOrWhiteSpace(downMessage) ? null : downMessage.Trim();
+            downMessage = savedMessage;
+            Snackbar.Add(savedMessage is null ? "The down page has no message of yours now." : "Saved the down page's message.", Severity.Success);
+        }
+        finally
+        {
+            savingDown = false;
+        }
+    }
 
     // The switch's tooltip: what it does, or why it can't be turned on yet.
     private string ProtectTitle(DomainState d) =>

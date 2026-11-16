@@ -17,8 +17,9 @@ namespace Gitberth.Apps;
 /// back, rolled back, kept, on a stopped container too), the row is synced to whatever holds the name then.
 /// </summary>
 /// <param name="changer">The change engine, whose ends it follows; without it (in tests) only starts are followed.</param>
+/// <param name="audit">Where a recreate made outside Gitberth is recorded, as Docker's; none in older tests.</param>
 public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, IDbContextFactory<GitberthDb> dbFactory, IChangeJournal journal,
-    NetworkService network, ActivityLog activity, ILogger<AppSync> logger, PortChanger? changer = null) : BackgroundService
+    NetworkService network, ActivityLog activity, ILogger<AppSync> logger, PortChanger? changer = null, Audit.AuditLog? audit = null) : BackgroundService
 {
     // One look per container at a time: the starts of a restart loop don't pile up.
     private readonly ConcurrentDictionary<string, byte> _looking = new(StringComparer.Ordinal);
@@ -26,6 +27,8 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Docker));
         _stopping = stoppingToken;
         events.Started += OnStarted;
         if (changer is not null) changer.Ended += OnEnded;
@@ -46,6 +49,7 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
     // Off the change's thread, which goes on at once.
     private void OnEnded(ContainerChange change) => _ = Task.Run(async () =>
     {
+        using var actor = Audit.AuditScope.Begin(Audit.AuditActor.System(Audit.AuditVia.Docker));
         try
         {
             await EndedAsync(change, _stopping);
@@ -83,7 +87,7 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
         var slug = container.StartsWith("gb-", StringComparison.Ordinal) ? container["gb-".Length..] : null;
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         return await db.Apps.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.Source != AppSource.Git && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
+            .FirstOrDefaultAsync(a => a.Source != AppSource.Git && a.Source != AppSource.Compose && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
     }
 
     // Off the event loop, which goes on to the next event at once.
@@ -92,6 +96,7 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
         if (!_looking.TryAdd(container, 0)) return;
         _ = Task.Run(async () =>
         {
+            using var actor = Audit.AuditScope.Begin(Audit.AuditActor.System(Audit.AuditVia.Docker));
             try
             {
                 await SeenAsync(container, _stopping);
@@ -120,7 +125,7 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
         AppDefinition? row;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
             row = await db.Apps.AsNoTracking()
-                .FirstOrDefaultAsync(a => a.Source != AppSource.Git && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
+                .FirstOrDefaultAsync(a => a.Source != AppSource.Git && a.Source != AppSource.Compose && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
         if (row is null) return false;
         var id = ContainerPorts.Str(await network.InspectAsync(container, ct), "Id");
         if (id.Length == 0 || id == row.ContainerId) return false;
@@ -133,6 +138,12 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
             logger.LogInformation("{Container} was recreated outside Gitberth; its ports and settings were read again", container);
             await activity.AddAsync(container, row.Id, ActivityKind.RecreatedOutside, "Recreated outside Gitberth: its ports and settings were read again.",
                 ActivityTone.Warning, ct);
+            audit?.Record(new Audit.AuditEntry("docker.container.recreated",
+                $"Recreated outside Gitberth: {row.Name} runs in a new container, and its ports and settings were read again.")
+            {
+                Actor = Audit.AuditActor.Outside, AppId = row.Id, AppName = row.Name, Container = container,
+                Changes = [new("Container ID", row.ContainerId is { Length: >= 12 } was ? was[..12] : row.ContainerId, id.Length >= 12 ? id[..12] : id)],
+            });
         }
         return true;
     }

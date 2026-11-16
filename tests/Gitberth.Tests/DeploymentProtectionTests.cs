@@ -477,14 +477,19 @@ public sealed class DeploymentProtectionTests : IDisposable
         catch (IOException) { }
     }
 
-    /// <summary>A docker that lists a running cloudflared on the host's network (run with a tunnel token) and the app's container.</summary>
-    private static string WriteFakeDocker(string dir)
+    /// <summary>
+    /// A docker that lists a running cloudflared on the host's network (run with a tunnel token) and the app's container,
+    /// running unless <paramref name="webRunning"/> says it's stopped. Written again, it changes what the same docker says.
+    /// </summary>
+    private static string WriteFakeDocker(string dir, bool webRunning = true)
     {
         var token = Convert.ToBase64String(Encoding.UTF8.GetBytes($$"""{"a":"{{AccountId}}","t":"{{TunnelId}}","s":"c2VjcmV0"}"""));
         string[] ps =
         [
             """{"Names":"tunnel","State":"running","Status":"Up 1 hour","Image":"cloudflare/cloudflared:latest","Ports":"","Labels":"","Command":"cloudflared tunnel run"}""",
-            """{"Names":"gb-web","State":"running","Status":"Up 1 hour","Image":"gitberth/web:1","Ports":"0.0.0.0:3001->3000/tcp","Labels":"gitberth.managed=true","Command":"node server.js"}""",
+            webRunning
+                ? """{"Names":"gb-web","State":"running","Status":"Up 1 hour","Image":"gitberth/web:1","Ports":"0.0.0.0:3001->3000/tcp","Labels":"gitberth.managed=true","Command":"node server.js"}"""
+                : """{"Names":"gb-web","State":"exited","Status":"Exited (0) 1 minute ago","Image":"gitberth/web:1","Ports":"","Labels":"gitberth.managed=true","Command":"node server.js"}""",
         ];
         var inspect = """[{"Id":"t1","Name":"/tunnel","Args":["tunnel","run","--token","TOKEN"],"Config":{"Cmd":["tunnel","run","--token","TOKEN"],"Env":[]},"HostConfig":{"NetworkMode":"host"},"NetworkSettings":{"Networks":{"host":{}}}}]"""
             .Replace("TOKEN", token, StringComparison.Ordinal);
@@ -540,6 +545,20 @@ public sealed class DeploymentProtectionTests : IDisposable
 
     private JsonObject RuleFor(string hostname) => _cloudflare.Ingress.OfType<JsonObject>().Single(r => r["hostname"]?.GetValue<string>() == hostname && r["path"] is null);
 
+    /// <summary>
+    /// Held back: the domain's only rule in the tunnel shows Gitberth's down page, without an Access check (there's none
+    /// to apply), so it reveals nothing of the app and is never served open.
+    /// </summary>
+    private void AssertHeldOnTheDownPage()
+    {
+        var rules = _cloudflare.Ingress.OfType<JsonObject>().Where(r => r["hostname"]?.GetValue<string>() == Hostname).ToList();
+        var rule = Assert.Single(rules);
+        Assert.Equal(Gitberth.Public.MarkerHosts.Down(Domain().Id), TunnelRoutes.HostHeaderOf(rule));
+        Assert.NotEqual("http://localhost:3001", rule["service"]!.GetValue<string>());
+        Assert.Null(rule["originRequest"]!["access"]);
+        Assert.False(TunnelRoutes.ServesWithoutAccess(_cloudflare.Ingress, Hostname));
+    }
+
     [Fact]
     public async Task Nothing_asks_access_while_no_domain_is_protected()
     {
@@ -593,13 +612,13 @@ public sealed class DeploymentProtectionTests : IDisposable
     }
 
     [Fact]
-    public async Task A_protected_domain_nobody_may_sign_in_to_is_not_served_at_all()
+    public async Task A_protected_domain_nobody_may_sign_in_to_shows_only_its_down_page()
     {
         Protect();
 
         var report = await _domains.SyncAsync();
 
-        Assert.DoesNotContain(_cloudflare.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == Hostname);
+        AssertHeldOnTheDownPage();
         Assert.Contains(report.Notes, n => n.Problem && n.Hostname == Hostname && n.Text.Contains("nobody is allowed in yet", StringComparison.Ordinal));
         Assert.Empty(_cloudflare.Apps);
         // That waits for someone to be let in: it isn't asked again every 15 minutes.
@@ -617,7 +636,7 @@ public sealed class DeploymentProtectionTests : IDisposable
 
         var report = await _domains.SyncAsync();
 
-        Assert.DoesNotContain(_cloudflare.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == Hostname);
+        AssertHeldOnTheDownPage();
         Assert.Contains(report.Notes, n => n.Problem && n.Text.Contains("Zero Trust isn't set up", StringComparison.Ordinal));
         Assert.DoesNotContain(report.Notes, n => n.Text.Contains("tries again", StringComparison.Ordinal));
         // Setting Zero Trust up is the owner's to do: Cloudflare isn't asked again every 15 minutes meanwhile.
@@ -759,10 +778,10 @@ public sealed class DeploymentProtectionTests : IDisposable
 
         var report = await _domains.SyncAsync();
 
-        // Out of the tunnel rather than open, and the note says it's tried again.
-        Assert.DoesNotContain(_cloudflare.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == Hostname);
+        // Only its down page rather than open, and the note says it's tried again.
+        AssertHeldOnTheDownPage();
         var note = Assert.Single(report.Notes, n => n.Problem && n.Hostname == Hostname);
-        Assert.StartsWith("app.example.com isn't served: it's protected, and ", note.Text);
+        Assert.StartsWith("app.example.com shows only Gitberth's down page: it's protected, and ", note.Text);
         Assert.EndsWith("Gitberth tries again every 15 minutes.", note.Text);
 
         // Once Access answers, the retry puts it back behind Access, and then has nothing left to do.
@@ -782,12 +801,13 @@ public sealed class DeploymentProtectionTests : IDisposable
 
         var report = await _domains.SyncAsync();
 
-        Assert.DoesNotContain(_cloudflare.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == Hostname);
+        AssertHeldOnTheDownPage();
         Assert.Contains(report.Notes, n => n.Problem && n.Hostname == Hostname && n.Text.Contains("api.cloudflare.com couldn't be reached", StringComparison.Ordinal)
             && n.Text.EndsWith("Gitberth tries again every 15 minutes.", StringComparison.Ordinal));
         // The card offers Fix meanwhile: nothing is wrong with how protection is set up.
         var state = Assert.Single((await _domains.GetOverviewAsync(_appId)).Domains);
-        Assert.StartsWith("Not served until it's behind Cloudflare Access. api.cloudflare.com couldn't be reached", state.Summary);
+        Assert.StartsWith("Shows only the down page until it can be put behind Cloudflare Access. api.cloudflare.com couldn't be reached", state.Summary);
+        Assert.True(state.DownPage);
         Assert.Equal(DomainFix.Sync, state.Fix);
         Assert.NotNull(await _domains.RetryRemovalsAsync());
     }
@@ -801,7 +821,7 @@ public sealed class DeploymentProtectionTests : IDisposable
 
         var report = await _domains.SyncAsync();
 
-        Assert.DoesNotContain(_cloudflare.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == Hostname);
+        AssertHeldOnTheDownPage();
         var note = Assert.Single(report.Notes, n => n.Problem && n.Hostname == Hostname);
         Assert.Contains(CloudflareApi.AccessPermission, note.Text);
         Assert.DoesNotContain("tries again", note.Text);
@@ -1335,10 +1355,10 @@ public sealed class DeploymentProtectionTests : IDisposable
     [Fact]
     public async Task Turning_off_a_domain_that_never_got_its_application_is_tried_again_when_the_tunnel_couldnt_change()
     {
-        // Protected while nobody was allowed in: it got no Access application, and it's out of the tunnel.
+        // Protected while nobody was allowed in: it got no Access application, and only its down page is in the tunnel.
         Protect();
         await _domains.SyncAsync();
-        Assert.DoesNotContain(_cloudflare.Ingress.OfType<JsonObject>(), r => r["hostname"]?.GetValue<string>() == Hostname);
+        AssertHeldOnTheDownPage();
         _cloudflare.TunnelDown = true;
 
         var (error, _) = await _domains.SetProtectedAsync(_appId, Hostname, on: false);
@@ -1437,6 +1457,56 @@ public sealed class DeploymentProtectionTests : IDisposable
         Assert.False(states[Hostname].Working);
         Assert.Equal("Couldn't be checked.", states[Hostname].Summary);
         Assert.Equal("Not serving: Web isn't running, or its saved ports aren't live yet.", states["www.example.com"].Summary);
+    }
+
+    private async Task SetAppAsync(DesiredState desired, bool downPage)
+    {
+        await using var db = _db.CreateDbContext();
+        await db.Apps.Where(a => a.Id == _appId).ExecuteUpdateAsync(s => s.SetProperty(a => a.DesiredState, desired).SetProperty(a => a.DownPage, downPage));
+    }
+
+    [Fact]
+    public async Task A_held_domain_taken_off_its_down_page_while_its_app_is_stopped_goes_back_behind_access()
+    {
+        await _settings.SetAsync(SettingKeys.ProtectionEmails, "ann@example.com");
+        Protect();
+        var states = new DownStates();
+        states.MarkReady();
+        var domains = new DomainService(_db, _settings, new CloudflareApi(new Factory(_cloudflare)), new TunnelLocator(_docker), _docker, NullLogger<DomainService>.Instance, down: states);
+        // The token loses its Access permission: the protected domain is held back on its down page.
+        _cloudflare.Fail = r => r.RequestUri!.AbsolutePath.Contains("/access/", StringComparison.Ordinal) ? HttpStatusCode.Forbidden : (HttpStatusCode?)null;
+        await domains.SyncAsync();
+        AssertHeldOnTheDownPage();
+        // The owner stops the app: still only its down page.
+        WriteFakeDocker(_dir, webRunning: false);
+        await SetAppAsync(DesiredState.Stopped, downPage: true);
+        states.Set(_appId, DownReason.Stopped);
+        await domains.SyncAsync();
+        AssertHeldOnTheDownPage();
+
+        // Then gives the token its permission back (nothing syncs) and turns the app's down page off: the one sync that
+        // follows has Access working again, and takes the domain off the down page, to where the app will be once it runs.
+        _cloudflare.Fail = null;
+        await SetAppAsync(DesiredState.Stopped, downPage: false);
+        states.Set(_appId, null);
+        var report = await domains.SyncAsync();
+
+        // Behind Access there from the start, so it's never open to anyone once the container runs.
+        var rule = RuleFor(Hostname);
+        Assert.Equal("http://localhost:3001", rule["service"]!.GetValue<string>());
+        Assert.Equal("""{"access":{"required":true,"teamName":"acme","audTag":["aud1"]}}""", rule["originRequest"]!.ToJsonString());
+        Assert.True(TunnelRoutes.BehindAccess(_cloudflare.Ingress, Hostname));
+        Assert.DoesNotContain(report.Notes, n => n.Problem && n.Hostname == Hostname);
+        Assert.Equal("http://localhost:3001", Domain().Service);
+        Assert.Null(await domains.RetryRemovalsAsync());
+
+        // Started (a plain docker start, which asks for no sync): served behind Access, and a sync has nothing to change.
+        WriteFakeDocker(_dir);
+        await SetAppAsync(DesiredState.Running, downPage: false);
+        var puts = _cloudflare.Puts;
+        await domains.SyncAsync();
+        Assert.Equal(puts, _cloudflare.Puts);
+        Assert.True(TunnelRoutes.BehindAccess(_cloudflare.Ingress, Hostname));
     }
 
     [Fact]

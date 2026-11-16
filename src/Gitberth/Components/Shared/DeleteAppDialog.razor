@@ -7,7 +7,8 @@
     </TitleContent>
     <DialogContent>
         <MudText Typo="Typo.body2" Class="mb-3">
-            This stops and removes the container and deletes the deploy history and logs. It can't be undone.
+            @(Compose ? "This takes down all its services (their containers and network) and deletes the deploy history and logs. It can't be undone."
+                : "This stops and removes the container and deletes the deploy history and logs. It can't be undone.")
         </MudText>
         @if (Domains.Count > 0 && DomainsEnabled)
         {
@@ -25,6 +26,14 @@
         }
         <MudCheckBox T="bool" @bind-Value="removeImages" Color="Color.Error" Label="Also delete its images" />
         <MudCheckBox T="bool" @bind-Value="removeVolumes" Color="Color.Error" Label="Also delete its named volumes (their data is lost)" />
+        @if (Databases.Count > 0)
+        {
+            <MudText Typo="Typo.body2" Class="mt-3">
+                Its databases: @string.Join(", ", Databases). Unless you tick below, their data stays where it is (a Postgres database on its server,
+                a Redis's in its volume), and only Gitberth forgets them. Its previews' own databases always go, with their previews.
+            </MudText>
+            <MudCheckBox T="bool" @bind-Value="removeDatabases" Color="Color.Error" Label="Also delete their data" />
+        }
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
@@ -33,15 +42,20 @@
 </MudDialog>
 
 @code {
-    public sealed record Choice(bool RemoveImages, bool RemoveVolumes);
+    public sealed record Choice(bool RemoveImages, bool RemoveVolumes, bool RemoveDatabases = false);
 
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public string AppName { get; set; } = "";
     [Parameter] public IReadOnlyList<string> Domains { get; set; } = [];
     [Parameter] public bool DomainsEnabled { get; set; } = true;
+    /// <summary>Its databases (Settings › Databases), as "the Postgres database shop on postgres".</summary>
+    [Parameter] public IReadOnlyList<string> Databases { get; set; } = [];
+    /// <summary>A Compose app: its whole project goes (docker compose down).</summary>
+    [Parameter] public bool Compose { get; set; }
 
     private bool removeImages = true;
     private bool removeVolumes;
+    private bool removeDatabases;
 
-    private void Confirm() => MudDialog.Close(DialogResult.Ok(new Choice(removeImages, removeVolumes)));
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(new Choice(removeImages, removeVolumes, removeDatabases)));
 }

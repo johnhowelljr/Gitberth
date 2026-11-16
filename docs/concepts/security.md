@@ -73,6 +73,22 @@ With [instant deploys](../guides/github-integration.md#instant-deploys) on, one 
 
 A [deploy hook](../guides/deploy-hooks.md)'s URL, `/hooks/deploy/<token>`, does deploy, with no sign-in: its token is all that guards it, so keep it as you would a password. The token is 32 random bytes; Gitberth keeps it encrypted, and finds a call's hook by the token's SHA-256. An unknown token gets `404`, and after 10 of them in 10 minutes from one address, that address gets `429`. The URLs answer on your network, and from the internet only on the host name above. A hook whose URL got out is deleted in a click; a new one gets a new URL.
 
+## API tokens
+
+[AI agents and scripts](../guides/ai-agents.md) use API tokens instead of signing in, on `/mcp` and `/api` only: a token
+never works on any other page, and the sign-in cookie never works there. A token is `gbt_` and 32 random bytes; Gitberth
+keeps only its SHA-256 (compared in fixed time) and its first characters, so it's shown once. Each has an access level
+(Read, Operate or Admin), may expire, and is revoked in a click. Requests from a browser page (with an `Origin` header) are
+refused, against DNS rebinding; after 10 bad tokens in 15 minutes from one address, its bad ones get `429`. `/mcp` and
+`/api` are on Gitberth's own address only, never on the tunnel's host names. Everything a token changes is in the audit
+log under its name, and a tool it isn't allowed is refused and recorded (at most once a minute per token and tool, with a
+count of the refusals in between).
+
+**An Admin token is full control of this host, like signing in.** It can create apps, and an app's container can be given
+the Docker socket or the host's files, which reach everything on the host; treat an Admin token like the admin password.
+No tool manages tokens, changes the admin password or stops the audit log recording changes made outside Gitberth, but
+that's a promise about the tools: only for Read and Operate tokens is it the whole story.
+
 ## Related
 
 - [Configuration](../reference/configuration.md)

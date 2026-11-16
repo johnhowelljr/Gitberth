@@ -18,15 +18,29 @@ namespace Gitberth.Previews;
 /// <param name="ExpiryDays">A preview with no new commit for this many days is removed.</param>
 /// <param name="Forks">Also preview pull requests from forks.</param>
 /// <param name="Protect">Put previews' domains behind Cloudflare Access.</param>
-public sealed record PreviewSettings(PreviewMode Mode, int Limit, int ExpiryDays, bool Forks, bool Protect)
+/// <param name="Databases">What each preview gets for its database: none of its own, an empty one, or a copy of production's.</param>
+public sealed record PreviewSettings(PreviewMode Mode, int Limit, int ExpiryDays, bool Forks, bool Protect, PreviewDatabaseMode Databases = PreviewDatabaseMode.Empty)
 {
-    public static PreviewSettings Of(AppDefinition app) => new(app.PreviewMode, app.PreviewLimit, app.PreviewExpiryDays, app.PreviewForks, app.ProtectPreviews);
+    public static PreviewSettings Of(AppDefinition app) =>
+        new(app.PreviewMode, app.PreviewLimit, app.PreviewExpiryDays, app.PreviewForks, app.ProtectPreviews, app.PreviewDatabases);
 
     /// <summary>Why they can't be saved, or null.</summary>
     public string? Problem =>
         Limit is < 1 or > 20 ? "Between 1 and 20 previews can run at once."
         : ExpiryDays is < 1 or > 365 ? "Previews are removed after 1 to 365 days without a new commit."
         : null;
+}
+
+/// <summary>A variable each preview gets a database of its own for, and where that database goes.</summary>
+/// <param name="Server">Postgres: the server; Redis: a container of the preview's own.</param>
+public sealed record PreviewDatabaseOf(string Variable, DatabaseKind Kind, string Server);
+
+/// <summary>What an app's previews get for their databases (<see cref="PreviewService.DatabasesAsync"/>).</summary>
+/// <param name="Shared">Variables that would still give them production's database: a preview's deploy stops for them.</param>
+/// <param name="Own">Variables each preview gets a database of its own for.</param>
+public sealed record PreviewDatabasesView(IReadOnlyList<PreviewDatabases.Shared> Shared, IReadOnlyList<PreviewDatabaseOf> Own)
+{
+    public static readonly PreviewDatabasesView None = new([], []);
 }
 
 /// <summary>What saving a Git app's preview settings did.</summary>
@@ -79,7 +93,9 @@ public sealed class PreviewService(
     HostPortMap? hostPorts = null,
     PreviewGate? gate = null,
     RepoVariables? repoVariables = null,
-    Security.SecretProtector? protector = null)
+    Security.SecretProtector? protector = null,
+    Audit.AuditLog? audit = null,
+    Databases.DatabaseService? databases = null)
 {
     /// <summary>How often a repo's pull requests are asked for at most when nothing says they changed.</summary>
     internal TimeSpan PullsEvery { get; set; } = TimeSpan.FromMinutes(5);
@@ -360,6 +376,17 @@ public sealed class PreviewService(
         hostPorts?.ForgetSaved();
         await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Event,
             $"Preview {label} added{(target.Title is { Length: > 0 } title ? $": {title}" : "")}.", ActivityTone.Neutral, ct);
+        audit?.Record(new Audit.AuditEntry("preview.created", $"Made a preview of {parent.Name} for {label}{(target.Title is { Length: > 0 } t ? $": {t}" : "")}.")
+        {
+            AppId = parent.Id, AppName = parent.Name, Container = parent.ContainerName, Target = row.Name,
+            Changes =
+            [
+                new("Preview", null, row.ContainerName),
+                .. target.HeadSha is { Length: >= 7 } head ? new[] { new Audit.AuditChange("Commit", null, head[..7]) } : [],
+                .. row.Domains.Select(d => new Audit.AuditChange("Domain", null, d.Hostname)),
+                .. target.FromFork ? new[] { new Audit.AuditChange("From a fork", null, "yes") } : [],
+            ],
+        });
         return row.Id;
     }
 
@@ -432,6 +459,12 @@ public sealed class PreviewService(
             var label = PreviewNames.Label(info.Kind, info.Branch, info.PullRequest);
             await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Removed, $"Preview {label} removed{(reason is null ? "" : ": " + reason)}.",
                 ActivityTone.Neutral, ct);
+            audit?.Record(new Audit.AuditEntry("preview.removed", $"Removed the preview of {parent.Name} for {label}{(reason is null ? "" : ": " + reason)}, with its container, images, volumes and domain.")
+            {
+                AppId = parent.Id, AppName = parent.Name, Container = parent.ContainerName,
+                Target = PreviewNames.Name(parent.Name, info.Kind, info.Branch, info.PullRequest),
+                Changes = [new("Why", null, reason ?? "removed by hand")],
+            });
         }
     }
 
@@ -461,6 +494,13 @@ public sealed class PreviewService(
         await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Event,
             $"Preview {PreviewNames.Label(info.Kind, info.Branch, info.PullRequest)} promoted: production builds {commit[..Math.Min(7, commit.Length)]} and stays on it until the next commit on {parent.Branch}.",
             ActivityTone.Neutral, ct);
+        audit?.Record(new Audit.AuditEntry("preview.promoted",
+            $"Promoted the preview of {parent.Name} for {PreviewNames.Label(info.Kind, info.Branch, info.PullRequest)}: production builds {commit[..Math.Min(7, commit.Length)]} and stays on it until the next commit on {parent.Branch}.")
+        {
+            AppId = parent.Id, AppName = parent.Name, Container = parent.ContainerName, Target = preview.Name,
+            Correlation = Audit.AuditCorrelation.ForDeployment(deployment),
+            Changes = [new("Commit", parent.CurrentCommit is { Length: >= 7 } now ? now[..7] : null, commit[..Math.Min(7, commit.Length)])],
+        });
         return deployment;
     }
 
@@ -502,11 +542,13 @@ public sealed class PreviewService(
             {
                 var app = await db.Apps.FirstOrDefaultAsync(a => a.Id == parentId, ct);
                 if (app is null) return new("That app doesn't exist any more.");
-                if (!app.Deployed || app.IsPreview) return new($"{app.Name} isn't deployed from a repo, so it has no previews.");
+                if (!app.FromRepo || app.IsPreview) return new($"{app.Name} isn't deployed from a repo, so it has no previews.");
                 before = PreviewSettings.Of(app);
-                (app.PreviewMode, app.PreviewLimit, app.PreviewExpiryDays, app.PreviewForks, app.ProtectPreviews) = (wanted.Mode, wanted.Limit, wanted.ExpiryDays, wanted.Forks, wanted.Protect);
+                (app.PreviewMode, app.PreviewLimit, app.PreviewExpiryDays, app.PreviewForks, app.ProtectPreviews, app.PreviewDatabases) =
+                    (wanted.Mode, wanted.Limit, wanted.ExpiryDays, wanted.Forks, wanted.Protect, wanted.Databases);
                 app.UpdatedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
+                AuditSettings(app, before, wanted);
                 previewIds = await db.Apps.AsNoTracking().Where(a => a.ParentAppId == parentId).Select(a => a.Id).ToListAsync(ct);
                 forkIds = await db.Previews.AsNoTracking().Where(p => p.ParentAppId == parentId && p.FromFork).Select(p => p.AppId).ToListAsync(ct);
                 if (wanted.Protect != before.Protect && previewIds.Count > 0)
@@ -549,6 +591,43 @@ public sealed class PreviewService(
         watch.CheckNow();
         return new(null, warning);
     }
+
+    // A change of the preview settings in the audit log, field by field.
+    private void AuditSettings(AppDefinition app, PreviewSettings before, PreviewSettings after)
+    {
+        if (audit is null) return;
+        var changes = new List<Audit.AuditChange>();
+        if (before.Mode != after.Mode) changes.Add(new("Previews", Mode(before.Mode), Mode(after.Mode)));
+        if (before.Limit != after.Limit) changes.Add(new("At most", Audit.AuditText.N(before.Limit), Audit.AuditText.N(after.Limit)));
+        if (before.ExpiryDays != after.ExpiryDays) changes.Add(new("Removed after", Days(before.ExpiryDays), Days(after.ExpiryDays)));
+        if (before.Forks != after.Forks) changes.Add(new("Pull requests from forks", Audit.AuditText.OnOff(before.Forks), Audit.AuditText.OnOff(after.Forks)));
+        if (before.Protect != after.Protect) changes.Add(new("Protect their domains", Audit.AuditText.OnOff(before.Protect), Audit.AuditText.OnOff(after.Protect)));
+        if (before.Databases != after.Databases) changes.Add(new("Their databases", DatabaseWords(before.Databases), DatabaseWords(after.Databases)));
+        if (changes.Count == 0) return;
+        audit.Record(new Audit.AuditEntry("app.previews.changed", after.Mode == PreviewMode.Off && before.Mode != PreviewMode.Off
+            ? $"Turned off {app.Name}'s previews: they're removed."
+            : $"Changed {app.Name}'s preview settings: {Audit.AuditText.Join(changes.Select(c => c.Field.ToLowerInvariant()).ToList())}.")
+        {
+            AppId = app.Id, AppName = app.Name, Container = app.ContainerName, Changes = changes,
+        });
+
+        static string Mode(PreviewMode mode) => mode switch
+        {
+            PreviewMode.PullRequests => "pull requests",
+            PreviewMode.PullRequestsAndBranches => "pull requests and branches",
+            _ => "off",
+        };
+
+        static string Days(int? days) => days is int d ? (d == 1 ? "1 day" : $"{Audit.AuditText.N(d)} days") : "never";
+    }
+
+    /// <summary>What previews get for their database, in the words of the Previews section's choice.</summary>
+    public static string DatabaseWords(PreviewDatabaseMode mode) => mode switch
+    {
+        PreviewDatabaseMode.Off => "none of their own",
+        PreviewDatabaseMode.CopyOfProduction => "a copy of production's",
+        _ => "an empty one each",
+    };
 
     // What the sync left undone for the previews' domains: one that may still be open while they're to be protected, or
     // still behind Access while they're not, else its first problem.
@@ -619,25 +698,56 @@ public sealed class PreviewService(
     /// The variables that would give the app's previews production's database (<see cref="PreviewDatabases"/>): its Previews
     /// section says so before a preview is refused for it. Its GitHub variables as last read when GitHub can't be asked.
     /// </summary>
-    public async Task<IReadOnlyList<PreviewDatabases.Shared>> SharedDatabasesAsync(int appId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<PreviewDatabases.Shared>> SharedDatabasesAsync(int appId, CancellationToken ct = default) =>
+        (await DatabasesAsync(appId, null, ct)).Shared;
+
+    /// <summary>
+    /// What the app's previews get for their databases with <paramref name="mode"/> (its saved one when null): the variables
+    /// each gets a database of its own for (Gitberth makes it), and those that would still give them production's database,
+    /// which stop a preview's deploy (<see cref="PreviewDatabases"/>). Its GitHub variables as last read when GitHub can't
+    /// be asked.
+    /// </summary>
+    public async Task<PreviewDatabasesView> DatabasesAsync(int appId, PreviewDatabaseMode? mode = null, CancellationToken ct = default)
     {
-        if (protector is null) return [];
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var app = await db.Apps.AsNoTracking().Include(a => a.EnvVars).FirstOrDefaultAsync(a => a.Id == appId, ct);
-        if (app is null || !app.Deployed || app.IsPreview) return [];
-        IEnumerable<(string, string)> github = [];
+        if (protector is null) return PreviewDatabasesView.None;
+        AppDefinition? app;
+        await using (var db = await dbFactory.CreateDbContextAsync(ct))
+            app = await db.Apps.AsNoTracking().Include(a => a.EnvVars).FirstOrDefaultAsync(a => a.Id == appId, ct);
+        if (app is null || !app.FromRepo || app.IsPreview) return PreviewDatabasesView.None;
+        IReadOnlyList<RepoVariable> github = [];
         if (repoVariables is not null)
         {
             try
             {
-                github = (await repoVariables.ForDeployAsync(app.Owner, app.Repo, ct)).Variables.Select(v => (v.Name, v.Value));
+                github = (await repoVariables.ForDeployAsync(app.Owner, app.Repo, ct)).Variables;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.LogDebug(ex, "Couldn't read {Repo}'s GitHub variables for its Previews section", $"{app.Owner}/{app.Repo}");
             }
         }
-        return PreviewDatabases.Find(app.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)), github);
+        IReadOnlyList<(string Variable, DatabaseKind Kind, string Server)> own = [];
+        if (databases is not null)
+        {
+            // What production gets, as a deploy works it out: the app's own values for every deploy and for production, over GitHub's.
+            var production = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in github.Where(v => v.Value.Length > 0)) production[v.Name] = v.Value;
+            foreach (var v in EnvScopes.ForDeploy(app.EnvVars, preview: false))
+                if (protector.TryUnprotect(v.ProtectedValue) is { Length: > 0 } value) production[v.Key] = value;
+            var forPreviews = app.EnvVars.Where(v => v.Scope == EnvScope.Preview && protector.TryUnprotect(v.ProtectedValue).Length > 0)
+                .Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                own = await databases.PreviewVariablesAsync(app, mode ?? app.PreviewDatabases, production, forPreviews, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogDebug(ex, "Couldn't work out the databases of {App}'s previews", app.Slug);
+            }
+        }
+        var shared = PreviewDatabases.Find(app.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)), github.Select(v => (v.Name, v.Value)),
+            own.Select(o => o.Variable));
+        return new PreviewDatabasesView(shared, own.Select(o => new PreviewDatabaseOf(o.Variable, o.Kind, o.Server)).ToList());
     }
 
     /// <summary>What a preview previews and of which app, for its own page's banner; null when the app isn't a preview.</summary>

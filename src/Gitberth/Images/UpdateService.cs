@@ -88,17 +88,56 @@ public sealed partial class UpdateService : IHookUpdates
         JsonObject? Image, UpdatePolicy Policy);
 
     public UpdateService(AppCatalog catalog, AppSettingsService settings, ImageService images, PortChanger changer, IContainerEngine engine,
-        IDbContextFactory<GitberthDb> dbFactory, ActivityLog activity, ILogger<UpdateService> logger)
-        : this(new LiveSteps(catalog, settings, changer, engine, activity), images, dbFactory, logger)
+        IDbContextFactory<GitberthDb> dbFactory, ActivityLog activity, ILogger<UpdateService> logger, Audit.AuditLog? audit = null)
+        : this(new LiveSteps(catalog, settings, changer, engine, activity), images, dbFactory, logger, audit)
     {
     }
 
-    internal UpdateService(IUpdateSteps steps, ImageService images, IDbContextFactory<GitberthDb> dbFactory, ILogger<UpdateService> logger)
+    /// <param name="audit">Where updates found, applied, failed and rolled back are recorded; none in older tests.</param>
+    internal UpdateService(IUpdateSteps steps, ImageService images, IDbContextFactory<GitberthDb> dbFactory, ILogger<UpdateService> logger, Audit.AuditLog? audit = null)
     {
         _steps = steps;
         _images = images;
         _dbFactory = dbFactory;
         _logger = logger;
+        _audit = audit;
+    }
+
+    private readonly Audit.AuditLog? _audit;
+
+    // An update or rollback in the audit log once the engine is done with it, as whoever asked (a person, a hook, the
+    // automatic updates).
+    private async Task AuditAsync(PortChangeJob job, Prepared p)
+    {
+        if (_audit is null) return;
+        try
+        {
+            var result = await job.Completion;
+            if (result.Outcome == PortChangeOutcome.NothingChanged) return;
+            AppDefinition? row;
+            await using (var db = await _dbFactory.CreateDbContextAsync())
+                row = await db.Apps.AsNoTracking().FirstOrDefaultAsync(a => a.Id == p.AppId);
+            var name = row?.Name ?? p.Key;
+            var image = ImageReference.Parse(p.Tracked)?.Familiar ?? p.Tracked;
+            var changes = new List<Audit.AuditChange> { new("Image", ImageService.Short(p.OldImageId), ImageService.Short(p.NewImageId)) };
+            var (action, summary, outcome) = (p.Kind, result.Ok) switch
+            {
+                (ChangeKind.Rollback, true) => ("app.update.rolledback", $"Rolled {name} back to the image it ran before its last update ({ImageService.Short(p.NewImageId)}).", Audit.AuditOutcome.Succeeded),
+                (ChangeKind.Rollback, false) => ("app.update.rolledback", $"Couldn't roll {name} back: {Reason(result.Message)}.", Audit.AuditOutcome.Failed),
+                (_, true) => ("app.update.applied", $"Updated {name} to the newest {image}.", Audit.AuditOutcome.Succeeded),
+                _ => ("app.update.failed", $"The update of {name} to the newest {image} didn't work, and the engine put the old version back: {Reason(result.Message)}.", Audit.AuditOutcome.Failed),
+            };
+            _audit.Record(new Audit.AuditEntry(action, summary)
+            {
+                Outcome = outcome, AppId = p.AppId, AppName = name, Container = p.Key, Target = image, Changes = changes,
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Couldn't record the update of {Container}", p.Key);
+        }
+
+        static string Reason(string message) => Audit.AuditLog.Clean(message, 300)?.TrimEnd('.') ?? "";
     }
 
     internal TimeProvider Time { get; init; } = TimeProvider.System;
@@ -161,7 +200,8 @@ public sealed partial class UpdateService : IHookUpdates
     /// </summary>
     public async Task<UpdatePrepared> PrepareAsync(string key, IProgress<PullProgress>? progress = null, CancellationToken ct = default)
     {
-        if ((await RowAsync(key, ct))?.Deployed == true) return Blocked("A GitHub app is updated by a new commit: use Deploy.");
+        if (await RowAsync(key, ct) is { Deployed: true } deployed)
+            return Blocked(deployed.IsCompose ? "A Compose app's images are updated by deploying it: use Deploy." : "A GitHub app is updated by a new commit: use Deploy.");
         if (await _steps.InspectContainerAsync(key, ct) is not { } inspect) return Blocked($"{key} has no container to update: start it first.");
         var row = await _steps.AdoptAsync(key, ct);
         // The tag it runs, never another: an image changed in Settings is never taken back to the tag it was made from.
@@ -271,7 +311,10 @@ public sealed partial class UpdateService : IHookUpdates
         var job = _steps.Start(plan);
         // A change already running for the container is returned as it is: it isn't this update, so nothing follows it.
         if (ReferenceEquals(job.Plan, plan) && _prepared.TryGetValue(plan, out var prepared))
+        {
             _followUps[plan.Container] = FollowUpAsync(job, prepared);
+            _ = AuditAsync(job, prepared);
+        }
         return job;
     }
 
@@ -403,7 +446,13 @@ public sealed partial class UpdateService : IHookUpdates
             var check = await CheckReferenceAsync(on[0].Reference, on.Select(f => f.RegistryId).FirstOrDefault(id => id is not null), ct);
             if (check.RemoteDigest is not { } latest || latest == before) continue;
             foreach (var f in on.Where(f => !f.RunningDigests.Contains(latest)))
+            {
                 await _steps.ActivityAsync(f.Key, f.AppId, ActivityKind.UpdateFound, $"{f.Reference.Familiar} has a newer image ({Abbrev(latest)}).", ActivityTone.Neutral, ct);
+                _audit?.Record(new Audit.AuditEntry("app.update.found", $"Found a newer image for {f.Key}: {f.Reference.Familiar} ({Abbrev(latest)}).")
+                {
+                    AppId = f.AppId, Container = f.Key, Target = f.Reference.Familiar, Changes = [new("Newest digest", before is null ? null : Abbrev(before), Abbrev(latest))],
+                });
+            }
         }
         return due;
     }
@@ -419,7 +468,7 @@ public sealed partial class UpdateService : IHookUpdates
     {
         List<AppDefinition> rows;
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))
-            rows = await db.Apps.AsNoTracking().Where(a => a.UpdatePolicy == UpdatePolicy.Auto && a.Source != AppSource.Git).ToListAsync(ct);
+            rows = await db.Apps.AsNoTracking().Where(a => a.UpdatePolicy == UpdatePolicy.Auto && a.Source != AppSource.Git && a.Source != AppSource.Compose).ToListAsync(ct);
         var updated = new List<string>();
         foreach (var row in rows)
         {
@@ -456,6 +505,10 @@ public sealed partial class UpdateService : IHookUpdates
             }
             await using (var db = await _dbFactory.CreateDbContextAsync(ct))
                 await db.Apps.Where(a => a.Id == row.Id).ExecuteUpdateAsync(s => s.SetProperty(a => a.UpdatePolicy, UpdatePolicy.Notify), ct);
+            _audit?.Record(new Audit.AuditEntry("app.updates.changed", $"Set {row.Name} back to Tell me: its automatic update failed.")
+            {
+                AppId = row.Id, AppName = row.Name, Container = key, Changes = [new("Updates", "Automatically", "Tell me")],
+            });
             var tracked = row.ImageRef ?? Str(inspect["Config"], "Image");
             await _steps.ActivityAsync(key, row.Id, ActivityKind.Updated,
                 $"Automatic update to {tracked} failed and was rolled back: {result.Message} Updates are back to Tell me until you choose Automatically again.",
@@ -470,9 +523,11 @@ public sealed partial class UpdateService : IHookUpdates
     /// </summary>
     internal static string? AutoRefusal(AppDefinition row, JsonObject inspect, string? self)
     {
-        if (row.Deployed) return "A GitHub app is updated by a new commit.";
-        if (ContainerService.IsDatabase(Str(inspect["Config"], "Image"), inspect["Config"], row.ImageRef)) return "Databases are never updated by themselves.";
+        if (row.Deployed) return row.IsCompose ? "A Compose app's images are updated when it's deployed." : "A GitHub app is updated by a new commit.";
         var labels = inspect["Config"]?["Labels"] as JsonObject;
+        // A Compose app's service is updated by its app's deploys, never on its own.
+        if (labels?.ContainsKey(Compose.ComposeNames.ServiceLabel) == true) return "It's a service of a Compose app, which a deploy updates.";
+        if (ContainerService.IsDatabase(Str(inspect["Config"], "Image"), inspect["Config"], row.ImageRef)) return "Databases are never updated by themselves.";
         var id = Str(inspect, "Id");
         var name = Str(inspect, "Name").TrimStart('/');
         if (self is { Length: > 0 } && (id.StartsWith(self, StringComparison.Ordinal) || name == self)
@@ -612,12 +667,17 @@ public sealed partial class UpdateService : IHookUpdates
         return new UpdateStatus(ImageOrigin.Registry, s.Tracked, remoteNewer || newerHere, runningDigest, check.RemoteDigest, check.CheckedAt, text, check.Error, canRollBack);
     }
 
-    // Every container that follows a tag, helpers and Gitberth's temporaries left out.
+    // Every container that follows a tag, helpers and Gitberth's temporaries left out, and an app's own Redis while its app
+    // keeps it: Gitberth makes it, with its app's databases, and it's never an app of its own to update.
     private async Task<List<Followed>> FollowedAsync(CancellationToken ct)
     {
         List<AppDefinition> rows;
+        HashSet<string> members;
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+        {
             rows = await db.Apps.AsNoTracking().ToListAsync(ct);
+            members = (await db.ManagedDatabases.AsNoTracking().Where(d => d.Kind == DatabaseKind.Redis).Select(d => d.Server).ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
+        }
         var byName = rows.GroupBy(r => r.ContainerName).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         var followed = new List<Followed>();
         foreach (var c in (await _images.ContainersAsync(ct)).OfType<JsonObject>())
@@ -625,7 +685,8 @@ public sealed partial class UpdateService : IHookUpdates
             var name = NameOf(c);
             var labels = c["Labels"] as JsonObject;
             if (name.Length == 0 || labels?.ContainsKey(RecreateRules.HelperLabel) == true || Temporary().IsMatch(name)
-                || labels?.ContainsKey(Gitberth.Docker.ContainerSpecFactory.BridgeLabel) == true) continue;
+                || labels?.ContainsKey(Gitberth.Docker.ContainerSpecFactory.BridgeLabel) == true
+                || labels?.ContainsKey(Databases.DatabaseNames.MemberLabel) == true && members.Contains(name)) continue;
             var row = byName.GetValueOrDefault(name);
             if (row?.Deployed == true) continue;
             // The tag it runs, else its row's. Docker lists the image by its ID once the tag has moved on: the container's own

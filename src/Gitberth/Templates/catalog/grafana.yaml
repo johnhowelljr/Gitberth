@@ -1,0 +1,40 @@
+id: grafana
+name: Grafana
+tagline: Dashboards and alerts for your metrics, logs and everything in between.
+description: >-
+  Grafana turns data from Prometheus, InfluxDB, Postgres, Loki and dozens of other sources into dashboards you build in
+  the browser. It alerts you when a value crosses a line, and thousands of ready-made dashboards are a click away.
+category: Monitoring
+website: https://grafana.com/oss/grafana
+source: https://github.com/grafana/grafana
+license: AGPL-3.0
+icon: grafana.svg
+icon_source: monogram
+memory: 256
+web:
+  service: grafana
+  port: 3000
+  health: /api/health
+inputs:
+  - name: ADMIN_USER
+    label: Admin's user name
+    default: admin
+    required: true
+    kind: text
+secrets:
+  - name: ADMIN_PASSWORD
+    length: 20
+notes:
+  - Sign in as ADMIN_USER with the password in ADMIN_PASSWORD. Both are on its Environment tab, where Show reveals the password.
+compose: |
+  services:
+    grafana:
+      image: grafana/grafana:13.3.1
+      environment:
+        GF_SECURITY_ADMIN_USER: ${ADMIN_USER}
+        GF_SECURITY_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+        GF_SERVER_ROOT_URL: ${APP_URL}
+      volumes:
+        - data:/var/lib/grafana
+  volumes:
+    data:

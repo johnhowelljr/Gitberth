@@ -4,9 +4,12 @@
 #   inner.sh up              build what changed and (re)start only what changed: stand-ins, Gitberth, fake cloudflared
 #   inner.sh reset           a fresh Gitberth (data wiped, every app and its containers, images and volumes removed) and
 #                            empty stand-ins
-#   inner.sh test [args]     run the scenarios (pytest args), then print the report
+#   inner.sh test [args]     collect every scenario file (one that doesn't import stops the run), run the scenarios
+#                            (pytest args; the results also go to /e2e/out/junit.xml), then print the report
 #   inner.sh logs [what] [n] gitberth, standin, cloudflared, or any container's name
 #   inner.sh password        the rig's admin password, for a person who wants to look at the UI
+# E2E_TEST_TIMINGS (from run.sh, through docker exec) reaches docker compose from this script's environment: unset, the
+# rig's compose file gives Gitberth its shorter waits; empty, none. E2E_TEMPLATES goes on to the scenarios.
 set -eu
 
 SRC=/e2e/src
@@ -94,6 +97,9 @@ start_gitberth() {
   write_env
   compose up -d --remove-orphans gitberth >"$LOGS/compose.log" 2>&1 || { cat "$LOGS/compose.log"; die "docker compose up failed"; }
   wait_gitberth
+  # The waits Gitberth really has (only that one variable is printed: its environment holds the admin password too).
+  timings=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' gitberth | sed -n 's/^GITBERTH_TEST_TIMINGS=//p')
+  say "Gitberth's test timings: ${timings:-none (production timings)}"
 }
 
 up_gitberth() {
@@ -162,6 +168,9 @@ remove_apps() {
   [ -z "$images" ] || docker rmi -f $images >/dev/null 2>&1 || true
   volumes=$(docker volume ls -q | grep '^gb-' || true)
   [ -z "$volumes" ] || docker volume rm -f $volumes >/dev/null 2>&1 || true
+  # Compose apps' own networks (gb-<slug>_default).
+  networks=$(docker network ls --format '{{.Name}}' | grep '^gb-' || true)
+  [ -z "$networks" ] || docker network rm $networks >/dev/null 2>&1 || true
   for n in gitberth gitberth-lan; do docker network rm "$n" >/dev/null 2>&1 || true; done
 }
 
@@ -182,12 +191,8 @@ reset() {
   up_cloudflared
 }
 
-run_tests() {
-  mkdir -p "$OUT"
-  rm -rf "${OUT:?}"/* 2>/dev/null || true
-  pw=$(docker exec "$STANDIN" cat /state/admin-password)
-  docker rm -f gbe2e-runner >/dev/null 2>&1 || true
-  rc=0
+# runner [pytest args]: pytest in the scenario runner, against this rig.
+runner() {
   # The runner sees GitHub's and Cloudflare's names as Gitberth does (the stand-in, trusted through the rig's CA), so a
   # scenario can call them as Gitberth would, and nothing in it can reach the real ones.
   hosts=""
@@ -198,8 +203,27 @@ run_tests() {
     -v gbe2e-trust:/trust:ro -e SSL_CERT_FILE=/trust/gitberth-bundle.pem \
     -v /var/run/docker.sock:/var/run/docker.sock -v "$E2E":/e2e:ro -v gitberth_gitberth-data:/gbdata -v "$OUT":/out \
     -e E2E_GITBERTH_URL=http://gitberth:8080 -e E2E_STANDIN_URL="http://$STANDIN:8099" -e E2E_ADMIN_PASSWORD="$pw" \
-    -e E2E_PUBLIC_HOST="$PUBLIC_HOST" -e E2E_KEEP="${E2E_KEEP:-}" -e E2E_GITBERTH_CONTAINER=gitberth -e E2E_OUT=/out \
-    -w /e2e/scenarios gbe2e-runner:latest python3 -m pytest -p no:cacheprovider "$@" || rc=$?
+    -e E2E_PUBLIC_HOST="$PUBLIC_HOST" -e E2E_KEEP="${E2E_KEEP:-}" -e E2E_TEMPLATES="${E2E_TEMPLATES:-}" \
+    -e E2E_GITBERTH_CONTAINER=gitberth -e E2E_OUT=/out \
+    -w /e2e/scenarios gbe2e-runner:latest python3 -m pytest -p no:cacheprovider "$@"
+}
+
+run_tests() {
+  mkdir -p "$OUT"
+  rm -rf "${OUT:?}"/* 2>/dev/null || true
+  pw=$(docker exec "$STANDIN" cat /state/admin-password)
+  docker rm -f gbe2e-runner >/dev/null 2>&1 || true
+  # Every scenario file must import, the ones this run leaves out too: they import each other's helpers, so a broken
+  # one breaks the groups that import it. That takes a few seconds.
+  if ! runner --collect-only -q >"$LOGS/collect.log" 2>&1; then
+    tail -n 40 "$LOGS/collect.log" >&2
+    first=$(grep -m 1 '^ERROR ' "$LOGS/collect.log" || true)
+    echo "[rig] a scenario file doesn't import: ${first:-see above}" >&2
+    exit 2
+  fi
+  rm -rf "${OUT:?}"/* 2>/dev/null || true
+  rc=0
+  runner --junitxml=/out/junit.xml "$@" || rc=$?
   echo "===== E2E REPORT ====="
   cat "$OUT/report.txt" 2>/dev/null || echo "(no report: pytest exited with $rc before writing one)"
   echo "===== END OF REPORT ====="

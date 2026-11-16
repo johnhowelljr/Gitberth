@@ -1,0 +1,284 @@
+@using Gitberth.Uptime
+@inject UptimeMonitor Monitor
+@inject UptimeStore Store
+@inject UptimeSettings Saves
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@*
+    An app's uptime, as its checks from outside see it (any source, as long as Gitberth keeps a record of the app): how it
+    stands, its uptime over a day, a week and a month, a day of response times, its last incidents, what's checked and
+    when, and its domain's certificate. Check now runs one check at once. The check itself (on or off, and the path it
+    asks for) is saved here, on its own.
+*@
+<SectionCard Title="Uptime" Icon="@Icons.Material.Outlined.MonitorHeart" Id="uptime" Class="gb-upcard">
+    <Actions>
+        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="CheckNowAsync" Busy="checking" Disabled="@(checking || !checkOn)">Check now</Btn>
+    </Actions>
+    <ChildContent>
+        <div class="gb-up-head">
+            <span class="gb-pill2 @Tone(state.Status)">
+                @if (state.Status == UptimeStatus.Up)
+                {
+                    <i class="gb-st-dot gb-st-dot--running"></i>
+                }
+                else
+                {
+                    <SvgIcon Icon="@StateIcon(state.Status)" />
+                }
+                @StateText(state)
+            </span>
+            @if (state.Open is { } open)
+            {
+                <span class="gb-help">Down since @Format.Ago(open.Started): @open.Cause</span>
+            }
+            else if (state.Last is { Up: false } failed && state.Status != UptimeStatus.Down)
+            {
+                <span class="gb-help">The last check failed (@failed.Problem): one more makes it down.</span>
+            }
+        </div>
+        @if (state.Why is { } why)
+        {
+            <p class="gb-help" style="margin:8px 0 0">@why</p>
+        }
+
+        <div class="gb-up-stats">
+            @foreach (var (label, value) in Stats)
+            {
+                <div class="gb-up-stat">
+                    <span class="gb-up-stat-v">@(value is double v ? Percent(v) : "–")</span>
+                    <span class="gb-up-stat-k">@label</span>
+                </div>
+            }
+        </div>
+
+        <TimeChart Title="Response time" Subject="@Name" Times="times" End="end" Window="TimeSpan.FromHours(24)" MaxGap="TimeSpan.FromMinutes(Math.Max(5, interval * 3 / 60.0))"
+                   Series="@([new ChartSeries("Response time", 1, values)])" ValueFormat="Ms" Floor="100" Area="true"
+                   EmptyText="@(state.Address is null ? "Not checked" : "No checks in the last day yet")" Down="downSpans" />
+
+        @if (incidents.Count > 0)
+        {
+            <div class="gb-up-incidents">
+                <div class="gb-label">Recent incidents</div>
+                @foreach (var i in incidents.Take(5))
+                {
+                    <div class="gb-up-incident @(i.Ended is null ? "open" : null)">
+                        <span class="gb-up-incident-dot"></span>
+                        <span style="min-width:0">
+                            <span class="gb-up-incident-t">@(i.Ended is null ? $"Down for {UptimeMonitor.Duration(DateTime.UtcNow - i.Started)} so far" : $"Down for {UptimeMonitor.Duration(i.Ended.Value - i.Started)}")</span>
+                            <span class="gb-up-incident-s">@Format.Local(i.Started)<span class="gb-t3"> · </span>@i.Cause</span>
+                        </span>
+                    </div>
+                }
+            </div>
+        }
+
+        <dl class="gb-kv gb-up-kv">
+            @if (state.Address is { } address)
+            {
+                <dt>Checks</dt>
+                <dd><span class="gb-mono" style="overflow-wrap:anywhere">@address</span></dd>
+            }
+            <dt>Last checked</dt>
+            <dd>
+                @(state.Last is { } last ? $"{Format.Ago(last.At)}{(last.Status is int s ? $" · HTTP {s}" : "")}{(last.Ms is int ms ? $" · {ms} ms" : "")}" : "Not yet")
+                @if (state.Status is not (UptimeStatus.Paused or UptimeStatus.NotChecked))
+                {
+                    <span class="gb-t3">every @interval s</span>
+                }
+            </dd>
+            @if (state.CertificateExpires is { } expires)
+            {
+                <dt>Certificate</dt>
+                <dd>Expires @expires.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)<span class="gb-t3">in @Math.Max(0, (int)(expires - DateTime.UtcNow).TotalDays) days</span></dd>
+            }
+        </dl>
+    </ChildContent>
+    <Foot>
+        <div class="gb-up-set">
+            <SwitchRow @key="@($"uc{switchKey}")" Title="Uptime check" Value="checkOn" ValueChanged="SetCheckAsync" Disabled="saving"
+                       Sub="Its main domain through Cloudflare, or its web port on the LAN, the way a visitor reaches it." />
+            @if (checkOn)
+            {
+                <div class="gb-up-path">
+                    <label class="gb-input gb-input--sm"><span class="gb-input-prefix gb-t3">Path</span><input id="uptime-path" value="@path" placeholder="/" aria-label="The path the uptime check asks for"
+                           @oninput="e => path = e.Value?.ToString()" disabled="@saving" /></label>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Secondary" OnClick="SavePathAsync" Disabled="@(saving || (path ?? "").Trim() == (savedPath ?? ""))">Save path</Btn>
+                </div>
+            }
+        </div>
+    </Foot>
+</SectionCard>
+
+@code {
+    [Parameter, EditorRequired] public int AppId { get; set; }
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+
+    private AppUptime state = AppUptime.Unknown(0);
+    private List<UptimeHour> hours = [];
+    private List<UptimeIncident> incidents = [];
+    private IReadOnlyList<DateTime> times = [];
+    private IReadOnlyList<double?> values = [];
+    private IReadOnlyList<Gitberth.Health.DownSpan> downSpans = [];
+    private DateTime end = DateTime.UtcNow;
+    private int interval = UptimeMonitor.DefaultInterval;
+    private bool checking, saving, checkOn = true;
+    private string? path, savedPath;
+    private int? loadedFor;
+    private int switchKey;
+    private DateTime readAt;
+
+    private IEnumerable<(string Label, double? Value)> Stats =>
+    [
+        ("24 hours", UptimeOver(TimeSpan.FromHours(24))),
+        ("7 days", UptimeOver(TimeSpan.FromDays(7))),
+        ("30 days", UptimeOver(TimeSpan.FromDays(30))),
+    ];
+
+    protected override void OnInitialized() => Monitor.Changed += OnChanged;
+
+    public void Dispose() => Monitor.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        // A pass ends every minute or so: the history is read again then, not on every page refresh.
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    protected override async Task OnParametersSetAsync()
+    {
+        state = Monitor.For(AppId);
+        if (loadedFor == AppId && DateTime.UtcNow - readAt < TimeSpan.FromSeconds(30)) return;
+        loadedFor = AppId;
+        await LoadAsync();
+        if (await Saves.OfAsync(AppId) is { } saved) (checkOn, path, savedPath) = (saved.Uptime, saved.Path, saved.Path);
+    }
+
+    private async Task LoadAsync()
+    {
+        state = Monitor.For(AppId);
+        readAt = DateTime.UtcNow;
+        try
+        {
+            interval = await Monitor.IntervalAsync();
+            var now = DateTime.UtcNow;
+            hours = await Store.HoursAsync([AppId], now.AddDays(-30));
+            incidents = await Store.IncidentsAsync(AppId, now.AddDays(-30));
+            var results = await Store.ResultsAsync(AppId, now.AddHours(-24));
+            times = results.Select(r => r.At).ToList();
+            values = results.Select(r => r.Up && r.Ms is int ms ? (double?)ms : null).ToList();
+            downSpans = incidents.Where(i => (i.Ended ?? now) >= now.AddHours(-24)).Select(i => new Gitberth.Health.DownSpan(i.Started, i.Ended ?? now)).ToList();
+            end = now;
+        }
+        catch (Exception)
+        {
+            // Without the history the card still says how the app stands now.
+        }
+    }
+
+    private double? UptimeOver(TimeSpan window)
+    {
+        var from = DateTime.UtcNow - window;
+        var inWindow = hours.Where(h => h.Hour >= UptimeStore.HourOf(from)).ToList();
+        var checks = inWindow.Sum(h => h.Checks);
+        return checks == 0 ? null : 100.0 * inWindow.Sum(h => h.Ups) / checks;
+    }
+
+    private async Task CheckNowAsync()
+    {
+        checking = true;
+        try
+        {
+            state = await Monitor.CheckNowAsync(AppId);
+            await LoadAsync();
+            if (state.Address is null)
+                // Stopped, checks off, or nothing to check: nothing was asked, so the last check's outcome isn't news.
+                Snackbar.Add(state.Why ?? $"{Name} has nothing to check.", Severity.Info);
+            else
+                Snackbar.Add(state.Last is { Up: true } up ? $"{Name} answers: HTTP {up.Status} in {up.Ms} ms." : $"{Name} didn't pass the check: {state.Last?.Problem ?? state.Why}", state.Last?.Up == true ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            checking = false;
+        }
+    }
+
+    private async Task SetCheckAsync(bool on)
+    {
+        saving = true;
+        try
+        {
+            if (await Saves.SetUptimeAsync(AppId, on, savedPath) is { } error)
+            {
+                Snackbar.Add(error, Severity.Error);
+                switchKey++;
+                return;
+            }
+            checkOn = on;
+            Snackbar.Add(on ? $"{Name}'s uptime check is on." : $"{Name}'s uptime check is off: it isn't checked, and the status page doesn't list it unless you picked it.", Severity.Success);
+            state = await Monitor.CheckNowAsync(AppId);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task SavePathAsync()
+    {
+        saving = true;
+        try
+        {
+            if (await Saves.SetUptimeAsync(AppId, checkOn, path) is { } error)
+            {
+                Snackbar.Add(error, Severity.Error);
+                return;
+            }
+            savedPath = string.IsNullOrWhiteSpace(path) || path.Trim() == "/" ? null : path.Trim();
+            path = savedPath;
+            Snackbar.Add($"Saved. The check asks for {UptimeMonitor.PathOf(savedPath)}.", Severity.Success);
+            state = await Monitor.CheckNowAsync(AppId);
+            await LoadAsync();
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private static string Percent(double v) => v >= 99.995 ? "100%" : v.ToString(v >= 99 ? "0.00" : "0.0", CultureInfo.InvariantCulture) + "%";
+
+    private static string Ms(double v) => v >= 1000 ? (v / 1000).ToString("0.#", CultureInfo.InvariantCulture) + " s" : v.ToString("0", CultureInfo.InvariantCulture) + " ms";
+
+    private static string Tone(UptimeStatus s) => s switch
+    {
+        UptimeStatus.Up => "gb-tone-good",
+        UptimeStatus.Down => "gb-tone-critical",
+        UptimeStatus.Paused => "gb-tone-neutral",
+        UptimeStatus.NotChecked => "gb-tone-neutral",
+        _ => "gb-tone-info",
+    };
+
+    private static string StateIcon(UptimeStatus s) => s switch
+    {
+        UptimeStatus.Down => Icons.Material.Outlined.ErrorOutline,
+        UptimeStatus.Paused => Icons.Material.Outlined.PauseCircleOutline,
+        UptimeStatus.NotChecked => Icons.Material.Outlined.RemoveCircleOutline,
+        _ => Icons.Material.Outlined.HourglassEmpty,
+    };
+
+    /// <summary>How the app stands, in a word or two.</summary>
+    public static string StateText(AppUptime s) => s.Status switch
+    {
+        UptimeStatus.Up => "Up",
+        UptimeStatus.Down => "Down",
+        UptimeStatus.Paused => "Paused",
+        UptimeStatus.NotChecked => "Not checked",
+        _ => s.Address is null ? "Not checked yet" : "Checking",
+    };
+}

@@ -33,15 +33,16 @@ public sealed class ImageService
     private HostFacts? _host;
 
     /// <param name="dbFactory">Where a pull records that the registry has the reference (ImageChecks), and facts read it back.</param>
+    /// <param name="audit">Where pulls and removals are recorded; none in older tests.</param>
     public ImageService(DockerApi api, RegistryService registries, GitberthOptions options, IHttpClientFactory http, ILogger<ImageService> logger,
-        IDbContextFactory<GitberthDb>? dbFactory = null)
-        : this((IImageEngine)api, registries, options, http, logger, dbFactory)
+        IDbContextFactory<GitberthDb>? dbFactory = null, Audit.AuditLog? audit = null)
+        : this((IImageEngine)api, registries, options, http, logger, dbFactory, audit)
     {
     }
 
     /// <summary>Talks to the engine through <paramref name="engine"/>: a stand-in, in tests.</summary>
     internal ImageService(IImageEngine engine, RegistryService registries, GitberthOptions options, IHttpClientFactory http, ILogger<ImageService> logger,
-        IDbContextFactory<GitberthDb>? dbFactory = null)
+        IDbContextFactory<GitberthDb>? dbFactory = null, Audit.AuditLog? audit = null)
     {
         _engine = engine;
         _registries = registries;
@@ -49,7 +50,10 @@ public sealed class ImageService
         _http = http;
         _logger = logger;
         _dbFactory = dbFactory;
+        _audit = audit;
     }
+
+    private readonly Audit.AuditLog? _audit;
 
     /// <summary>Reads Docker's disk; tests give their own.</summary>
     internal Func<DiskSpace>? ReadDisk { get; init; }
@@ -206,19 +210,31 @@ public sealed class ImageService
         var job = new PullJob(parsed?.Familiar ?? reference.Trim());
         job.Completion = Task.Run(async () =>
         {
+            PullResult result;
             try
             {
-                return parsed is null ? new PullResult(false, null, null, NotAReference(reference)) : await PullCoreAsync(job, parsed, platform, registryId);
+                result = parsed is null ? new PullResult(false, null, null, NotAReference(reference)) : await PullCoreAsync(job, parsed, platform, registryId);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Pulling {Reference} failed", reference);
-                return new PullResult(false, null, null, $"Pulling {reference} failed: {ex.Message}");
+                result = new PullResult(false, null, null, $"Pulling {reference} failed: {ex.Message}");
             }
             finally
             {
                 job.Finished();
             }
+            // As whoever started it (the job carries their audit actor): a new app's, an update's, a person's.
+            var name = parsed?.Familiar ?? reference.Trim();
+            _audit?.Record(new Audit.AuditEntry("image.pulled", result.Ok
+                ? $"Pulled the image {name}{(result.ImageId is { } id ? $" ({Short(id)})" : "")}."
+                : $"Couldn't pull the image {name}: {Audit.AuditLog.Clean(result.Message, 300)?.TrimEnd('.')}.")
+            {
+                Outcome = result.Ok ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+                Target = name,
+                Changes = platform is { Length: > 0 } ? [new("Platform", null, platform)] : null,
+            });
+            return result;
         });
         _pulls[key] = job;
         return job;
@@ -274,6 +290,7 @@ public sealed class ImageService
                 if (await db.Apps.AsNoTracking().AnyAsync(a => a.PreviousImage == id, ct)) return $"{Short(id)} is kept for an app's Roll back, so Gitberth left it.";
             }
             await _engine.RemoveImageAsync(id, ct);
+            _audit?.Record(new Audit.AuditEntry("image.removed", $"Removed the image {Short(id)}: nothing uses it any more.") { Target = Short(id) });
             return null;
         }
         catch (DockerApiException ex) when (ex.NotFound || ex.Status == 409)

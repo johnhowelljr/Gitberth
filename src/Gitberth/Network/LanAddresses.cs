@@ -224,7 +224,7 @@ public sealed record LanChange(string? Error, string? Done = null, string? Check
 /// One test, address change or turn on or off at a time: two temporary networks can't share the interface.
 /// </summary>
 public sealed class LanAddresses(SettingsService settings, HostScanner scanner, DockerApi api, IContainerEngine engine, HostHelpers helpers,
-    NetworkService networks, IDbContextFactory<GitberthDb> dbFactory, ILogger<LanAddresses> logger)
+    NetworkService networks, IDbContextFactory<GitberthDb> dbFactory, ILogger<LanAddresses> logger, Audit.AuditLog? audit = null)
 {
     /// <summary>The network own LAN addresses are on.</summary>
     public const string Network = "gitberth-lan";
@@ -293,6 +293,21 @@ public sealed class LanAddresses(SettingsService settings, HostScanner scanner, 
     /// </summary>
     public async Task<LanTest> TurnOnAsync(string? text, CancellationToken ct = default)
     {
+        var test = await TurnOnCoreAsync(text, ct);
+        // Refused before anything was made (a wrong block, a network that's there already) isn't a change.
+        if (test.Problem is null || test.Lines.Count > 0)
+            audit?.Record(new Audit.AuditEntry("settings.ownlan.on", test.Passed
+                ? $"Turned on own LAN addresses: containers can have their own address from {test.Block?.Text ?? text}."
+                : $"Couldn't turn on own LAN addresses: {Audit.AuditLog.Clean(test.Problem ?? test.Lines.FirstOrDefault(l => !l.Ok)?.Text ?? "the test failed", 300)?.TrimEnd('.')}.")
+            {
+                Outcome = test.Passed ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+                Target = Network, Changes = [new("Block", null, test.Block?.Text ?? text)],
+            });
+        return test;
+    }
+
+    private async Task<LanTest> TurnOnCoreAsync(string? text, CancellationToken ct)
+    {
         var (subnet, all, why) = await FactsAsync(ct);
         if (why is not null) return LanTest.Refused(why);
         var (block, problem) = CheckBlock(text, subnet!, all, Name);
@@ -332,6 +347,18 @@ public sealed class LanAddresses(SettingsService settings, HostScanner scanner, 
     /// an address leaves too, or its next start would look for a network that's gone. Returns why it couldn't, or null.
     /// </summary>
     public async Task<string?> TurnOffAsync(CancellationToken ct = default)
+    {
+        var error = await TurnOffCoreAsync(ct);
+        audit?.Record(new Audit.AuditEntry("settings.ownlan.off", error is null
+            ? $"Turned off own LAN addresses: {Network} is gone, and every container that had its own address lost it."
+            : $"Couldn't turn off own LAN addresses: {Audit.AuditLog.Clean(error, 300)?.TrimEnd('.')}.")
+        {
+            Outcome = error is null ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed, Target = Network,
+        });
+        return error;
+    }
+
+    private async Task<string?> TurnOffCoreAsync(CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try

@@ -14,6 +14,7 @@ namespace Gitberth.Services;
 /// </summary>
 /// <param name="engine">The Engine API, asked whether Docker is up before port changes are settled.</param>
 /// <param name="changer">Finishes or undoes the port changes a restart cut short, acting only on the containers its journal names.</param>
+/// <param name="audit">Where an interrupted deploy's end is recorded, against the one who asked for it; none in older tests.</param>
 public sealed class StartupTasks(
     IDbContextFactory<GitberthDb> dbFactory,
     DockerCli docker,
@@ -25,7 +26,8 @@ public sealed class StartupTasks(
     IContainerEngine? engine = null,
     PortChanger? changer = null,
     HostHelpers? helpers = null,
-    NetworkKeeper? keeper = null) : BackgroundService
+    NetworkKeeper? keeper = null,
+    Audit.AuditLog? audit = null) : BackgroundService
 {
     private static readonly TimeSpan DockerRetry = TimeSpan.FromSeconds(10);
 
@@ -36,6 +38,8 @@ public sealed class StartupTasks(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Startup));
         await using (var db = await dbFactory.CreateDbContextAsync(stoppingToken))
         {
             var interrupted = await db.Deployments
@@ -49,6 +53,26 @@ public sealed class StartupTasks(
                 dep.FinishedAt = DateTime.UtcNow;
             }
             await db.SaveChangesAsync(stoppingToken);
+            // Each one's end, as the one who asked for it: queued or started, its entries get their outcome.
+            if (audit is not null && interrupted.Count > 0)
+            {
+                var appIds = interrupted.Select(d => d.AppId).Distinct().ToList();
+                var rows = await db.Apps.AsNoTracking().Where(a => appIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, stoppingToken);
+                foreach (var dep in interrupted.Where(d => rows.ContainsKey(d.AppId)))
+                {
+                    var app = rows[dep.AppId];
+                    var (action, summary, outcome) = Audit.AuditText.Ended(app.Name, dep);
+                    audit.Record(new Audit.AuditEntry(action, summary)
+                    {
+                        Actor = Audit.AuditActors.ForDeploy(dep.RequestedBy, dep.Trigger),
+                        Outcome = outcome,
+                        AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
+                        Target = $"deploy #{Audit.AuditText.N(dep.Id)}",
+                        Correlation = Audit.AuditCorrelation.ForDeployment(dep.Id),
+                        Changes = [new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger))],
+                    });
+                }
+            }
             // A promote cut short lets production follow its branch again.
             foreach (var appId in interrupted.Where(d => d.Trigger == DeployTrigger.Promote).Select(d => d.AppId).Distinct())
                 await RepoWatcher.ForgetUnheldPromotionAsync(db, appId, stoppingToken);
@@ -86,9 +110,17 @@ public sealed class StartupTasks(
         // once the changes a restart cut short are settled (SettleAsync).
         List<AppDefinition> apps;
         await using (var db = await dbFactory.CreateDbContextAsync(stoppingToken))
-            apps = await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git).ToListAsync(stoppingToken);
+            apps = await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git || a.Source == AppSource.Compose).ToListAsync(stoppingToken);
         foreach (var app in apps)
         {
+            // A Compose app with a service's container missing comes back with its current release (or, with none kept, a deploy).
+            if (app.IsCompose)
+            {
+                if (app.DesiredState != DesiredState.Running || app.CurrentImage is null || await actions.CompleteAsync(app, stoppingToken)) continue;
+                logger.LogWarning("A service of {App} has no container; bringing its current release up again", app.Slug);
+                await actions.RecreateAsync(app.Id, DeployTrigger.Start, ct: stoppingToken);
+                continue;
+            }
             bool missing;
             using (await locks.AcquireAsync(app.Id, stoppingToken))
             {

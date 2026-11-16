@@ -7,7 +7,8 @@ namespace Gitberth.Previews;
 /// A preview never uses production's database unless it's told to. A variable that names a database (DATABASE_URL, a
 /// postgres:// value, …) and would reach a preview with production's value (set in Gitberth for all deploys, or one of the
 /// repo's GitHub variables) stops the preview's deploy before anything is built: a preview's build can run migrations, and
-/// its code is a pull request's. A value for Previews takes its place, even the same one when previews may share it.
+/// its code is a pull request's. A value for Previews takes its place, even the same one when previews may share it; so does
+/// a database of the preview's own that Gitberth makes for it (Databases.DatabaseService.ForPreviewAsync).
 /// </summary>
 public static partial class PreviewDatabases
 {
@@ -19,11 +20,13 @@ public static partial class PreviewDatabases
 
     /// <param name="own">The app's own variables (production's app), with their values and where they apply.</param>
     /// <param name="github">The repo's GitHub variables, which every deploy gets unless the app has a value of its own.</param>
-    public static List<Shared> Find(IEnumerable<(string Key, string Value, EnvScope Scope)> own, IEnumerable<(string Name, string Value)> github)
+    /// <param name="provided">What Gitberth sets for the preview itself: a database of its own, whose variable takes production's place.</param>
+    public static List<Shared> Find(IEnumerable<(string Key, string Value, EnvScope Scope)> own, IEnumerable<(string Name, string Value)> github,
+        IEnumerable<string>? provided = null)
     {
         var set = own.Where(v => v.Value.Length > 0).ToList();
-        var forPreviews = set.Where(v => v.Scope == EnvScope.Preview).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var previewGets = set.Where(v => v.Scope is EnvScope.All or EnvScope.Preview).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var forPreviews = set.Where(v => v.Scope == EnvScope.Preview).Select(v => v.Key).Concat(provided ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var previewGets = set.Where(v => v.Scope is EnvScope.All or EnvScope.Preview).Select(v => v.Key).Concat(provided ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var shared = set.Where(v => v.Scope == EnvScope.All && !forPreviews.Contains(v.Key) && LooksLikeDatabase(v.Key, v.Value))
             .Select(v => new Shared(v.Key, FromGitHub: false))
             .Concat(github.Where(v => v.Value.Length > 0 && !previewGets.Contains(v.Name) && LooksLikeDatabase(v.Name, v.Value))

@@ -16,7 +16,7 @@ def _show(value, limit=1500):
     return text if len(text) <= limit else text[:limit] + "…"
 
 
-def until(check, timeout, what, interval=1.0, seen=None):
+def until(check, timeout, what, interval=0.5, seen=None):
     """Calls check() until it returns something truthy, and returns that. Exceptions count as "not yet". After timeout
     seconds it fails with `what` and the last thing seen: seen() when given, else check()'s last result or error."""
     deadline = time.monotonic() + timeout

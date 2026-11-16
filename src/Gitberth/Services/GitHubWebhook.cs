@@ -183,7 +183,7 @@ public sealed class GitHubWebhookEndpoint(IDbContextFactory<GitberthDb> dbFactor
         var match = deployed.FirstOrDefault(a => string.Equals(a.Owner, owner, StringComparison.OrdinalIgnoreCase) && string.Equals(a.Repo, repo, StringComparison.OrdinalIgnoreCase));
         if (match is null) return StatusCodes.Status204NoContent;
         logger.LogInformation("GitHub says {Repo} changed ({Event}): checking it now", $"{match.Owner}/{match.Repo}", eventName);
-        watch.CheckNowFromWebhook(match.Owner, match.Repo);
+        watch.CheckNowFromWebhook(match.Owner, match.Repo, sender);
         return StatusCodes.Status202Accepted;
     }
 

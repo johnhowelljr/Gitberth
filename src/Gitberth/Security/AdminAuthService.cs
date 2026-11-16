@@ -16,7 +16,9 @@ namespace Gitberth.Security;
 /// read from the database once and then kept, so checking a request never touches SQLite.
 /// </para>
 /// </summary>
-public sealed class AdminAuthService(SettingsService settings, GitberthOptions options, LoginThrottle throttle, ILogger<AdminAuthService> logger)
+/// <param name="audit">Where sign-ins (good, failed and refused) and password changes are recorded; none in older tests.</param>
+public sealed class AdminAuthService(SettingsService settings, GitberthOptions options, LoginThrottle throttle, ILogger<AdminAuthService> logger,
+    Audit.AuditLog? audit = null)
 {
     public const string UserName = "admin";
 
@@ -48,18 +50,35 @@ public sealed class AdminAuthService(SettingsService settings, GitberthOptions o
 
     public async Task<(bool Ok, string? Error)> ValidateAsync(string? user, string? password, string client)
     {
-        if (throttle.IsLocked(client)) return (false, "Too many failed attempts. Try again in a few minutes.");
+        // Who tried: the admin, or someone with a name that isn't one (never the name itself: it may be a password typed in
+        // the wrong field).
+        var known = string.Equals(user?.Trim(), UserName, StringComparison.OrdinalIgnoreCase);
+        var actor = Audit.AuditActor.User(known ? UserName : "unknown user", client is "" or "unknown" ? null : client);
+        if (throttle.IsLocked(client))
+        {
+            audit?.Record(new Audit.AuditEntry("auth.signin.refused", $"Refused a sign-in from {client}: too many failed attempts in a row.")
+            {
+                Actor = actor, Outcome = Audit.AuditOutcome.Denied, Target = UserName,
+            });
+            return (false, "Too many failed attempts. Try again in a few minutes.");
+        }
         var hash = await settings.GetAsync(SettingKeys.AdminPasswordHash);
         var ok = hash is not null
-            && string.Equals(user?.Trim(), UserName, StringComparison.OrdinalIgnoreCase)
+            && known
             && !string.IsNullOrEmpty(password)
             && AdminPassword.Verify(password, hash);
         if (!ok)
         {
             throttle.Fail(client);
+            audit?.Record(new Audit.AuditEntry("auth.signin.failed",
+                $"A sign-in from {client} failed: {(known ? "wrong password" : "unknown username")}.")
+            {
+                Actor = actor, Outcome = Audit.AuditOutcome.Failed, Target = UserName,
+            });
             return (false, "Wrong username or password.");
         }
         throttle.Succeed(client);
+        audit?.Record(new Audit.AuditEntry("auth.signin.succeeded", $"{UserName} signed in from {client}.") { Actor = actor, Target = UserName });
         return (true, null);
     }
 
@@ -70,7 +89,14 @@ public sealed class AdminAuthService(SettingsService settings, GitberthOptions o
     public async Task<PasswordChange> ChangePasswordAsync(string current, string next)
     {
         var hash = await settings.GetAsync(SettingKeys.AdminPasswordHash);
-        if (hash is null || !AdminPassword.Verify(current, hash)) return new PasswordChange("The current password is wrong.", null);
+        if (hash is null || !AdminPassword.Verify(current, hash))
+        {
+            audit?.Record(new Audit.AuditEntry("auth.password.changed", "Didn't change the admin password: the current password was wrong.")
+            {
+                Outcome = Audit.AuditOutcome.Failed, Target = UserName,
+            });
+            return new PasswordChange("The current password is wrong.", null);
+        }
         if (next.Length < 10) return new PasswordChange("Use at least 10 characters.", null);
         await settings.SetAsync(SettingKeys.AdminPasswordHash, AdminPassword.Hash(next));
         var stamp = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
@@ -82,6 +108,7 @@ public sealed class AdminAuthService(SettingsService settings, GitberthOptions o
         var renewal = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         _renewals[renewal] = (stamp, now + RenewalLifetime);
         logger.LogInformation("The admin password was changed: every other signed-in browser is signed out.");
+        audit?.Record(new Audit.AuditEntry("auth.password.changed", "Changed the admin password: every other browser is signed out.") { Target = UserName });
         return new PasswordChange(null, renewal);
     }
 

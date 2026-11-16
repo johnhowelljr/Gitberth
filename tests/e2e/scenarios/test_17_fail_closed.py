@@ -3,9 +3,9 @@
 - Protecting a domain while Cloudflare's tunnel API fails (502 on the configuration's PUT): the switch's answer says
   the domain isn't behind Access yet and that Gitberth tries again; the Domains card says "Served without Cloudflare
   Access…" and offers Fix. Once Cloudflare is back, Fix (what the 15-minute retry does, sooner) puts it behind Access.
-- A protected domain while Cloudflare Access fails for a moment (503 on its applications): the next sync holds it out of
-  the tunnel, says why and that Gitberth tries again, and it's never served open. Once Access is back, Fix serves it
-  behind Access again.
+- A protected domain while Cloudflare Access fails for a moment (503 on its applications): the next sync holds it back
+  (its only rule shows Gitberth's down page: a 503, never the app), says why and that Gitberth tries again, and it's
+  never served open. Once Access is back, Fix serves it behind Access again.
 """
 from types import SimpleNamespace
 
@@ -15,7 +15,7 @@ from e2e.github_reports import set_variables, wait_deployment
 from e2e.wait import until
 from test_02_pull_request_previews import new_app, own_apps, unique
 from test_12_commit_statuses import add_domain
-from test_16_protect import ALLOWED, access_app, card, domains_on, flat, save_emails, service_rule, toggle_protected, visit
+from test_16_protect import ALLOWED, access_app, card, domains_on, down_page_header, flat, save_emails, service_rule, toggle_protected, visit
 
 TUNNEL_PUT = r"/cfd_tunnel/[^/]+/configurations$"
 ACCESS_APPS = r"/access/apps$"
@@ -90,8 +90,10 @@ def access_failed(tunnel_failed, gitberth, cloudflare, standins):
         w.held_deploy = wait_deployment(gitberth, set_variables(gitberth, w.page, w.app, [{"name": "E2E_SYNC", "value": "access fails"}]))
         cloudflare.wait_runs()
         w.held_rule = service_rule(cloudflare, w.host)
-        w.held_log = gitberth.deploy_log(w.held_deploy["Id"], tail=60)
+        w.held_log = gitberth.deploy_log(w.held_deploy["Id"], tail=80)
         w.held_visit = visit(cloudflare, w.url)
+        # Past Cloudflare's own check (its Access application is still there): the down page, never the app.
+        w.held_allowed = visit(cloudflare, w.url, ALLOWED)
         w.held_row = row_text(gitberth, w.page, w.app, w.host)
     finally:
         standins.clear_failures(rule)
@@ -125,18 +127,24 @@ class TestTunnelFailsWhileProtecting:
 
 
 class TestAccessFailsForAMoment:
-    def test_the_domain_is_held_out_never_served_open(self, access_failed):
+    def test_the_domain_is_held_back_on_the_down_page_never_served_open(self, access_failed):
         w = access_failed
         assert w.held_deploy["Status"] == "Succeeded", w.held_deploy
-        assert w.held_rule is None, w.held_rule
+        # Its only rule goes to Gitberth's down page, without an Access check to apply.
+        assert w.held_rule["service"] == "http://localhost:8080", w.held_rule
+        assert (w.held_rule.get("originRequest") or {}).get("httpHostHeader", "").endswith(".down.gitberth.invalid"), w.held_rule
+        assert not behind_access(w.held_rule), w.held_rule
         assert w.held_visit["status"] != 200, w.held_visit
+        assert w.held_allowed["status"] == 503 and down_page_header(w.held_allowed) == "down", w.held_allowed
+        assert "gbe2e-testapp" not in (w.held_allowed["body"] or ""), w.held_allowed
 
     def test_the_sync_says_why_and_that_gitberth_tries_again(self, access_failed):
         w = access_failed
-        line = next((l for l in w.held_log.splitlines() if f"{w.host} isn't served: it's protected, and Cloudflare Access can't be used" in l), None)
+        line = next((l for l in w.held_log.splitlines() if f"{w.host} shows only Gitberth's down page: it's protected, and Cloudflare Access can't be used" in l), None)
         assert line is not None, w.held_log
         assert "Gitberth tries again every 15 minutes." in line, line
         assert "Served without" not in w.held_row, w.held_row
+        assert "Shows only the down page" in w.held_row, w.held_row
 
     def test_once_access_is_back_it_is_served_behind_access_again(self, access_failed):
         w = access_failed

@@ -1,0 +1,36 @@
+id: vaultwarden
+name: Vaultwarden
+tagline: A light password manager server that works with the Bitwarden apps.
+description: >-
+  Vaultwarden is a small server for your passwords that Bitwarden's browser extensions, desktop and mobile apps sign in
+  to. Your vault stays on your own host, with organizations, sharing, attachments, Send and two-factor sign-in.
+category: Security
+website: https://github.com/dani-garcia/vaultwarden/wiki
+source: https://github.com/dani-garcia/vaultwarden
+license: AGPL-3.0
+icon: vaultwarden.svg
+icon_source: monogram
+memory: 128
+web:
+  service: vaultwarden
+  port: 80
+  health: /alive
+secrets:
+  - name: ADMIN_TOKEN
+    length: 48
+notes:
+  - Nobody can sign up by themselves. Open /admin on it, sign in with the token in ADMIN_TOKEN (its Environment tab shows it), and invite your email address under Users.
+  - Then make your account with that address at /#/signup. Browsers only run the web vault over HTTPS, so give it a domain first.
+compose: |
+  services:
+    vaultwarden:
+      image: vaultwarden/server:1.37.5
+      environment:
+        DOMAIN: ${APP_URL}
+        SIGNUPS_ALLOWED: "false"
+        INVITATIONS_ALLOWED: "true"
+        ADMIN_TOKEN: ${ADMIN_TOKEN}
+      volumes:
+        - data:/data
+  volumes:
+    data:

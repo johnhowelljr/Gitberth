@@ -10,7 +10,8 @@ namespace Gitberth.Notifications;
 /// try 30 seconds later; how each delivery went is kept in memory for Settings to show. Nothing is sent while there's no
 /// destination, for a kind that's off, or about an app that's left out.
 /// </summary>
-public sealed class Notifier(NotificationSettings settings, NotificationSender sender, SettingsService store, ILogger<Notifier> logger) : BackgroundService
+public sealed class Notifier(NotificationSettings settings, NotificationSender sender, SettingsService store, ILogger<Notifier> logger,
+    Audit.AuditLog? audit = null) : BackgroundService
 {
     internal TimeSpan RetryAfter { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -56,7 +57,7 @@ public sealed class Notifier(NotificationSettings settings, NotificationSender s
     {
         var settingsUrl = await LinkAsync("settings#notifications", ct);
         var notice = new Notice(NotifyEvent.Test, NoticeLevel.Info, $"Gitberth can reach {destination.Title}",
-            "This is a test from Settings › Notifications. Gitberth sends here what you chose there: failed deploys, crashes and failing health checks, unless you turned them off.",
+            "This is a test from Settings › Notifications. Gitberth sends here what you chose there: failed deploys, crashes, failing health checks, apps that go down and certificates about to expire, unless you turned them off.",
             settingsUrl, "", null, DateTime.UtcNow);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(DeliveryTimeout);
@@ -64,12 +65,22 @@ public sealed class Notifier(NotificationSettings settings, NotificationSender s
         {
             await sender.SendAsync(destination, notice, timeout.Token);
             Record(destination, new Delivery(DateTime.UtcNow, true, notice.Title, null));
+            audit?.Record(new Audit.AuditEntry("settings.notifications.destination.tested", $"Sent a test notification to {destination.Name} ({DestinationText.KindName(destination.Kind)}).")
+            {
+                Target = destination.Name,
+            });
             return null;
         }
         catch (Exception ex) when (ex is NotifyException || ex is OperationCanceledException && !ct.IsCancellationRequested)
         {
             var why = ex is NotifyException ? ex.Message : $"{destination.Title} didn't answer in time.";
             Record(destination, new Delivery(DateTime.UtcNow, false, notice.Title, why));
+            // The destination's own words can carry its address; only its name and kind are written.
+            audit?.Record(new Audit.AuditEntry("settings.notifications.destination.tested",
+                $"A test notification to {destination.Name} ({DestinationText.KindName(destination.Kind)}) didn't arrive.")
+            {
+                Target = destination.Name, Outcome = Audit.AuditOutcome.Failed,
+            });
             return why;
         }
     }

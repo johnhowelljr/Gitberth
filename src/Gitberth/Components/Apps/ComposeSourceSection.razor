@@ -1,0 +1,157 @@
+@inject Gitberth.Compose.ComposeApps Compose
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@*
+    A Compose app's own section: its Compose file and its web service. A Git app's file is in its repo (which file, and which
+    service is the web one); an inline app's whole file is here, and saving it shows what changes, then deploys it. Saved on
+    its own, like Previews: none of it is a field of the app's container.
+*@
+<SettingsSection Id="@Id" Title="Compose" Icon="@Icons.Material.Outlined.AccountTree" Changed="@Changed"
+                 Description="@(Inline ? "The Compose file Gitberth keeps for this app, and the service that's its web one. Saving deploys it with them." : "Which Compose file in the repo it's deployed with, and the service that's its web one. Saving deploys it again.")">
+    @if (Inline)
+    {
+        <Field Label="Compose file" For="set-compose-yaml" Changed="@(yaml != loadedYaml)" Error="@(problems.FirstOrDefault())"
+               Help="The whole file, as docker compose reads it. ${NAME} is filled from the app's variables (Environment).">
+            <textarea id="set-compose-yaml" class="gb-input gb-input--mono gb-paste @(yaml != loadedYaml ? "gb-input--changed" : null)" rows="16" spellcheck="false"
+                      value="@yaml" @oninput="YamlTyped"></textarea>
+        </Field>
+    }
+    else
+    {
+        <Field Label="Compose file" For="set-compose-file" Changed="@(file.Trim() != (View.Row?.ComposeFile ?? ""))" Was="@View.Row?.ComposeFile"
+               Help="@($"In {(View.Row?.Subdirectory is { } sub ? $"{sub}/" : "the repository's root")}, like compose.yaml or docker-compose.yml.")">
+            <input id="set-compose-file" class="gb-input gb-input--mono" value="@file" @oninput="e => file = e.Value?.ToString() ?? string.Empty" spellcheck="false" />
+        </Field>
+    }
+    <Field Label="Web service" Changed="@(web != View.Row?.WebService)" Was="@View.Row?.WebService"
+           Help="Its container is the app's: its domains, LAN port, health URL, logs and uptime checks. The others stay inside the app.">
+        @if (Services.Count > 0)
+        {
+            <Seg T="string" Options="@(Services.Select(s => new SegOption<string>(s, s)).ToList())" Value="web" ValueChanged="v => web = v" Label="Web service" />
+        }
+        else
+        {
+            <input class="gb-input gb-input--mono" value="@web" @oninput="e => web = e.Value?.ToString() ?? string.Empty" aria-label="Web service" spellcheck="false" />
+        }
+    </Field>
+    <SwitchRow Title="Put every service on Gitberth's network" Value="everyShared" ValueChanged="v => everyShared = v" Changed="@(everyShared != loadedShared)"
+               Sub="@($"So a worker or a cron service reaches the app's database and other apps by name, as its web service does. Only the web service is {View.Row?.Slug} there; the others have no name of their own.")" />
+    @if (Changes.Count > 0)
+    {
+        <div class="gb-ro-note"><SvgIcon Icon="@Icons.Material.Outlined.Info" Size="sm" /><span>@string.Join(" ", Changes) Saving deploys it.</span></div>
+    }
+    <div class="gb-row" style="justify-content:flex-end;gap:10px;flex-wrap:wrap">
+        @if (Changed)
+        {
+            <Btn Kind="BtnKind.Ghost" OnClick="Reset" Disabled="saving">Undo</Btn>
+        }
+        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="SaveAsync" Busy="saving" Disabled="@(!Changed || problems.Count > 0)">Save and deploy</Btn>
+    </div>
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    [Parameter] public string Id { get; set; } = "sec-compose";
+    [Parameter] public EventCallback Saved { get; set; }
+
+    private string yaml = "", loadedYaml = "", file = "", web = "";
+    private bool everyShared, loadedShared;
+    private int? loadedFor;
+    private bool saving;
+    private List<string> problems = [];
+
+    private bool Inline => View.Row?.Source == AppSource.Compose;
+
+    private bool Changed => everyShared != loadedShared
+        || (Inline ? yaml != loadedYaml || web != View.Row?.WebService : file.Trim() != (View.Row?.ComposeFile ?? "") || web != View.Row?.WebService);
+
+    // The services to pick the web one from: the file's as it's edited (inline), else the ones the last deploy ran.
+    private IReadOnlyList<string> Services => Inline
+        ? Gitberth.Compose.ComposeFiles.Read(yaml).Services.Select(s => s.Name).ToList()
+        : Gitberth.Deploy.DeployPipeline.ParseImages(View.Git?.Deployments.FirstOrDefault(d => d.Status == DeployStatus.Succeeded)?.Images).Keys.Order(StringComparer.Ordinal).ToList();
+
+    // What saving changes, said plainly: the services that come and go, and the web service.
+    private List<string> Changes
+    {
+        get
+        {
+            var list = new List<string>();
+            if (Inline && yaml != loadedYaml)
+            {
+                var before = Gitberth.Compose.ComposeFiles.Read(loadedYaml).Services.Select(s => s.Name).ToList();
+                var after = Gitberth.Compose.ComposeFiles.Read(yaml).Services.Select(s => s.Name).ToList();
+                var added = after.Except(before).ToList();
+                var removed = before.Except(after).ToList();
+                if (added.Count > 0) list.Add($"New: {string.Join(", ", added)}.");
+                if (removed.Count > 0) list.Add($"Removed, with their containers (their volumes stay): {string.Join(", ", removed)}.");
+                if (added.Count == 0 && removed.Count == 0) list.Add("The file changes; its services stay the same.");
+            }
+            if (!Inline && file.Trim() != (View.Row?.ComposeFile ?? "")) list.Add($"It's deployed with {file.Trim()} from now on.");
+            if (web != View.Row?.WebService && web.Length > 0) list.Add($"{web} becomes the web service: the app's domains and LAN port go to it.");
+            if (everyShared != loadedShared)
+                list.Add(everyShared ? $"Every service joins {Network}, with no name of its own there." : $"Only the web service stays on {Network}.");
+            return list;
+        }
+    }
+
+    [Inject] private GitberthOptions Options { get; set; } = default!;
+
+    private string Network => Options.Network;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (View.Row is not { } row || loadedFor == row.Id) return;
+        loadedFor = row.Id;
+        loadedShared = await Compose.EveryServiceSharedAsync(row.Id);
+        Reset();
+    }
+
+    private void Reset()
+    {
+        if (View.Row is not { } row) return;
+        loadedYaml = yaml = Inline ? Compose.YamlOf(row) : "";
+        file = row.ComposeFile ?? "";
+        web = row.WebService ?? "";
+        everyShared = loadedShared;
+        problems = [];
+    }
+
+    private void YamlTyped(ChangeEventArgs e)
+    {
+        yaml = e.Value?.ToString() ?? "";
+        problems = yaml == loadedYaml ? [] : Gitberth.Compose.ComposeApps.Problems(yaml, null);
+        if (Services.Count > 0 && !Services.Contains(web)) web = Gitberth.Compose.ComposeFiles.PickWeb(Gitberth.Compose.ComposeFiles.Read(yaml).Services)?.Service ?? Services[0];
+    }
+
+    private async Task SaveAsync()
+    {
+        if (View.Row is not { } row || saving) return;
+        saving = true;
+        try
+        {
+            var (problem, deployment) = Inline ? await Compose.SaveInlineAsync(row.Id, yaml, web, everyShared) : await Compose.SaveGitAsync(row.Id, file, web, everyShared);
+            if (problem is not null)
+            {
+                problems = [problem];
+                Snackbar.Add(problem, Severity.Warning);
+                return;
+            }
+            if (deployment is int id)
+            {
+                Nav.NavigateTo($"apps/{row.Id}/deployments/{id}");
+                return;
+            }
+            loadedFor = null;
+            await Saved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

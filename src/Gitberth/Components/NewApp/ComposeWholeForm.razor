@@ -1,0 +1,157 @@
+@inject Gitberth.Compose.ComposeApps Compose
+@inject AppService Apps
+@inject NavigationManager Nav
+
+@*
+    A pasted Compose file as one app with all its services: its name, its web service and port, and the values its ${…}
+    take. Create and deploy keeps the file (encrypted) and deploys it with docker compose; its page has the rest.
+*@
+<div class="gb-stack" style="gap:14px">
+    <div class="gb-fgrid">
+        <Field Label="Name" For="gb-whole-name" Help="@NameHelp" Error="@(nameTried ? AppService.NameProblem(name) : null)">
+            <input id="gb-whole-name" class="gb-input" value="@name" @oninput="NameTypedAsync" />
+        </Field>
+        <Field Label="Web port" For="gb-whole-port" Help="The web service's container port: the app's domains and LAN address go to it. Empty for an app without one.">
+            <input id="gb-whole-port" class="gb-input gb-input--mono" type="number" min="1" max="65535" value="@port" @oninput="e => port = int.TryParse(e.Value?.ToString(), out var p) && p is > 0 and < 65536 ? p : null" />
+        </Field>
+    </div>
+    <Field Label="Web service" Help="Its container is the app's: its domains, LAN port, health URL and logs. The others stay inside the app.">
+        <Seg T="string" Options="@(Info.Services.Select(s => new SegOption<string>(s.Name, s.Name)).ToList())" Value="web" ValueChanged="PickWeb" Label="Web service" />
+    </Field>
+    @if (Info.Variables.Count > 0)
+    {
+        <div>
+            <div class="gb-label" style="margin-bottom:8px"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />Its variables</div>
+            <div class="gb-envtbl" role="table" aria-label="The Compose file's variables">
+                @foreach (var v in Info.Variables)
+                {
+                    var secret = Security.Masking.IsSecret(v.Name, values.GetValueOrDefault(v.Name) ?? "");
+                    <div class="gb-envrow" role="row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)" @key="v.Name">
+                        <span class="gb-envkey" role="cell"><span class="gb-mono">@v.Name</span>@if (v.Required) { <span class="gb-default-tag">needed</span> }</span>
+                        <span class="gb-envval" role="cell">
+                            <input class="gb-input gb-input--mono" type="@(secret ? "password" : "text")" aria-label="@v.Name" autocomplete="off"
+                                   placeholder="@(v.Default is { Length: > 0 } d ? d : v.Required ? "" : "empty")" value="@values.GetValueOrDefault(v.Name)"
+                                   @oninput="e => values[v.Name] = e.Value?.ToString() ?? string.Empty" />
+                        </span>
+                    </div>
+                }
+            </div>
+            <p class="gb-help" style="margin-top:6px">They're the app's own variables, changed later on its Environment tab. One left empty takes the file's default.</p>
+        </div>
+    }
+    @foreach (var problem in Problems)
+    {
+        <Banner Tone="critical" Title="Not created yet">@problem</Banner>
+    }
+    <div class="gb-row gb-row--wrap" style="justify-content:flex-end;gap:10px">
+        <span class="gb-help" style="margin-right:auto">Creates the Compose project gb-@Slug with @Info.Services.Count services, then pulls, builds and starts them.</span>
+        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="@(creating || Problems.Count > 0 && tried)">Create and deploy</Btn>
+    </div>
+</div>
+
+@code {
+    /// <summary>The whole pasted file.</summary>
+    [Parameter, EditorRequired] public string Yaml { get; set; } = "";
+
+    private string name = "";
+    private string web = "";
+    private int? port;
+    private bool creating, tried, nameTried;
+    private string? error;
+    private string? readFor;
+    private Gitberth.Compose.ComposeFileInfo Info = new([], [], null);
+    private readonly Dictionary<string, string> values = new(StringComparer.Ordinal);
+    private NetworkName? slugFor;
+
+    private string Slug => slugFor is { } chosen && AppService.Slugify(name) is { Length: > 0 } typed && chosen.Slug.StartsWith(typed, StringComparison.Ordinal) ? chosen.Slug
+        : AppService.Slugify(name) is { Length: > 0 } slug ? slug : "app";
+
+    private string? NameHelp => AppService.Slugify(name).Length == 0 ? null : $"Its containers are gb-{Slug}_{(web.Length > 0 ? web : "service")} and the like.";
+
+    private List<string> Problems
+    {
+        get
+        {
+            var list = Gitberth.Compose.ComposeApps.Problems(Yaml, web.Length > 0 ? web : null);
+            if (Info.Variables.FirstOrDefault(v => v.Required && string.IsNullOrEmpty(values.GetValueOrDefault(v.Name))) is { } needed)
+                list.Add($"The file needs {needed.Name}: give it a value.");
+            if (error is not null) list.Add(error);
+            return list;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (readFor == Yaml) return;
+        readFor = Yaml;
+        Info = Gitberth.Compose.ComposeFiles.Read(Yaml);
+        error = null;
+        if (Info.Services.Count == 0) return;
+        if (Gitberth.Compose.ComposeFiles.PickWeb(Info.Services) is { } picked && Info.Service(web) is null)
+        {
+            web = picked.Service;
+            port = picked.Port;
+        }
+        if (name.Length == 0)
+        {
+            name = TopName(Yaml) ?? web;
+            await ChooseSlugAsync();
+        }
+        foreach (var v in Info.Variables) values.TryAdd(v.Name, "");
+    }
+
+    // A Compose file's own name (name: at the top), the app's name when it has one.
+    private static string? TopName(string yaml)
+    {
+        foreach (var line in yaml.Replace("\r", "").Split('\n'))
+            if (line.StartsWith("name:", StringComparison.Ordinal) && line[5..].Trim().Trim('"', '\'') is { Length: > 0 } named && !named.Contains('$')) return named;
+        return null;
+    }
+
+    private void PickWeb(string service)
+    {
+        web = service;
+        if (Info.Service(service) is { } s) port = Gitberth.Compose.ComposeFiles.WebPortOf(s);
+    }
+
+    private async Task NameTypedAsync(ChangeEventArgs e)
+    {
+        name = e.Value?.ToString() ?? "";
+        nameTried = true;
+        await ChooseSlugAsync();
+    }
+
+    private async Task ChooseSlugAsync()
+    {
+        if (AppService.Slugify(name).Length == 0) return;
+        try
+        {
+            slugFor = await Apps.ChooseSlugAsync(name);
+        }
+        catch (Exception)
+        {
+            slugFor = null;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        (tried, nameTried, error) = (true, true, null);
+        if (AppService.NameProblem(name) is not null || Problems.Count > 0) return;
+        creating = true;
+        try
+        {
+            var created = await Compose.CreateInlineAsync(new Gitberth.Compose.InlineComposeApp(name.Trim(), Yaml, web, port,
+                values.Where(v => v.Value.Length > 0).Select(v => new Gitberth.Compose.ComposeValue(v.Key, v.Value)).ToList()));
+            Nav.NavigateTo(created.DeploymentId is int deployment ? $"apps/{created.AppId}/deployments/{deployment}" : $"apps/{Uri.EscapeDataString(created.Key)}");
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            creating = false;
+        }
+    }
+}

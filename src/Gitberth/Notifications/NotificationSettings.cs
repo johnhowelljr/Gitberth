@@ -10,13 +10,25 @@ namespace Gitberth.Notifications;
 /// the channels encrypted as one value, the rest in clear. Apps left out are kept by container name, like the Health
 /// page's choices, so any container can be.
 /// </summary>
-public sealed class NotificationSettings(SettingsService settings)
+/// <param name="audit">Where destinations added and removed and the switches are recorded (names and kinds only, never addresses or tokens).</param>
+public sealed class NotificationSettings(SettingsService settings, Audit.AuditLog? audit = null)
 {
-    /// <summary>What's sent when nothing was chosen yet: failures, not successes.</summary>
-    public static readonly ImmutableHashSet<NotifyEvent> DefaultEvents = [NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy];
+    /// <summary>What's sent when nothing was chosen yet: failures (an app down, a certificate about to expire too), not successes.</summary>
+    public static readonly ImmutableHashSet<NotifyEvent> DefaultEvents =
+        [NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down, NotifyEvent.CertificateExpiring];
 
-    /// <summary>The kinds Settings turns on and off. A health check passing again goes with Unhealthy; a test always goes.</summary>
-    public static readonly NotifyEvent[] Choosable = [NotifyEvent.DeployFailed, NotifyEvent.DeploySucceeded, NotifyEvent.Crashed, NotifyEvent.Unhealthy];
+    /// <summary>
+    /// The kinds Settings turns on and off. A health check passing again goes with Unhealthy, and an app back up with Down;
+    /// a test always goes.
+    /// </summary>
+    public static readonly NotifyEvent[] Choosable =
+        [NotifyEvent.DeployFailed, NotifyEvent.DeploySucceeded, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down, NotifyEvent.CertificateExpiring];
+
+    /// <summary>
+    /// The kinds Settings offered when the choices were saved as a plain list (1.2): a kind added since is on or off as its
+    /// default says until it's chosen, so an app going down is told even to someone who changed their choices before.
+    /// </summary>
+    private static readonly NotifyEvent[] ChoosableIn12 = [NotifyEvent.DeployFailed, NotifyEvent.DeploySucceeded, NotifyEvent.Crashed, NotifyEvent.Unhealthy];
 
     public const int MaxDestinations = 10;
 
@@ -39,6 +51,7 @@ public sealed class NotificationSettings(SettingsService settings)
     {
         NotifyEvent.Test => true,
         NotifyEvent.Healthy => _events.Contains(NotifyEvent.Unhealthy),
+        NotifyEvent.BackUp => _events.Contains(NotifyEvent.Down),
         _ => _events.Contains(e),
     };
 
@@ -65,7 +78,16 @@ public sealed class NotificationSettings(SettingsService settings)
             if (at < 0 && _destinations.Count >= MaxDestinations) throw new ArgumentException($"Gitberth sends to at most {MaxDestinations} places.", nameof(channel));
             var next = at < 0 ? _destinations.Add(clean) : _destinations.SetItem(at, clean);
             await settings.SetSecretAsync(SettingKeys.NotifyDestinations, JsonSerializer.Serialize(next, Json), ct);
+            var before = at < 0 ? null : _destinations[at];
             _destinations = next;
+            // Its name and kind only: an address, a webhook URL or a token is never written to the log.
+            audit?.Record(new Audit.AuditEntry(at < 0 ? "settings.notifications.destination.added" : "settings.notifications.destination.changed",
+                at < 0 ? $"Added the notification destination {clean.Name} ({DestinationText.KindName(clean.Kind)})."
+                    : $"Changed the notification destination {clean.Name} ({DestinationText.KindName(clean.Kind)}).")
+            {
+                Target = clean.Name,
+                Changes = before is not null && before.Name != clean.Name ? [new("Name", before.Name, clean.Name)] : [new("Kind", null, DestinationText.KindName(clean.Kind))],
+            });
         });
     }
 
@@ -73,8 +95,12 @@ public sealed class NotificationSettings(SettingsService settings)
     {
         var next = _destinations.RemoveAll(c => c.Id == id);
         if (next.Count == _destinations.Count) return;
+        var gone = _destinations.FirstOrDefault(c => c.Id == id);
         await settings.SetSecretAsync(SettingKeys.NotifyDestinations, next.IsEmpty ? null : JsonSerializer.Serialize(next, Json), ct);
         _destinations = next;
+        if (gone is not null)
+            audit?.Record(new Audit.AuditEntry("settings.notifications.destination.removed",
+                $"Removed the notification destination {gone.Name} ({DestinationText.KindName(gone.Kind)}).") { Target = gone.Name });
     });
 
     public Task SetEventAsync(NotifyEvent e, bool on, CancellationToken ct = default)
@@ -84,9 +110,33 @@ public sealed class NotificationSettings(SettingsService settings)
         {
             var next = on ? _events.Add(e) : _events.Remove(e);
             if (next.SetEquals(_events)) return;
-            await settings.SetAsync(SettingKeys.NotifyEvents, JsonSerializer.Serialize(next.Order().Select(x => x.ToString()), Json), ct);
+            await settings.SetAsync(SettingKeys.NotifyEvents, WriteEvents(next), ct);
             _events = next;
+            var what = e switch
+            {
+                NotifyEvent.DeployFailed => "a deploy fails",
+                NotifyEvent.DeploySucceeded => "a deploy succeeds",
+                NotifyEvent.Crashed => "an app crashes",
+                _ => "a health check fails",
+            };
+            audit?.Record(new Audit.AuditEntry("settings.notifications.changed", on ? $"Notifications are sent when {what} now." : $"No more notifications when {what}.")
+            {
+                Target = "notifications", Changes = [new($"When {what}", on ? "off" : "on", on ? "on" : "off")],
+            });
         });
+    }
+
+    /// <summary>The choices as they're saved: the kinds that are on, and every kind Settings offered then.</summary>
+    internal static string WriteEvents(IEnumerable<NotifyEvent> on) => JsonSerializer.Serialize(new SavedEvents
+    {
+        On = [.. on.Where(Choosable.Contains).Order().Select(x => x.ToString())],
+        Known = [.. Choosable.Order().Select(x => x.ToString())],
+    }, Json);
+
+    private sealed class SavedEvents
+    {
+        public List<string> On { get; set; } = [];
+        public List<string> Known { get; set; } = [];
     }
 
     public Task SetPreviewsAsync(bool on, CancellationToken ct = default) => UpdateAsync(async () =>
@@ -94,6 +144,10 @@ public sealed class NotificationSettings(SettingsService settings)
         if (on == _previews) return;
         await settings.SetAsync(SettingKeys.NotifyPreviews, on ? "true" : null, ct);
         _previews = on;
+        audit?.Record(new Audit.AuditEntry("settings.notifications.changed", on ? "Notifications are sent about previews' deploys too now." : "No more notifications about previews' deploys.")
+        {
+            Target = "notifications", Changes = [new("Previews too", on ? "off" : "on", on ? "on" : "off")],
+        });
     });
 
     /// <summary>Leaves the container's app out of notifications, or lets it back in.</summary>
@@ -151,19 +205,37 @@ public sealed class NotificationSettings(SettingsService settings)
         }
     }
 
+    /// <summary>
+    /// The kinds that are on, as saved: {"on": [...], "known": [...]} (a kind that wasn't known then is as its default says),
+    /// or the plain list of 1.2 (which knew its four kinds). Unset or unreadable: the defaults.
+    /// </summary>
     internal static ImmutableHashSet<NotifyEvent> ParseEvents(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return DefaultEvents;
         try
         {
-            return (JsonSerializer.Deserialize<List<string>>(json, Json) ?? [])
-                .Select(s => Enum.TryParse<NotifyEvent>(s, out var e) ? e : (NotifyEvent?)null)
-                .OfType<NotifyEvent>().Where(Choosable.Contains).ToImmutableHashSet();
+            IEnumerable<string> on, known;
+            if (json.TrimStart().StartsWith('['))
+            {
+                on = JsonSerializer.Deserialize<List<string>>(json, Json) ?? [];
+                known = ChoosableIn12.Select(e => e.ToString());
+            }
+            else
+            {
+                var saved = JsonSerializer.Deserialize<SavedEvents>(json, Json) ?? new SavedEvents();
+                (on, known) = (saved.On, saved.Known);
+            }
+            var chosen = Names(on).Where(Choosable.Contains).ToHashSet();
+            var seen = Names(known).ToHashSet();
+            return [.. chosen, .. DefaultEvents.Where(e => Choosable.Contains(e) && !seen.Contains(e))];
         }
         catch (JsonException)
         {
             return DefaultEvents;
         }
+
+        static IEnumerable<NotifyEvent> Names(IEnumerable<string> names) =>
+            names.Select(s => Enum.TryParse<NotifyEvent>(s, out var e) && Enum.IsDefined(e) ? e : (NotifyEvent?)null).OfType<NotifyEvent>();
     }
 
     internal static ImmutableHashSet<string> ParseMuted(string? json)

@@ -24,19 +24,21 @@ public sealed class AppSettingsService
     private readonly IContainerEngine _engine;
     private readonly GitberthOptions _options;
     private readonly ILogger<AppSettingsService> _logger;
+    private readonly Audit.AuditLog? _audit;
 
     public AppSettingsService(AppCatalog catalog, AppService apps, Lazy<AppActions> actions, PortChanger changer, ContainerUpdater updater,
         IContainerEngine engine, AppLocks appLocks, DomainService domains, HealthSettings health, RestartSchedules restarts, SecretProtector protector,
         IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, ActivityLog activity, ILogger<AppSettingsService> logger,
-        Notifications.NotificationSettings? notify = null)
+        Notifications.NotificationSettings? notify = null, Audit.AuditLog? audit = null)
         : this(new AppSettingsHost(catalog, apps, actions, appLocks, domains, health, restarts, protector, dbFactory, options, activity, notify), changer, updater, engine, options,
-            logger)
+            logger, audit)
     {
     }
 
     /// <summary>The service over its seam: what it asks of the catalog, the Git apps' records, deploys, domains and Activity.</summary>
+    /// <param name="audit">Where each applied change is recorded (SettingsAudit); none in older tests.</param>
     internal AppSettingsService(IAppSettingsHost host, PortChanger changer, ContainerUpdater updater, IContainerEngine engine, GitberthOptions options,
-        ILogger<AppSettingsService> logger)
+        ILogger<AppSettingsService> logger, Audit.AuditLog? audit = null)
     {
         _host = host;
         _changer = changer;
@@ -44,14 +46,20 @@ public sealed class AppSettingsService
         _engine = engine;
         _options = options;
         _logger = logger;
+        _audit = audit;
     }
+
+    /// <summary>The app's record when Gitberth deploys it (a Git app, or an inline Compose app), as its page has the app; null otherwise.</summary>
+    private static AppDefinition? DeployedRow(AppView view) =>
+        view.Summary.Source is AppSource.Git or AppSource.Compose ? view.Row : null;
 
     /// <summary>Null when there's no such app. Without a container, the settings are the snapshot's (ApplyKind.Snapshot).</summary>
     public async Task<SettingsView?> LoadAsync(string key, CancellationToken ct = default)
     {
         if (await _host.ViewAsync(key, ct) is not { } view) return null;
         var app = view.Summary;
-        if (app.Source == AppSource.Git && view.Row is { } gitRow)
+        // A Git app, or an inline Compose app: its record is the truth for its settings, and a deploy applies them.
+        if (DeployedRow(view) is { } gitRow)
             return new SettingsView(app, app.ContainerId, _host.GitContainer(gitRow), _host.GitAppOptions(gitRow), _host.GitOptions(gitRow),
                 new EditAccess(null, null, null, ViaDeploy: true, null, GitAppSettings.ReadOnly), null);
         var options = await _host.OptionsAsync(key, ct);
@@ -66,6 +74,16 @@ public sealed class AppSettingsService
             new EditAccess(null, null, $"There's no container yet: {app.Container} joins its networks when it's created.", false, null, new HashSet<SettingField>()), null);
     }
 
+    /// <summary>
+    /// The variables a plan's lines mask: those marked secret before the change and after it (the options' secret names, and
+    /// any variable marked secret itself), so a line never shows a value that was secret, even when the change un-marks it.
+    /// </summary>
+    internal static IReadOnlyList<string> MaskedKeys(SettingsEdit edit) =>
+        edit.LoadedOptions.SecretKeys.Concat(edit.WantedOptions.SecretKeys)
+            .Concat(edit.Loaded.Env.Where(e => e.Secret).Select(e => e.Key))
+            .Concat(edit.Wanted.Env.Where(e => e.Secret).Select(e => e.Key))
+            .Distinct(StringComparer.Ordinal).ToList();
+
     /// <summary>What applying the edit would do, with every line, problem and consequence. It changes nothing.</summary>
     public async Task<SettingsPlan> PlanAsync(string key, SettingsEdit edit, CancellationToken ct = default)
     {
@@ -74,18 +92,21 @@ public sealed class AppSettingsService
         // A swap limit set before, and not changed with it, follows a new memory limit, so Docker takes the change.
         edit = edit with { Wanted = ContainerUpdater.FollowSwap(edit.Loaded, edit.Wanted) };
         var fields = SettingsDiff.Changed(edit.Loaded, edit.Wanted);
-        var secrets = edit.WantedOptions.SecretKeys;
+        // What the lines (and the engine's) mask: every variable that's secret before the change or after it, so un-marking
+        // one never shows the value it had. A Compose snippet holds only the wanted values, masked as they'll be.
+        var secrets = MaskedKeys(edit);
         var own = OptionLines(edit.LoadedOptions, edit.WantedOptions).Concat(GitLines(edit.LoadedGit, edit.WantedGit)).ToList();
         // Gitberth's own fields are checked whatever else changed, so Apply never meets them as an error halfway.
         var ownProblems = OptionProblems(edit.LoadedOptions, edit.WantedOptions).Concat(GitProblems(edit.LoadedGit, edit.WantedGit)).ToList();
         var plan = new SettingsPlan { Key = key, Edit = edit, Lines = own, Problems = ownProblems, Consequence = own.Count > 0 ? "Saved at once: nothing restarts." : null };
         if (fields.Count == 0) return plan;
-        var context = await ContextAsync(app.Source == AppSource.Git, ct);
+        var deployed = DeployedRow(view) is not null;
+        var context = await ContextAsync(deployed, ct);
         var problems = SettingsRules.Check(edit.Wanted, context).Where(p => p.Field is not { } f || fields.Contains(f)).Concat(LabelProblems(edit, fields))
             .Concat(ownProblems).ToList();
 
-        // A Git app: saved, its limits applied live, the rest by a deploy without a build.
-        if (app.Source == AppSource.Git)
+        // A Git app (or an inline Compose app): saved, its limits applied live, the rest by a deploy without a build.
+        if (deployed)
         {
             problems.AddRange(fields.Where(GitAppSettings.ReadOnly.Contains).Select(f => new SettingProblem(f,
                 f == SettingField.Image ? "A Git app's image is built from its repo." : "A Git app always runs on the shared network.")));
@@ -128,7 +149,7 @@ public sealed class AppSettingsService
             return plan with
             {
                 Lines = [.. SettingsDiff.Lines(edit.Loaded, edit.Wanted, fields, secrets, _ => ApplyKind.Compose), .. own],
-                ComposeSnippet = compose is null ? null : ComposeSnippet.For(compose, edit.Wanted, fields, secrets),
+                ComposeSnippet = compose is null ? null : ComposeSnippet.For(compose, edit.Wanted, fields, edit.WantedOptions.SecretKeys),
                 ComposeCommand = compose?.Command,
                 Blocked = compose is null ? verdict.Reason : null,
                 Consequence = $"Gitberth's own container: change it in {compose?.File ?? "its Compose file"}, then run the command.",
@@ -142,7 +163,7 @@ public sealed class AppSettingsService
             {
                 Lines = [.. SettingsDiff.Lines(edit.Loaded, edit.Wanted, fields, secrets, _ => ApplyKind.Compose), .. own],
                 Problems = problems,
-                ComposeSnippet = ComposeSnippet.For(compose, edit.Wanted, fields, secrets),
+                ComposeSnippet = ComposeSnippet.For(compose, edit.Wanted, fields, edit.WantedOptions.SecretKeys),
                 ComposeCommand = compose.Command,
                 Consequence = $"Change it in Compose: put this in {compose.File}, then run the command.",
             };
@@ -180,6 +201,39 @@ public sealed class AppSettingsService
     /// </summary>
     public async Task<SettingsOutcome> ApplyAsync(SettingsPlan plan, ApplyTiming timing = ApplyTiming.Now, CancellationToken ct = default)
     {
+        SettingsOutcome outcome;
+        try
+        {
+            outcome = await ApplyCoreAsync(plan, timing, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await AuditAsync(plan, ex.Message);
+            throw;
+        }
+        // A change the engine carries out is recorded when it ends (FollowAsync), with how it ended.
+        if (outcome.Job is null && plan.Lines.Count > 0 && (outcome.Ok || plan.Problems.Count == 0)) await AuditAsync(plan, outcome.Ok ? null : outcome.Message);
+        return outcome;
+    }
+
+    // The change in the audit log (SettingsAudit), as the app is now (it may have been adopted, or renamed, by it).
+    private async Task AuditAsync(SettingsPlan plan, string? error)
+    {
+        if (_audit is null) return;
+        try
+        {
+            if (await _host.ViewAsync(plan.Key, CancellationToken.None) is not { } view) return;
+            var summary = view.Summary with { Title = plan.Edit.LoadedOptions.Name is { Length: > 0 } loaded ? loaded : view.Summary.Title };
+            foreach (var entry in SettingsAudit.For(summary, view.Row?.Id, plan, error)) _audit.Record(entry);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger.LogInformation(ex, "Couldn't record {Key}'s settings change", plan.Key);
+        }
+    }
+
+    private async Task<SettingsOutcome> ApplyCoreAsync(SettingsPlan plan, ApplyTiming timing, CancellationToken ct)
+    {
         if (plan.Problems.Count > 0) return new SettingsOutcome(false, plan.Problems[0].Message, Problems: plan.Problems);
         if (plan.Blocked is { } blocked) return new SettingsOutcome(false, blocked);
         if (plan.ComposeSnippet is not null) return new SettingsOutcome(false, "Compose manages this container: change it in its file, then run the command.");
@@ -193,7 +247,7 @@ public sealed class AppSettingsService
         var optionsChanged = OptionLines(edit.LoadedOptions, edit.WantedOptions).Any();
         if (optionsChanged) await _host.SaveOptionsAsync(plan.Key, edit.WantedOptions, ct);
 
-        if (app.Source == AppSource.Git && view.Row is { } gitRow) return await ApplyGitAsync(app, gitRow, edit, fields, timing, ct);
+        if (DeployedRow(view) is { } gitRow) return await ApplyGitAsync(app, gitRow, edit, fields, timing, ct);
         if (fields.Count == 0) return new SettingsOutcome(true, "Saved.");
 
         if (view.Inspect is null)
@@ -211,7 +265,7 @@ public sealed class AppSettingsService
         // A settings change of any kind adopts the container first, so its row keeps the tag before a recreate pins a digest.
         var appId = view.Row?.Id ?? (await _host.AdoptAsync(app.Container, ct)).Id;
         var job = _changer.Start(change);
-        _ = FollowAsync(job, app.Container, appId);
+        _ = FollowAsync(job, app.Container, appId, plan);
         return new SettingsOutcome(true, change.LiveOnly ? "Updating its limits." : $"Recreating {app.Title}.", job);
     }
 
@@ -283,13 +337,14 @@ public sealed class AppSettingsService
     // Once the change is over, however it ended: the row follows the container that holds the name (the new one, or the
     // original put back), and after one that worked, the domains its new ports. Its record in Activity is the engine's (the
     // journal row of a recreate, ContainerUpdater's entry for a live change), so none is written here.
-    private async Task FollowAsync(PortChangeJob job, string container, int appId)
+    private async Task FollowAsync(PortChangeJob job, string container, int appId, SettingsPlan? settings = null)
     {
         try
         {
             var result = await job.Completion;
             var plan = job.Plan;
             await _host.SyncAsync(appId, CancellationToken.None);
+            if (settings is not null) await AuditAsync(settings, result.Ok ? null : result.Message);
             if (result.Ok && !plan.LiveOnly) await _host.SyncDomainsAsync(appId, CancellationToken.None);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

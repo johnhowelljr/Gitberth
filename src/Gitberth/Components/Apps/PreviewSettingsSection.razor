@@ -32,8 +32,27 @@
             <SwitchRow Title="Protect previews' domains" Value="protect" ValueChanged="v => protect = v" Changed="@(protect != loaded.Protect)"
                        Sub="Visitors sign in through Cloudflare Access before they see a preview. Access is set up in Settings › Domains." />
         </div>
-        @if (shared.Count > 0)
+        <Field Label="Each preview's database" Changed="@(databases != loaded.Databases)">
+            <Seg T="PreviewDatabaseMode" Options="DatabaseOptions" Value="databases" ValueChanged="SetDatabasesAsync" Label="Each preview's database" Class="gb-seg--wrap" />
+        </Field>
+        <p class="gb-help" style="margin-top:-4px">@DatabasesHelp</p>
+        @if (databases != PreviewDatabaseMode.Off && view.Own.Count > 0)
         {
+            <div class="gb-ro-note">
+                <SvgIcon Icon="@GitberthIcons.Database" Size="sm" />
+                <span>Each preview gets its own @Own(view.Own), made before its first build and dropped when it goes. Production's stays as it is.</span>
+            </div>
+        }
+        @if (databases == PreviewDatabaseMode.CopyOfProduction)
+        {
+            <Banner Tone="serious" Title="Production's data, in every preview">
+                A copy holds whatever production's database holds, people's personal data too, and a preview runs a pull request's code with it.
+                Choose it only when everyone who can open a pull request may see that data.
+            </Banner>
+        }
+        @if (view.Shared.Count > 0)
+        {
+            var shared = view.Shared;
             <Banner Tone="serious" Title="@(shared.Count == 1 ? $"{shared[0].Name} would give previews production's database" : "These would give previews production's database")">
                 @PreviewDatabases.Refusal(shared, App.Name) Until then each preview's deploy stops before it builds.
             </Banner>
@@ -61,6 +80,7 @@
 
     private PreviewSettings loaded = new(PreviewMode.Off, 3, 7, false, true);
     private PreviewMode mode;
+    private PreviewDatabaseMode databases;
     private int limit, days;
     private bool forks, protect, busy;
     private int? loadedFor;
@@ -72,7 +92,25 @@
         new(PreviewMode.PullRequestsAndBranches, "Pull requests and branches"),
     ];
 
-    private PreviewSettings Wanted => new(mode, limit, days, forks, protect);
+    private static readonly IReadOnlyList<SegOption<PreviewDatabaseMode>> DatabaseOptions =
+    [
+        new(PreviewDatabaseMode.Off, "None of its own"),
+        new(PreviewDatabaseMode.Empty, "An empty one"),
+        new(PreviewDatabaseMode.CopyOfProduction, "A copy of production's"),
+    ];
+
+    private PreviewSettings Wanted => new(mode, limit, days, forks, protect, databases);
+
+    private string DatabasesHelp => databases switch
+    {
+        PreviewDatabaseMode.Off => "Previews get no database of their own. A variable that would give them production's database stops their deploys, unless it has a value for previews on the Environment tab.",
+        PreviewDatabaseMode.CopyOfProduction => "Each preview gets a database of its own on the same Postgres server, with production's data copied in when it's made; a Redis of its own starts empty.",
+        _ => "Each preview gets a database of its own on the same Postgres server, empty, so its migrations make their own tables; and a Redis of its own when the app has one.",
+    };
+
+    // "database for DATABASE_URL (on postgres) and Redis for REDIS_URL".
+    private static string Own(IReadOnlyList<PreviewDatabaseOf> own) => AppFacts.Names(own.Select(o => o.Kind == DatabaseKind.Redis
+        ? $"Redis for {o.Variable}" : $"database for {o.Variable} (on {o.Server})").ToList());
 
     private bool Dirty => Wanted != loaded;
 
@@ -83,8 +121,10 @@
         _ => "No previews: only production runs.",
     };
 
-    // Variables that would give its previews production's database: said here, before a preview is refused for it.
-    private IReadOnlyList<PreviewDatabases.Shared> shared = [];
+    // What previews get for their databases with the choice shown: the variables each gets its own for, and those that would
+    // give them production's database, said here before a preview is refused for one.
+    private PreviewDatabasesView view = PreviewDatabasesView.None;
+    private PreviewDatabaseMode? viewFor;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -95,20 +135,29 @@
         loadedFor = App.Id;
         loaded = now;
         Undo();
-        if (first)
+        if (first || viewFor != databases) await ReadDatabasesAsync();
+    }
+
+    private async Task ReadDatabasesAsync()
+    {
+        viewFor = databases;
+        try
         {
-            try
-            {
-                shared = await Previews.SharedDatabasesAsync(App.Id);
-            }
-            catch (Exception)
-            {
-                shared = [];
-            }
+            view = await Previews.DatabasesAsync(App.Id, databases);
+        }
+        catch (Exception)
+        {
+            view = PreviewDatabasesView.None;
         }
     }
 
-    private void Undo() => (mode, limit, days, forks, protect) = (loaded.Mode, loaded.Limit, loaded.ExpiryDays, loaded.Forks, loaded.Protect);
+    private async Task SetDatabasesAsync(PreviewDatabaseMode value)
+    {
+        databases = value;
+        await ReadDatabasesAsync();
+    }
+
+    private void Undo() => (mode, limit, days, forks, protect, databases) = (loaded.Mode, loaded.Limit, loaded.ExpiryDays, loaded.Forks, loaded.Protect, loaded.Databases);
 
     private async Task SaveAsync()
     {

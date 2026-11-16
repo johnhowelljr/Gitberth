@@ -36,9 +36,9 @@ public sealed class PortChangerTests
         _engine.Images["gitberth:local"] = new JsonObject { ["Id"] = "sha256:0c1a38670237d7bc11ee185585ec1309b54599d259ccd7930e81c2114472b125" };
     }
 
-    private PortChanger Changer(ContainerLocks? locks = null) =>
+    private PortChanger Changer(ContainerLocks? locks = null, Audit.AuditLog? audit = null) =>
         new(_engine, _journal, locks ?? _locks, _host, _host, _host, _host, _host,
-            new GitberthOptions { DataDir = Path.GetTempPath() }, NullLogger<PortChanger>.Instance, _clock);
+            new GitberthOptions { DataDir = Path.GetTempPath() }, NullLogger<PortChanger>.Instance, _clock, audit: audit);
 
     private FakeEngine.Box Postgres(bool running = true, Action<JsonObject>? change = null)
     {
@@ -409,7 +409,8 @@ public sealed class PortChangerTests
             b.ExitsAfter = TimeSpan.FromSeconds(4);
         };
         _engine.Fail = OriginalWontStart(old.Id, "failed to create task for container: OCI runtime create failed");
-        var changer = Changer();
+        var audit = new Audit.AuditLog();
+        var changer = Changer(audit: audit);
 
         var result = await changer.ApplyAsync(await changer.PlanAsync("postgres", Publish5432));
 
@@ -432,6 +433,11 @@ public sealed class PortChangerTests
         var back = Assert.Single(_engine.Boxes);
         Assert.Equal((old.Id, "postgres", true, "unless-stopped"), (back.Id, back.Name, back.Running, Policy("postgres")));
         Assert.Equal(ChangeOutcome.RolledBack, Assert.Single(_journal.Rows).Outcome);
+        // The owner's decision is in the audit log; asking again, with nothing left to decide, isn't.
+        await changer.PutOriginalBackAsync("postgres");
+        var decided = Assert.Single(audit.Entries);
+        Assert.Equal(("app.change.putback", "Put the original postgres back: postgres is back as it was.", Audit.AuditOutcome.Succeeded, "postgres"),
+            (decided.Action, decided.Summary, decided.Outcome, decided.Container));
     }
 
     [Fact]
@@ -444,7 +450,8 @@ public sealed class PortChangerTests
             b.ExitsAfter = TimeSpan.FromSeconds(4);
         };
         _engine.Fail = OriginalWontStart(old.Id);
-        var changer = Changer();
+        var audit = new Audit.AuditLog();
+        var changer = Changer(audit: audit);
         await changer.ApplyAsync(await changer.PlanAsync("postgres", Publish5432));
         _engine.Fail = null;
         _engine.Get(TempName).ExitsAfter = null;
@@ -452,6 +459,9 @@ public sealed class PortChangerTests
         var kept = await changer.KeepNewAsync("postgres");
 
         Assert.Equal(new PortChangeResult(PortChangeOutcome.Done, "postgres keeps the new container. The original is removed (its volumes stay)."), kept);
+        var decided = Assert.Single(audit.Entries);
+        Assert.Equal(("app.change.kept", "Kept the new postgres: postgres keeps the new container. The original is removed (its volumes stay).", Audit.AuditOutcome.Succeeded),
+            (decided.Action, decided.Summary, decided.Outcome));
         var now = Assert.Single(_engine.Boxes);
         Assert.NotEqual(old.Id, now.Id);
         // The failed rollback had turned its policy off; it has the original's again.

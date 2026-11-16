@@ -1,7 +1,7 @@
 # App settings
 
 Every setting on an app's **Settings**, **Environment** and **Network** tabs, field by field, in the order the page shows
-them. Each entry says what the setting does, its default, and when you'd change it. To learn how to edit and apply
+them, and the uptime check on its **Overview**. Each entry says what the setting does, its default, and when you'd change it. To learn how to edit and apply
 settings, see [Change settings](../guides/manage-apps.md#change-settings).
 
 ![An app's Settings tab, with the section list on the left](../images/app-settings.webp)
@@ -59,6 +59,20 @@ A commit the build filters leave out, or whose message says `[skip ci]`, ends **
 its version; **Deploy** still builds it. Patterns starting with `!` aren't supported, and each field takes at most 50
 patterns of at most 200 characters. See [Skip commits that don't need a deploy](../guides/deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
 
+### Compose
+
+[Compose apps](../guides/compose-apps.md) only: a Git app deployed with Compose has this section after **Source** (its
+**Build** field is the Compose file's then), and an inline Compose app has it in place of **Image**. Saved on its own with
+**Save and deploy**, which says what changes first. A Compose app has no **Command**, **Volumes**, **Resources**, **Health
+check**, **Labels**, **Logging** or **Advanced** section, and **Restart** has only the scheduled restart: those are its
+Compose file's, service by service.
+
+| Field | What it does | Default | Applies |
+|---|---|---|---|
+| **Compose file** | A Git app's: the file's path in the app's folder, such as `compose.yaml`. An inline app's: the whole file, as `docker compose` reads it; `${NAME}` takes the app's variables. Saving shows the services that come and go. | The file it was created from | Build |
+| **Web service** | The service whose container is the app's: its domains, LAN port, health URL, logs and uptime checks. The others stay inside the app. | The one that publishes a web port | Build |
+| **Put every service on Gitberth's network** | Every service joins Gitberth's shared network too, with no name of its own there, so a worker or a cron service reaches the app's database server and other apps by name. Off: only the web service, as the app's name. Its previews follow it. | Off | Deploy without a build |
+
 ### Previews
 
 Git apps only: a preview of each pull request, or branch, as an app of its own. Saved on its own with **Save previews**;
@@ -71,6 +85,7 @@ nothing here restarts the app. See [Preview deployments](../guides/previews.md).
 | **Remove after (days without a new commit)** | A preview with no new commit for this long is removed (1 to 365). | 7 | At once |
 | **Also pull requests from forks** | Previews pull requests from other people's copies of the repo. Their code is built and run on this server, without added capabilities, security options or GPUs (no preview gets the host's devices or privileged mode). Turning it off removes their previews. | Off | At once |
 | **Protect previews' domains** | Visitors sign in through Cloudflare Access before they reach a preview's domain. | On | At once |
+| **Each preview's database** | **None of its own**, **An empty one** or **A copy of production's**: a database and a role of the preview's own on the same Postgres server, made before its first build and dropped with it, for the app's own database and for a variable whose production value is a `postgres://` URL to a server on this host Gitberth can use; and a Redis of its own for an app with one. A copy holds production's personal data too. See [Databases](../guides/databases.md#previews). | **An empty one** | The next new preview |
 
 ### Image
 
@@ -96,6 +111,22 @@ it when the image moved. Saved on its own; nothing here restarts the app. See [D
 | Bin | Deletes the hook, after asking. Its URL answers 404 from then on. | | At once |
 
 Each hook also says when it was last used.
+
+### Databases
+
+Every app but Gitberth itself and its tunnel: a Postgres database or a Redis of the app's own, with its connection string
+in a variable Gitberth sets. Saved on its own; the app takes a change as any settings change: a Git app with a deploy
+without a build, any other app recreated by the change engine. See [Databases](../guides/databases.md).
+
+| Field or button | What it does | Default | Applies |
+|---|---|---|---|
+| **Add** | **Postgres**: a database and a role of the app's own on a Postgres server, named after the app, that only it may connect to. **Redis**: a container of the app's own (`gb-<app>_redis`) with a password and its data on a volume of its own. | **Postgres** | At once, then Recreate |
+| **Server** | Postgres: the server it goes on, among those Gitberth can use. | The default in **Settings › Databases** | |
+| **Variable** | The variable its connection string goes in. Says when it takes the place of the app's own value or a GitHub variable. | `DATABASE_URL`, `REDIS_URL` | |
+| **Copy connection string** | Copies the URL with its password; the page never shows it. | | |
+| Bin | **Keep the data**: the variable goes, and the database stays where it is (a Postgres database on its server, a Redis's data in its volume). **Delete the data**: it's dropped too, once its name is typed in. | | At once, then Recreate |
+
+Each database shows its kind, server, size, variable, and when Gitberth made it.
 
 ### Command
 
@@ -200,7 +231,7 @@ Everything else Docker can set. Most apps never need these. Every field here app
 ### Remove
 
 **Remove …** removes the app. A Git app's container goes with its deploy history; its images and volumes go only if you
-tick them. Any other app's volumes stay unless you tick them. See [Remove an app](../guides/manage-apps.md#remove-an-app).
+tick them. A Compose app's whole project goes (`docker compose down`), its named volumes and images only if you tick them. Any other app's volumes stay unless you tick them. See [Remove an app](../guides/manage-apps.md#remove-an-app).
 Gitberth's own container has no **Remove** section.
 
 ## Environment tab
@@ -217,6 +248,11 @@ The app's environment variables. See [Environment variables](../guides/environme
 | **Add variable**, **Paste .env** | Add one variable, or several from `.env` lines. | Recreate |
 | **Stored in GitHub** | Git apps: the repository's GitHub variables. **Save to GitHub** and delete act on GitHub at once; the app gets them with its next deploy. | Next deploy |
 | **Set by Gitberth, like on Vercel** | Git apps: the variables Gitberth adds, read-only. Turned off with **Vercel's variables** in **Source**. | |
+| **Set by Gitberth from its databases** | The variables the app's [databases](../guides/databases.md) give it, with where each comes from, read-only. For a Git app they win over a value of the same name above (tagged **Replaced by Gitberth**) and over GitHub's; any other app's row of one says **Set by Gitberth**. | |
+
+A [Compose app](../guides/compose-apps.md)'s variables are what its Compose file's `${…}` are filled with: Gitberth writes
+them to the project's `.env` too, so `env_file: .env` takes them. A service gets one only when the file passes it on
+(`environment:` or `env_file:`). A change applies with a deploy without a build.
 
 ## Network tab
 
@@ -244,8 +280,16 @@ also offers **Save for next deploy**. A container Compose manages gets the lines
 
 The app's domains, through the Cloudflare tunnel, once domains are turned on in **Settings** › **Domains (Cloudflare)**.
 Type a domain such as `app.example.com` and click **Add domain** (or **Add domain and publish** when the web port is
-**Internal**). Each domain shows **Live** or **Not working**, with **Make main**, **Serve every path**, **Point it here** or
-**Fix** when they apply, and a button to remove it. See [Domains](../guides/domains.md).
+**Internal**). Each domain shows **Live**, **Not working** or **Down page**, with **Make main**, **Serve every path**,
+**Point it here** or **Fix** when they apply, a button that previews its down page, and a button to remove it. See
+[Domains](../guides/domains.md).
+
+#### Down page
+
+| Field | What it does | Default | Applies |
+|---|---|---|---|
+| **Down page** | While the app can't be served (stopped, its container down, a deploy replacing it, or its protection not applied yet), its domains show a clean "temporarily unavailable" page instead of Cloudflare's error. See [The down page](../guides/uptime-and-status-page.md#the-down-page). | On | At once, saved on its own |
+| **Message** | A sentence of yours on the down page, up to 280 characters, like "Back by 9:00 UTC." A protected domain's down page leaves it out. **Save message** saves it. | None | At once, saved on its own |
 
 ### Networks
 
@@ -260,6 +304,17 @@ Choose **Off**, **Automatic** (the next free address of the block) or **Static**
 instant and restarts nothing. **Change** and **Remove…** change it later. See [Networking](../guides/networking.md).
 
 ![An app's Network tab with an own LAN address on](../images/own-lan-address.webp)
+
+## Overview tab: Uptime
+
+The **Uptime** card on the app's **Overview** checks the app from outside, the way a visitor reaches it. See
+[Uptime checks](../guides/uptime-and-status-page.md).
+
+| Field or button | What it does | Default | Applies |
+|---|---|---|---|
+| **Uptime check** | Checks the app every minute (as set in **Settings › Uptime and status page**): its main domain over HTTPS, else its web port on the LAN. Off, it isn't checked, sends no down or back-up notifications, and the status page leaves it out unless you picked it there. | On | At once, saved on its own |
+| **Path** | The path the check asks for, like `/health`. | `/` | At once, saved on its own |
+| **Check now** | Checks it at once. A stopped app isn't checked: it says why instead. | | |
 
 ## Related
 

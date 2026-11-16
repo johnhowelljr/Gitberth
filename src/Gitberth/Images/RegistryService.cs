@@ -23,18 +23,22 @@ public sealed partial class RegistryService
     private readonly SecretProtector _protector;
     private readonly IImageEngine _engine;
 
-    public RegistryService(IDbContextFactory<GitberthDb> dbFactory, SecretProtector protector, DockerApi api)
-        : this(dbFactory, protector, (IImageEngine)api)
+    public RegistryService(IDbContextFactory<GitberthDb> dbFactory, SecretProtector protector, DockerApi api, Audit.AuditLog? audit = null)
+        : this(dbFactory, protector, (IImageEngine)api, audit)
     {
     }
 
     /// <summary>Signs in through <paramref name="engine"/>: a stand-in, in tests.</summary>
-    internal RegistryService(IDbContextFactory<GitberthDb> dbFactory, SecretProtector protector, IImageEngine engine)
+    /// <param name="audit">Where sign-ins added, refused and removed are recorded (never their secrets); none in older tests.</param>
+    internal RegistryService(IDbContextFactory<GitberthDb> dbFactory, SecretProtector protector, IImageEngine engine, Audit.AuditLog? audit = null)
     {
         _dbFactory = dbFactory;
         _protector = protector;
         _engine = engine;
+        _audit = audit;
     }
+
+    private readonly Audit.AuditLog? _audit;
 
     /// <summary>Every saved sign-in, by host; one whose secret can't be read any more is marked as needing it again.</summary>
     public async Task<IReadOnlyList<RegistryInfo>> ListAsync(CancellationToken ct = default)
@@ -78,15 +82,27 @@ public sealed partial class RegistryService
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            _audit?.Record(new Audit.AuditEntry("settings.registry.added", $"Didn't save the sign-in for {NameOf(host)} as {username}: the registry refused it.")
+            {
+                Outcome = Audit.AuditOutcome.Failed, Target = NameOf(host),
+            });
             return new RegistrySaved(false, $"{NameOf(host)} refused the sign-in, so nothing was saved. Docker said: {ex.Message}", null);
         }
 
+        var replaced = row is not null;
+        var userBefore = row?.Username;
         if (row is null) db.Registries.Add(row = new RegistryCredential());
         row.Host = host;
         row.Username = username;
         row.ProtectedSecret = _protector.Protect(secret);
         row.VerifiedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        // The sign-in's secret never goes in the log: only the registry and the user name.
+        _audit?.Record(new Audit.AuditEntry(replaced ? "settings.registry.changed" : "settings.registry.added",
+            replaced ? $"Changed the sign-in for {NameOf(host)}: it signs in as {username}." : $"Added a sign-in for {NameOf(host)} as {username}.")
+        {
+            Target = NameOf(host), Changes = [new("User name", userBefore, username)],
+        });
         // What the registry refused before may be private to this sign-in: the next look asks again.
         await db.ImageChecks.Where(c => c.Error == ImageOrigins.OnlyHere && c.Reference.StartsWith(host + "/")).ExecuteDeleteAsync(ct);
         return new RegistrySaved(true, $"Signed in to {NameOf(host)} as {username}. Saved.", row.Id);
@@ -96,8 +112,11 @@ public sealed partial class RegistryService
     public async Task RemoveAsync(int id, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.Registries.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
         await db.Apps.Where(a => a.RegistryId == id).ExecuteUpdateAsync(s => s.SetProperty(a => a.RegistryId, (int?)null), ct);
         await db.Registries.Where(r => r.Id == id).ExecuteDeleteAsync(ct);
+        if (row is not null)
+            _audit?.Record(new Audit.AuditEntry("settings.registry.removed", $"Removed the sign-in for {NameOf(row.Host)} ({row.Username}).") { Target = NameOf(row.Host) });
     }
 
     /// <summary>X-Registry-Auth for the reference (base64url JSON), or null for none.</summary>

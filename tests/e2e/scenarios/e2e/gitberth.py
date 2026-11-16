@@ -377,7 +377,7 @@ class Gitberth:
             d = self.db.one("SELECT * FROM Deployments WHERE AppId = ? AND Id > ? ORDER BY Id DESC LIMIT 1", app_id, after)
             return d if d and d["Status"] in FINAL else None
 
-        d = until(done, timeout, f"a deploy of app {app_id} (after #{after}) to finish", interval=2,
+        d = until(done, timeout, f"a deploy of app {app_id} (after #{after}) to finish", interval=0.5,
                   seen=lambda: [{k: x[k] for k in ("Id", "Trigger", "Status", "CommitSha", "Error")} for x in self.db.deployments(app_id)[:3]])
         if d["Status"] not in statuses:
             raise AssertionError(f"Deploy #{d['Id']} of app {app_id} ended {d['Status']}, not {'/'.join(statuses)}: {d['Error']}\n"
@@ -393,7 +393,7 @@ class Gitberth:
             marks = ",".join("?" * len(ids))
             return self.db.query(f"SELECT Id, AppId, Status FROM Deployments WHERE AppId IN ({marks}) AND Status IN ('Queued','Cloning','Building','Starting')", *ids)
 
-        until(lambda: not busy(), timeout, f"app {app_id}'s deploys to end ({'/'.join(active)})", interval=2, seen=busy)
+        until(lambda: not busy(), timeout, f"app {app_id}'s deploys to end ({'/'.join(active)})", interval=0.5, seen=busy)
 
     def deploy_log(self, deployment_id, tail=None):
         path = os.path.join(config.GBDATA, "logs", f"deploy-{deployment_id}.log")

@@ -59,7 +59,8 @@ public sealed record DockerInfo(string? ServerVersion, string? ClientVersion, st
 /// Thin wrapper over the docker CLI. The CLI negotiates the Engine API version itself,
 /// so Gitberth keeps working across Docker upgrades (a pinned old API version is what broke Watchtower on Docker 29).
 /// </summary>
-public sealed partial class DockerCli(GitberthOptions options)
+/// <param name="expected">Where every change a command makes is registered first, so the audit log knows the events as Gitberth's own.</param>
+public sealed partial class DockerCli(GitberthOptions options, Audit.ExpectedChanges? expected = null)
 {
     private IReadOnlyList<string>? _logOptions;
 
@@ -83,14 +84,55 @@ public sealed partial class DockerCli(GitberthOptions options)
 
     public async Task<ProcessResult> RunAsync(IEnumerable<string> args, ProcessOptions? processOptions = null, CancellationToken ct = default)
     {
-        if (Runner is not null) return await Runner([.. args], processOptions, ct);
+        IReadOnlyList<string> list = args as IReadOnlyList<string> ?? [.. args];
+        // A command's changes are Gitberth's own from just before it runs until a little after it ended.
+        using var lease = expected?.ForCli(list);
+        if (Runner is not null) return await Runner([.. list], processOptions, ct);
         try
         {
-            return await ProcessRunner.RunAsync(options.DockerPath, args, processOptions, ct);
+            return await ProcessRunner.RunAsync(options.DockerPath, list, processOptions, ct);
         }
         catch (System.ComponentModel.Win32Exception)
         {
             return new ProcessResult(-1, "", $"The docker CLI wasn't found ('{options.DockerPath}').");
+        }
+    }
+
+    /// <summary>
+    /// Runs a command in a running container (<c>docker exec</c>). <paramref name="stdin"/> is piped in (<c>-i</c>), so SQL and
+    /// the like never show on a command line; each of <paramref name="environment"/>'s variables is named on the command
+    /// line (<c>-e PGPASSWORD</c>) while its value reaches the docker CLI through its own environment, never argv.
+    /// </summary>
+    /// <param name="maxCapture">How much of its output to keep (the tail).</param>
+    public Task<ProcessResult> ExecAsync(string container, IReadOnlyList<string> command, string? stdin = null,
+        IReadOnlyDictionary<string, string>? environment = null, CancellationToken ct = default, int maxCapture = 1024 * 1024) =>
+        RunAsync(ExecArgs(container, command, stdin is not null, environment?.Keys),
+            new ProcessOptions { Stdin = stdin, Environment = environment, MaxCapture = maxCapture }, ct);
+
+    /// <summary>`docker exec [-i] [-e NAME…] container command…`: the names only, never a value.</summary>
+    internal static List<string> ExecArgs(string container, IReadOnlyList<string> command, bool input, IEnumerable<string>? names)
+    {
+        var args = new List<string> { "exec" };
+        if (input) args.Add("-i");
+        foreach (var name in names ?? []) args.AddRange(["-e", name]);
+        args.Add(container);
+        args.AddRange(command);
+        return args;
+    }
+
+    /// <summary>
+    /// Gitberth is about to cause these events on things its next command doesn't name in its arguments (the networks and
+    /// volumes a Compose file names itself): they're known as its own until the returned lease is disposed, and a little after.
+    /// </summary>
+    public IDisposable Expect(string type, IReadOnlyCollection<string> actions, params string[] subjects) =>
+        expected?.Expect(type, actions, subjects) ?? NoLease.Instance;
+
+    private sealed class NoLease : IDisposable
+    {
+        public static readonly NoLease Instance = new();
+
+        public void Dispose()
+        {
         }
     }
 
@@ -544,6 +586,34 @@ public sealed partial class DockerCli(GitberthOptions options)
             .Where(t => !t.EndsWith(":<none>", StringComparison.Ordinal))
             .Distinct()
             .ToList();
+    }
+
+    /// <summary>
+    /// The tags (repository:tag) whose repository starts with <paramref name="prefix"/> (gitberth/shop/: a Compose app's
+    /// built images and pins), whatever their labels; untagged ones left out.
+    /// </summary>
+    public async Task<List<string>> ListImageTagsUnderAsync(string prefix, CancellationToken ct = default)
+    {
+        var r = await RunAsync(["image", "ls", "--format", "{{.Repository}}:{{.Tag}}"], null, ct);
+        if (!r.Ok) return [];
+        return r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(t => t.StartsWith(prefix, StringComparison.Ordinal) && !t.EndsWith(":<none>", StringComparison.Ordinal))
+            .Distinct()
+            .ToList();
+    }
+
+    /// <summary>The ID of the image a reference names; null when there's none here.</summary>
+    public async Task<string?> ImageIdAsync(string reference, CancellationToken ct = default)
+    {
+        var r = await RunAsync(["image", "inspect", "--format", "{{.Id}}", reference], null, ct);
+        return r.Ok && r.StdOut.Trim() is { Length: > 0 } id ? id : null;
+    }
+
+    /// <summary>The names of the containers, of any state, made from an image (by its ID) or from one built on it.</summary>
+    public async Task<List<string>> ContainersOfImageAsync(string imageId, CancellationToken ct = default)
+    {
+        var r = await RunAsync(["ps", "-a", "--filter", $"ancestor={imageId}", "--format", "{{.Names}}"], null, ct);
+        return r.Ok ? r.StdOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList() : ["(unknown)"];
     }
 
     public Task<ProcessResult> RemoveImageAsync(string image, CancellationToken ct = default) => RunAsync(["image", "rm", image], null, ct);

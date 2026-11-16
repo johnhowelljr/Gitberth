@@ -1,0 +1,150 @@
+@implements IDisposable
+@inject Gitberth.Compose.ComposeApps Compose
+@inject ISnackbar Snackbar
+
+@*
+    A Compose app's services (one app, several containers): each one's state, image, ports, CPU and memory, with its log and
+    a restart. The web service is the app's own container, so its addresses, domains and charts are the app's; the others
+    are inside the app, reached by their service names on its own network.
+*@
+<SectionCard Title="Services" Icon="@Icons.Material.Outlined.AccountTree" Sub="@Sub" Flush="true">
+    <Actions>
+        <a class="gb-card-link" href="@($"{View.Summary.Href}/logs")">Logs<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
+    </Actions>
+    <ChildContent>
+        @if (members is null)
+        {
+            <div style="padding:14px 18px"><div class="gb-skel" style="height:64px"></div></div>
+        }
+        else if (members.Count == 0)
+        {
+            <div style="padding:14px 18px">
+                <EmptyState Small="true" Title="No services yet">Its services show here once its first deploy brings them up.</EmptyState>
+            </div>
+        }
+        else
+        {
+            @foreach (var m in members)
+            {
+                var (tone, label) = Pill(m);
+                <div class="gb-feed-row gb-svcrow" @key="m.Service">
+                    <div class="gb-svcrow-main">
+                        <span class="gb-row" style="gap:8px;flex-wrap:wrap">
+                            <span class="gb-svcrow-name">@m.Service</span>
+                            @if (m.Web)
+                            {
+                                <span class="gb-tag gb-tag--accent" title="Its domains, LAN port, health URL and uptime are the app's">Web</span>
+                            }
+                            <span class="@($"gb-pill gb-pill--{tone}")"><span class="gb-pill-dot"></span>@label</span>
+                        </span>
+                        <span class="gb-t3 gb-mono gb-svcrow-image" title="@m.Image">@m.Image</span>
+                        <span class="gb-t3 gb-svcrow-facts">
+                            @if (m.Container is { } container)
+                            {
+                                <span class="gb-mono" title="Its container">@container</span>
+                            }
+                            @if (Ports(m) is { Length: > 0 } ports)
+                            {
+                                <span>@ports</span>
+                            }
+                            @if (m.CpuPercent is double cpu)
+                            {
+                                <span>CPU @AppFacts.Percent(cpu)</span>
+                            }
+                            @if (m.MemoryBytes is ulong memory)
+                            {
+                                <span>@AppFacts.Bytes(memory)</span>
+                            }
+                        </span>
+                    </div>
+                    <div class="gb-svcrow-actions">
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Article" Href="@($"{View.Summary.Href}/logs?service={Uri.EscapeDataString(m.Service)}")"
+                             Disabled="@(m.Container is null)">Log</Btn>
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.RestartAlt" OnClick="() => RestartAsync(m)" Busy="@(restarting == m.Service)"
+                             Disabled="@(m.Container is null || restarting is not null || View.Summary.State == AppState.Deploying)">Restart</Btn>
+                    </div>
+                </div>
+            }
+        }
+    </ChildContent>
+    <Foot>
+        <span>Start, Stop, Restart and Delete act on all of them. The others reach each service by its name inside the app.</span>
+    </Foot>
+</SectionCard>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+
+    private IReadOnlyList<Gitberth.Compose.ComposeMember>? members;
+    private string? restarting;
+    private Timer? timer;
+    private int? loadedFor;
+
+    private string? Sub => members is null || members.Count == 0 ? null
+        : $"{members.Count(m => m.Running)} of {members.Count} running";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == View.Row?.Id) return;
+        loadedFor = View.Row?.Id;
+        members = null;
+        await LoadAsync();
+        timer?.Dispose();
+        // The states and readings move on with the page's own refresh.
+        timer = new Timer(_ => _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }), null, 5000, 5000);
+    }
+
+    private async Task LoadAsync()
+    {
+        if (View.Row is not { } row) return;
+        try
+        {
+            var loaded = await Compose.MembersAsync(row);
+            if (row.Id == View.Row?.Id) members = loaded;
+        }
+        catch (Exception)
+        {
+            members ??= [];
+        }
+    }
+
+    private async Task RestartAsync(Gitberth.Compose.ComposeMember member)
+    {
+        if (View.Row is not { } row || restarting is not null) return;
+        restarting = member.Service;
+        try
+        {
+            var error = await Compose.RestartServiceAsync(row, member.Service);
+            Snackbar.Add(error is null ? $"Restarted {member.Service}." : error, error is null ? Severity.Success : Severity.Error);
+            await LoadAsync();
+        }
+        finally
+        {
+            restarting = null;
+        }
+    }
+
+    // The ports a service publishes or listens on, as docker ps shows them, without the IPv6 copies.
+    private static string Ports(Gitberth.Compose.ComposeMember m) =>
+        string.Join(", ", m.Ports.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(p => !p.StartsWith('[')).Distinct());
+
+    internal static (string Tone, string Label) Pill(Gitberth.Compose.ComposeMember m) => m.State switch
+    {
+        "missing" => ("danger", "No container"),
+        "running" when m.Status.Contains("(unhealthy)", StringComparison.Ordinal) => ("danger", "Unhealthy"),
+        "running" when m.Status.Contains("(health: starting)", StringComparison.Ordinal) => ("info", "Starting"),
+        "running" when m.Status.Contains("(healthy)", StringComparison.Ordinal) => ("success", "Healthy"),
+        "running" => ("success", "Running"),
+        "restarting" => ("warning", "Restarting"),
+        "exited" when ContainerService.ExitCode(m.Status) is { } code and not (0 or 137 or 143) => ("danger", $"Exited ({code})"),
+        "exited" => ("secondary", "Stopped"),
+        "created" => ("secondary", "Not started"),
+        _ => ("secondary", m.State),
+    };
+
+    public void Dispose() => timer?.Dispose();
+}

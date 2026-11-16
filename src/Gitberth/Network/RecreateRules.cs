@@ -182,10 +182,15 @@ public static class RecreateRules
             return new(RecreateKind.Self, compose is null
                 ? "Gitberth's own container: it can't recreate itself."
                 : $"Gitberth's own container. Its ports are set in {compose.File}.", compose);
+        if (Databases.DatabaseNames.IsMember(labels))
+            return new(RecreateKind.DeployTemporary, "This is an app's own Redis: Gitberth makes it, and removes it, with its app's databases.");
         if (labels.TryGetValue("gitberth.app", out var slug))
         {
             if (labels.ContainsKey(ContainerSpecFactory.BridgeLabel))
                 return new(RecreateKind.DeployTemporary, "This is a deploy's temporary or previous container, which Gitberth removes itself.");
+            // A service of a Compose app Gitberth deploys: never a foreign Compose project's container.
+            if (labels.TryGetValue(Compose.ComposeNames.ServiceLabel, out var service))
+                return new(RecreateKind.App, $"{name} is the {service} service of the app {slug}: its settings are the app's Compose file and its Network tab, which a deploy applies.");
             if (MadeFromImage(labels)) return null;
             if (name != AppDefinition.ContainerNameFor(slug))
                 return new(RecreateKind.DeployTemporary, "This is a deploy's temporary or previous container, which Gitberth removes itself.");

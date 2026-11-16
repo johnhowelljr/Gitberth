@@ -25,9 +25,26 @@ public sealed class RestartScheduler(
     AppLocks locks,
     ILogger<RestartScheduler> logger,
     ContainerLocks? containerLocks = null,
-    PortChanger? changer = null) : BackgroundService
+    PortChanger? changer = null,
+    Audit.AuditLog? audit = null) : BackgroundService
 {
-    private static readonly TimeSpan Tick = TimeSpan.FromMinutes(1);
+    // A scheduled restart that isn't a deploy (a deploy records itself), as the schedule's.
+    private void Restarted(string container, string? name, int? appId, ProcessResult r, RestartInterval every) =>
+        audit?.Record(new Audit.AuditEntry("app.restarted", r.Ok
+            ? $"Restarted {name ?? container} on its schedule ({every})."
+            : $"Couldn't restart {name ?? container} on its schedule: {Audit.AuditLog.Clean(r.ErrorText, 300)?.TrimEnd('.')}.")
+        {
+            Outcome = r.Ok ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed, AppId = appId, AppName = name, Container = container,
+        });
+
+    /// <summary>How often the schedules are looked at: a minute, shorter only in the test rig (<see cref="TestTimings"/>).</summary>
+    internal TimeSpan TickEvery { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// How long a minute of a schedule lasts: a minute, shorter only in the test rig (<see cref="TestTimings"/>). What's said
+    /// about a schedule (the audit log, Activity, the logs) is always in its own minutes.
+    /// </summary>
+    internal TimeSpan MinuteLength { get; set; } = TimeSpan.FromMinutes(1);
 
     private readonly ContainerLocks _containerLocks = containerLocks ?? new ContainerLocks();
 
@@ -40,6 +57,8 @@ public sealed class RestartScheduler(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Schedule));
         try
         {
             // After start-up has repaired anything a restart of Gitberth interrupted.
@@ -54,7 +73,7 @@ public sealed class RestartScheduler(
                 {
                     logger.LogWarning(ex, "Scheduled restarts failed");
                 }
-                await Task.Delay(Tick, stoppingToken);
+                await Task.Delay(TickEvery, stoppingToken);
             }
         }
         catch (OperationCanceledException)
@@ -85,14 +104,14 @@ public sealed class RestartScheduler(
 
         foreach (var (container, minutes) in all.OrderBy(s => s.Key, StringComparer.Ordinal))
         {
-            var every = TimeSpan.FromMinutes(minutes);
+            var every = MinuteLength * minutes;
             if (await docker.StartedAtAsync(container, ct) is not { } startedAt || !IsDue(startedAt, every, LastRestart(container), now)) continue;
             if (apps.TryGetValue(container, out var app))
             {
                 // A deploy is replacing it already, or it's meant to be stopped: nothing to restart.
                 if (deploying.Contains(app.Id) || app.DesiredState == DesiredState.Stopped) continue;
                 _restarted[container] = now;
-                await RestartAppAsync(app, every);
+                await RestartAppAsync(app, minutes);
             }
             else if (!await RestartStandaloneAsync(container, minutes, now, ct))
             {
@@ -122,12 +141,13 @@ public sealed class RestartScheduler(
         var r = await docker.RestartStandaloneAsync(container, ContainerService.IsDatabaseImage, ct);
         if (r.Ok) logger.LogInformation("Restarted {Container} on its schedule ({Every})", container, RestartInterval.FromMinutes(minutes));
         else logger.LogWarning("Restarting {Container} on its schedule failed: {Error}", container, r.ErrorText);
+        Restarted(container, null, null, r, RestartInterval.FromMinutes(minutes));
         return true;
     }
 
-    private async Task RestartAppAsync(AppDefinition app, TimeSpan every)
+    private async Task RestartAppAsync(AppDefinition app, int minutes)
     {
-        var interval = RestartInterval.FromMinutes((int)every.TotalMinutes);
+        var interval = RestartInterval.FromMinutes(minutes);
         // A recreate would also apply settings saved since the container started. Those wait for the user, so the
         // container restarts as it is.
         if (app.ConfigChangePending)
@@ -137,6 +157,7 @@ public sealed class RestartScheduler(
                 r = await docker.RestartAsync(app.ContainerName);
             if (r.Ok) logger.LogInformation("Restarted {App} on its schedule ({Every}), as it is: its saved settings aren't applied yet", app.Slug, interval);
             else logger.LogWarning("Restarting {App} on its schedule failed: {Error}", app.Slug, r.ErrorText);
+            Restarted(app.ContainerName, app.Name, app.Id, r, interval);
             return;
         }
         var deployment = await actions.RecreateAsync(app.Id, DeployTrigger.Restart);

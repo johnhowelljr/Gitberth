@@ -22,8 +22,9 @@ namespace Gitberth.Services;
 /// paste into GitHub by hand.
 /// </summary>
 /// <param name="domains">The tunnel: a webhook is added or moved once cloudflared runs a route written just before, so GitHub's first ping gets through.</param>
+/// <param name="audit">Where webhooks added on GitHub and moved to a new host name are recorded, and the ones GitHub refused.</param>
 public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, SettingsService settings, GitHubWrites github, GitHubIntegrationState state,
-    ILogger<WebhookKeeper> logger, DomainService? domains = null) : BackgroundService
+    ILogger<WebhookKeeper> logger, DomainService? domains = null, Audit.AuditLog? audit = null) : BackgroundService
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(10);
 
@@ -65,6 +66,8 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Sync));
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
@@ -177,6 +180,19 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
         }
     }
 
+    // A webhook GitHub didn't take, once per repo and reason while Gitberth runs: the keeper tries again every 10 minutes.
+    private readonly ConcurrentDictionary<string, string> _refused = new(StringComparer.OrdinalIgnoreCase);
+
+    private void Refused(string repo, string why)
+    {
+        if (audit is null || (_refused.TryGetValue(repo, out var said) && said == why)) return;
+        _refused[repo] = why;
+        audit.Record(new Audit.AuditEntry("github.webhook.added", $"Couldn't set up Gitberth's webhook on {repo}: {Audit.AuditLog.Clean(why, 300)?.TrimEnd('.')}.")
+        {
+            Target = repo, Outcome = Audit.AuditOutcome.Failed,
+        });
+    }
+
     // Sets the webhook up on each repo not done yet for this payload URL, and records it with that URL (save writes it).
     private async Task SetUpAsync(List<(string Owner, string Repo)> repos, string url, string secret, string token, Dictionary<string, KeptHook> kept,
         Func<Task> save, CancellationToken ct)
@@ -211,21 +227,35 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
                 _done[name] = url;
                 state.Worked(GitHubFeature.Webhooks, name);
                 state.Hook(new HookResult(name, true, existing is null ? "Webhook added" : "Webhook set up", Now()));
+                // Added, or moved to a new host name; set up again as it was (after a restart, say) changes nothing.
+                if (existing is null)
+                    audit?.Record(new Audit.AuditEntry("github.webhook.added", $"Added Gitberth's webhook to {name} on GitHub: pushes reach Gitberth at {url}.")
+                    {
+                        Target = name, Changes = [new("Payload URL", null, url)],
+                    });
+                else if (!SameUrl(existing.Url, url))
+                    audit?.Record(new Audit.AuditEntry("github.webhook.moved", $"Moved Gitberth's webhook on {name} to {url}.")
+                    {
+                        Target = name, Changes = [new("Payload URL", existing.Url, url)],
+                    });
             }
             catch (GitHubWriteException ex) when (ex.BadToken)
             {
                 state.Hook(new HookResult(name, false, ex.Message, Now()));
                 if (state.Report(GitHubFeature.Webhooks, ex.Message, Now())) logger.LogWarning("GitHub refused Gitberth's token: {Problem}", ex.Message);
+                Refused(name, ex.Message);
                 return;
             }
             catch (GitHubWriteException ex) when (ex.MissingPermission)
             {
                 state.Hook(new HookResult(name, false, ex.Message, Now()));
                 if (state.Refused(GitHubFeature.Webhooks, name, ex.Message, Now())) logger.LogWarning("GitHub refused Gitberth's webhook on {Repo}: {Problem}", name, ex.Message);
+                Refused(name, ex.Message);
             }
             catch (GitHubWriteException ex)
             {
                 state.Hook(new HookResult(name, false, ex.Message, Now()));
+                Refused(name, ex.Message);
             }
         }
     }

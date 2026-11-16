@@ -1,8 +1,8 @@
 # Gitberth's settings
 
-The **Settings** page holds the settings for Gitberth as a whole: GitHub and registry access, notifications, image updates, domains, the network, deploys, the admin password, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
+The **Settings** page holds the settings for Gitberth as a whole: GitHub and registry access, notifications, image updates, domains, uptime checks and the status page, the network, deploys, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
 
-The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Network**, **Own LAN addresses**, **Deploys**, **Admin password** and **System**. Each section saves on its own.
+The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Network**, **Own LAN addresses**, **Deploys**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
 
 ![The Settings page](../images/settings.webp)
 
@@ -39,7 +39,7 @@ When GitHub refuses one of these on a repo, a banner says which permission is mi
 
 ## Notifications
 
-Failed deploys, crashes and failing health checks, by email, Discord, Slack, ntfy or a webhook. See [Notifications](../guides/notifications.md).
+Failed deploys, crashes, failing health checks and apps that go down, by email, Discord, Slack, ntfy or a webhook. See [Notifications](../guides/notifications.md).
 
 | Field or button | What it does | Default |
 |---|---|---|
@@ -51,6 +51,8 @@ Failed deploys, crashes and failing health checks, by email, Discord, Slack, ntf
 | **A deploy succeeds** | Deploys that build a commit; not restarts, settings changes or starts. | Off |
 | **An app crashes** | An error exit or running out of memory, of any container. A crash loop sends one message, then a count every 30 minutes. | On |
 | **A health check fails** | Docker marks an app unhealthy, and again once it passes. | On |
+| **An app goes down** | Its [uptime check](../guides/uptime-and-status-page.md) fails twice in a row, and again once it's back up. | On |
+| **A certificate is about to expire** | A domain's certificate expires within 14 days, and again within 3. | On |
 | **Previews too** | Deploys of previews as well. | Off |
 
 Each destination's row shows where it goes without its secret (`https://discord.com/…`), and how its last message went: **Sent 2 min ago** or **Failed 2 min ago** with the reason. An app's own **Notifications** switch (its Settings tab, **General**) leaves it out; the line under the switches counts the apps left out.
@@ -106,6 +108,24 @@ With domains on, the section shows **Token saved** or **No token**, and the tunn
 
 **Protection** is tagged **Ready** (with where visitors sign in, like **Visitors sign in at acme.cloudflareaccess.com.**, and how many domains are protected) or **Not set up**, with a **Protection isn't ready** banner saying what's missing. A domain is protected with its **Protected** switch on the app's Network tab; see [Protect a domain](../guides/domains.md#protect-a-domain).
 
+## Uptime and status page
+
+How often every app is checked from outside, and the public status page. See
+[Uptime checks, the status page and the down page](../guides/uptime-and-status-page.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Check each app every** | How many seconds apart each app is checked, 30 to 900. **Save** saves it. | 60 seconds |
+| **Status page** | A public page with each listed app's state, 90 days of uptime and the last 14 days' incidents. On your network at `/status` and `/status.json` without signing in; while it's off both answer 404. | Off |
+| **Title** | The page's title, up to 60 characters. | **Status** |
+| **Description** | A sentence under the title, up to 280 characters. | None |
+| **Apps it lists** | **Every app with uptime checks** (apps added later too), or **Only the apps I pick**, from the list under it. | Every app with uptime checks |
+| **Show response times** | Each app's average response time over the last 24 hours. | Off |
+| **Host name on the internet** | Needs domains: a host name nothing else uses, like `status.example.com`. The tunnel sends the whole host to the status page, with its DNS record like any domain, and nothing else of Gitberth's answers there. Not an app's domain, nor GitHub's webhook host. Emptied, its route and the DNS record Gitberth added go. | None |
+| **Save status page** | Saves the status page's settings. The line next to it links the page on your network and on the internet. | |
+
+Every change is recorded in the audit log.
+
 ## Network
 
 How devices on your LAN reach containers. See [Networking](../guides/networking.md).
@@ -159,6 +179,19 @@ every step again, so it takes longer. Afterwards Gitberth says how much it freed
 clear it once the build is done. To build one app without the cache instead, use **Deploy without the build cache**; see
 [Deploys and rollbacks](../guides/deploys-and-rollbacks.md#without-the-build-cache).
 
+## Databases
+
+The Postgres servers apps' databases go on. Each app adds its own on its Settings tab › **Databases**: a database and a
+role of its own, or a Redis. See [Databases](../guides/databases.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| The servers | Every container of a Postgres image on the host: **Gitberth uses it**, or **Not usable** with why (it isn't running, it isn't on Gitberth's network, or Gitberth can't sign in to it as its superuser inside its container). Each shows its image and version, the name apps reach it by, and who Gitberth signs in as. | |
+| **Default** / **Make it the default** | The server new databases go on. An app can still pick another when it adds a database. | The only server Gitberth can use, when there's one |
+| **Create a Postgres server** | Pulls `postgres:18` and makes an app of it: container `postgres` (or the first free name after it), reached by that name on Gitberth's network and published nowhere, its data on a volume of its own, a generated superuser password kept as a secret variable, updates that only tell. It becomes the default unless one was chosen. | |
+
+Choosing the default and setting up a server are recorded in the audit log.
+
 ## Admin password
 
 The section says **Sign in as admin. Use at least 10 characters. Changing it signs every other browser out.**
@@ -169,6 +202,37 @@ The section says **Sign in as admin. Use at least 10 characters. Changing it sig
 | **New password** and **New password again** | The new one, twice. |
 
 Click **Change password**. Every other browser that's signed in goes to the sign-in page: on its next request, or within a minute for a page that's left open. The browser you changed it in stays signed in and says **Password changed. Every other browser is signed out.** See [Security](../concepts/security.md#sign-in-and-the-lockout).
+
+## AI agents and API
+
+Tokens for AI agents (over MCP, at `/mcp`) and scripts (the HTTP API, at `/api/v1`), which use them instead of signing in. See [AI agents and the API](../guides/ai-agents.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Name** | What will use the token, like `Claude Code`. The audit log names the token for everything it does. Up to 50 characters, and no two tokens in use share one. | |
+| **Expires** | **30 days**, **90 days**, **1 year** or **Never**. An expired token stops working by itself, and its expiry is recorded in the audit log. | 90 days |
+| **Access** | **Read** (sees everything, changes nothing), **Operate** (Read, plus deploy, restart, start, stop, roll back, cancel, promote, updates, cron jobs and previews on or off) or **Admin** (full control of this host, like signing in: it can create apps whose containers reach the whole host, so treat it like the admin password). | Read |
+| **Create token** | Makes it and shows it once (`gbt_` and 43 characters), with a copy button and the setup for **Claude Code**, **VS Code**, **Cursor**, **Claude Desktop**, **Other MCP clients** and the **HTTP API (curl)**. Gitberth keeps only its SHA-256 and its first characters. | |
+| **Revoke** | Ends the token at once: every request with it gets 401. It stays in the list, marked **Revoked**. | |
+
+Each token in the list shows its name, access, first characters (`gbt_AbCd1234…`), when it was **Created**, when and from which address it was **Last used**, and when it **Expires** (or **Expired**). The section also shows the **MCP server**'s and the **HTTP API**'s addresses, with copy buttons.
+
+No tool makes, lists or revokes tokens, changes the admin password, or turns off the audit log's recording of changes made outside Gitberth. That's a promise about the tools: for a Read or Operate token it's the whole story, but an Admin token can create an app whose container reaches the whole host, and from there those too. Making and revoking a token, and its expiry, are recorded in the audit log, by name and access, never the token.
+
+## Audit log
+
+Every change to this Gitberth and its apps, who made it and how it ended, in a file of its own. See [Audit log](../guides/audit-log.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Keep entries for** | How many days entries are kept, 30 to 3650. Older ones are removed once a day, and the rest still check out. | 365 days |
+| **Record changes made outside Gitberth** | Containers, images, networks and volumes changed with `docker` on the host, Compose or another tool, each recorded as Docker's. Gitberth's own changes are recorded either way. | On |
+| **Save** | Saves both. The change is itself an entry in the log, made off or on. It refuses a number of days outside the limits ("Keep entries for 30 to 3650 days."). | |
+| **Open the audit log** | The **Audit log** page, where entries are searched, filtered and opened. | |
+| **Export everything (CSV)**, **JSON Lines** | Downloads every entry in the log. | |
+| **Check its integrity** | Walks the chain of hashes and says **The audit log is intact**, or which entry was changed. | |
+
+The section also shows the log's **File** (`/data/audit.db`), its **Size**, and how many **Entries** it holds and since when.
 
 ## System
 
@@ -185,4 +249,5 @@ What this Gitberth installation is talking to. Nothing here can be changed.
 
 - [Configuration](configuration.md)
 - [App settings](app-settings.md)
+- [Tools for AI agents and the HTTP API](api.md)
 - [Security](../concepts/security.md)

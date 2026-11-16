@@ -17,11 +17,12 @@
 @inject ISnackbar Snackbar
 @inject GitHubIntegrationState GitHubState
 @inject WebhookKeeper Webhooks
+@inject Gitberth.Audit.AuditLog Audit
 @implements IDisposable
 
 <PageTitle>Settings · Gitberth</PageTitle>
 
-<PageHead Title="Settings" Lead="GitHub and registry access, notifications, domains, the network, updates, and this Gitberth installation.">
+<PageHead Title="Settings" Lead="GitHub and registry access, notifications, domains, uptime checks and the status page, the network, updates, apps' databases, and this Gitberth installation.">
     <Crumbs><a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /><span>Settings</span></Crumbs>
 </PageHead>
 
@@ -353,6 +354,8 @@
             </div>
         </section>
 
+        <UptimeSection />
+
         <section class="gb-card gb-sec" id="network" aria-labelledby="network-t">
             @Head("network-t", Icons.Material.Outlined.Lan, "Network", "How devices on your LAN reach containers.")
             <div class="gb-sec-body">
@@ -485,6 +488,8 @@
             </div>
         </section>
 
+        <DatabaseServersSection />
+
         <section class="gb-card gb-sec" id="password" aria-labelledby="password-t">
             @Head("password-t", Icons.Material.Outlined.Lock, "Admin password", "Sign in as admin. Use at least 10 characters. Changing it signs every other browser out.")
             <div class="gb-sec-body">
@@ -496,6 +501,10 @@
                 <div class="gb-row gb-row--wrap" style="justify-content:flex-end"><Btn Icon="@Icons.Material.Outlined.Lock" OnClick="ChangePasswordAsync" Disabled="busy">Change password</Btn></div>
             </div>
         </section>
+
+        <ApiTokensSection />
+
+        <AuditLogSection />
 
         <section class="gb-card gb-sec" id="system" aria-labelledby="system-t">
             @Head("system-t", Icons.Material.Outlined.Info, "System", "What this Gitberth installation is talking to.")
@@ -522,6 +531,12 @@
                     <dd><code>@Options.DataDir</code></dd>
                     <dt>Version</dt>
                     <dd>Gitberth @AppVersion.Display</dd>
+                    @if (Options.TestTimings is { } testTimings)
+                    {
+                        <dt>Test timings</dt>
+                        <dd><span style="color:#ffb3b9">On: @testTimings (in seconds). Shorter waits, for Gitberth's own test rig only; an
+                            install never sets @TestTimings.Variable.</span></dd>
+                    }
                 </dl>
             </div>
         </section>
@@ -546,12 +561,18 @@
         ("registries", "Registries", Icons.Material.Outlined.Key),
         ("updates", "Updates", Icons.Material.Outlined.CloudDownload),
         ("domains", "Domains", Icons.Material.Outlined.Public),
+        ("uptime", "Uptime and status page", Icons.Material.Outlined.MonitorHeart),
         ("network", "Network", Icons.Material.Outlined.Lan),
         ("own-lan", "Own LAN addresses", Icons.Material.Outlined.Router),
         ("deploys", "Deploys", Icons.Material.Outlined.RocketLaunch),
+        ("databases", "Databases", GitberthIcons.Database),
         ("password", "Admin password", Icons.Material.Outlined.Lock),
+        ("agents", "AI agents and API", Icons.Material.Outlined.SmartToy),
+        ("audit", "Audit log", Icons.Material.Outlined.Policy),
         ("system", "System", Icons.Material.Outlined.Info),
     ];
+
+    private static string PolicyName(UpdatePolicy policy) => PolicyOptions.FirstOrDefault(o => o.Value == policy)?.Text ?? policy.ToString();
 
     private static readonly List<SegOption<UpdatePolicy>> PolicyOptions =
     [
@@ -644,11 +665,9 @@
         _ => $"Not detected. {LanUse}",
     }) + (Options.PublicHost is { } variable ? $" Left empty, Gitberth uses GITBERTH_PUBLIC_HOST ({variable})." : "");
 
-    private string? HoursProblem => checkHours is < 1 or > 168 ? "Every 1 to 168 hours." : null;
+    private string? HoursProblem => UpdateSettingsSave.HoursProblem(checkHours);
 
-    private string? WindowProblem => TimeOnly.TryParse(windowFrom, CultureInfo.InvariantCulture, out var from) && TimeOnly.TryParse(windowTo, CultureInfo.InvariantCulture, out var to)
-        ? from == to ? "Give the window some length." : null
-        : "Pick both times.";
+    private string? WindowProblem => UpdateSettingsSave.WindowProblem(windowFrom, windowTo);
 
     private string PolicyHelp => defaultPolicy switch
     {
@@ -709,9 +728,15 @@
             await Settings.SetAsync(key, on ? null : "false");
             if (key == SettingKeys.GitHubStatuses) statusesOn = on;
             else commentsOn = on;
-            Snackbar.Add(key == SettingKeys.GitHubStatuses
+            var said = key == SettingKeys.GitHubStatuses
                 ? on ? "Deploys set commit statuses on GitHub again." : "Deploys don't set commit statuses any more."
-                : on ? "Previews comment on their pull requests again." : "Previews don't comment on pull requests any more.", Severity.Info);
+                : on ? "Previews comment on their pull requests again." : "Previews don't comment on pull requests any more.";
+            Audit.Record(new Gitberth.Audit.AuditEntry("settings.github.changed", said)
+            {
+                Target = "GitHub integration",
+                Changes = [new(key == SettingKeys.GitHubStatuses ? "Commit statuses" : "Comments on pull requests", on ? "off" : "on", on ? "on" : "off")],
+            });
+            Snackbar.Add(said, Severity.Info);
         }
         catch (Exception ex)
         {
@@ -935,9 +960,11 @@
         busy = true;
         try
         {
-            await Settings.SetAsync(CheckHoursKey, checkHours.ToString(CultureInfo.InvariantCulture));
-            await Settings.SetAsync(AutoWindowKey, $"{windowFrom}-{windowTo}");
-            await Settings.SetAsync(DefaultPolicyKey, defaultPolicy.ToString());
+            if (await UpdateSettingsSave.SaveAsync(Settings, Audit, checkHours, windowFrom, windowTo, defaultPolicy) is { } problem)
+            {
+                Snackbar.Add(problem, Severity.Error);
+                return;
+            }
             Snackbar.Add("Saved", Severity.Success);
         }
         catch (Exception ex)
@@ -1138,12 +1165,25 @@
             var check = await GitHub.CheckTokenAsync(token);
             if (!check.Valid)
             {
+                Audit.Record(new Gitberth.Audit.AuditEntry("settings.github.token.saved", "Didn't save the GitHub token: GitHub refused it.")
+                {
+                    Target = "GitHub token", Outcome = Gitberth.Audit.AuditOutcome.Failed,
+                });
                 Snackbar.Add(check.Warning ?? "GitHub rejected the token.", Severity.Error);
                 return;
             }
+            var replaced = tokenSaved;
             await Settings.SetSecretAsync(SettingKeys.GitHubToken, token);
             await Settings.SetAsync(SettingKeys.GitHubLogin, check.Login);
             await Settings.SetAsync(SettingKeys.GitHubTokenExpires, check.ExpiresAt?.ToString("O", CultureInfo.InvariantCulture));
+            // Who it signs in as, never the token itself.
+            Audit.Record(new Gitberth.Audit.AuditEntry("settings.github.token.saved",
+                $"{(replaced ? "Replaced" : "Saved")} the GitHub token{(check.Login is null ? "" : $" for {check.Login}")}.")
+            {
+                Target = "GitHub token",
+                Changes = [new("Signs in as", replaced ? login : null, check.Login ?? "unknown"),
+                    .. check.ExpiresAt is { } until ? new[] { new Gitberth.Audit.AuditChange("Expires", null, until.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)) } : []],
+            });
             newToken = null;
             await LoadAsync();
             Watch.CheckNow();
@@ -1160,9 +1200,14 @@
 
     private async Task RemoveTokenAsync()
     {
+        var was = login;
         await Settings.SetAsync(SettingKeys.GitHubToken, null);
         await Settings.SetAsync(SettingKeys.GitHubLogin, null);
         await Settings.SetAsync(SettingKeys.GitHubTokenExpires, null);
+        Audit.Record(new Gitberth.Audit.AuditEntry("settings.github.token.removed", $"Removed the GitHub token{(was is null ? "" : $" of {was}")}: private repositories can't be cloned until another is saved.")
+        {
+            Target = "GitHub token",
+        });
         await LoadAsync();
         GitHubState.Clear();
         Snackbar.Add("Token removed", Severity.Info);
@@ -1170,17 +1215,32 @@
 
     private async Task SaveNetworkAsync()
     {
+        var before = savedHost;
         savedHost = string.IsNullOrWhiteSpace(publicHost) ? null : publicHost.Trim();
         await Settings.SetAsync(SettingKeys.PublicHost, savedHost);
+        AuditLanHost(before, savedHost);
         Snackbar.Add("Saved", Severity.Success);
     }
 
     // The drift prompt's [Use it]: the detected address is saved, so GITBERTH_PUBLIC_HOST can't put the old one back.
     private async Task UseDetectedAsync(string detected)
     {
+        var before = savedHost;
         publicHost = savedHost = detected;
         await Settings.SetAsync(SettingKeys.PublicHost, detected);
+        AuditLanHost(before, detected);
         Snackbar.Add($"Saved. Every LAN address uses {detected} now.", Severity.Success);
+    }
+
+    private void AuditLanHost(string? before, string? after)
+    {
+        if (before == after) return;
+        Audit.Record(new Gitberth.Audit.AuditEntry("settings.network.changed", after is null
+            ? "Cleared this host's LAN address: Gitberth uses the one it detects."
+            : $"Set this host's LAN address to {after}: every LAN address and connection string Gitberth shows uses it.")
+        {
+            Target = "LAN address", Changes = [new("LAN address of this host", before ?? "detected", after ?? "detected")],
+        });
     }
 
     private async Task SaveDeploysAsync()
@@ -1190,7 +1250,13 @@
             Snackbar.Add("Check for new commits every 10 to 3600 seconds.", Severity.Error);
             return;
         }
+        var before = await Settings.GetIntAsync(SettingKeys.WatchIntervalSeconds, RepoWatcher.DefaultIntervalSeconds);
         await Settings.SetAsync(SettingKeys.WatchIntervalSeconds, interval.ToString(CultureInfo.InvariantCulture));
+        if (before != interval)
+            Audit.Record(new Gitberth.Audit.AuditEntry("settings.deploys.changed", $"Gitberth checks for new commits every {interval} seconds now.")
+            {
+                Target = "deploys", Changes = [new("Check for new commits every", $"{before} seconds", $"{interval} seconds")],
+            });
         Watch.CheckNow();
         Snackbar.Add("Saved", Severity.Success);
     }

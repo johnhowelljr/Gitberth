@@ -28,7 +28,8 @@ public sealed record HookCreated(HookView? Hook, string? Problem, int? AppId = n
 /// can be shown again. A Git app (not a preview) can have them, and so can an app that runs a registry's tag: never one
 /// that runs a local image or one pinned to a digest, which have nothing to pull, nor Gitberth itself.
 /// </summary>
-public sealed class DeployHooks(IDbContextFactory<GitberthDb> dbFactory, SecretProtector protector, AppCatalog catalog)
+/// <param name="audit">Where hooks made and deleted are recorded (never their tokens); none in older tests.</param>
+public sealed class DeployHooks(IDbContextFactory<GitberthDb> dbFactory, SecretProtector protector, AppCatalog catalog, Audit.AuditLog? audit = null)
 {
     /// <summary>The most hooks one app has.</summary>
     public const int MaxPerApp = 10;
@@ -61,6 +62,8 @@ public sealed class DeployHooks(IDbContextFactory<GitberthDb> dbFactory, SecretP
     /// <summary>What a hook does on this app, or null when it can't have hooks.</summary>
     public static HookKind? KindOf(AppSummary app, AppDefinition? row) =>
         app.Source == AppSource.Git ? (row is { IsPreview: true } ? null : HookKind.Git)
+        // An inline Compose app is deployed again: its file's images are pulled anew.
+        : app.Source == AppSource.Compose ? HookKind.Git
         // Gitberth itself would be recreated by its own hook, cutting the call short.
         : app.Role == ContainerRole.Self ? null
         : app.Origin == ImageOrigin.Registry ? HookKind.Image
@@ -104,6 +107,10 @@ public sealed class DeployHooks(IDbContextFactory<GitberthDb> dbFactory, SecretP
             var hook = new DeployHook { AppId = row.Id, Name = name, TokenHash = Hash(token), ProtectedToken = protector.Protect(token) };
             db.DeployHooks.Add(hook);
             await db.SaveChangesAsync(ct);
+            audit?.Record(new Audit.AuditEntry("app.hook.created", $"Made the deploy hook {name} for {view.Summary.Title}: calling its URL {(KindOf(view.Summary, view.Row) == HookKind.Git ? "builds it again" : "updates it")}.")
+            {
+                AppId = row.Id, AppName = view.Summary.Title, Container = view.Summary.Container, Target = name,
+            });
             return new HookCreated(View(hook, token), null, row.Id);
         }
         finally
@@ -116,7 +123,17 @@ public sealed class DeployHooks(IDbContextFactory<GitberthDb> dbFactory, SecretP
     public async Task<bool> DeleteAsync(int appId, int hookId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.DeployHooks.Where(h => h.Id == hookId && h.AppId == appId).ExecuteDeleteAsync(ct) > 0;
+        var hook = await db.DeployHooks.AsNoTracking().FirstOrDefaultAsync(h => h.Id == hookId && h.AppId == appId, ct);
+        var deleted = await db.DeployHooks.Where(h => h.Id == hookId && h.AppId == appId).ExecuteDeleteAsync(ct) > 0;
+        if (deleted && hook is not null && audit is not null)
+        {
+            var app = await db.Apps.AsNoTracking().FirstOrDefaultAsync(a => a.Id == appId, ct);
+            audit.Record(new Audit.AuditEntry("app.hook.deleted", $"Deleted the deploy hook {hook.Name} of {app?.Name ?? $"app {appId}"}: its URL answers 404 from now on.")
+            {
+                AppId = appId, AppName = app?.Name, Container = app?.ContainerName, Target = hook.Name,
+            });
+        }
+        return deleted;
     }
 
     /// <summary>The hook with this token and its app; null when there's none.</summary>
@@ -184,6 +201,8 @@ public sealed class DeployHookEndpoint(DeployHooks hooks, AppActions actions, IH
             return new Answer(StatusCodes.Status404NotFound);
         }
         var (hook, app) = found;
+        // What the call starts is the hook's, from the sender's address: its deploy, or its update, is recorded so.
+        using var actor = Audit.AuditScope.Begin(new Audit.AuditActor(Audit.AuditActorKind.DeployHook, hook.Name, Audit.AuditVia.Hook, sender.Length > 0 ? sender : null));
         await hooks.UsedAsync(hook.Id, Now(), ct);
         var said = $"Deploy hook \"{hook.Name}\"";
         if (app.Deployed)

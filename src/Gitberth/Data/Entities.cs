@@ -27,6 +27,15 @@ public enum PreviewKind { Branch, PullRequest }
 /// </summary>
 public enum EnvScope { All, Production, Preview }
 
+/// <summary>What kind of database Gitberth made (or took over) for an app.</summary>
+public enum DatabaseKind { Postgres, Redis }
+
+/// <summary>What each preview of a Git app gets for its database: none of its own, an empty one, or a copy of production's.</summary>
+public enum PreviewDatabaseMode { Off, Empty, CopyOfProduction }
+
+/// <summary>How much an API token (an AI agent's, a script's) may do: read, operate apps, or everything a person can.</summary>
+public enum ApiAccess { Read, Operate, Admin }
+
 /// <summary>
 /// One app: a container Gitberth runs or knows. A Git app is a repo + branch (+ optional subfolder) and how its container
 /// should run; any other app's settings live in its container, and the row keeps Gitberth's own data about it.
@@ -74,7 +83,10 @@ public class AppDefinition
 
     /// <summary>How the app came to Gitberth: every row from before the unified apps is a Git app.</summary>
     public AppSource Source { get; set; } = AppSource.Git;
-    /// <summary>The container's name when it isn't gb-&lt;slug&gt; (Existing apps). Null for every app Gitberth creates.</summary>
+    /// <summary>
+    /// The container's name when it isn't gb-&lt;slug&gt;: an Existing app's, or a Compose app's web service's member
+    /// (gb-&lt;slug&gt;_&lt;service&gt;). Null for every other app Gitberth creates.
+    /// </summary>
     public string? Container { get; set; }
     /// <summary>The container's ID when Gitberth last looked: a new one under the same name means it was recreated.</summary>
     public string? ContainerId { get; set; }
@@ -123,6 +135,40 @@ public class AppDefinition
     /// </summary>
     public string? PromotedOverCommit { get; set; }
 
+    /// <summary>
+    /// Check this app from outside the way a visitor reaches it: its main domain through Cloudflare and the tunnel, or its
+    /// LAN address when it has no domain. Feeds its uptime, the status page and the down/back-up notifications. On unless
+    /// turned off.
+    /// </summary>
+    public bool UptimeCheck { get; set; } = true;
+    /// <summary>The path the uptime check asks for; "/" when unset.</summary>
+    public string? UptimePath { get; set; }
+    /// <summary>
+    /// While the app can't be served (stopped, its container down, being replaced by a deploy, or held back because its
+    /// protection can't be applied), its domains show Gitberth's down page instead of Cloudflare's error. On unless turned
+    /// off.
+    /// </summary>
+    public bool DownPage { get; set; } = true;
+    /// <summary>An optional sentence of the owner's for the down page.</summary>
+    public string? DownPageMessage { get; set; }
+
+    /// <summary>
+    /// A Git app deployed with Compose: its Compose file's path, relative to the app's folder in the repo. Null: the repo
+    /// is built into one container, as before.
+    /// </summary>
+    public string? ComposeFile { get; set; }
+    /// <summary>An inline Compose app's (<see cref="AppSource.Compose"/>) whole Compose file, encrypted with SecretProtector.</summary>
+    public string? ComposeYamlProtected { get; set; }
+    /// <summary>
+    /// A Compose app's web service: the member that is the app's container (its domains, LAN port, health path, logs,
+    /// uptime checks and down page). Null for every other app.
+    /// </summary>
+    public string? WebService { get; set; }
+    /// <summary>What each of a Git app's previews gets for its database: an empty one of its own unless chosen otherwise.</summary>
+    public PreviewDatabaseMode PreviewDatabases { get; set; } = PreviewDatabaseMode.Empty;
+    /// <summary>The template the app was installed from (its id in the catalog); null when it wasn't.</summary>
+    public string? TemplateId { get; set; }
+
     /// <summary>A preview's own row (see <see cref="ParentAppId"/>).</summary>
     public bool IsPreview => ParentAppId is not null;
 
@@ -133,14 +179,32 @@ public class AppDefinition
     /// <summary>Networks the app is on besides the shared one.</summary>
     public List<AppNetwork> Networks { get; set; } = [];
 
-    /// <summary>Its container's name: gb-&lt;slug&gt;, or the name of the container an Existing app is.</summary>
+    /// <summary>
+    /// Its container's name: gb-&lt;slug&gt;, the name of the container an Existing app is, or a Compose app's web service's
+    /// member (gb-&lt;slug&gt;_&lt;service&gt;).
+    /// </summary>
     public string ContainerName => Container ?? ContainerNameFor(Slug);
 
     /// <summary>What containers on the shared network call it: an Existing app its container's name, any other app its slug.</summary>
     public string NetworkName => Source == AppSource.Existing ? ContainerName : Slug;
 
-    /// <summary>Gitberth deploys it from a repo: its database row is the truth for its settings, and a deploy applies them.</summary>
-    public bool Deployed => Source == AppSource.Git;
+    /// <summary>
+    /// Gitberth deploys it, from a repo or from a Compose file it keeps: its database row is the truth for its settings, and
+    /// a deploy applies them.
+    /// </summary>
+    public bool Deployed => Source is AppSource.Git or AppSource.Compose;
+
+    /// <summary>
+    /// It comes from a GitHub repo: the watcher, previews, build filters and the GitHub integration are its. An inline
+    /// Compose app is deployed too, but has no repo.
+    /// </summary>
+    public bool FromRepo => Source == AppSource.Git;
+
+    /// <summary>Deployed with Compose, as one app with all its services: a Git app with a Compose file, or an inline Compose app.</summary>
+    public bool IsCompose => Source == AppSource.Compose || ComposeFile is not null;
+
+    /// <summary>A Compose app's project in Docker: gb-&lt;slug&gt;.</summary>
+    public string ComposeProject => Compose.ComposeNames.Project(Slug);
 
     public static string ContainerNameFor(string slug) => $"gb-{slug}";
     public string ImageRepository => $"gitberth/{Slug}";
@@ -383,6 +447,14 @@ public class Deployment
     public string? HookName { get; set; }
     /// <summary>Built without the build cache: every step ran again, and the base images were pulled.</summary>
     public bool NoCache { get; set; }
+    /// <summary>
+    /// Who asked for it, as the audit log names them (the signed-in user, an API token, a deploy hook, GitHub's webhook),
+    /// saved when it's queued so the deploy's outcome is told against the same person. Null when Gitberth started it on its
+    /// own (the watcher, a schedule, startup).
+    /// </summary>
+    public string? RequestedBy { get; set; }
+    /// <summary>A Compose app's deploy: each service's image (a JSON object, service → image), so Roll back runs them again.</summary>
+    public string? Images { get; set; }
 
     public bool IsActive => Status is DeployStatus.Queued or DeployStatus.Cloning or DeployStatus.Building or DeployStatus.Starting;
     public string ShortSha => CommitSha is { Length: >= 7 } ? CommitSha[..7] : CommitSha ?? "";
@@ -409,4 +481,48 @@ public class Setting
 {
     public string Key { get; set; } = "";
     public string Value { get; set; } = "";
+}
+
+/// <summary>
+/// A database of an app's own that Gitberth made, or took over: a Postgres database and its role on a Postgres server
+/// container, or a Redis container of the app's own. Its connection URL is set in the app's <see cref="Variable"/>.
+/// </summary>
+public class ManagedDatabase
+{
+    public int Id { get; set; }
+    public int AppId { get; set; }
+    public DatabaseKind Kind { get; set; }
+    /// <summary>Postgres: the server's container; Redis: the app's Redis container.</summary>
+    public string Server { get; set; } = "";
+    /// <summary>Postgres: the database's name; Redis: the network alias apps reach it by.</summary>
+    public string Name { get; set; } = "";
+    /// <summary>Postgres: the role that owns the database; null for Redis.</summary>
+    public string? Role { get; set; }
+    /// <summary>The password, encrypted with SecretProtector.</summary>
+    public string ProtectedPassword { get; set; } = "";
+    /// <summary>The variable its connection URL is set in (DATABASE_URL, REDIS_URL).</summary>
+    public string Variable { get; set; } = "";
+    /// <summary>Gitberth made it, so it may drop it when asked; false: taken over, and never dropped.</summary>
+    public bool Created { get; set; } = true;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// A token an AI agent (over MCP) or a script uses instead of signing in. Only its hash is kept; the token is shown once,
+/// when it's made.
+/// </summary>
+public class ApiToken
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = "";
+    public ApiAccess Access { get; set; } = ApiAccess.Read;
+    /// <summary>SHA-256 of the token, as lowercase hex: how a request finds its token.</summary>
+    public string TokenHash { get; set; } = "";
+    /// <summary>The token's first characters, to tell tokens apart without the secret.</summary>
+    public string Prefix { get; set; } = "";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ExpiresAt { get; set; }
+    public DateTime? LastUsedAt { get; set; }
+    public string? LastUsedIp { get; set; }
+    public DateTime? RevokedAt { get; set; }
 }

@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Gitberth.Data;
 using Gitberth.Docker;
+using Gitberth.Public;
 using Gitberth.Services;
 
 namespace Gitberth.Domains;
@@ -23,10 +24,19 @@ public sealed record TunnelScan(IReadOnlyList<TunnelInfo> Tunnels, IReadOnlyList
 /// <summary>Something Gitberth did or found while routing domains, for the UI and the deploy log.</summary>
 public sealed record DomainNote(string? Hostname, string Text, bool Problem = false);
 
-/// <summary>A domain Gitberth routes to its app's service.</summary>
+/// <summary>A domain Gitberth routes to its app's service, or to its down page.</summary>
 /// <param name="Previous">Where Gitberth sent it before (the remembered service), so its rules are recognized after a port change.</param>
 /// <param name="KeepPaths">Its rules keep their path filters: they're only re-pointed, never widened.</param>
-public sealed record DomainRoute(string Hostname, int AppId, string Service, string? Previous = null, bool KeepPaths = false);
+/// <param name="HostHeader">
+/// The marker host its rules carry as <c>originRequest.httpHostHeader</c> (<see cref="MarkerHosts.Down"/>): the domain
+/// shows Gitberth's down page, and <paramref name="Service"/> is Gitberth's own. Null: it goes to the app, and its rules
+/// carry no marker (one left from the down page is taken off; a host header of anyone else's stays).
+/// </param>
+/// <param name="Bare">
+/// Its rules carry no Cloudflare Access check either: a protected domain held back because its protection can't be applied
+/// right now, which is only ever served the down page.
+/// </param>
+public sealed record DomainRoute(string Hostname, int AppId, string Service, string? Previous = null, bool KeepPaths = false, string? HostHeader = null, bool Bare = false);
 
 /// <summary>A domain whose rules to <paramref name="Service"/> (where Gitberth sent it) are to go. Rules to anything else stay.</summary>
 public sealed record DomainDrop(string Hostname, string Service);
@@ -235,9 +245,20 @@ public static class TunnelRoutes
         var notes = new List<DomainNote>();
 
         AppDefinition? AppOf(DomainRoute route) => apps.FirstOrDefault(a => a.Id == route.AppId);
-        // Gitberth's rules for the domain: they go where it sends the domain now or sent it before.
+        // Gitberth's rules for the domain: they go where it sends the domain now or sent it before (the app, or Gitberth's
+        // own service while it shows the down page).
         bool Mine(JsonObject rule, DomainRoute route) =>
             SameService(Service(rule), route.Service, AppOf(route)) || SameService(Service(rule), route.Previous, AppOf(route));
+        // Whether the rule's down page marker is as the route wants it.
+        bool Flips(DomainRoute route, JsonObject rule) => (route.HostHeader is not null) != IsPublicPage(rule);
+        var flipped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void FlipNote(DomainRoute route)
+        {
+            if (!flipped.Add(route.Hostname)) return;
+            notes.Add(new DomainNote(route.Hostname, route.HostHeader is not null
+                ? $"{route.Hostname} shows Gitberth's down page now"
+                : $"{route.Hostname} goes to {AppOf(route)?.Name ?? "the app"} again"));
+        }
 
         var output = new List<JsonNode?>();
         // Rules for every host at the top apply first, to every host; they stay first.
@@ -289,7 +310,8 @@ public static class TunnelRoutes
             var old = body.Where(x => SameHost(x, route.Hostname)).ToList();
             var mine = old.Where(x => Mine(x, route)).ToList();
             var app = AppOf(route);
-            if (mine.Count > 0 && mine.All(x => SameService(Service(x), route.Service, app)) && mine.Any(x => Path(x) is null))
+            // Already right: the service, and the down page's marker (and a held-back one's missing Access check) as wanted.
+            if (mine.Count > 0 && mine.All(x => SameService(Service(x), route.Service, app) && Fits(x, route)) && mine.Any(x => Path(x) is null))
                 return old.Select(x => x.DeepClone()).ToList();
             // It serves every path already: its own rules are only re-pointed, path, settings and all (a path rule's Access
             // included), so a domain that moves to a deploy's temporary container and back comes back the same. Other
@@ -307,7 +329,10 @@ public static class TunnelRoutes
             // Settings carry over, from its every-path rule or else from the filtered one being widened (Access included).
             var source = mine.FirstOrDefault(x => Path(x) is null) ?? mine.FirstOrDefault();
             if (source?["originRequest"] is JsonObject origin) rule["originRequest"] = origin.DeepClone();
-            if (mine.Count == 0 && old.Count == 0) notes.Add(new DomainNote(route.Hostname, $"Routed {route.Hostname} to {route.Service}"));
+            Shape(rule, route);
+            // To the down page, or back from it: said as that, not as the service it goes to.
+            if (route.HostHeader is not null ? mine.All(x => Flips(route, x)) : mine.Any(x => Flips(route, x))) FlipNote(route);
+            else if (mine.Count == 0 && old.Count == 0) notes.Add(new DomainNote(route.Hostname, $"Routed {route.Hostname} to {route.Service}"));
             else if (mine.Count == 0) notes.Add(new DomainNote(route.Hostname, $"Pointed {route.Hostname} at {route.Service}, instead of {Service(old.FirstOrDefault(x => Path(x) is null) ?? old[0])}"));
             else if (mine.FirstOrDefault(x => Path(x) is not null) is { } filtered && !mine.Any(x => Path(x) is null))
                 notes.Add(new DomainNote(route.Hostname, $"{route.Hostname} now sends every path to the app. Its path filter \"{Path(filtered)}\" let only matching addresses through, so Cloudflare answered 404 for the app's other pages, scripts and sign-in."));
@@ -318,13 +343,146 @@ public static class TunnelRoutes
         JsonNode Repoint(JsonObject rule, DomainRoute route)
         {
             var copy = (JsonObject)rule.DeepClone();
+            var flips = Flips(route, rule);
             if (!SameService(Service(rule), route.Service, AppOf(route)))
             {
                 copy["service"] = route.Service;
-                notes.Add(new DomainNote(route.Hostname, $"Pointed {route.Hostname}{(Path(rule) is { } p ? $" (path \"{p}\")" : "")} at {route.Service}, instead of {Service(rule)}"));
+                if (!flips) notes.Add(new DomainNote(route.Hostname, $"Pointed {route.Hostname}{(Path(rule) is { } p ? $" (path \"{p}\")" : "")} at {route.Service}, instead of {Service(rule)}"));
             }
+            Shape(copy, route);
+            if (flips) FlipNote(route);
             return copy;
         }
+    }
+
+    /// <summary>
+    /// Whether a rule of a domain is as its route wants it, besides its service: the down page's marker when the domain shows
+    /// the down page and no marker when it goes to the app (a host header of anyone else's is fine), and no Access check
+    /// on one held back (<see cref="DomainRoute.Bare"/>).
+    /// </summary>
+    private static bool Fits(JsonObject rule, DomainRoute route) =>
+        (route.HostHeader is { } wanted ? HostHeaderOf(rule) == wanted : !IsPublicPage(rule))
+        && (!route.Bare || (rule["originRequest"] as JsonObject)?["access"] is null);
+
+    /// <summary>
+    /// Gives a rule the route's marker, or takes a marker off it, and takes the Access check off one held back; every other
+    /// setting of its originRequest stays. A rule that's already right is left exactly as it is. A marker takes the place of
+    /// any other host header, so <see cref="DomainService"/> never sends a domain whose rules to its app set one of the
+    /// owner's (<see cref="OwnersHostHeader"/>) to the down page, except one held back on it, which loses that rule either way.
+    /// </summary>
+    private static void Shape(JsonObject rule, DomainRoute route)
+    {
+        var origin = rule["originRequest"] as JsonObject;
+        var removed = false;
+        if (route.HostHeader is { } marker)
+        {
+            if (HostHeaderOf(rule) != marker)
+            {
+                if (origin is null) rule["originRequest"] = origin = [];
+                origin["httpHostHeader"] = marker;
+            }
+        }
+        else if (origin is not null && IsPublicPage(rule))
+        {
+            origin.Remove("httpHostHeader");
+            removed = true;
+        }
+        if (route.Bare && origin is not null && origin.ContainsKey("access"))
+        {
+            origin.Remove("access");
+            removed = true;
+        }
+        if (removed && origin is { Count: 0 }) rule.Remove("originRequest");
+    }
+
+    // ---- Gitberth's public pages: the down page and the status page ----
+
+    /// <summary>The host header a rule makes cloudflared send (<c>originRequest.httpHostHeader</c>), or null.</summary>
+    public static string? HostHeaderOf(JsonObject rule) => rule["originRequest"] is JsonObject origin ? Text(origin, "httpHostHeader") : null;
+
+    /// <summary>
+    /// Whether a rule sends its visitors to one of Gitberth's public pages: it carries a marker host
+    /// (<see cref="MarkerHosts"/>), so whatever it goes to only ever answers with that page. Such a rule serves
+    /// nothing of an app, so it never counts as an app's domain served without Cloudflare Access.
+    /// </summary>
+    public static bool IsPublicPage(JsonObject rule) => MarkerHosts.IsMarker(HostHeaderOf(rule));
+
+    /// <summary>Whether the host has rules that serve something other than Gitberth's public pages.</summary>
+    public static bool HasAppRules(JsonArray ingress, string hostname) => Rules(ingress).Any(r => SameHost(r, hostname) && !IsPublicPage(r));
+
+    /// <summary>Whether the tunnel sends the domain to its down page now: it has rules, and its every-path rule carries the down page's marker.</summary>
+    public static bool ShowsDownPage(JsonArray ingress, string hostname) =>
+        Rules(ingress).Where(r => SameHost(r, hostname)).FirstOrDefault(r => Path(r) is null) is { } decider && IsPublicPage(decider);
+
+    /// <summary>
+    /// Where a stopped app's domains would go once it runs again, from its saved web port: its host binding on the host's
+    /// network, its name and container port on the shared one. Null when it has no web port the tunnel could reach. Used to
+    /// take a domain off the down page while its app doesn't run (its down page was turned off, say), so no marker stays.
+    /// </summary>
+    public static string? ExpectedService(AppDefinition app, TunnelInfo tunnel)
+    {
+        if (PortRules.WebOf(app.Ports) is not { } web) return null;
+        if (tunnel.HostNetwork)
+            return web.Access == Network.PortAccess.Internal || web.HostPort is not int port ? null
+                : $"http://{(web.Access == Network.PortAccess.HostOnly ? "127.0.0.1" : Address(web.HostIp))}:{port}";
+        return tunnel.OnAppNetwork ? $"http://{app.NetworkName}:{web.ContainerPort}" : null;
+    }
+
+    /// <summary>
+    /// The Host header someone set on a domain's rules to its app (the ones going to one of <paramref name="services"/>), in
+    /// Cloudflare: Gitberth's down page would have to put its marker there instead, and couldn't give it back when the domain
+    /// goes back to the app, so such a domain doesn't show the down page. Null when those rules set none, or only carry a
+    /// marker.
+    /// </summary>
+    public static string? OwnersHostHeader(JsonArray ingress, string hostname, AppDefinition app, params string?[] services) =>
+        Rules(ingress).Where(r => SameHost(r, hostname) && services.Any(s => SameService(Service(r), s, app)))
+            .Select(HostHeaderOf)
+            .FirstOrDefault(h => h is not null && !MarkerHosts.IsMarker(h));
+
+    /// <summary>
+    /// The ingress with the status page's host name routed: the whole host goes to Gitberth (<paramref name="service"/>)
+    /// carrying the status page's marker, so it only ever answers with the status page; never behind Access. Rules of a host
+    /// in <paramref name="drop"/> (the status page's host names before) that carry that marker go. With no host or no
+    /// service (Gitberth can't be reached from the tunnel), the host's rules stay as they are.
+    /// </summary>
+    public static IngressPlan PlanStatus(JsonArray current, string? host, string? service, IReadOnlyCollection<string> drop)
+    {
+        var rules = Rules(current).ToList();
+        var notes = new List<DomainNote>();
+        bool StatusRule(JsonObject r) => HostHeaderOf(r) == MarkerHosts.Status;
+        var output = new List<JsonObject>();
+        foreach (var rule in rules)
+        {
+            if (Host(rule) is { } h && !string.Equals(h, host, StringComparison.OrdinalIgnoreCase) && drop.Contains(h, StringComparer.OrdinalIgnoreCase) && StatusRule(rule))
+            {
+                notes.Add(new DomainNote(h.ToLowerInvariant(), $"Removed the route the status page took through {h}"));
+                continue;
+            }
+            output.Add(rule);
+        }
+        if (host is not null && service is not null)
+        {
+            var wanted = new JsonObject
+            {
+                ["hostname"] = host, ["service"] = service,
+                ["originRequest"] = new JsonObject { ["httpHostHeader"] = MarkerHosts.Status },
+            };
+            var own = output.Where(r => SameHost(r, host)).ToList();
+            var right = own is [var only] && JsonNode.DeepEquals(only, wanted) && !ShadowedByWildcard(output, host)
+                && output.TakeWhile(r => Host(r) is null && !IsCatchAll(r)).Count() <= output.IndexOf(only);
+            if (!right)
+            {
+                // Gitberth's own rules for it go; the status page's rule goes right after the rules for every host, ahead of
+                // any wildcard and of anything someone else put on the host since (the whole host is the status page's).
+                output.RemoveAll(r => SameHost(r, host) && (StatusRule(r) || SameService(Service(r), service)));
+                var at = output.TakeWhile(r => Host(r) is null && !IsCatchAll(r)).Count();
+                output.Insert(at, wanted);
+                notes.Add(new DomainNote(host, $"Routed https://{host} to Gitberth's status page"));
+            }
+        }
+        if (output.Count == 0 || !IsCatchAll(output[^1])) output.Add(new JsonObject { ["service"] = NotFoundService });
+        var ingress = new JsonArray([.. output.Select(r => (JsonNode?)r.DeepClone())]);
+        return new IngressPlan(ingress, !JsonNode.DeepEquals(current, ingress), notes);
     }
 
     /// <summary>
@@ -559,12 +717,19 @@ public static class TunnelRoutes
     }
 
     /// <summary>
+    /// Whether the tunnel serves the host to anyone without a Cloudflare Access sign-in: a rule for it that skips Access and
+    /// isn't one of Gitberth's public pages (<see cref="IsPublicPage"/>), which reveal nothing of the app.
+    /// </summary>
+    public static bool ServesWithoutAccess(JsonArray ingress, string hostname) =>
+        Rules(ingress).Any(r => SameHost(r, hostname) && !IsPublicPage(r) && !ChecksSignIn(r));
+
+    /// <summary>
     /// Whether a rule for the host that skips Cloudflare Access goes to one of these services: the app's, where Gitberth
     /// sends the domain now or sent it before. Such a rule is Gitberth's, so a sync puts it behind Access; one going
-    /// anywhere else is someone else's, and no sync changes it.
+    /// anywhere else is someone else's, and no sync changes it. A rule to one of Gitberth's public pages doesn't count.
     /// </summary>
     public static bool OpenTo(JsonArray ingress, string hostname, AppDefinition app, params string?[] services) =>
-        Rules(ingress).Any(r => SameHost(r, hostname) && !ChecksSignIn(r) && services.Any(s => SameService(Service(r), s, app)));
+        Rules(ingress).Any(r => SameHost(r, hostname) && !IsPublicPage(r) && !ChecksSignIn(r) && services.Any(s => SameService(Service(r), s, app)));
 
     // Whether the rule makes cloudflared check an Access sign-in.
     private static bool ChecksSignIn(JsonObject rule) =>

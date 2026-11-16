@@ -55,6 +55,10 @@ public sealed class AppSettingsModel
     public string Name { get; set; } = "";
     public string Branch { get; set; } = "main";
     public string? Subdirectory { get; set; }
+    /// <summary>A new Git app deployed with Compose: its Compose file in the app's folder; null to build it into one container.</summary>
+    public string? ComposeFile { get; set; }
+    /// <summary>With <see cref="ComposeFile"/>: the service that's the app's container (its domains, LAN port and health URL).</summary>
+    public string? WebService { get; set; }
     public DockerfileMode DockerfileMode { get; set; }
     public string? CustomDockerfile { get; set; }
     public string? ProjectHint { get; set; }
@@ -162,7 +166,14 @@ public enum AppRunState { NotDeployed, Deploying, Running, Restarting, Stopped, 
 public sealed record AppStatusInfo(AppRunState State, string Label, string CssClass, string? Detail = null);
 
 /// <param name="Deployed">A Git app, deployed from its repo: a scheduled restart recreates it through a deploy (RestartScheduler).</param>
-public sealed record NavApp(int Id, string Name, string Slug, bool Deployed = false);
+public sealed record NavApp(int Id, string Name, string Slug, bool Deployed = false)
+{
+    /// <summary>
+    /// A Compose app's container (its web service's member, gb-&lt;slug&gt;_&lt;service&gt;): its other members carry its slug too,
+    /// and are its own (app-internal). Null for an app whose container is gb-&lt;slug&gt;.
+    /// </summary>
+    public string? Container { get; init; }
+}
 
 public sealed record AppDetail(AppDefinition App, AppStatusInfo Status, List<Deployment> Deployments, ContainerSummary? Container, string? DockerError);
 
@@ -270,6 +281,15 @@ public static class Format
         trigger == DeployTrigger.Hook && hookName is { Length: > 0 } name ? $"Deploy hook \"{name}\"" : Trigger(trigger);
 
     public static string Trigger(Deployment d) => Trigger(d.Trigger, d.HookName);
+
+    /// <summary>
+    /// Who asked for the deploy, when that says more than its trigger: "by admin", "by the token ci". Null for Gitberth's own
+    /// deploys, GitHub's, and a deploy hook's (its trigger names the hook already).
+    /// </summary>
+    public static string? RequestedBy(Deployment d) =>
+        Audit.AuditActors.Parse(d.RequestedBy) is { } actor && Audit.AuditActors.AddsToTrigger(actor) && !(actor.Kind == Audit.AuditActorKind.DeployHook && d.Trigger == DeployTrigger.Hook)
+            ? $"by {Audit.AuditActors.Describe(actor)}"
+            : null;
 
     /// <summary>The same in the middle of a line ("2 min ago · deploy hook "Contentful""): lower case, but never the hook's own name.</summary>
     public static string TriggerInLine(Deployment d) =>

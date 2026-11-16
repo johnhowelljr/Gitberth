@@ -1,0 +1,42 @@
+id: gitea
+name: Gitea
+tagline: Your own Git service, with pull requests, issues, packages and CI.
+description: >-
+  Gitea hosts Git repositories with everything around them: pull requests and code review, issues and projects, a wiki,
+  package registries and Actions for CI. It's quick and light, and keeps its data in Postgres.
+category: Development
+website: https://about.gitea.com
+source: https://github.com/go-gitea/gitea
+license: MIT
+icon: gitea.svg
+icon_source: monogram
+memory: 256
+open_until_setup: true
+web:
+  service: gitea
+  port: 3000
+  health: /
+databases:
+  - kind: postgres
+    variable: DATABASE_URL
+notes:
+  - The first visit shows Gitea's installation page with its database filled in. Add an administrator account at the bottom, then install.
+  - It clones over HTTPS or HTTP; SSH is turned off, since its SSH port isn't published.
+compose: |
+  services:
+    gitea:
+      image: gitea/gitea:28.3.0
+      environment:
+        USER_UID: "1000"
+        USER_GID: "1000"
+        GITEA__database__DB_TYPE: postgres
+        GITEA__database__HOST: ${DATABASE_URL_HOST}:${DATABASE_URL_PORT}
+        GITEA__database__NAME: ${DATABASE_URL_NAME}
+        GITEA__database__USER: ${DATABASE_URL_USER}
+        GITEA__database__PASSWD: ${DATABASE_URL_PASSWORD}
+        GITEA__server__ROOT_URL: ${APP_URL}/
+        GITEA__server__DISABLE_SSH: "true"
+      volumes:
+        - data:/data
+  volumes:
+    data:

@@ -1,0 +1,145 @@
+# The whole end-to-end suite on GitHub's hosted runners, each run in a rig of its own (tests/e2e/run.sh): the full pass
+# before a release, in about 25 minutes, without CT 101. A change's own test is the 10-minute impact pass
+# (tests/e2e/run.sh, or e2e-run.ps1 on CT 101); this suite is on demand only. Two ways to start it:
+#   - by hand: Actions > E2E > Run workflow, or gh workflow run e2e.yml --ref next -f suite=release;
+#   - by pushing a tag named e2e-* (git tag e2e-1.4-rc1 && git push origin e2e-1.4-rc1): the release suite (every group
+#     and every template) with test timings, on 8 runners plus 3 for the templates. It needs no API token.
+# The rig reaches no real GitHub or Cloudflare (stand-ins only), and the workflow uses no secrets.
+name: E2E
+
+on:
+  push:
+    tags: ['e2e-*']
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "release: every group and every template; full: every group; impact: what changed since 'base'; groups: the ones below; smoke"
+        type: choice
+        options: [release, full, impact, groups, smoke]
+        default: release
+      groups:
+        description: "With 'groups': group numbers or aliases (02 14 12+slow @t28-paste)"
+        type: string
+        default: ""
+      base:
+        description: "With 'impact': the branch to compare with"
+        type: string
+        default: main
+      timings:
+        description: "test: the rig's shorter waits; production: as an install runs (the template smoke always is)"
+        type: choice
+        options: [test, production]
+        default: test
+      shards:
+        description: "Runners for the groups (the template smoke adds 3)"
+        type: string
+        default: "8"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      runs: ${{ steps.plan.outputs.runs }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        # Inputs reach the script as variables only (E2E_GROUPS, not GROUPS: bash keeps $GROUPS for itself). A pushed
+        # e2e-* tag has no inputs: the release suite, with test timings, on 8 runners.
+        env:
+          SUITE: ${{ inputs.suite || 'release' }}
+          E2E_GROUPS: ${{ inputs.groups }}
+          BASE: ${{ inputs.base || 'main' }}
+          TIMINGS: ${{ inputs.timings || 'test' }}
+          SHARDS: ${{ inputs.shards || '8' }}
+        run: |
+          set -- --tier "$SUITE" --timings "$TIMINGS" --shards "$SHARDS" --template-shards 3
+          if [ -n "$E2E_GROUPS" ]; then set -- "$@" --groups "$E2E_GROUPS"; fi
+          case "$SUITE" in impact) set -- "$@" --git "origin/$BASE" ;; esac
+          python3 tests/e2e/impact.py plan "$@" --format matrix --out matrix.json
+          python3 tests/e2e/impact.py plan "$@" --format markdown >> "$GITHUB_STEP_SUMMARY"
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "runs=$(python3 -c 'import json; print(len(json.load(open("matrix.json"))["include"]))')" >> "$GITHUB_OUTPUT"
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/dotnet/sdk:10.0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: dotnet test tests/Gitberth.Tests --nologo
+
+  e2e:
+    name: ${{ matrix.name }}
+    needs: plan
+    if: needs.plan.outputs.runs != '0'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Free disk space
+        # A rig with template images needs more than the runner's free 14 GB.
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - name: Run
+        env:
+          # Docker Hub through Google's mirror: shared runner addresses run into Docker Hub's anonymous limits.
+          E2E_DIND_ARGS: --registry-mirror=https://mirror.gcr.io
+          E2E_TIMINGS: ${{ matrix.timings }}
+          E2E_TEMPLATES: ${{ matrix.templates }}
+          ARGS: ${{ matrix.args }}
+        run: |
+          set -f  # the plan's node IDs, one word each, as they are
+          # shellcheck disable=SC2086
+          sh tests/e2e/run.sh test -v $ARGS
+      - name: Logs
+        if: always()
+        run: |
+          mkdir -p tests/e2e/out
+          sh tests/e2e/run.sh logs gitberth 5000 > tests/e2e/out/gitberth.log 2>&1 || true
+          sh tests/e2e/run.sh logs standin 5000 > tests/e2e/out/standin.log 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-${{ matrix.id }}
+          path: tests/e2e/out
+          retention-days: 14
+
+  summary:
+    name: Summary
+    needs: [plan, unit, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: e2e-*
+          path: shards
+      - name: One table for the run
+        env:
+          UNIT: ${{ needs.unit.result }}
+        run: python3 tests/e2e/impact.py report shards --unit "$UNIT" >> "$GITHUB_STEP_SUMMARY"
+      - name: Fail when anything failed
+        if: needs.plan.result != 'success' || needs.unit.result != 'success' || (needs.e2e.result != 'success' && needs.e2e.result != 'skipped')
+        run: exit 1

@@ -1,0 +1,53 @@
+id: n8n
+name: n8n
+tagline: Automate work across your apps with visual workflows, AI steps and code.
+description: >-
+  n8n connects hundreds of services, and anything with an API, in workflows you build in the browser: code where you want
+  it, AI steps where they help. Workflows run on triggers, schedules and webhooks, and their history is kept in Postgres.
+category: Automation
+website: https://n8n.io
+source: https://github.com/n8n-io/n8n
+license: Sustainable Use License
+icon: n8n.svg
+icon_source: monogram
+memory: 512
+open_until_setup: true
+web:
+  service: n8n
+  port: 5678
+  health: /healthz
+inputs:
+  - name: GENERIC_TIMEZONE
+    label: Time zone
+    help: Where its schedules run, like Europe/Berlin or America/New_York.
+    default: UTC
+    kind: text
+secrets:
+  - name: N8N_ENCRYPTION_KEY
+    length: 40
+databases:
+  - kind: postgres
+    variable: DATABASE_URL
+notes:
+  - The first time you open it, n8n asks you to set up the owner's account.
+compose: |
+  services:
+    n8n:
+      image: n8nio/n8n:2.47.7
+      environment:
+        DB_TYPE: postgresdb
+        DB_POSTGRESDB_HOST: ${DATABASE_URL_HOST}
+        DB_POSTGRESDB_PORT: ${DATABASE_URL_PORT}
+        DB_POSTGRESDB_DATABASE: ${DATABASE_URL_NAME}
+        DB_POSTGRESDB_USER: ${DATABASE_URL_USER}
+        DB_POSTGRESDB_PASSWORD: ${DATABASE_URL_PASSWORD}
+        N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+        WEBHOOK_URL: ${APP_URL}/
+        N8N_EDITOR_BASE_URL: ${APP_URL}/
+        N8N_SECURE_COOKIE: ${APP_HTTPS}
+        GENERIC_TIMEZONE: ${GENERIC_TIMEZONE}
+        TZ: ${GENERIC_TIMEZONE}
+      volumes:
+        - data:/home/node/.n8n
+  volumes:
+    data:

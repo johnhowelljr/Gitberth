@@ -42,6 +42,15 @@ The examples deploy `github.com/you/website`, a static site.
 5. Check **Branch** (the repository's default is marked **(default)**) and **Subfolder (optional)**. If you change either,
    click **Analyze again**.
 
+## A repo with a Compose file
+
+When the app's folder has a `compose.yaml` (or `compose.yml`, `docker-compose.yaml`, `docker-compose.yml`), Gitberth says
+**This repo has a compose.yaml with N services** and offers **With Compose** (all its services as one app) or **As one
+container** (the repo built into one image, as below). With several services, or nothing else to build, Compose is the
+first choice. Pick the **Compose file** when there are several, and the **Web service**: the one whose container is the
+app's, with its ports, domains and health URL. The **Settings** card then has the web service's ports and the variables
+the file uses; restart policy, volumes and limits are the file's own. See [Compose apps](compose-apps.md).
+
 ## Check how it will run
 
 Gitberth shows **How it will run:** and the kind of project it found, such as **Static website**, with:
@@ -133,7 +142,8 @@ On the app's **Settings** tab, the **Source** section holds:
   [Skip commits that don't need a deploy](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
 
 A change of branch, folder or build is saved for the next build. The page then says **Saved, not live yet**; click
-**Rebuild and deploy** to build it now. See [App settings](../reference/app-settings.md#source).
+**Rebuild and deploy** to build it now. See [App settings](../reference/app-settings.md#source). An app deployed with
+Compose has a **Compose** section too, with its Compose file and web service.
 
 ## If Check fails
 
@@ -148,6 +158,7 @@ See [Troubleshooting](troubleshooting.md) for more.
 
 ## Related
 
+- [Compose apps](compose-apps.md)
 - [How Gitberth builds each kind of project](../reference/build-detection.md)
 - [Environment variables](environment-variables.md)
 - [Deploys and rollbacks](deploys-and-rollbacks.md)

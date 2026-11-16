@@ -1,6 +1,9 @@
 @inject AppService Apps
+@inject DatabaseService Dbs
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
+@inject Gitberth.Compose.ComposeApps ComposeApps
+@inject Gitberth.Templates.TemplateBuiltIns BuiltIns
 
 @*
     The Environment tab: the container's own variables, editable, secrets masked with Show and Copy; the image's own
@@ -24,8 +27,10 @@ else
     var fromImage = Draft.Env.Where(r => r.Original?.FromImage == true).ToList();
     var imageOpen = showImage || fromImage.Any(r => r.Changed);
     var git = View.Summary.Source == AppSource.Git;
+    var compose = View.Row?.IsCompose == true;
     <SectionCard Title="Environment" Icon="@Icons.Material.Outlined.Key" Id="sec-env"
-                 Sub="@(git ? "Passed to the container when it starts; build-time ones to the build too. Each is for every deploy, for production, or for previews." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
+                 Sub="@(compose ? $"What the Compose file's ${{…}} are filled with, also written to its .env for env_file: .env; build-time ones go to its builds too.{(git ? " Each is for every deploy, for production, or for previews." : "")}"
+                     : git ? "Passed to the container when it starts; build-time ones to the build too. Each is for every deploy, for production, or for previews." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
         <Actions>
             @if (Draft.EnvChanged)
             {
@@ -78,10 +83,64 @@ else
         </ChildContent>
     </SectionCard>
 
+    @if (managed.Count > 0)
+    {
+        <SectionCard Title="Set by Gitberth from its databases" Icon="@GitberthIcons.Database" Class="gb-mt" Id="sec-env-databases">
+            <ChildContent>
+                <p class="gb-help" style="margin-bottom:14px">
+                    @(git ? "Each deploy sets these from the app's own databases, over a value of the same name above or in GitHub; masked in the log, and passed to the build as secrets."
+                          : compose ? "Each deploy sets these from the app's own databases, over a value of the same name above, and each in parts too for a Compose file that wants them one by one; masked in the log."
+                          : "Gitberth keeps these in the container's environment, from the app's own databases. They change only with the database.")
+                </p>
+                <div class="gb-envtbl" role="table" aria-label="Variables set from its databases">
+                    @foreach (var m in managed)
+                    {
+                        <div class="gb-envrow" role="row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)">
+                            <span class="gb-envkey" role="cell"><span>@m.Variable</span><span class="gb-tag" title="Masked wherever it's shown"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Secret</span></span>
+                            <span class="gb-envval" role="cell" style="font-family:var(--gb-sans)">
+                                <span>From @DatabaseService.From(m)</span>
+                                @if (compose)
+                                {
+                                    <span class="gb-t3 gb-env-parts">In parts too: <span class="gb-mono">@string.Join(", ", DatabaseUrls.PartNames(m.Variable, m.Kind))</span></span>
+                                }
+                            </span>
+                        </div>
+                    }
+                </div>
+                @if (Shadowed.Count > 0)
+                {
+                    <p class="gb-help" style="margin-top:10px">In place of the value@(Shadowed.Count == 1 ? "" : "s") above: @string.Join(", ", Shadowed). Production gets Gitberth's.</p>
+                }
+                <p class="gb-help" style="margin-top:6px">Its <a href="@($"{View.Summary.Href}/settings#sec-databases")">Settings › Databases</a> adds them, copies their connection strings, and removes them.</p>
+            </ChildContent>
+        </SectionCard>
+    }
+
+    @if (builtIns.Count > 0)
+    {
+        <SectionCard Title="Set by Gitberth: where it's reached" Icon="@Icons.Material.Outlined.Public" Class="gb-mt" Id="sec-env-address">
+            <ChildContent>
+                <p class="gb-help" style="margin-bottom:14px">
+                    Each deploy tells the app where it's reached, as its template's file asks: its main domain, or its address on the LAN without one.
+                    A domain added or taken off, or a new host port, reaches it with one deploy without a build (Apply now). A variable with the same name above wins.
+                </p>
+                <div class="gb-envtbl" role="table" aria-label="Where it's reached">
+                    @foreach (var (key, value) in builtIns)
+                    {
+                        <div class="gb-envrow" role="row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)">
+                            <span class="gb-envkey" role="cell"><span>@key</span>@if (BuiltInsOwn.Contains(key)) { <span class="gb-tag gb-tag--outline" title="Set above: the app gets that value, not this one.">Yours above</span> }</span>
+                            <span class="gb-envval" role="cell"><span class="gb-mono">@value</span></span>
+                        </div>
+                    }
+                </div>
+            </ChildContent>
+        </SectionCard>
+    }
+
     @if (git && View.Row is { } row)
     {
         <div style="height:16px"></div>
-        <RepoVariablesEditor Owner="@row.Owner" Repo="@row.Repo" />
+        <RepoVariablesEditor Owner="@row.Owner" Repo="@row.Repo" App="@row" />
         @if (vercel is not null)
         {
             <SectionCard Title="Set by Gitberth, like on Vercel" Icon="@Icons.Material.Outlined.AutoAwesome" Class="gb-mt">
@@ -140,8 +199,49 @@ else
         : Settings?.Access.Compose is not null ? "Compose created this container: applying gives the lines for its file, and the command to run."
         : Settings?.Access.Recreate is { } refusal ? $"Gitberth won't recreate it now: {refusal.TrimEnd('.')}." : null;
 
+    // The variables Gitberth sets from the app's own databases (Settings › Databases).
+    private IReadOnlyList<ManagedDatabase> managed = [];
+
+    // A variable set from a database: any other app's row of it is Gitberth's, shown but not edited here.
+    private bool IsManaged(string key) => managed.Any(m => m.Variable == key);
+
+    // A Git or Compose app is given its databases' variables by each deploy, over its own values of those names.
+    private bool Deployed => View.Row?.Deployed == true;
+
+    // The database variable that takes the place of the app's own value of this name at each deploy: the variable itself, or
+    // for a Compose app one of its parts (DATABASE_URL_HOST…); null for none.
+    private string? ReplacedBy(string key) =>
+        IsManaged(key) ? key
+        : View.Row?.IsCompose == true ? managed.FirstOrDefault(m => DatabaseUrls.PartNames(m.Variable, m.Kind).Contains(key))?.Variable
+        : null;
+
+    // The tab's own values a database's replaces for production: every deploy's and production's of the same name (and a
+    // Compose app's of a part's).
+    private IReadOnlyList<string> Shadowed => Deployed && Draft is not null
+        ? Draft.Env.Where(r => !r.Removed && r.Scope != EnvScope.Preview && ReplacedBy(r.Key) is not null).Select(r => r.Key).Distinct().ToList()
+        : [];
+
+    // Where an app installed from a template is reached, as each deploy tells it (APP_URL…), the ones its file uses; and those
+    // the tab has a value of its own for, which win.
+    private IReadOnlyList<(string Key, string Value)> builtIns = [];
+
+    // The variables an inline Compose app's file uses: the built-ins it asks for are among them.
+    private IReadOnlySet<string> UsedByFile(AppDefinition app) =>
+        Gitberth.Compose.ComposeVariables.Used(ComposeApps.YamlOf(app)).Select(v => v.Name).ToHashSet(StringComparer.Ordinal);
+    private IReadOnlyList<string> BuiltInsOwn => Draft is null ? []
+        : builtIns.Where(b => Draft.Env.Any(r => !r.Removed && r.Key == b.Key && r.Value.Length > 0)).Select(b => b.Key).ToList();
+
     protected override async Task OnParametersSetAsync()
     {
+        try { managed = View.Summary.AppId is int appId ? await Dbs.RowsAsync(appId) : []; }
+        catch (Exception) { managed = []; }
+        try
+        {
+            builtIns = View.Row is { TemplateId: not null } template && await Apps.GetAsync(template.Id) is { } loaded
+                ? (await BuiltIns.ForAsync(loaded)).Where(b => UsedByFile(loaded).Contains(b.Key)).ToList()
+                : [];
+        }
+        catch (Exception) { builtIns = []; }
         if (View.Summary.Source != AppSource.Git || View.Row is not { } row || vercelFor == row.Id) return;
         vercelFor = row.Id;
         try { vercel = await Apps.VercelVariablesAsync(row); }
@@ -158,8 +258,14 @@ else
         // Secret by the owner's marking, or by its name or a password in a URL it carries (DATABASE_URL), which it always is.
         var secret = row.IsSecret;
         var masked = secret && !revealed.Contains(row);
+        // Any other app's variable set from its database is Gitberth's: shown, never edited here. A Git or Compose app's own
+        // value of that name is replaced for production by the database's (a Compose app's of one of its parts too).
+        var gitberths = !Deployed && !row.IsNew && row.Original?.FromImage != true && IsManaged(row.Key);
+        var replacedBy = Deployed && !row.IsNew && row.Scope != EnvScope.Preview ? ReplacedBy(row.Key) : null;
+        var replaced = replacedBy is not null;
+        var locked = ReadOnly || gitberths;
         // The image's own untouched variables are passed on as they are; marking one makes it the container's own.
-        var canMark = !row.Removed && !ReadOnly && !(row.Original?.FromImage == true && !row.Changed);
+        var canMark = !row.Removed && !locked && !(row.Original?.FromImage == true && !row.Changed);
         var css =row.Removed ? "gb-envrow--gone" : row.IsNew ? "gb-envrow--new" : row.Changed ? "gb-envrow--changed" : null;
         <div class="gb-envrow @css" role="row" @key="row">
             <span class="gb-envkey" role="cell">
@@ -192,16 +298,25 @@ else
                 {
                     <span class="gb-tag gb-tag--outline" title="@ScopeTitle(row.Scope)">@EnvScopes.Label(row.Scope)</span>
                 }
+                @if (gitberths)
+                {
+                    <span class="gb-tag gb-tag--accent" title="From its database: Settings › Databases adds and removes it.">Set by Gitberth</span>
+                }
+                else if (replaced)
+                {
+                    <span class="gb-tag gb-tag--warn" title="@(replacedBy == row.Key ? $"Gitberth sets {row.Key} from the app's database, so production doesn't get this value." : $"Gitberth sets {row.Key} as a part of {replacedBy}, from the app's database, so the app doesn't get this value.")">Replaced by Gitberth</span>
+                }
             </span>
             <span class="gb-envval" role="cell">
-                @if (row.Removed)
+                @if (row.Removed || gitberths)
                 {
+                    @* A database's connection string isn't edited here, so it isn't on the page either until it's shown. *@
                     <span class="@(masked ? "gb-mask" : null)">@(masked ? "••••••••••" : row.Value)</span>
                 }
                 else
                 {
                     <input class="gb-input gb-input--mono" type="@(masked ? "password" : "text")" value="@row.Value" aria-label="@($"Value of {row.Key}")"
-                           spellcheck="false" autocomplete="off" readonly="@ReadOnly" @oninput="e => SetValue(row, e.Value?.ToString())" />
+                           spellcheck="false" autocomplete="off" readonly="@locked" @oninput="e => SetValue(row, e.Value?.ToString())" />
                 }
             </span>
             <span class="gb-envrow-actions" role="cell">
@@ -237,7 +352,7 @@ else
                 {
                     <button type="button" class="gb-iconbtn" title="Undo" aria-label="@($"Undo {row.Key}")" @onclick="() => Undo(row)"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
                 }
-                @if (!row.Removed && !ReadOnly)
+                @if (!row.Removed && !locked)
                 {
                     <button type="button" class="gb-iconbtn" title="Remove" aria-label="@($"Remove {row.Key}")" @onclick="() => Remove(row)"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
                 }

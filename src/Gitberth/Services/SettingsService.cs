@@ -101,6 +101,34 @@ public static class SettingKeys
     public const string NotifyPreviews = "notify.previews";
     /// <summary>The containers whose apps are left out of notifications, as a JSON list of names.</summary>
     public const string NotifyMuted = "notify.muted";
+
+    // ---- Uptime checks, the status page and the down page (1.3) ----
+    /// <summary>How often each app is checked from outside, in seconds (30 to 900); 60 when unset.</summary>
+    public const string UptimeIntervalSeconds = "uptime.intervalSeconds";
+    /// <summary>"true" when the status page is served (on the LAN at /status, and through its host name); off when unset.</summary>
+    public const string StatusEnabled = "status.enabled";
+    /// <summary>The status page's title; "Status" when unset.</summary>
+    public const string StatusTitle = "status.title";
+    /// <summary>A short description under the status page's title; none when unset.</summary>
+    public const string StatusDescription = "status.description";
+    /// <summary>The apps the status page lists, as a JSON list of app ids; every app with uptime checks when unset.</summary>
+    public const string StatusApps = "status.apps";
+    /// <summary>"true" when the status page shows each app's response time.</summary>
+    public const string StatusResponseTimes = "status.responseTimes";
+    /// <summary>The host name the status page is served on through the tunnel (status.example.com); none when unset.</summary>
+    public const string StatusHost = "status.host";
+    /// <summary>
+    /// Where cloudflared reaches Gitberth itself (http://gitberth:8080), as the last domain sync worked it out: a domain on
+    /// the down page goes there, which isn't one of the host ports routed to an app.
+    /// </summary>
+    public const string OwnService = "domains.ownService";
+
+    // ---- Databases (1.3) ----
+    /// <summary>
+    /// The Postgres server new databases go on (its container's name), as Settings › Databases chose it. Unset: the one
+    /// Gitberth can use, when there's exactly one.
+    /// </summary>
+    public const string DatabasesDefaultServer = "databases.defaultServer";
 }
 
 /// <summary>Key/value settings stored in SQLite; secrets are encrypted.</summary>

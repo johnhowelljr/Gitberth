@@ -8,8 +8,12 @@ public enum DestinationKind { Email, Discord, Slack, Ntfy, Webhook }
 /// <summary>How Gitberth talks to a mail server. TLS from the first byte (port 465) isn't something .NET's mail client speaks.</summary>
 public enum SmtpSecurity { StartTls, None }
 
-/// <summary>What a notification is about. Settings › Notifications turns each kind on or off; a test is always sent.</summary>
-public enum NotifyEvent { DeployFailed, DeploySucceeded, Crashed, Unhealthy, Healthy, Test }
+/// <summary>
+/// What a notification is about. Settings › Notifications turns each kind on or off; a test is always sent. Saved by name:
+/// only ever appended. Down and BackUp come from the uptime checks (BackUp goes with Down, as Healthy with Unhealthy), and
+/// CertificateExpiring from the certificate an uptime check saw.
+/// </summary>
+public enum NotifyEvent { DeployFailed, DeploySucceeded, Crashed, Unhealthy, Healthy, Test, Down, BackUp, CertificateExpiring }
 
 /// <summary>How bad it is: the color of a Discord embed, an ntfy priority, the word in a webhook's JSON.</summary>
 public enum NoticeLevel { Good, Info, Warning, Critical }
@@ -62,6 +66,8 @@ public sealed record Notice(NotifyEvent Event, NoticeLevel Level, string Title, 
     /// <summary>The deploy hook that started the deploy, by name; null for any other trigger.</summary>
     public string? Hook { get; init; }
     public bool Preview { get; init; }
+    /// <summary>The address an uptime check asked (https://web.example.com/), for Down, BackUp and CertificateExpiring.</summary>
+    public string? Address { get; init; }
 }
 
 /// <summary>How a delivery went, kept per channel (in memory) for Settings to show.</summary>

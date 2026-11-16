@@ -21,7 +21,11 @@
 <PageHead Title="@HeadTitle" Lead="@Lead">
     <Crumbs>
         <a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
-        @if (step == NewAppStep.Source)
+        @if (OpenTemplate is { } open)
+        {
+            <a href="apps/new?from=templates">New app</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /><span>@open.Name</span>
+        }
+        else if (step == NewAppStep.Source)
         {
             <span>New app</span>
         }
@@ -33,7 +37,7 @@
 </PageHead>
 
 <ol class="gb-stepper" aria-label="Steps">
-    @Stp(NewAppStep.Source, 1, step == NewAppStep.Source ? "Source" : $"Source · {SourceWord}")
+    @Stp(NewAppStep.Source, 1, Shown == NewAppStep.Source ? "Source" : $"Source · {SourceWord}")
     <li class="gb-stp-line" aria-hidden="true"></li>
     @Stp(NewAppStep.Configure, 2, "Configure")
     <li class="gb-stp-line" aria-hidden="true"></li>
@@ -43,7 +47,9 @@
 @if (step == NewAppStep.Source || source == NewAppSource.Git)
 {
     <div class="gb-stack">
-        <div class="gb-srcgrid" role="radiogroup" aria-label="Where it comes from">
+        @if (OpenTemplate is null)
+        {
+        <div class="gb-srcgrid gb-srcgrid--5" role="radiogroup" aria-label="Where it comes from">
             @foreach (var s in Enum.GetValues<NewAppSource>())
             {
                 var (title, text, icon, tags) = NewAppSources.Of(s);
@@ -65,8 +71,12 @@
                 </button>
             }
         </div>
+        }
         @switch (source)
         {
+            case NewAppSource.Templates:
+                <TemplateSource TemplateId="@TemplateId" />
+                break;
             case NewAppSource.Git:
                 <GitSource PrefillUrl="@Url" OnStage="s => gitStage = s" />
                 break;
@@ -124,6 +134,13 @@ else if (form is not null)
     /// <summary>An image to start from straight away (New app from an image on this host): ?use=postgres:18&source=local.</summary>
     [SupplyParameterFromQuery(Name = "use")] private string? Use { get; set; }
     [SupplyParameterFromQuery(Name = "source")] private string? SourceName { get; set; }
+    /// <summary>A template's page (?template=uptime-kuma); ?from=templates opens the gallery.</summary>
+    [SupplyParameterFromQuery(Name = "template")] private string? TemplateId { get; set; }
+
+    [Inject] private Gitberth.Templates.TemplateCatalog Templates { get; set; } = default!;
+
+    // The template whose page is open, while the Templates source shows one.
+    private Gitberth.Templates.AppTemplate? OpenTemplate => source == NewAppSource.Templates ? Templates.Find(TemplateId) : null;
 
     private NewAppSource source = NewAppSource.Registry;
     private NewAppStep step = NewAppStep.Source;
@@ -141,14 +158,22 @@ else if (form is not null)
     private CreateResult? result;
     private bool showOutput;
 
-    private NewAppStep Shown => source == NewAppSource.Git ? gitStage : step;
+    private NewAppStep Shown => source switch
+    {
+        NewAppSource.Git => gitStage,
+        NewAppSource.Templates => OpenTemplate is null ? NewAppStep.Source : NewAppStep.Configure,
+        _ => step,
+    };
 
     private string Slug => plan?.Slug is { Length: > 0 } s && plan.Draft.Name == form?.Name.Trim() ? s : AppService.Slugify(form?.Name) is { Length: > 0 } slug ? slug : "app";
 
-    private string HeadTitle => Shown == NewAppStep.Source || form is null || source == NewAppSource.Git ? "New app" : $"New app from {form.Image}";
+    private string HeadTitle => OpenTemplate is { } open ? $"Install {open.Name}"
+        : Shown == NewAppStep.Source || form is null || source is NewAppSource.Git or NewAppSource.Templates ? "New app" : $"New app from {form.Image}";
 
     private string Lead => Shown switch
     {
+        NewAppStep.Configure when OpenTemplate is not null => "From the template gallery: Gitberth sets up its database, secrets and domain, then deploys it.",
+        NewAppStep.Source when source == NewAppSource.Templates => "Pick an app to install. Gitberth sets up its database, secrets and domain, then deploys it.",
         NewAppStep.Source => "Run anything on this host. Pick where it comes from; every setting can change before it starts, and after.",
         NewAppStep.Configure when source == NewAppSource.Git => "Gitberth works out how to build it; check the settings and deploy.",
         NewAppStep.Configure => "Filled in from the source. Check the parts that matter to you; the preview shows exactly what will run.",
@@ -160,6 +185,7 @@ else if (form is not null)
         NewAppSource.Git => "GitHub",
         NewAppSource.Registry => "Registry",
         NewAppSource.Local => "Local image",
+        NewAppSource.Templates => "Template",
         _ => hand == HandMode.Compose ? "Compose" : hand == HandMode.DockerRun ? "docker run" : "By hand",
     };
 
@@ -169,6 +195,7 @@ else if (form is not null)
     protected override async Task OnInitializedAsync()
     {
         if (From == "paste") (source, hand) = (NewAppSource.Hand, HandMode.DockerRun);
+        else if (From == "templates" || !string.IsNullOrWhiteSpace(TemplateId)) source = NewAppSource.Templates;
         else if (!string.IsNullOrWhiteSpace(Url)) source = NewAppSource.Git;
         else if (SourceName == "local") source = NewAppSource.Local;
         lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));

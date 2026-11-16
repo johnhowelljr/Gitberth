@@ -54,6 +54,51 @@ namespace Gitberth.Data.Migrations
                     b.ToTable("ActivityEntries", (string)null);
                 });
 
+            modelBuilder.Entity("Gitberth.Data.ApiToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Access")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastUsedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastUsedIp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Prefix")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.ToTable("ApiTokens", (string)null);
+                });
+
             modelBuilder.Entity("Gitberth.Data.AppDefinition", b =>
                 {
                     b.Property<int>("Id")
@@ -65,6 +110,12 @@ namespace Gitberth.Data.Migrations
 
                     b.Property<string>("Branch")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ComposeFile")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ComposeYamlProtected")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("ConfigChangePending")
@@ -108,6 +159,12 @@ namespace Gitberth.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("DownPage")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DownPageMessage")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("HealthCheckPath")
                         .HasColumnType("TEXT");
 
@@ -136,6 +193,12 @@ namespace Gitberth.Data.Migrations
 
                     b.Property<bool>("Pinned")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("PreviewDatabases")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("Empty");
 
                     b.Property<int>("PreviewExpiryDays")
                         .HasColumnType("INTEGER");
@@ -200,6 +263,9 @@ namespace Gitberth.Data.Migrations
                     b.Property<string>("Subdirectory")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("TemplateId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("UpdatePolicy")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -209,10 +275,19 @@ namespace Gitberth.Data.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("UptimeCheck")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UptimePath")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("VercelVariables")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("WatchPaths")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WebService")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
@@ -469,10 +544,16 @@ namespace Gitberth.Data.Migrations
                     b.Property<string>("ImageTag")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Images")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("NoCache")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("QueuedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestedBy")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SkipReason")
@@ -591,6 +672,53 @@ namespace Gitberth.Data.Migrations
                     b.HasKey("ContainerName", "Network");
 
                     b.ToTable("KeptNetworks", (string)null);
+                });
+
+            modelBuilder.Entity("Gitberth.Data.ManagedDatabase", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AppId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Created")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProtectedPassword")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Role")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Server")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Variable")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppId");
+
+                    b.HasIndex("Server", "Name");
+
+                    b.ToTable("ManagedDatabases", (string)null);
                 });
 
             modelBuilder.Entity("Gitberth.Data.PortMapping", b =>
@@ -798,6 +926,15 @@ namespace Gitberth.Data.Migrations
                 {
                     b.HasOne("Gitberth.Data.AppDefinition", null)
                         .WithMany("EnvVars")
+                        .HasForeignKey("AppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Gitberth.Data.ManagedDatabase", b =>
+                {
+                    b.HasOne("Gitberth.Data.AppDefinition", null)
+                        .WithMany()
                         .HasForeignKey("AppId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

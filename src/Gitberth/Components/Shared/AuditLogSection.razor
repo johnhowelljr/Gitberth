@@ -1,0 +1,141 @@
+@using Gitberth.Audit
+@inject global::Gitberth.Audit.AuditLog Log
+@inject AuditSettings Options
+@inject ISnackbar Snackbar
+
+@* Settings › Audit log: how long entries are kept, whether Docker changes made outside Gitberth are recorded, the file, its export and its check. *@
+<section class="gb-card gb-sec" id="audit" aria-labelledby="audit-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Policy" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3" id="audit-t">Audit log</div>
+            <p>Every change to this Gitberth and its apps, who made it and how it ended, kept in a file of its own and checked against tampering.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        <div class="gb-setrow">
+            <Field Label="Keep entries for" For="audit-days" Help="@($"{AuditSettings.MinRetentionDays} to {AuditSettings.MaxRetentionDays} days. Older entries are removed once a day; the rest still check out.")"
+                   Error="@AuditSettings.RetentionProblem(days)">
+                <label class="gb-input"><input id="audit-days" type="number" min="@AuditSettings.MinRetentionDays" max="@AuditSettings.MaxRetentionDays" value="@days"
+                       @onchange="e => days = int.TryParse(e.Value?.ToString(), out var d) ? d : days" /><span class="gb-input-suffix">days</span></label>
+            </Field>
+            <div style="padding-bottom:22px">
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveAsync" Busy="busy"
+                     Disabled="@(AuditSettings.RetentionProblem(days) is not null || (days == Options.RetentionDays && outside == Options.RecordOutside))">Save</Btn>
+            </div>
+        </div>
+        <SwitchRow @key="@($"out{switchKey}")" Title="Record changes made outside Gitberth" Value="outside" ValueChanged="v => outside = v" Disabled="busy"
+                   Changed="@(outside != Options.RecordOutside)"
+                   Sub="Containers, images, networks and volumes changed with docker on the host, Compose or another tool. Gitberth's own changes are recorded either way." />
+        <dl class="gb-kv">
+            <dt>File</dt>
+            <dd><code>@(Log.FilePath ?? "in memory")</code></dd>
+            <dt>Size</dt>
+            <dd>@(summary is null ? "…" : Format.Memory(summary.Bytes))</dd>
+            <dt>Entries</dt>
+            <dd>
+                @if (summary is null)
+                {
+                    <span class="gb-t3">…</span>
+                }
+                else if (summary.Count == 0)
+                {
+                    <span class="gb-t3">None yet</span>
+                }
+                else
+                {
+                    <span>@summary.Count.ToString("N0", CultureInfo.InvariantCulture)</span>
+                    @if (summary.Oldest is { } oldest)
+                    {
+                        <span class="gb-t3">since @oldest.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                    }
+                }
+            </dd>
+        </dl>
+        @if (verification is { } v)
+        {
+            <Banner Tone="@(v.Ok ? "good" : "critical")" Icon="@(v.Ok ? Icons.Material.Outlined.VerifiedUser : Icons.Material.Outlined.GppBad)"
+                    Title="@(v.Ok ? "The audit log is intact" : "The audit log was changed")" OnDismiss="() => verification = null">@v.Message</Banner>
+        }
+        <div class="gb-row gb-row--wrap">
+            <Btn Href="audit" Icon="@Icons.Material.Outlined.Policy">Open the audit log</Btn>
+            <Btn Href="@AuditEndpoints.ExportUrl(AuditFilter.Default with { Range = AuditRange.All }, AuditExportFormat.Csv)" Icon="@Icons.Material.Outlined.Download">Export everything (CSV)</Btn>
+            <Btn Href="@AuditEndpoints.ExportUrl(AuditFilter.Default with { Range = AuditRange.All }, AuditExportFormat.JsonLines)" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.DataObject">JSON Lines</Btn>
+            <Btn OnClick="VerifyAsync" Busy="verifying" Icon="@Icons.Material.Outlined.VerifiedUser">Check its integrity</Btn>
+        </div>
+        <p class="gb-help">
+            Each entry's hash covers the one before it, so a changed or missing entry shows when the log is checked. Secret values (variables marked
+            secret, tokens, passwords) never go in it: only their names.
+        </p>
+    </div>
+</section>
+
+@code {
+    private int days;
+    private bool outside, busy, verifying;
+    private int switchKey;
+    private AuditSummary? summary;
+    private AuditVerification? verification;
+
+    protected override async Task OnInitializedAsync()
+    {
+        days = Options.RetentionDays;
+        outside = Options.RecordOutside;
+        await ReadAsync();
+    }
+
+    private async Task ReadAsync()
+    {
+        try
+        {
+            summary = await Log.SummaryAsync();
+        }
+        catch (Exception)
+        {
+            summary = new AuditSummary(0, null, null, Log.Bytes);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        try
+        {
+            if (await Options.SaveAsync(days, outside) is { } problem)
+            {
+                Snackbar.Add(problem, Severity.Error);
+                return;
+            }
+            Snackbar.Add("Saved. The audit log keeps entries for " + AuditSettings.Days(days) + (outside ? "." : ", and leaves out changes made outside Gitberth."), Severity.Success);
+            await ReadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            (days, outside) = (Options.RetentionDays, Options.RecordOutside);
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task VerifyAsync()
+    {
+        verifying = true;
+        try
+        {
+            verification = await Log.VerifyAsync();
+            await ReadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"The log couldn't be checked: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            verifying = false;
+        }
+    }
+}

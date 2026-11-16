@@ -376,6 +376,36 @@ public sealed class AppCatalogTests : IDisposable
         await Assert.ThrowsAsync<InvalidOperationException>(() => _rig.Catalog.ForgetAsync(_rig.ObsId));
     }
 
+    [Fact]
+    public async Task Forgetting_an_app_takes_its_redis_away_and_a_redis_no_app_keeps_is_an_app_like_any_other()
+    {
+        var row = await _rig.Catalog.AdoptAsync("sample-index");
+        var member = new Dictionary<string, string> { ["gitberth.managed"] = "true", ["gitberth.app"] = row.Slug, ["gitberth.database"] = "redis" };
+        _rig.Engine.AddLike("sample-index", "sample-index_redis", member);
+        await _rig.AddAsync(new ManagedDatabase
+        {
+            AppId = row.Id, Kind = DatabaseKind.Redis, Server = "sample-index_redis", Name = "sample-index-redis", ProtectedPassword = _rig.Protector.Protect("pw"),
+            Variable = "REDIS_URL",
+        });
+        // While its app keeps it, it's the app's: not an app of its own, and never adopted as one.
+        Assert.DoesNotContain((await ListAsync()).Apps, a => a.Key == "sample-index_redis");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _rig.Catalog.AdoptAsync("sample-index_redis"));
+
+        await _rig.Catalog.ForgetAsync(row.Id);
+
+        // Its Redis went with it (its data stays in its volume); its own container stays.
+        Assert.False(_rig.Engine.Has("sample-index_redis"));
+        Assert.Contains("docker rm -f sample-index_redis", _rig.Engine.Writes);
+        Assert.DoesNotContain(_rig.Engine.Writes, w => w.StartsWith("docker volume rm", StringComparison.Ordinal));
+        Assert.True(_rig.Engine.Has("sample-index"));
+        await using (var db = _rig.Db.CreateDbContext()) Assert.Empty(db.ManagedDatabases);
+
+        // One left behind with no app keeping it (a row lost) is listed, and adopted, like any other container.
+        _rig.Engine.AddLike("sample-index", "lost_redis", new Dictionary<string, string> { ["gitberth.app"] = "lost", ["gitberth.database"] = "redis" });
+        Assert.Contains((await ListAsync()).Apps, a => a.Key == "lost_redis");
+        Assert.Equal("lost_redis", (await _rig.Catalog.AdoptAsync("lost_redis")).ContainerName);
+    }
+
     [Theory]
     [InlineData("postgres:18", true)]
     [InlineData("nginx", true)]

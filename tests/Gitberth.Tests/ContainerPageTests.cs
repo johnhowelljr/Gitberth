@@ -498,7 +498,8 @@ public sealed class ContainerPageTests : IDisposable
     [Fact]
     public async Task Notes_are_saved_and_taken_away_per_container()
     {
-        var notes = new ContainerPortNotes(_db);
+        var audit = new Audit.AuditLog();
+        var notes = new ContainerPortNotes(_db, audit);
         await notes.SaveAsync("cloudflare-tunnel", [(20241, "tcp"), (8080, "tcp")]);
         await notes.SaveAsync("postgres", [(8081, "tcp")]);
 
@@ -509,5 +510,15 @@ public sealed class ContainerPageTests : IDisposable
         Assert.Equal([(8081, "tcp")], (await notes.ListAsync("postgres")).Select(n => (n.Port, n.Protocol)));
         await notes.SaveAsync("postgres", []);
         Assert.Empty(await notes.ListAsync("postgres"));
+        // Each change is in the audit log, with the notes before and after; saving the same notes again changes nothing.
+        await notes.SaveAsync("cloudflare-tunnel", [(53, "udp"), (8080, "tcp")]);
+        Assert.Equal(
+        [
+            ("cloudflare-tunnel", "Changed the ports noted for cloudflare-tunnel: noted 8080/tcp, 20241/tcp.", "none", "8080/tcp, 20241/tcp"),
+            ("postgres", "Changed the ports noted for postgres: noted 8081/tcp.", "none", "8081/tcp"),
+            ("cloudflare-tunnel", "Changed the ports noted for cloudflare-tunnel: noted 53/udp and took off 20241/tcp.", "8080/tcp, 20241/tcp", "53/udp, 8080/tcp"),
+            ("postgres", "Changed the ports noted for postgres: took off 8081/tcp.", "8081/tcp", "none"),
+        ], audit.Entries.Select(e => (e.Container!, e.Summary, e.Changes[0].From!, e.Changes[0].To!)));
+        Assert.All(audit.Entries, e => Assert.Equal("app.ports.noted", e.Action));
     }
 }

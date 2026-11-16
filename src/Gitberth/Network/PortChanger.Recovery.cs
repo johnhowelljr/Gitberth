@@ -284,6 +284,42 @@ public sealed partial class PortChanger
     /// </summary>
     public async Task<PortChangeResult> PutOriginalBackAsync(string container, CancellationToken ct = default)
     {
+        var result = await PutBackAsync(container, ct);
+        Decided(container, "app.change.putback", $"Put the original {container} back", result, PortChangeOutcome.RolledBack);
+        return result;
+    }
+
+    /// <summary>
+    /// The owner's [Keep the new one]: the original stops for good and goes, never with its volumes, and the new container
+    /// takes its place with the original's restart policy. The new one only starts once Docker says the original is down.
+    /// A change whose containers were removed or replaced outside Gitberth just ends.
+    /// </summary>
+    public async Task<PortChangeResult> KeepNewAsync(string container, CancellationToken ct = default)
+    {
+        var result = await KeepAsync(container, ct);
+        Decided(container, "app.change.kept", $"Kept the new {container}", result, PortChangeOutcome.Done);
+        return result;
+    }
+
+    // The owner's decision in the audit log, with what came of it. One with nothing left to decide changed nothing.
+    private void Decided(string container, string action, string did, PortChangeResult result, PortChangeOutcome worked)
+    {
+        if (audit is null || result.Outcome == PortChangeOutcome.NothingChanged) return;
+        var ok = result.Outcome == worked;
+        var message = Audit.AuditLog.Clean(result.Message, 300) ?? "";
+        audit.Record(new Audit.AuditEntry(action, ok ? $"{did}: {Lower(message)}" : message)
+        {
+            Outcome = ok ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+            Container = container,
+            Target = container,
+        });
+    }
+
+    private static string Lower(string text) =>
+        text.Length > 1 && char.IsUpper(text[0]) && !char.IsUpper(text[1]) ? char.ToLowerInvariant(text[0]) + text[1..] : text;
+
+    private async Task<PortChangeResult> PutBackAsync(string container, CancellationToken ct)
+    {
         using var _ = await locks.AcquireAsync(container, ct);
         if (await PendingAsync(container, ct) is not { } row) return Nothing($"There's no change on {container} to undo.");
         try
@@ -311,12 +347,7 @@ public sealed partial class PortChanger
         }
     }
 
-    /// <summary>
-    /// The owner's [Keep the new one]: the original stops for good and goes, never with its volumes, and the new container
-    /// takes its place with the original's restart policy. The new one only starts once Docker says the original is down.
-    /// A change whose containers were removed or replaced outside Gitberth just ends.
-    /// </summary>
-    public async Task<PortChangeResult> KeepNewAsync(string container, CancellationToken ct = default)
+    private async Task<PortChangeResult> KeepAsync(string container, CancellationToken ct)
     {
         var none = CancellationToken.None;
         using var _ = await locks.AcquireAsync(container, ct);

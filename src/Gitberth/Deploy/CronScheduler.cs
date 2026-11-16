@@ -49,7 +49,8 @@ public sealed class CronScheduler(
     DockerCli docker,
     IHttpClientFactory httpFactory,
     GitberthOptions options,
-    ILogger<CronScheduler> logger) : BackgroundService
+    ILogger<CronScheduler> logger,
+    Audit.AuditLog? audit = null) : BackgroundService
 {
     /// <summary>How long a run may take, reading the answer included. The "cron" HttpClient has the same timeout.</summary>
     public static readonly TimeSpan RunTimeout = TimeSpan.FromMinutes(5);
@@ -77,6 +78,8 @@ public sealed class CronScheduler(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Schedule));
         try
         {
             var next = Minute(DateTime.UtcNow).AddMinutes(1);
@@ -173,7 +176,17 @@ public sealed class CronScheduler(
         var job = jobs.FirstOrDefault(j => j.Job.Path == path && j.Job.Schedule == schedule)?.Job
             ?? throw new InvalidOperationException($"The app's current image has no cron job {path} ({schedule}).");
         var target = await TargetAsync(app, await docker.ListContainersAsync(managedOnly: true, _stopping.Token), _stopping.Token);
-        return await RunAsync(app, job, target, manual: true);
+        var run = await RunAsync(app, job, target, manual: true);
+        // A scheduled job run by hand is a person's doing; the ones on schedule are only the schedule.
+        audit?.Record(new Audit.AuditEntry("app.cron.run", run.Succeeded
+            ? $"Ran {app.Name}'s scheduled job {path} now: it answered {run.Status}."
+            : $"Ran {app.Name}'s scheduled job {path} now, and it didn't work: {run.Detail ?? run.Outcome.ToString()}.")
+        {
+            Outcome = run.Succeeded ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+            AppId = app.Id, AppName = app.Name, Container = app.ContainerName, Target = path,
+            Changes = [new("Schedule", null, schedule)],
+        });
+        return run;
     }
 
     /// <summary>

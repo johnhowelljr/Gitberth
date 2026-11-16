@@ -44,7 +44,8 @@ public sealed partial class PortChanger(
     ILogger<PortChanger> logger,
     TimeProvider? time = null,
     ContainerUpdater? updater = null,
-    IHealthProbe? health = null)
+    IHealthProbe? health = null,
+    Audit.AuditLog? audit = null)
 {
     private const int LogLines = 60;
     private static readonly IReadOnlyDictionary<string, NavApp> NoApps = new Dictionary<string, NavApp>();

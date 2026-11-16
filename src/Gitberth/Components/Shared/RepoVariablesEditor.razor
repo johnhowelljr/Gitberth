@@ -67,6 +67,8 @@
 @code {
     [Parameter, EditorRequired] public string Owner { get; set; } = "";
     [Parameter, EditorRequired] public string Repo { get; set; } = "";
+    /// <summary>The app whose Environment tab this is: the audit log tells a save or a deletion against it.</summary>
+    [Parameter] public AppDefinition? App { get; set; }
 
     private RepoVariablesResult? result;
     private (string Owner, string Repo)? loadedFor;
@@ -103,7 +105,9 @@
         busy = true;
         try
         {
-            await Variables.SetAsync(Owner, Repo, name, value);
+            // What it was, when the repo had it (GitHub's names don't mind case), for the audit log's before and after.
+            var previous = result?.Variables.FirstOrDefault(v => string.Equals(v.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))?.Value;
+            await Variables.SetAsync(Owner, Repo, name, value, app: App, previous: previous);
             Snackbar.Add($"Saved {name.Trim()} to GitHub. Deploy the app to use it.", Severity.Success);
             (name, value) = ("", "");
             await LoadAsync();
@@ -128,7 +132,7 @@
         busy = true;
         try
         {
-            await Variables.DeleteAsync(Owner, Repo, v.Name);
+            await Variables.DeleteAsync(Owner, Repo, v.Name, app: App, previous: v.Value);
             Snackbar.Add($"Deleted {v.Name} from GitHub.", Severity.Success);
             await LoadAsync();
         }

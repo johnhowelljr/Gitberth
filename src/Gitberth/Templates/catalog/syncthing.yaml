@@ -1,0 +1,29 @@
+id: syncthing
+name: Syncthing
+tagline: Keep folders in sync between your devices, with no cloud in between.
+description: >-
+  Syncthing syncs folders directly between your computers, phones and servers, encrypted and private. There's no central
+  server and no account: devices find each other and keep every copy up to date, with versioning if you want it.
+category: Files
+website: https://syncthing.net
+source: https://github.com/syncthing/syncthing
+license: MPL-2.0
+icon: syncthing.svg
+icon_source: monogram
+memory: 128
+open_until_setup: true
+web:
+  service: syncthing
+  port: 8384
+  health: /rest/noauth/health
+notes:
+  - Set a user name and password for its web page first, in Actions › Settings › GUI.
+  - Its sync port isn't published, so devices connect to it through Syncthing's relays and its own outgoing connections.
+compose: |
+  services:
+    syncthing:
+      image: syncthing/syncthing:2.1.7
+      volumes:
+        - data:/var/syncthing
+  volumes:
+    data:

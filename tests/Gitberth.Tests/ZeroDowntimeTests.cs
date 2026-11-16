@@ -27,7 +27,7 @@ namespace Gitberth.Tests;
 /// cloudflared runs that does the old one stop. A docker kept in memory and a stand-in Cloudflare write every step that
 /// changes something into one timeline.
 /// </summary>
-public sealed class ZeroDowntimeTests : IAsyncLifetime
+public sealed partial class ZeroDowntimeTests : IAsyncLifetime
 {
     private const string AccountId = "0123456789abcdef0123456789abcdef";
     private const string TunnelId = "11111111-2222-4333-8444-555555555555";

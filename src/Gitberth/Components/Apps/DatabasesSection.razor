@@ -1,0 +1,271 @@
+@inject DatabaseService Databases
+@inject DatabaseServers Servers
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@*
+    An app's Databases section on its Settings tab, saved on its own (like Deploy hooks): a Postgres database and a role of
+    the app's own on a Postgres server, or a Redis of its own, with its connection string in a variable Gitberth sets.
+    Each one shows its kind, server, size and variable, copies its connection string on a click (never shown on the page),
+    and goes with Remove: its data kept, or deleted once its name is typed in.
+*@
+<SettingsSection Id="sec-databases" Title="Databases" Icon="@GitberthIcons.Database" Description="@Description">
+    @if (rows is null)
+    {
+        <div class="gb-skel" style="height:64px"></div>
+    }
+    else
+    {
+        @if (rows.Count == 0)
+        {
+            <EmptyState Small="true" Title="No databases">Add a Postgres database or a Redis of its own: Gitberth makes it and puts its connection string in a variable, so @View.Summary.Title only has to read it.</EmptyState>
+        }
+        else
+        {
+            <div class="gb-envtbl" role="list" aria-label="Databases">
+                @foreach (var d in rows)
+                {
+                    <div class="gb-db" role="listitem" @key="d.Id">
+                        <div class="gb-db-head">
+                            <span class="gb-tag @(d.Kind == DatabaseKind.Redis ? "gb-tag--warn" : "gb-tag--accent")">@d.KindText</span>
+                            <strong>@d.Name</strong>
+                            <span class="gb-t3">@(d.Kind == DatabaseKind.Redis ? "its own container" : $"on {d.Server}")@(d.SizeBytes is long size ? $" · {AppFacts.Bytes(size)}" : "")</span>
+                            <span class="gb-db-actions">
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => CopyAsync(d)" Disabled="busy"
+                                     Label="@($"Copy {d.Variable}'s connection string")">Copy connection string</Btn>
+                                <button type="button" class="gb-iconbtn" title="Remove" aria-label="@($"Remove the database {d.Name}")" disabled="@busy" @onclick="() => RemoveAsync(d)">
+                                    <SvgIcon Icon="@Icons.Material.Outlined.Delete" />
+                                </button>
+                            </span>
+                        </div>
+                        <dl class="gb-kv">
+                            <dt>Variable</dt>
+                            <dd><code>@d.Variable</code> <span class="gb-t3">set by Gitberth@(replaces.GetValueOrDefault(d.Variable) is { Any: true } r ? ". " + r.Text(d.Variable) : "")</span></dd>
+                            <dt>Reached at</dt>
+                            <dd><span class="gb-mono">@d.Host:@(d.Kind == DatabaseKind.Redis ? DatabaseService.RedisPort : 5432)</span>@(d.Role is { } role ? $" as {role}" : "")</dd>
+                            <dt>Made</dt>
+                            <dd title="@Format.Local(d.CreatedAt)">@(d.Created ? $"By Gitberth {Format.Ago(d.CreatedAt)}" : $"Taken over {Format.Ago(d.CreatedAt)}: Gitberth never deletes its data")</dd>
+                        </dl>
+                        @if (d.Problem is { } problem)
+                        {
+                            <div class="gb-db-problem"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" /><span>@problem</span></div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="gb-db-add">
+            <Field Label="Add">
+                <Seg T="DatabaseKind" Options="KindOptions" Value="kind" ValueChanged="SetKindAsync" Label="Kind of database" />
+            </Field>
+            @if (kind == DatabaseKind.Postgres)
+            {
+                <Field Label="Server" For="db-server" Help="@ServerHelp">
+                    <select id="db-server" class="gb-input" value="@server" @onchange="e => server = e.Value?.ToString()" disabled="@(usable.Count == 0)">
+                        @if (usable.Count == 0)
+                        {
+                            <option value="">No server yet</option>
+                        }
+                        @foreach (var s in usable)
+                        {
+                            <option value="@s.Container">@s.Container (Postgres @s.VersionText)@(s.Container == defaultServer ? " · default" : "")</option>
+                        }
+                    </select>
+                </Field>
+            }
+            else
+            {
+                <Field Label="Container" Help="Redis 8, with a password and its data on a volume of its own.">
+                    <input class="gb-input gb-input--mono" value="@DatabaseNames.RedisContainer(View.Summary.Container)" readonly aria-label="Redis container" />
+                </Field>
+            }
+            <Field Label="Variable" For="db-variable" Error="@variableProblem" Help="@VariableHelp">
+                <input id="db-variable" class="gb-input gb-input--mono" value="@variable" autocomplete="off" spellcheck="false" maxlength="100"
+                       @oninput="e => { variable = e.Value?.ToString() ?? string.Empty; variableProblem = null; }" @onchange="CheckVariableAsync" />
+            </Field>
+            <div class="gb-row">
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Busy="busy"
+                     Disabled="@(variable.Trim().Length == 0 || kind == DatabaseKind.Postgres && usable.Count == 0)">Add database</Btn>
+            </div>
+        </div>
+        @if (kind == DatabaseKind.Postgres && usable.Count == 0)
+        {
+            <Banner Tone="info" Title="No Postgres server for it yet">
+                Gitberth puts each app's database on a Postgres server of this host. <a href="settings#databases">Settings › Databases</a> sets one up in a click, or lists the ones Gitberth found and why it can't use them.
+            </Banner>
+        }
+        <p class="gb-help" style="margin:0">@HowItApplies</p>
+    }
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>Raised after a change, so the page reads the app again (a container that had no row has one now).</summary>
+    [Parameter] public EventCallback Saved { get; set; }
+
+    private IReadOnlyList<DatabaseView>? rows;
+    private IReadOnlyList<PostgresServer> usable = [];
+    private string? defaultServer, server, variableProblem;
+    private DatabaseKind kind = DatabaseKind.Postgres;
+    private string variable = DatabaseNames.PostgresVariable;
+    private bool busy;
+    private int? loadedFor = -1;
+    // Whether each variable shown replaces a value the app had (the Environment tab's, GitHub's).
+    private Dictionary<string, VariableReplaces> replaces = new(StringComparer.Ordinal);
+    private VariableReplaces? typedReplaces;
+
+    private static readonly IReadOnlyList<SegOption<DatabaseKind>> KindOptions = [new(DatabaseKind.Postgres, "Postgres"), new(DatabaseKind.Redis, "Redis")];
+
+    private bool IsGit => View.Summary.Source == AppSource.Git;
+
+    private string Description => "A Postgres database or a Redis of the app's own, made by Gitberth, with its connection string in a variable it sets.";
+
+    private string? ServerHelp => usable.Count == 0 ? null : "A database and a role of its own, on this server.";
+
+    private string? VariableHelp => typedReplaces is { Any: true } r ? r.Text(variable.Trim()) + " Gitberth's value wins." : "Where the app reads its connection string.";
+
+    private string HowItApplies => IsGit
+        ? "Gitberth sets the variable on every deploy, over the Environment tab's and GitHub's, masked in the log and passed to the build as a secret. Adding or removing one makes the app take it with a deploy without a build."
+        : $"Gitberth puts the variable in {View.Summary.Title}'s container: adding or removing one recreates it, as an edit on its Environment tab does.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == View.Summary.AppId && rows is not null) return;
+        loadedFor = View.Summary.AppId;
+        await LoadAsync();
+        await LoadServersAsync();
+        await CheckVariableAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            rows = View.Summary.AppId is int appId ? await Databases.ListAsync(appId) : [];
+            replaces.Clear();
+            if (View.Summary.AppId is int id)
+                foreach (var d in rows) replaces[d.Variable] = await Databases.ReplacesAsync(id, d.Variable);
+        }
+        catch (Exception ex)
+        {
+            rows = [];
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task LoadServersAsync()
+    {
+        try
+        {
+            var all = await Servers.ListAsync();
+            usable = all.Where(s => s.Usable).ToList();
+            defaultServer = (await Servers.DefaultAsync(all))?.Container;
+            server ??= defaultServer ?? usable.FirstOrDefault()?.Container;
+        }
+        catch (Exception)
+        {
+            usable = [];
+        }
+    }
+
+    private async Task SetKindAsync(DatabaseKind value)
+    {
+        // The variable follows the kind while it's still the other kind's usual one.
+        if (variable.Trim().Length == 0 || variable.Trim() == DatabaseService.DefaultVariable(kind)) variable = DatabaseService.DefaultVariable(value);
+        kind = value;
+        variableProblem = null;
+        await CheckVariableAsync();
+    }
+
+    private async Task CheckVariableAsync()
+    {
+        var name = variable.Trim();
+        typedReplaces = null;
+        if (name.Length == 0 || View.Summary.AppId is not int appId) return;
+        try
+        {
+            typedReplaces = await Databases.ReplacesAsync(appId, name);
+        }
+        catch (Exception)
+        {
+            typedReplaces = null;
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        busy = true;
+        try
+        {
+            var done = await Databases.AddAsync(View.Summary.Key, new DatabaseRequest(kind, variable.Trim(), kind == DatabaseKind.Postgres ? server : null));
+            if (!done.Ok)
+            {
+                variableProblem = done.Message.Contains(variable.Trim(), StringComparison.Ordinal) && done.Message.Contains("variable", StringComparison.OrdinalIgnoreCase) ? done.Message : null;
+                if (variableProblem is null) Snackbar.Add(done.Message, Severity.Error);
+                return;
+            }
+            Snackbar.Add(done.Message, Severity.Success);
+            loadedFor = done.AppId;
+            await LoadAsync();
+            await CheckVariableAsync();
+            await Saved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task CopyAsync(DatabaseView d)
+    {
+        if (View.Summary.AppId is not int appId) return;
+        try
+        {
+            var url = await Databases.ConnectionStringAsync(appId, d.Id);
+            if (url is null)
+            {
+                Snackbar.Add("That database isn't the app's any more.", Severity.Warning);
+                return;
+            }
+            var copied = await JS.InvokeAsync<bool>("gitberth.copy", url);
+            Snackbar.Add(copied ? $"Copied {d.Variable}'s connection string." : "Your browser blocked copying.", copied ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task RemoveAsync(DatabaseView d)
+    {
+        if (View.Summary.AppId is not int appId) return;
+        var dialog = await Dialogs.ShowAsync<RemoveDatabaseDialog>(null, new DialogParameters<RemoveDatabaseDialog>
+        {
+            { x => x.Database, d },
+            { x => x.AppTitle, View.Summary.Title },
+        }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is not { Canceled: false, Data: bool deleteData }) return;
+        busy = true;
+        try
+        {
+            var done = await Databases.RemoveAsync(appId, d.Id, deleteData);
+            Snackbar.Add(done.Message, done.Ok ? Severity.Success : Severity.Error);
+            await LoadAsync();
+            if (done.Ok) await Saved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

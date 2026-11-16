@@ -1,0 +1,65 @@
+id: ghost
+name: Ghost
+tagline: A publishing platform for blogs, newsletters and paid memberships.
+description: >-
+  Ghost is a modern platform for publishing: a clean editor, fast themes, newsletters sent to your members, and paid
+  subscriptions if you want them. This template runs it with a MySQL database of its own.
+category: Websites
+website: https://ghost.org
+source: https://github.com/TryGhost/Ghost
+license: MIT
+icon: ghost.svg
+icon_source: monogram
+memory: 1024
+open_until_setup: true
+web:
+  service: ghost
+  port: 2368
+  health: /ghost/api/admin/site/
+secrets:
+  - name: DB_PASSWORD
+    length: 32
+  - name: DB_ROOT_PASSWORD
+    length: 32
+notes:
+  - Open /ghost on it to make the owner's account and start writing.
+compose: |
+  services:
+    ghost:
+      image: ghost:6.77.0
+      environment:
+        url: ${APP_URL}
+        database__client: mysql
+        database__connection__host: ghost-db
+        database__connection__user: ghost
+        database__connection__password: ${DB_PASSWORD}
+        database__connection__database: ghost
+      volumes:
+        - content:/var/lib/ghost/content
+      depends_on:
+        ghost-db:
+          condition: service_healthy
+      healthcheck:
+        test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:2368/ghost/api/admin/site/', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))"]
+        interval: 10s
+        timeout: 5s
+        retries: 6
+        start_period: 5m
+    ghost-db:
+      image: mysql:8.4.13
+      environment:
+        MYSQL_DATABASE: ghost
+        MYSQL_USER: ghost
+        MYSQL_PASSWORD: ${DB_PASSWORD}
+        MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      volumes:
+        - db:/var/lib/mysql
+      healthcheck:
+        test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+        interval: 5s
+        timeout: 5s
+        retries: 30
+        start_period: 30s
+  volumes:
+    content:
+    db:

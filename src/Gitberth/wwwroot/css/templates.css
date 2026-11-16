@@ -1,0 +1,99 @@
+/* App templates (1.3): New app's fifth source card, the template gallery (search, category chips, cards) and a template's
+   page, and the first steps on a template app's first deploy. Built from the design system's tokens. */
+
+/* ---------- The source cards: five of them now ---------- */
+
+@media (min-width: 1181px) {
+    .gb-srcgrid--5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+/* ---------- The gallery ---------- */
+
+.gb-tpl-gallery { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+
+.gb-tpl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+.gb-tpl-search { position: relative; flex: 0 1 320px; min-width: 0; display: block; }
+.gb-tpl-search > .gb-i { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 17px; height: 17px; color: var(--gb-text-3); pointer-events: none; }
+.gb-tpl-search .gb-input { padding-left: 34px; width: 100%; }
+
+.gb-tpl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.gb-tpl-chip {
+    display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--gb-line-2); background: var(--gb-surface-2); color: var(--gb-text-2); font: inherit; font-size: 12.5px; font-weight: 600;
+    transition: border-color var(--gb-t), background var(--gb-t), color var(--gb-t);
+}
+.gb-tpl-chip:hover { border-color: var(--gb-line-3); color: var(--gb-text-1); }
+.gb-tpl-chip.on { border-color: var(--gb-accent-line); background: var(--gb-accent-soft); color: var(--gb-accent-text); }
+.gb-tpl-chip:focus-visible { outline: none; box-shadow: var(--gb-focus); }
+.gb-tpl-chip-n { font: 11px/1 var(--gb-mono); color: var(--gb-text-3); }
+.gb-tpl-chip.on .gb-tpl-chip-n { color: inherit; opacity: .8; }
+
+.gb-tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+
+.gb-tpl-card {
+    display: flex; gap: 12px; align-items: flex-start; min-width: 0; padding: 14px; border-radius: var(--gb-r-lg);
+    border: 1px solid var(--gb-line-2); background: var(--gb-surface-2); color: var(--gb-text-1) !important; text-decoration: none !important;
+    transition: border-color var(--gb-t), transform var(--gb-t), background var(--gb-t);
+}
+.gb-tpl-card:hover { border-color: var(--gb-line-3); background: var(--gb-surface-3); transform: translateY(-1px); }
+.gb-tpl-card:focus-visible { outline: none; box-shadow: var(--gb-focus); }
+
+.gb-tpl-icon { width: 44px; height: 44px; flex: none; border-radius: 12px; object-fit: contain; }
+.gb-tpl-icon--lg { width: 60px; height: 60px; border-radius: 15px; }
+
+.gb-tpl-card-body { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 auto; }
+.gb-tpl-card-name { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
+.gb-tpl-card-tag { font-size: 12.5px; line-height: 1.45; color: var(--gb-text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.gb-tpl-card-foot { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 4px; }
+.gb-tpl-card-foot .gb-i { width: 12px; height: 12px; }
+
+/* ---------- A template's page ---------- */
+
+.gb-tpl-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 13px; font-weight: 600; color: var(--gb-text-2) !important; text-decoration: none !important; }
+.gb-tpl-back:hover { color: var(--gb-text-1) !important; }
+.gb-tpl-back .gb-i { width: 16px; height: 16px; }
+
+.gb-tpl-hero { display: flex; align-items: center; gap: 16px; padding: 18px; flex-wrap: wrap; }
+.gb-tpl-hero-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 260px; }
+.gb-tpl-hero-name { margin: 0; font-size: 20px; line-height: 1.25; font-weight: 700; letter-spacing: -.015em; }
+.gb-tpl-hero-tag { margin: 0; color: var(--gb-text-2); font-size: 13.5px; }
+.gb-tpl-links { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.gb-tpl-desc { margin: 0; color: var(--gb-text-2); line-height: 1.6; font-size: 13.5px; }
+
+.gb-tpl-read dd { min-width: 0; }
+.gb-tpl-dbs { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.gb-tpl-dbs > span { overflow-wrap: anywhere; }
+.gb-tpl-image { font-size: 12px; overflow-wrap: anywhere; }
+
+.gb-tpl-switch { grid-column: 1 / -1; }
+
+/* A banner in the page's narrow column: its text takes the width, its buttons go under it. */
+.gb-banner.gb-tpl-stack { flex-wrap: wrap; align-items: flex-start; margin-bottom: 0; }
+.gb-banner.gb-tpl-stack > .gb-grow { flex: 1 1 calc(100% - 46px); min-width: 0; }
+.gb-banner.gb-tpl-stack > .gb-banner-actions { flex-basis: 100%; padding-left: 46px; }
+.gb-banner.gb-tpl-stack .gb-ro-note { display: flex; }
+
+.gb-tpl-notes { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; color: var(--gb-text-2); font-size: 13px; line-height: 1.55; }
+.gb-tpl-notes li::marker { color: var(--gb-text-3); }
+
+/* ---------- The Environment tab: a database variable's parts, for a Compose app ---------- */
+
+.gb-env-parts { display: block; margin-top: 2px; font-size: 12px; overflow-wrap: anywhere; }
+.gb-env-parts .gb-mono { font-size: 11.5px; }
+
+/* ---------- A template app's first deploy: its first steps ---------- */
+
+.gb-tpl-first { display: flex; gap: 12px; align-items: flex-start; }
+.gb-tpl-first .gb-tpl-notes { margin-top: 6px; }
+
+@media (max-width: 760px) {
+    .gb-tpl-gallery { padding: 14px; }
+    .gb-tpl-search { flex-basis: 100%; }
+    .gb-tpl-grid { grid-template-columns: minmax(0, 1fr); }
+    .gb-tpl-hero { padding: 14px; gap: 12px; }
+    .gb-tpl-icon--lg { width: 48px; height: 48px; border-radius: 13px; }
+    .gb-tpl-hero-name { font-size: 18px; }
+}

@@ -66,9 +66,14 @@ public sealed partial class DockerApi : IDisposable
     private Version? _api;
     private string? _engine;
 
-    public DockerApi(GitberthOptions options) : this(options.DockerHost, CreateHandler(options.DockerHost))
+    /// <param name="expected">Where every change it makes is registered first, so the audit log knows the events as Gitberth's own.</param>
+    public DockerApi(GitberthOptions options, Audit.ExpectedChanges? expected = null) : this(options.DockerHost, CreateHandler(options.DockerHost))
     {
+        Expected = expected;
     }
+
+    /// <summary>Where the changes it makes are registered before they're made (the audit log's); none in tests.</summary>
+    internal Audit.ExpectedChanges? Expected { get; init; }
 
     /// <summary>Talks to the engine through <paramref name="handler"/>: a stand-in engine, in tests.</summary>
     internal DockerApi(string endpoint, HttpMessageHandler handler)
@@ -121,8 +126,12 @@ public sealed partial class DockerApi : IDisposable
     /// "containers/json?all=true". Returns the answer's body. Docker's {"message"} on a failure becomes a
     /// <see cref="DockerApiException"/>, and a call that outlasts its timeout a <see cref="TimeoutException"/>.
     /// </summary>
-    public async Task<string> SendAsync(HttpMethod method, string path, JsonNode? body = null, TimeSpan? timeout = null, CancellationToken ct = default) =>
-        await SendCoreAsync(method, await VersionedAsync(path, ct), body, timeout ?? DefaultTimeout, ct);
+    public async Task<string> SendAsync(HttpMethod method, string path, JsonNode? body = null, TimeSpan? timeout = null, CancellationToken ct = default)
+    {
+        // A change is Gitberth's own from just before it's asked for until a little after Docker answered.
+        using var expected = Expected?.ForApi(method, path, body);
+        return await SendCoreAsync(method, await VersionedAsync(path, ct), body, timeout ?? DefaultTimeout, ct);
+    }
 
     public async Task<List<RunningContainer>> ListRunningAsync(CancellationToken ct = default) =>
         ParseContainers(await SendAsync(HttpMethod.Get, "containers/json", ct: ct));
@@ -184,6 +193,23 @@ public sealed partial class DockerApi : IDisposable
         // One JSON object per line.
         while (await reader.ReadLineAsync(ct) is { } line)
             if (ParseEvent(line) is { } e) yield return e;
+    }
+
+    /// <summary>
+    /// Every event that <paramref name="filters"/> (Docker's filters JSON) lets through, from <paramref name="since"/> on, as the
+    /// raw lines the engine sends (one JSON object each): the audit log reads them itself. Ends when the connection does.
+    /// </summary>
+    public async IAsyncEnumerable<string> StreamEventLinesAsync(DateTime since, string filters, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var ticks = (since - DateTime.UnixEpoch).Ticks;
+        var from = $"{ticks / TimeSpan.TicksPerSecond}.{ticks % TimeSpan.TicksPerSecond * 100:D9}";
+        using var response = await _http.GetAsync(await VersionedAsync($"events?since={from}&filters={Uri.EscapeDataString(filters)}", ct), HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!response.IsSuccessStatusCode)
+            throw new DockerApiException((int)response.StatusCode, ErrorMessage(await response.Content.ReadAsStringAsync(ct), response));
+        await using var body = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(body);
+        while (await reader.ReadLineAsync(ct) is { } line)
+            if (line.Length > 0) yield return line;
     }
 
     /// <summary>One reading, without the second sample `docker stats` waits for: Gitberth diffs its own readings.</summary>
@@ -495,9 +521,11 @@ public sealed partial class DockerApi : IDisposable
             var nanos = Get(root, "timeNano") is { ValueKind: JsonValueKind.Number } tn && tn.TryGetInt64(out var ns) ? ns
                 : Get(root, "time") is { ValueKind: JsonValueKind.Number } ts && ts.TryGetInt64(out var s) ? s * 1_000_000_000 : 0;
             if (nanos <= 0) return null;
+            var service = Str(attributes, Compose.ComposeNames.ServiceLabel) is { Length: > 0 } named ? named : null;
             return new ContainerEvent(DateTime.UnixEpoch.AddTicks(nanos / 100), id, name, action,
                 Int(attributes, "exitCode"), Int(attributes, "signal"), Int(attributes, ContainerSpecFactory.DeploymentLabel),
-                Str(attributes, ContainerSpecFactory.TriggerLabel) is { Length: > 0 } trigger ? trigger : null);
+                Str(attributes, ContainerSpecFactory.TriggerLabel) is { Length: > 0 } trigger ? trigger : null,
+                service is null ? null : Str(attributes, "gitberth.app") is { Length: > 0 } app ? app : null, service);
         }
         catch (JsonException)
         {

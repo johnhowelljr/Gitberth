@@ -8,7 +8,13 @@
 <MudDialogProvider MaxWidth="MaxWidth.Small" FullWidth="true" CloseOnEscapeKey="true" />
 <MudSnackbarProvider />
 
-@* The sidebar (236 px), then the sticky, translucent top bar over the page. Under 960 px the sidebar becomes a drawer. *@
+@*
+    The sidebar (236 px), then the sticky, translucent top bar over the page. Under 960 px the sidebar becomes a drawer.
+    Only for someone signed in: the anonymous pages that use this layout ("not found") show the page alone, never the
+    menu's apps, the host's name or its LAN address.
+*@
+<AuthorizeView>
+    <Authorized Context="signedIn">
 <div class="gb-shell">
     <aside class="gb-side" aria-label="Main menu">
         <NavMenu />
@@ -54,6 +60,14 @@
         <NavMenu />
     </aside>
 }
+    </Authorized>
+    <NotAuthorized>
+        <main class="gb-page gb-page--alone" id="gb-page">
+            <a href="login" class="gb-brand gb-brand--alone" aria-label="Gitberth, sign in"><Logo Size="28" /><span>Gitberth</span></a>
+            @Body
+        </main>
+    </NotAuthorized>
+</AuthorizeView>
 
 @code {
     private bool drawerOpen;

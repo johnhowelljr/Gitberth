@@ -94,10 +94,14 @@ internal sealed class AppsRig : IDisposable
         Journal = new DbChangeJournal(Db);
         Activity = new ActivityLog(Db, Store);
         Catalog = new AppCatalog(Db, Network, Book, Apps, Stats, Titles, Health, Restarts, Journal, Cli, Domains, Protector, Options, Activity,
-            new Lazy<UpdateService>(() => Updates ?? throw new InvalidOperationException("No update checks here.")), NullLogger<AppCatalog>.Instance)
+            new Lazy<UpdateService>(() => Updates ?? throw new InvalidOperationException("No update checks here.")), NullLogger<AppCatalog>.Instance,
+            databases: new Lazy<Gitberth.Databases.DatabaseService>(() => Databases!))
         {
             ReadSettings = ReadSettings,
         };
+        Databases = new Gitberth.Databases.DatabaseService(Db, Cli, Protector,
+            new Gitberth.Databases.DatabaseServers(Cli, Settings, Options, NullLogger<Gitberth.Databases.DatabaseServers>.Instance), Options,
+            NullLogger<Gitberth.Databases.DatabaseService>.Instance, catalog: Catalog);
         var hub = new LiveLogHub();
         var repoVariables = new RepoVariables(new GitHubApi(http), Settings);
         var pipeline = new DeployPipeline(Db, new GitClient(Options, Settings), Cli, new ProjectAnalyzer(), AppLocks, hub, Protector, Options, http, repoVariables,
@@ -143,6 +147,8 @@ internal sealed class AppsRig : IDisposable
     public DbChangeJournal Journal { get; }
     public ActivityLog Activity { get; }
     public AppCatalog Catalog { get; }
+    /// <summary>Apps' databases: the catalog lets go of them when it forgets an app.</summary>
+    public Gitberth.Databases.DatabaseService Databases { get; }
     public DeployPipeline Pipeline { get; }
     public AppActions Actions { get; }
     public ContainerService Containers { get; }

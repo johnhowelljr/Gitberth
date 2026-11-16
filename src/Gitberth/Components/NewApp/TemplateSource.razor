@@ -1,0 +1,462 @@
+@using Gitberth.Templates
+@implements IDisposable
+@inject TemplateCatalog Catalog
+@inject TemplateInstaller Installer
+@inject DatabaseServers Servers
+@inject DomainService Domains
+@inject AppService Apps
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@*
+    New app › Templates: the gallery (search, category chips, a card per template), and a template's page (what it is, its
+    links, what it needs, its inputs, an optional domain) whose Install makes it a Compose app with its databases and
+    secrets, then opens its first deploy. A template that needs Postgres where there's no server says so and offers to set
+    one up, the way Settings › Databases does.
+*@
+@if (template is null)
+{
+    <section class="gb-card gb-tpl-gallery" aria-labelledby="gb-tpl-title">
+        <div class="gb-tpl-head">
+            <div style="min-width:0">
+                <div class="gb-h3" id="gb-tpl-title">Templates</div>
+                <p class="gb-t3" style="margin:3px 0 0;font-size:12.5px">Popular self-hosted apps, ready to run: Gitberth sets up each one's database, secrets and domain, then deploys it.</p>
+            </div>
+            <label class="gb-tpl-search">
+                <SvgIcon Icon="@Icons.Material.Outlined.Search" />
+                <input type="search" class="gb-input" placeholder="@($"Search {Catalog.All.Count} templates")" aria-label="Search templates" value="@query"
+                       @oninput="e => query = e.Value?.ToString() ?? string.Empty" autocomplete="off" spellcheck="false" />
+            </label>
+        </div>
+        <div class="gb-tpl-chips" role="radiogroup" aria-label="Category">
+            @Chip(null, "All", Catalog.Search(query).Count)
+            @foreach (var c in Catalog.Categories)
+            {
+                @Chip(c, c, Catalog.Search(query, c).Count)
+            }
+        </div>
+        @if (Shown is { Count: > 0 } shown)
+        {
+            <div class="gb-tpl-grid">
+                @foreach (var t in shown)
+                {
+                    <a class="gb-tpl-card" href="@($"apps/new?template={Uri.EscapeDataString(t.Id)}")" @key="t.Id" aria-label="@($"{t.Name}: {t.Tagline}")">
+                        <img class="gb-tpl-icon" src="@TemplateEndpoints.IconPath(t.Id)" alt="" width="44" height="44" loading="lazy" />
+                        <span class="gb-tpl-card-body">
+                            <span class="gb-tpl-card-name">@t.Name</span>
+                            <span class="gb-tpl-card-tag">@t.Tagline</span>
+                            <span class="gb-tpl-card-foot">
+                                <span class="gb-tag gb-tag--outline">@t.Category</span>
+                                @foreach (var d in t.Databases.Select(d => d.Kind).Distinct())
+                                {
+                                    <span class="gb-tag"><SvgIcon Icon="@Icons.Material.Outlined.Storage" />@DatabaseService.KindText(d)</span>
+                                }
+                            </span>
+                        </span>
+                    </a>
+                }
+            </div>
+        }
+        else
+        {
+            <EmptyState Icon="@Icons.Material.Outlined.SearchOff" Title="No template matches" Small="true">
+                <ChildContent>Try another word, or All. Anything else can still run from a registry image or a Compose file.</ChildContent>
+            </EmptyState>
+        }
+    </section>
+}
+else
+{
+    var t = template;
+    <div class="gb-stack gb-tpl-page">
+        <a class="gb-tpl-back" href="apps/new?from=templates"><SvgIcon Icon="@Icons.Material.Outlined.ArrowBack" />All templates</a>
+        <section class="gb-card gb-tpl-hero" aria-labelledby="gb-tpl-name">
+            <img class="gb-tpl-icon gb-tpl-icon--lg" src="@TemplateEndpoints.IconPath(t.Id)" alt="" width="60" height="60" />
+            <div class="gb-tpl-hero-main">
+                <h2 class="gb-tpl-hero-name" id="gb-tpl-name">@t.Name</h2>
+                <p class="gb-tpl-hero-tag">@t.Tagline</p>
+                <div class="gb-row gb-row--wrap" style="gap:6px">
+                    <span class="gb-tag gb-tag--outline">@t.Category</span>
+                    <span class="gb-tag" title="Its license">@t.License</span>
+                </div>
+            </div>
+            <div class="gb-tpl-links">
+                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Public" Href="@t.Website" Target="_blank" rel="noopener noreferrer">Website</Btn>
+                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Code" Href="@t.Source" Target="_blank" rel="noopener noreferrer">Source</Btn>
+            </div>
+        </section>
+
+        <div class="gb-split">
+            <div class="gb-stack">
+                <section class="gb-card gb-sec" aria-labelledby="gb-tpl-about">
+                    <div class="gb-sec-head">
+                        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Info" /></span>
+                        <div style="min-width:0"><div class="gb-h3" id="gb-tpl-about">What it is</div></div>
+                    </div>
+                    <div class="gb-sec-body">
+                        <p class="gb-tpl-desc">@t.Description</p>
+                    </div>
+                </section>
+
+                <section class="gb-card gb-sec" aria-labelledby="gb-tpl-settings">
+                    <div class="gb-sec-head">
+                        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Tune" /></span>
+                        <div style="min-width:0">
+                            <div class="gb-h3" id="gb-tpl-settings">Settings</div>
+                            <p>Each becomes one of the app's variables: its Environment tab changes them later.</p>
+                        </div>
+                    </div>
+                    <div class="gb-sec-body">
+                        <div class="gb-fgrid">
+                            <Field Label="Name" For="gb-tpl-appname" Help="@NameHelp" Error="@(nameTyped ? AppService.NameProblem(name) : null)">
+                                <input id="gb-tpl-appname" class="gb-input" value="@name" autocomplete="off" @oninput="NameTypedAsync" />
+                            </Field>
+                            @if (domainsOn)
+                            {
+                                <Field Label="Domain" For="gb-tpl-domain" Tag="optional" Error="@plan?.DomainProblem" Help="@DomainHelp">
+                                    <input id="gb-tpl-domain" class="gb-input gb-input--mono" value="@domain" placeholder="app.example.com" autocomplete="off" spellcheck="false"
+                                           @oninput="DomainTypedAsync" />
+                                </Field>
+                            }
+                        </div>
+                        @if (t.Inputs.Count > 0)
+                        {
+                            <div class="gb-fgrid">
+                                @foreach (var input in t.Inputs)
+                                {
+                                    var id = $"gb-tpl-in-{input.Name}";
+                                    if (input.Kind == TemplateInputKind.Bool)
+                                    {
+                                        <SwitchRow Title="@input.Label" Sub="@input.Help" Value="@(values.GetValueOrDefault(input.Name) == "true")"
+                                                   ValueChanged="@((bool v) => SetInput(input, v ? "true" : "false"))" Class="gb-tpl-switch" />
+                                    }
+                                    else
+                                    {
+                                        <Field Label="@input.Label" For="@id" Tag="@(input.Required ? null : "optional")" Help="@input.Help"
+                                               Error="@(tried ? TemplateCatalog.InputProblem(input, (values.GetValueOrDefault(input.Name) ?? "").Trim()) : null)">
+                                            <input id="@id" class="gb-input @(input.Kind is TemplateInputKind.Url or TemplateInputKind.Number ? "gb-input--mono" : null)"
+                                                   type="@InputType(input.Kind)" value="@values.GetValueOrDefault(input.Name)" autocomplete="off" spellcheck="false"
+                                                   @oninput="e => SetInput(input, e.Value?.ToString() ?? string.Empty)" />
+                                        </Field>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+                </section>
+            </div>
+
+            <div class="gb-stack">
+                <section class="gb-card gb-sec" aria-labelledby="gb-tpl-needs">
+                    <div class="gb-sec-head">
+                        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.FactCheck" /></span>
+                        <div style="min-width:0"><div class="gb-h3" id="gb-tpl-needs">What it needs</div></div>
+                    </div>
+                    <div class="gb-sec-body">
+                        <dl class="gb-read gb-tpl-read">
+                            <dt>Database</dt>
+                            <dd>
+                                @if (t.Databases.Count == 0)
+                                {
+                                    <span class="gb-t3">None@(t.Services.Count > 1 ? ": it runs its own" : "")</span>
+                                }
+                                else
+                                {
+                                    <span class="gb-tpl-dbs">
+                                        @foreach (var d in t.Databases)
+                                        {
+                                            <span>
+                                                @(d.Kind == DatabaseKind.Redis ? "A Redis of its own" : plan?.Server is { } server ? $"Postgres, on {server}" : "Postgres")
+                                                <span class="gb-t3 gb-mono">@d.Variable</span>
+                                            </span>
+                                        }
+                                    </span>
+                                }
+                            </dd>
+                            <dt>Memory</dt>
+                            <dd>At least @t.MemoryText</dd>
+                            <dt>@(t.Images.Count == 1 ? "Image" : "Images")</dt>
+                            <dd><span class="gb-tpl-dbs">@foreach (var image in t.Images) { <span class="gb-mono gb-tpl-image">@image</span> }</span></dd>
+                            @if (t.Secrets.Count > 0)
+                            {
+                                <dt>Secrets</dt>
+                                <dd><span>@(t.Secrets.Count == 1 ? "1 made for it" : $"{t.Secrets.Count} made for it"): <span class="gb-mono gb-t3">@string.Join(", ", t.Secrets.Select(s => s.Name))</span></span></dd>
+                            }
+                            <dt>Address</dt>
+                            <dd><span class="gb-mono">@(plan?.Address.Url ?? "…")</span></dd>
+                        </dl>
+                        @if (plan is { NeedsServer: true })
+                        {
+                            <Banner Tone="warn" Icon="@Icons.Material.Outlined.Storage" Title="It needs a Postgres server" Class="gb-tpl-stack">
+                                <ChildContent>
+                                    There's none Gitberth can use yet. Gitberth can set one up for every app's databases: an app of its own from
+                                    @DatabaseServers.ServerImage, reached only by your apps, its password generated and kept secret.
+                                    @if (creation is { Completion.IsCompleted: false } running)
+                                    {
+                                        <span class="gb-ro-note" style="margin-top:8px"><SvgIcon Icon="@Icons.Material.Outlined.Autorenew" Size="sm" Class="gb-spin" />@CreatingText(running.Phase)</span>
+                                    }
+                                </ChildContent>
+                                <Actions>
+                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="CreateServer" Busy="@(creation is { Completion.IsCompleted: false })">Set up a Postgres server</Btn>
+                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Href="settings#databases">Settings › Databases</Btn>
+                                </Actions>
+                            </Banner>
+                        }
+                        else if (plan is { NeedsServerChoice: true })
+                        {
+                            <Banner Tone="warn" Icon="@Icons.Material.Outlined.Storage" Title="Choose its Postgres server" Class="gb-tpl-stack">
+                                <ChildContent>
+                                    Gitberth can use more than one Postgres server here, and none is chosen for new databases. Make one the default in
+                                    Settings › Databases, then come back: its database goes there.
+                                </ChildContent>
+                                <Actions>
+                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Storage" Href="settings#databases">Settings › Databases</Btn>
+                                </Actions>
+                            </Banner>
+                        }
+                        @foreach (var problem in Problems)
+                        {
+                            <Banner Tone="critical" Title="Not installed yet" Class="gb-tpl-stack">@problem</Banner>
+                        }
+                        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="InstallAsync" Busy="installing"
+                             Disabled="@(installing || plan is null || plan.NeedsServer || plan.NeedsServerChoice)" Class="gb-btn--block">Install @t.Name</Btn>
+                        <p class="gb-help" style="margin:0">
+                            Installs it as a Compose app called <span class="gb-mono">@(plan?.Slug ?? "…")</span>@(t.Databases.Count > 0 ? ", makes its database" + (t.Databases.Count > 1 ? "s" : "") : ""),
+                            then pulls and starts it. Afterwards it's an app like any other.
+                        </p>
+                    </div>
+                </section>
+                @if (t.Notes.Count > 0)
+                {
+                    <section class="gb-card gb-sec" aria-labelledby="gb-tpl-notes">
+                        <div class="gb-sec-head">
+                            <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Flag" /></span>
+                            <div style="min-width:0"><div class="gb-h3" id="gb-tpl-notes">Once it's running</div></div>
+                        </div>
+                        <div class="gb-sec-body">
+                            <ul class="gb-tpl-notes">
+                                @foreach (var note in t.Notes)
+                                {
+                                    <li>@note</li>
+                                }
+                            </ul>
+                        </div>
+                    </section>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>The template whose page is open (?template=&lt;id&gt;); null for the gallery.</summary>
+    [Parameter] public string? TemplateId { get; set; }
+
+    private string query = "";
+    private string? category;
+    private AppTemplate? template;
+    private string? shownFor;
+
+    private string name = "";
+    private bool nameTyped, tried, installing, domainsOn, disposed;
+    private string domain = "";
+    private readonly Dictionary<string, string> values = new(StringComparer.Ordinal);
+    private TemplatePlan? plan;
+    private string? error;
+    private string lanHost = "";
+    private int planVersion;
+    private CancellationTokenSource? typing;
+    private ServerCreation? creation;
+    private Timer? timer;
+
+    private IReadOnlyList<AppTemplate> Shown => Catalog.Search(query, category);
+
+    private RenderFragment Chip(string? value, string text, int count) => @<button type="button" class="gb-tpl-chip @(category == value ? "on" : null)" role="radio"
+        aria-checked="@(category == value ? "true" : "false")" @onclick="() => category = value">@text<span class="gb-tpl-chip-n">@count</span></button>;
+
+    private string? NameHelp => plan is null ? null : $"Its containers are gb-{plan.Slug}_{template?.Web.Service} and the like.";
+
+    // What stops the install, besides what its fields say themselves (an input, the domain) and the missing or unchosen
+    // server (their own banners): the plan's other problems, and the last try's.
+    private List<string> Problems =>
+    [
+        .. plan?.Problems.Where(p => p is not (TemplateInstaller.NoServer or TemplateInstaller.ChooseServer) && p != plan.DomainProblem && !IsInputProblem(p)) ?? [],
+        .. error is null ? Array.Empty<string>() : [error],
+    ];
+
+    // Under the Domain field: what a domain does, and for a template that anyone could take over until it's set up, that it
+    // waits behind Cloudflare Access until then.
+    private string DomainHelp => template is { OpenUntilSetup: true }
+        ? "Until you've signed in and set it up, whoever opens it first can claim it. So its domain goes behind Cloudflare Access (only the people in Settings › Domains › Protection get in) until you turn that off on its Network tab."
+        : "Through Cloudflare and your tunnel. Leave it empty to reach it on the LAN only; add one later on its Network tab.";
+
+    // An input's own problem shows under its field once Install was tried.
+    private bool IsInputProblem(string problem) => template?.Inputs.Any(i => problem.StartsWith(i.Label + " ", StringComparison.Ordinal)) == true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (shownFor == TemplateId && (template is not null || TemplateId is null)) return;
+        shownFor = TemplateId;
+        template = Catalog.Find(TemplateId);
+        if (TemplateId is not null && template is null) Snackbar.Add($"There's no template {TemplateId}.", Severity.Warning);
+        (name, nameTyped, tried, error, domain, plan) = ("", false, false, null, "", null);
+        values.Clear();
+        if (template is null) return;
+        // The template's own name until the plan says which is free ("Uptime Kuma 2").
+        name = template.Name;
+        foreach (var input in template.Inputs) values[input.Name] = input.Default ?? (input.Kind == TemplateInputKind.Bool ? "false" : "");
+        lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));
+        try
+        {
+            domainsOn = await Domains.EnabledAsync();
+        }
+        catch (Exception)
+        {
+            domainsOn = false;
+        }
+        creation = Servers.Creation;
+        if (creation is { Completion.IsCompleted: false }) Follow();
+        await PlanAsync();
+    }
+
+    private async Task PlanAsync()
+    {
+        if (template is null) return;
+        var mine = ++planVersion;
+        try
+        {
+            var planned = await Installer.PlanAsync(Request(), lanHost);
+            if (mine != planVersion || disposed) return;
+            plan = planned;
+            if (!nameTyped) name = planned.Name;
+        }
+        catch (Exception ex)
+        {
+            if (mine == planVersion) error = $"Gitberth couldn't plan it: {ex.Message}";
+        }
+    }
+
+    private TemplateRequest Request() => new(template!.Id, nameTyped ? name : null, new Dictionary<string, string>(values), domainsOn ? domain : null);
+
+    private async Task NameTypedAsync(ChangeEventArgs e)
+    {
+        (name, nameTyped) = (e.Value?.ToString() ?? "", true);
+        await PlanSoonAsync();
+    }
+
+    private async Task DomainTypedAsync(ChangeEventArgs e)
+    {
+        domain = e.Value?.ToString() ?? "";
+        await PlanSoonAsync();
+    }
+
+    private async Task SetInput(TemplateInput input, string value)
+    {
+        values[input.Name] = value;
+        await PlanSoonAsync();
+    }
+
+    // The plan again once typing pauses: the name's slug, the domain's address and the inputs' problems follow it.
+    private async Task PlanSoonAsync()
+    {
+        error = null;
+        typing?.Cancel();
+        var mine = typing = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(350, mine.Token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        await PlanAsync();
+    }
+
+    private static string InputType(TemplateInputKind kind) => kind switch
+    {
+        TemplateInputKind.Email => "email",
+        TemplateInputKind.Url => "url",
+        TemplateInputKind.Number => "number",
+        _ => "text",
+    };
+
+    private async Task InstallAsync()
+    {
+        if (template is null || installing) return;
+        (tried, nameTyped, error) = (true, nameTyped || name != plan?.Name, null);
+        typing?.Cancel();
+        installing = true;
+        try
+        {
+            await PlanAsync();
+            if (plan is not { CanInstall: true }) return;
+            var installed = await Installer.InstallAsync(Request(), lanHost);
+            if (!installed.Ok)
+            {
+                error = installed.Message;
+                return;
+            }
+            if (installed.Message.Contains("wasn't added", StringComparison.Ordinal)) Snackbar.Add(installed.Message, Severity.Warning);
+            else if (installed.Message.Contains("Cloudflare Access", StringComparison.Ordinal)) Snackbar.Add(installed.Message, Severity.Info);
+            Nav.NavigateTo($"apps/{installed.AppId}/deployments/{installed.DeploymentId}");
+        }
+        catch (Exception ex)
+        {
+            error = $"It wasn't installed: {ex.Message}";
+        }
+        finally
+        {
+            installing = false;
+        }
+    }
+
+    // ---- A Postgres server, for a template that needs one ----
+
+    private static string CreatingText(string phase) => phase switch
+    {
+        "Pulling" => $"Pulling {DatabaseServers.ServerImage}…",
+        "Creating" or "Starting" => "Creating the server…",
+        "Checking" => "Checking that it stays up…",
+        _ => "Setting up the server…",
+    };
+
+    private void CreateServer()
+    {
+        try
+        {
+            creation = Servers.Create();
+            Follow();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    // While the server is set up: its phase every second, then the plan again (it's the default once it's made).
+    private void Follow()
+    {
+        timer?.Dispose();
+        timer = new Timer(_ => InvokeAsync(async () =>
+        {
+            if (creation is not { } c || disposed) return;
+            if (c.Completion.IsCompleted)
+            {
+                timer?.Dispose();
+                timer = null;
+                var result = await c.Completion;
+                Snackbar.Add(result.Ok ? $"The Postgres server {result.Key} is ready: new databases go on it." : result.Message, result.Ok ? Severity.Success : Severity.Error);
+                await PlanAsync();
+            }
+            StateHasChanged();
+        }), null, 1000, 1000);
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        typing?.Cancel();
+        timer?.Dispose();
+    }
+}

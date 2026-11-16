@@ -14,8 +14,8 @@ Zone, plus both Access groups).
   default; removing the preview takes its rule, record and Access application.
 - With Zero Trust gone, the protected domain is never served open: while Gitberth still remembers the team (10 minutes)
   a sync keeps it behind Access; once Settings has asked Cloudflare afresh (and says Zero Trust isn't set up) the next
-  sync holds it out of the tunnel, and its line says why. Once Zero Trust is back, the next sync serves it behind Access
-  again.
+  sync holds it back: its only rule shows Gitberth's down page (a 503 that names nothing but the host), never the app,
+  and its line says why. Once Zero Trust is back, the next sync serves it behind Access again.
 - Stop protecting removes the Access application and the check, and anyone reaches the app again.
 """
 import contextlib
@@ -131,6 +131,11 @@ def visit(cloudflare, url, who=None):
     return until(lambda: (lambda r: r if r.get("status") else None)(cloudflare.visit(url, signed_in_as=who)), 30, f"a visit to {url}")
 
 
+def down_page_header(result):
+    """Which of Gitberth's public pages answered (X-Gitberth-Page: "down" for the down page), or None."""
+    return next((v for k, v in (result.get("headers") or {}).items() if k.lower() == "x-gitberth-page"), None)
+
+
 # ---- the world, step by step ----
 
 @pytest.fixture(scope="module")
@@ -217,7 +222,10 @@ def zero_trust_gone(preview_domain, gitberth, cloudflare):
     w.gone_deploy = wait_deployment(gitberth, set_variables(gitberth, w.page, w.app, [{"name": "E2E_SYNC_2", "value": "still gone"}]))
     cloudflare.wait_runs()
     w.held_rule = service_rule(cloudflare, w.host)
+    w.held_rules = cloudflare.rules_for(w.host)
     w.held_visit = cloudflare.visit(w.url)
+    # Someone allowed in gets past Cloudflare's own check (its application is still there): the down page, not the app.
+    w.held_allowed = visit(cloudflare, w.url, ALLOWED)
     gitberth.open(w.page, f"/apps/{w.app.key}/network")
     row = card(w.page).locator(".gb-drow", has_text=w.host).first
     w.held_line = until(lambda: (lambda t: t if "Cloudflare Access" in t else None)(flat(row.inner_text())), 60, "the domain's line to say why",
@@ -327,10 +335,17 @@ class TestFailClosed:
         assert "Not set up" in w.gone_head, w.gone_head
         assert "Cloudflare Zero Trust isn't set up for this account yet." in w.gone_text, w.gone_text
 
-    def test_without_zero_trust_the_protected_domain_is_held_out_never_served_open(self, zero_trust_gone):
+    def test_without_zero_trust_the_protected_domain_shows_only_the_down_page_never_served_open(self, zero_trust_gone):
         w = zero_trust_gone
-        assert w.held_rule is None, w.held_rule
+        # Its only rule goes to Gitberth's down page (the domain's marker host), without an Access check to apply.
+        assert w.held_rule is not None and w.held_rule["service"] == "http://localhost:8080", w.held_rule
+        assert (w.held_rule.get("originRequest") or {}).get("httpHostHeader", "").endswith(".down.gitberth.invalid"), w.held_rule
+        assert not (w.held_rule.get("originRequest") or {}).get("access"), w.held_rule
+        assert all((r.get("originRequest") or {}).get("httpHostHeader") for r in w.held_rules), w.held_rules
         assert w.held_visit["status"] != 200, w.held_visit
+        allowed = w.held_allowed
+        assert allowed["status"] == 503 and down_page_header(allowed) == "down", allowed
+        assert "gbe2e-testapp" not in (allowed["body"] or "") and w.host in (allowed["body"] or ""), allowed
         assert "Cloudflare Access" in w.held_line, w.held_line
 
     def test_once_zero_trust_is_back_the_next_sync_serves_it_behind_access(self, zero_trust_gone):

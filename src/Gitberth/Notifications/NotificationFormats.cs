@@ -82,6 +82,7 @@ public static class NotificationFormats
             ["commit"] = n.Commit,
             ["trigger"] = n.Trigger,
             ["hook"] = n.Hook,
+            ["address"] = n.Address,
             ["time"] = n.At.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
         };
         var headers = new List<KeyValuePair<string, string>> { new("X-Gitberth-Event", EventName(n.Event)) };
@@ -99,7 +100,7 @@ public static class NotificationFormats
         return new MailNotice($"[Gitberth] {OneLine(n.Title)}", body.ToString());
     }
 
-    /// <summary>The event as a webhook names it: deploy.failed, container.crashed, …</summary>
+    /// <summary>The event as a webhook names it: deploy.failed, container.crashed, uptime.down, …</summary>
     public static string EventName(NotifyEvent e) => e switch
     {
         NotifyEvent.DeployFailed => "deploy.failed",
@@ -107,6 +108,9 @@ public static class NotificationFormats
         NotifyEvent.Crashed => "container.crashed",
         NotifyEvent.Unhealthy => "container.unhealthy",
         NotifyEvent.Healthy => "container.healthy",
+        NotifyEvent.Down => "uptime.down",
+        NotifyEvent.BackUp => "uptime.up",
+        NotifyEvent.CertificateExpiring => "certificate.expiring",
         _ => "test",
     };
 

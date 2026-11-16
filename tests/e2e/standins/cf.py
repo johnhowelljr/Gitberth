@@ -462,6 +462,13 @@ class Cloudflare:
 
     # ---- the edge: what a request to a host name meets on its way ----
 
+    def zone_for(self, host):
+        """The active zone the host name is in (the most specific one), as a dict, or None: whose certificate it gets."""
+        host = (host or "").lower().rstrip(".")
+        with self.lock:
+            found = [dict(z) for z in self.zones.values() if z["status"] == "active" and (host == z["name"] or host.endswith("." + z["name"]))]
+        return max(found, key=lambda z: len(z["name"])) if found else None
+
     def resolve(self, host):
         """Where public DNS sends host, as far as the rig knows: its record in one of the stand-in's active zones, followed
         through CNAMEs to other names in them. It reaches the tunnel when the first record is proxied and the chain ends at
@@ -556,7 +563,7 @@ class Cloudflare:
                   "iss": f"https://{self.team or 'unknown'}.cloudflareaccess.com", "type": "app", "sub": str(uuid.uuid4())}
         return ".".join([b64url(json.dumps(header).encode()), b64url(json.dumps(claims).encode()), b64url(b"gbe2e-not-a-signature")])
 
-    def edge(self, url, method="GET", headers=None, body=b"", client_ip="203.0.113.10", signed_in_as=None, verify_tls=True, timeout=None):
+    def edge(self, url, method="GET", headers=None, body=b"", client_ip="203.0.113.10", signed_in_as=None, verify_tls=True, timeout=None, keep_raw=False):
         """A request to url, as Cloudflare's edge and the tunnel handle it. Returns {"status", "headers", "body", "error",
         "route"}: status is None when it never got an answer (error says why), and route says what it met (DNS, Access,
         the connector, and the rule and service cloudflared used). Over https, Cloudflare's free certificate covers the
@@ -565,7 +572,9 @@ class Cloudflare:
 
         timeout: how long the client waits for its answer, all told (GitHub gives a delivery 10 seconds). When that
         passes the client has hung up: no status, and the error "timed out". Without one, the connector's answer may
-        take up to 45 seconds."""
+        take up to 45 seconds.
+
+        keep_raw: also keep the answer's whole body, as bytes (raw), for the stand-in's own HTTPS side to pass on."""
         deadline = None if timeout is None else time.monotonic() + timeout
 
         def left(longest):
@@ -657,6 +666,8 @@ class Cloudflare:
         route["cloudflared"] = debug
         out.update(status=resp.status, body=data[:4000].decode("utf-8", "replace"),
                    headers={k: v for k, v in resp.getheaders() if not k.lower().startswith("x-e2e-")})
+        if keep_raw:
+            out["raw"] = data
         return out
 
     # ---- reading back ----

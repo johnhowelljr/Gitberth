@@ -9,7 +9,7 @@
 - A deploy cancelled while it builds (not the commit's fault) ends as an error, linking to its log.
 - A restart (the app page's, and one on a schedule), a settings change and a rollback post none: the scheduled
   restart, the settings change and the rollback are deploys without a build. (The scheduled one waits about 6
-  minutes: its shortest schedule is 5.)
+  minutes: its shortest schedule is 5. About 2 with the rig's test timings.)
 - Turning commit statuses off in Settings › GitHub stops them; turned on again, the next deploy reports.
 - A branch's preview reports under "Gitberth preview: <parent>", linking to its own address, and gets no comment (it
   has no pull request).
@@ -26,6 +26,7 @@ import pytest
 from e2e.github_reports import (COMMENTS, STATUSES, comment_writes, context, leaks, set_github_switch, set_variables,
                                 status_writes, statuses, wait_deployment, wait_status)
 from e2e.wait import stays, until
+from e2e.audit import last_id, no_network_change_outside
 
 # A build that prints the app's secret on its way to failing. The repo's own Dockerfile is used as it is, and declares
 # the build-time variable, so docker build hands it over.
@@ -253,6 +254,7 @@ def test_a_cancelled_deploy_ends_its_status_as_an_error(page, gitberth, github, 
 
 
 def test_recreates_restarts_and_settings_changes_post_no_status(page, gitberth, github, engine, standins, apps, uniq):
+    audited = last_id()
     repo = github.create_repo(uniq("rc"), files={"marker.txt": "recreate v1"})
     first = repo.branch_sha("main")
     app = apps.track(gitberth.create_git_app(page, repo.url))
@@ -300,11 +302,18 @@ def test_recreates_restarts_and_settings_changes_post_no_status(page, gitberth, 
     stays(lambda: status_writes(repo, mark) == [], 5, "no commit status after a restart, a settings change and a rollback")
     assert {sha: statuses(repo, sha) for sha in (first, second)} == before
 
+    # The audit log: Gitberth's deploys, its Restart, the rollback and the app's deletion joined and left the app's networks,
+    # and none of that is a change made outside Gitberth (rig a once recorded the Restart's join so).
+    gitberth.delete_app(page, app)
+    engine.wait_gone(app.container)
+    no_network_change_outside(app.container, audited)
+
 
 @pytest.mark.slow
 def test_a_scheduled_restart_posts_no_status(page, gitberth, github, standins, apps, uniq):
     """A restart on a schedule recreates the app through a deploy without a build (trigger Restart). The shortest schedule
-    is every 5 minutes, counted from when the container last started, so this waits about 6 minutes."""
+    is every 5 minutes, counted from when the container last started, so this waits about 6 minutes; about 2 with the
+    rig's test timings (a schedule's minute lasts 20 s there, and the schedules are looked at every 2 s)."""
     repo = github.create_repo(uniq("sr"), files={"marker.txt": "scheduled v1"})
     sha = repo.branch_sha("main")
     app = apps.track(gitberth.create_git_app(page, repo.url))

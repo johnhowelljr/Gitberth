@@ -1,0 +1,251 @@
+@using Gitberth.Agents
+@inject ApiTokens Tokens
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@*
+    Settings › AI agents and API: the tokens AI agents (over MCP, at /mcp) and scripts (the HTTP API, /api/v1) use instead of
+    signing in. The list says each one's name, access, first characters, when it was made and last used (and from where), and
+    when it expires; Revoke ends one at once. A new token is shown once, with Copy and the setup for each client.
+*@
+<section class="gb-card gb-sec" id="agents" aria-labelledby="agents-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.SmartToy" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3" id="agents-t">AI agents and API</div>
+            <p>
+                Let AI agents (Claude Code, VS Code, Cursor, Claude Desktop, any MCP client) and scripts see and run your apps with a token of their own:
+                list them, read logs, deploy, restart, roll back, change settings. Everything a token does is in the audit log under its name.
+            </p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        @if (created is { Token: { } made, Secret: { } secret })
+        {
+            <Banner Tone="good" Title="@($"Token {made.Name} is ready: copy it now")" OnDismiss="Dismiss">
+                It isn't shown again: Gitberth keeps only a hash of it. If it's lost, revoke it and make another.
+            </Banner>
+            <div class="gb-agent-token">
+                <CopyText Text="@secret" Label="@($"the token {made.Name}")" />
+            </div>
+            <div class="gb-agent-setup">
+                <Seg T="string" Options="ClientOptions" Value="client" ValueChanged="v => client = v" Label="Set it up in" Class="gb-agent-clients" />
+                @if (Setup.FirstOrDefault(s => s.Id == client) is { } setup)
+                {
+                    <p class="gb-help" style="margin:0"><strong>@setup.Where</strong></p>
+                    <CodeBlock Title="@setup.Label" Icon="@Icons.Material.Outlined.Terminal" Code="@setup.Code" />
+                    @if (setup.Note is { } note)
+                    {
+                        <p class="gb-help" style="margin:0">@note</p>
+                    }
+                }
+            </div>
+        }
+
+        @if (tokens is null)
+        {
+            <div class="gb-skel" style="height:64px"></div>
+        }
+        else if (tokens.Count == 0)
+        {
+            <EmptyState Small="true" Icon="@Icons.Material.Outlined.SmartToy" Title="No tokens yet">
+                Make one for each agent or script, so the audit log tells them apart and you can revoke one on its own.
+            </EmptyState>
+        }
+        else
+        {
+            <div class="gb-envtbl" role="list" aria-label="API tokens">
+                @foreach (var t in tokens)
+                {
+                    var now = DateTime.UtcNow;
+                    <div class="gb-db gb-token @(t.ActiveAt(now) ? null : "gb-token--off")" role="listitem" @key="t.Id">
+                        <div class="gb-db-head">
+                            <strong>@t.Name</strong>
+                            <span class="gb-tag @AccessTone(t.Access)" title="@ApiTokens.AccessHelp(t.Access)">@ApiTokens.AccessText(t.Access)</span>
+                            @if (t.RevokedAt is not null)
+                            {
+                                <span class="gb-tag gb-tag--critical">Revoked</span>
+                            }
+                            else if (t.ExpiredAt(now))
+                            {
+                                <span class="gb-tag gb-tag--warn">Expired</span>
+                            }
+                            <span class="gb-mono gb-t3">@t.Shown</span>
+                            <span class="gb-db-actions">
+                                @if (t.RevokedAt is null)
+                                {
+                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Block" OnClick="() => RevokeAsync(t)" Disabled="busy"
+                                         Label="@($"Revoke the token {t.Name}")">Revoke</Btn>
+                                }
+                            </span>
+                        </div>
+                        <dl class="gb-kv gb-token-facts">
+                            <dt>Created</dt>
+                            <dd title="@Format.Local(t.CreatedAt)">@Format.Ago(t.CreatedAt)</dd>
+                            <dt>Last used</dt>
+                            <dd>
+                                @if (t.LastUsedAt is { } used)
+                                {
+                                    <span title="@Format.Local(used)">@Format.Ago(used)</span>
+                                    @if (t.LastUsedIp is { } ip)
+                                    {
+                                        <span class="gb-t3">from <span class="gb-mono">@ip</span></span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="gb-t3">Never</span>
+                                }
+                            </dd>
+                            <dt>@(t.ExpiredAt(now) ? "Expired" : "Expires")</dt>
+                            <dd>@(t.ExpiresAt is { } at ? at.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture) : "Never")</dd>
+                            @if (t.RevokedAt is { } revoked)
+                            {
+                                <dt>Revoked</dt>
+                                <dd title="@Format.Local(revoked)">@Format.Ago(revoked)</dd>
+                            }
+                        </dl>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="gb-agent-new">
+            <div class="gb-agent-new-title">Create a token</div>
+            <div class="gb-fgrid">
+                <Field Label="Name" For="token-name" Error="@problem" Help="What will use it, like Claude Code or Nightly report. The audit log names it.">
+                    <input id="token-name" class="gb-input" maxlength="@ApiTokens.MaxName" placeholder="Claude Code" value="@name" autocomplete="off"
+                           @oninput="e => { name = e.Value?.ToString() ?? string.Empty; problem = null; }" />
+                </Field>
+                <Field Label="Expires" Help="A token that expires stops working by itself.">
+                    <Seg T="int" Options="ExpiryOptions" Value="expiry" ValueChanged="v => expiry = v" Label="Expires" />
+                </Field>
+            </div>
+            <Field Label="Access" Help="@ApiTokens.AccessHelp(access)">
+                <Seg T="ApiAccess" Options="AccessOptions" Value="access" ValueChanged="v => access = v" Label="Access" />
+            </Field>
+            <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="CreateAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(name)">Create token</Btn>
+            </div>
+        </div>
+
+        <dl class="gb-kv">
+            <dt>MCP server</dt>
+            <dd><CopyText Text="@AgentSetup.McpUrl(Root)" Label="the MCP server's address" /></dd>
+            <dt>HTTP API</dt>
+            <dd><CopyText Text="@AgentSetup.ApiUrl(Root)" Label="the HTTP API's address" /><span class="gb-t3">OpenAPI at /api/v1/openapi.json</span></dd>
+        </dl>
+        <p class="gb-help" style="margin:0">
+            A token is a password. An Admin one is full control of this host, like signing in: it can create apps whose containers reach the whole
+            host, so treat it like the admin password. No tool manages tokens, changes the admin password or stops the audit log recording changes
+            made outside Gitberth, but that's a promise about the tools: only for Read and Operate tokens is it the whole story. Tokens work on
+            your network, never through the tunnel, and requests from a browser page are refused. Stopping, deleting or rolling back an app, and
+            turning its previews off, ask the agent to repeat the app's name.
+        </p>
+    </div>
+</section>
+
+@code {
+    private IReadOnlyList<TokenView>? tokens;
+    private TokenCreated? created;
+    private string name = "";
+    private string? problem;
+    private ApiAccess access = ApiAccess.Read;
+    private int expiry = 90;
+    private string client = "claude-code";
+    private bool busy;
+
+    // Gitberth's address as this browser reaches it: what agents on the network use too.
+    private string Root => Nav.BaseUri;
+
+    private IReadOnlyList<AgentClientSetup> Setup => created?.Secret is { } secret ? AgentSetup.For(Root, secret) : [];
+
+    private IReadOnlyList<SegOption<string>> ClientOptions => Setup.Select(s => new SegOption<string>(s.Id, s.Label)).ToList();
+
+    private static readonly IReadOnlyList<SegOption<ApiAccess>> AccessOptions =
+    [
+        new(ApiAccess.Read, "Read", Icons.Material.Outlined.Visibility),
+        new(ApiAccess.Operate, "Operate", Icons.Material.Outlined.PlayCircleOutline),
+        new(ApiAccess.Admin, "Admin", Icons.Material.Outlined.AdminPanelSettings),
+    ];
+
+    private static readonly IReadOnlyList<SegOption<int>> ExpiryOptions =
+    [
+        new(30, "30 days"), new(90, "90 days"), new(365, "1 year"), new(0, "Never"),
+    ];
+
+    private static string AccessTone(ApiAccess a) => a switch
+    {
+        ApiAccess.Admin => "gb-tag--serious",
+        ApiAccess.Operate => "gb-tag--accent",
+        _ => "gb-tag--outline",
+    };
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            tokens = await Tokens.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            tokens = [];
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        busy = true;
+        try
+        {
+            var made = await Tokens.CreateAsync(name, access, expiry == 0 ? null : expiry);
+            if (made.Problem is { } why)
+            {
+                problem = why;
+                return;
+            }
+            created = made;
+            client = "claude-code";
+            name = "";
+            await LoadAsync();
+            Snackbar.Add($"Token {made.Token!.Name} is ready. Copy it now: it isn't shown again.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Dismiss() => created = null;
+
+    private async Task RevokeAsync(TokenView token)
+    {
+        if (await Dialogs.ShowMessageBoxAsync($"Revoke the token {token.Name}?",
+                "Every agent or script using it is refused from now on. This can't be undone: make another token to let it back in.",
+                yesText: "Revoke", cancelText: "Cancel") != true) return;
+        busy = true;
+        try
+        {
+            if (await Tokens.RevokeAsync(token.Id))
+                Snackbar.Add($"Token {token.Name} is revoked.", Severity.Success);
+            if (created?.Token?.Id == token.Id) created = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

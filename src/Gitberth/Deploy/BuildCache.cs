@@ -11,13 +11,25 @@ public sealed record BuildCacheCleared(bool Ok, string Message, long Freed = 0);
 /// Docker's build cache, for Settings › Deploys: how big it is, and clearing it. Clearing is refused while a build runs,
 /// and a build that gets to its turn meanwhile waits for it, so no build ever loses its cache halfway through.
 /// </summary>
-public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<BuildCache> logger)
+public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<BuildCache> logger, Audit.AuditLog? audit = null)
 {
     /// <summary>The cache's size as Docker adds it up.</summary>
     public Task<BuildCacheUsage> UsageAsync(CancellationToken ct = default) => api.BuildCacheAsync(ct);
 
     /// <summary>Every record of the build cache goes: the next build of every app runs each step again.</summary>
     public async Task<BuildCacheCleared> ClearAsync(CancellationToken ct = default)
+    {
+        var cleared = await ClearCoreAsync(ct);
+        audit?.Record(new Audit.AuditEntry("settings.buildcache.cleared", cleared.Ok ? cleared.Message : $"Didn't clear Docker's build cache: {cleared.Message}")
+        {
+            Outcome = cleared.Ok ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+            Target = "build cache",
+            Changes = cleared.Ok ? [new("Freed", null, Format.Memory(cleared.Freed))] : null,
+        });
+        return cleared;
+    }
+
+    private async Task<BuildCacheCleared> ClearCoreAsync(CancellationToken ct)
     {
         using var hold = pipeline.TryHoldBuilds();
         if (hold is null) return new BuildCacheCleared(false, "A build is running, so the cache wasn't cleared. Clear it once the build is done.");

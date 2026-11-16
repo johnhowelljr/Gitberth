@@ -1,0 +1,87 @@
+id: paperless-ngx
+name: Paperless-ngx
+tagline: Scan your paper, and find any document again in seconds.
+description: >-
+  Paperless-ngx turns scans and PDFs into a searchable archive: it reads their text, then tags them, sorts them by
+  correspondent and type, and learns as you go. Mail, a watched folder or the browser bring documents in. It keeps its
+  data in Postgres and its queue in Redis.
+category: Documents
+website: https://docs.paperless-ngx.com
+source: https://github.com/paperless-ngx/paperless-ngx
+license: GPL-3.0
+icon: paperless-ngx.svg
+icon_source: monogram
+memory: 1024
+web:
+  service: paperless
+  port: 8000
+  health: /
+inputs:
+  - name: ADMIN_USER
+    label: Admin's user name
+    default: admin
+    required: true
+    kind: text
+  - name: TZ
+    label: Time zone
+    help: Like Europe/Berlin or America/New_York.
+    default: UTC
+    kind: text
+  - name: OCR_LANGUAGE
+    label: Language of your documents
+    help: Tesseract's code for it, several as eng+deu. It comes with eng, deu, fra, ita and spa; for any other, list it under Other languages too.
+    default: eng
+    required: true
+    kind: text
+  - name: OCR_LANGUAGES
+    label: Other languages to install
+    help: Only for a language other than eng, deu, fra, ita or spa. Its Tesseract code, several separated by spaces, like por nld.
+    kind: text
+secrets:
+  - name: PAPERLESS_SECRET_KEY
+    length: 50
+  - name: ADMIN_PASSWORD
+    length: 20
+databases:
+  - kind: postgres
+    variable: DATABASE_URL
+  - kind: redis
+    variable: REDIS_URL
+notes:
+  - Sign in as ADMIN_USER with the password in ADMIN_PASSWORD. Both are on its Environment tab, where Show reveals the password.
+  - Its first start sets up the database, which takes a minute or two.
+compose: |
+  services:
+    paperless:
+      image: ghcr.io/paperless-ngx/paperless-ngx:3.4.2
+      environment:
+        PAPERLESS_REDIS: ${REDIS_URL}
+        PAPERLESS_DBENGINE: postgresql
+        PAPERLESS_DBHOST: ${DATABASE_URL_HOST}
+        PAPERLESS_DBPORT: ${DATABASE_URL_PORT}
+        PAPERLESS_DBNAME: ${DATABASE_URL_NAME}
+        PAPERLESS_DBUSER: ${DATABASE_URL_USER}
+        PAPERLESS_DBPASS: ${DATABASE_URL_PASSWORD}
+        PAPERLESS_SECRET_KEY: ${PAPERLESS_SECRET_KEY}
+        PAPERLESS_URL: ${APP_URL}
+        PAPERLESS_ADMIN_USER: ${ADMIN_USER}
+        PAPERLESS_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+        PAPERLESS_TIME_ZONE: ${TZ}
+        PAPERLESS_OCR_LANGUAGE: ${OCR_LANGUAGE}
+        PAPERLESS_OCR_LANGUAGES: ${OCR_LANGUAGES:-}
+      volumes:
+        - data:/usr/src/paperless/data
+        - media:/usr/src/paperless/media
+        - export:/usr/src/paperless/export
+        - consume:/usr/src/paperless/consume
+      healthcheck:
+        test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "5", "http://localhost:8000"]
+        interval: 10s
+        timeout: 10s
+        retries: 6
+        start_period: 5m
+  volumes:
+    data:
+    media:
+    export:
+    consume:

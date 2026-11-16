@@ -54,7 +54,7 @@ the row for its menu:
 ![An Apps row's menu, open, with Open its page, Restart, Stop, Logs, Settings and Network](../images/apps-row-menu.webp)
 
 **Paste docker run**, at the top of the page, starts a new app from a command. See
-[Paste a docker run command or a Compose service](paste-docker-run-or-compose.md).
+[Paste a docker run command or a Compose file](paste-docker-run-or-compose.md).
 
 ## The app page
 

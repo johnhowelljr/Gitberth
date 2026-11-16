@@ -106,7 +106,12 @@ public sealed partial class DomainService
                 if (emails.Count == 0 && await db.Domains.AnyAsync(d => d.Protected, ct))
                     return ("Some domains are protected, so somebody has to be allowed in. Turn protection off on those domains first.", SyncReport.Nothing);
             }
+            var before = ParseEmails(await settings.GetAsync(SettingKeys.ProtectionEmails, ct)).Emails;
             await settings.SetAsync(SettingKeys.ProtectionEmails, emails.Count == 0 ? null : string.Join('\n', emails), ct);
+            if (!before.SequenceEqual(emails, StringComparer.OrdinalIgnoreCase))
+                AuditSetting("domains.protection.changed", emails.Count == 0 ? "Nobody may sign in to protected domains any more."
+                        : $"Changed who may sign in to protected domains: {(emails.Count == 1 ? "1 email address" : $"{emails.Count} email addresses")}.",
+                    "protection", [new("Who may sign in", before.Count == 0 ? "nobody" : string.Join(", ", before), emails.Count == 0 ? "nobody" : string.Join(", ", emails))]);
             return (null, await EnabledAsync(ct) && await TokenSavedAsync(ct) ? await SyncCoreAsync(widen: null, ct) : SyncReport.Nothing);
         }
         finally
@@ -138,6 +143,9 @@ public sealed partial class DomainService
                 row.Protected = on;
                 await db.SaveChangesAsync(ct);
             }
+            await AuditAppAsync(appId, on ? "app.domain.protected" : "app.domain.unprotected", hostname,
+                name => on ? $"Protected {hostname} ({name}): visitors sign in through Cloudflare Access first." : $"Took the protection off {hostname} ({name}): anyone can visit it again.",
+                changes: [new("Protected", on ? "no" : "yes", on ? "yes" : "no")]);
             var report = await SyncCoreAsync(widen: null, ct);
             // The tunnel wasn't reached: the retry every 15 minutes tries again, once there's a token to try with.
             var again = report.Exposed is null && await TokenSavedAsync(ct) ? $" Gitberth tries again every {RemovalRetry.Every.TotalMinutes:0} minutes." : "";
@@ -281,9 +289,15 @@ public sealed partial class DomainService
     /// checks Gitberth put on hosts that aren't protected any more come off, from what it remembers
     /// (<paramref name="checks"/>). Asks Cloudflare nothing when no domain is or was protected.
     /// </summary>
+    /// <param name="routed">
+    /// Where this sync sends each domain, by host name: its app's service, Gitberth's own (its down page), or where its app
+    /// will be once it runs (one taken off the down page while the app is stopped). A protected domain's Access check goes on
+    /// its rules there, so it follows the rule wherever it goes.
+    /// </param>
+    /// <param name="heldShowsDownPage">Whether a domain of the app that's held back shows its down page (rather than nothing), for what's said about it.</param>
     private async Task<AccessPlan> PlanAccessAsync(string token, TunnelInfo tunnel, List<AppDefinition> apps, List<DomainRemoval> removals,
         IReadOnlyDictionary<int, string> services, IReadOnlyDictionary<string, HashSet<string>> checks, Dictionary<string, string> leftovers,
-        List<DomainNote> notes, CancellationToken ct)
+        List<DomainNote> notes, CancellationToken ct, IReadOnlyDictionary<string, string>? routed = null, Func<AppDefinition, bool>? heldShowsDownPage = null)
     {
         var plan = AccessPlan.None();
         var domains = apps.SelectMany(a => a.Domains.Select(d => (App: a, Domain: d))).ToList();
@@ -302,12 +316,15 @@ public sealed partial class DomainService
         var emails = await EmailsAsync(ct);
         if (guarded.Count == 0 && !domains.Any(x => x.Domain.AccessAppId is not null) && leftovers.Count == 0 && (removals.Count == 0 || emails.Count == 0)) return plan;
 
-        // Out of the tunnel until it's behind Access. When Cloudflare only failed for a moment, the retry brings it back.
+        // Out of the tunnel until it's behind Access (only its down page is served meanwhile, when it has one). When Cloudflare
+        // only failed for a moment, the retry brings it back.
         void Withhold(string hostname, string why, bool retry)
         {
             plan.Withheld.Add(hostname);
             plan.Retry |= retry;
-            notes.Add(new DomainNote(hostname, $"{hostname} isn't served: it's protected, and {why}{(retry ? $" Gitberth tries again every {RemovalRetry.Every.TotalMinutes:0} minutes." : "")}",
+            var downPage = heldShowsDownPage is not null && domains.FirstOrDefault(x => string.Equals(x.Domain.Hostname, hostname, StringComparison.OrdinalIgnoreCase)) is { App: { } app }
+                && heldShowsDownPage(app) && PortRules.WebOf(app.Ports) is not null;
+            notes.Add(new DomainNote(hostname, $"{hostname} {(downPage ? "shows only Gitberth's down page" : "isn't served")}: it's protected, and {why}{(retry ? $" Gitberth tries again every {RemovalRetry.Every.TotalMinutes:0} minutes." : "")}",
                 Problem: true));
         }
 
@@ -371,7 +388,7 @@ public sealed partial class DomainService
                 if (made.Aud.Length == 0) throw new CloudflareApiException($"Cloudflare didn't give {d.Hostname}'s Access application an audience tag.");
                 d.AccessAppId = made.Id;
                 wanted.Add(made.Id);
-                List<string> owned = [.. new[] { services.GetValueOrDefault(app.Id), d.Service }.OfType<string>()];
+                List<string> owned = [.. new[] { services.GetValueOrDefault(app.Id), d.Service, routed?.GetValueOrDefault(d.Hostname) }.OfType<string>()];
                 plan.Protect[d.Hostname] = new TunnelRoutes.Protection(TunnelRoutes.AccessBlock(TeamName(team), made.Aud), owned);
             }
             catch (CloudflareApiException ex)

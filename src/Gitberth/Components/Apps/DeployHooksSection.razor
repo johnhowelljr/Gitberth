@@ -108,9 +108,12 @@
     // GitHub's webhook host, which takes deploy hooks too, while domains are on.
     private string? publicHost;
 
-    private bool IsGit => View.Summary.Source == AppSource.Git;
+    // Deployed by a hook's call: a Git app, or an inline Compose app.
+    private bool IsGit => View.Summary.Source is AppSource.Git or AppSource.Compose;
 
-    private string Description => IsGit
+    private string Description => View.Summary.Source == AppSource.Compose
+        ? "Secret URLs that deploy it when something calls them, like CI once it pushed new images: each call deploys its Compose file again, with its images pulled anew."
+        : IsGit
         ? "Secret URLs that deploy it when something calls them: a CMS whose content changed, a scheduled job, CI. Each call builds the branch's newest commit again."
         : $"Secret URLs that update it when something calls them, like CI once it pushed a new image: Gitberth pulls {View.Row?.ImageRef ?? View.Summary.Image} and recreates the app when the image moved.";
 

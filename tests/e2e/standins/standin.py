@@ -81,6 +81,12 @@ REC = Recorder()
 FAILS = Failures()
 CF = Cloudflare(RIG["cf_account_id"], RIG["cf_tunnel_id"], STATE)
 GH = GitHub(REPOS, TEMPLATES, REC, GITBERTH_URL, edge=CF.edge)
+# Cloudflare's edge certificates, for visitors' HTTPS requests to any other host name (see handle_edge).
+EDGE_CERTS = certs.EdgeCerts(STATE, CF.zone_for)
+
+# The names the HTTPS side answers as an API or a service; any other host name is a visitor's, through Cloudflare's edge.
+API_HOSTS = {"github.com", "www.github.com", "api.github.com", "api.cloudflare.com", "codeload.github.com", "uploads.github.com",
+             "raw.githubusercontent.com", "objects.githubusercontent.com", "gbe2e-standin"}
 
 
 # ---- notifications: where Gitberth sends them ----
@@ -236,9 +242,32 @@ def serve_smtp(port=2525):
 
 # ---- the HTTPS side: what Gitberth calls ----
 
+# Hop-by-hop headers an answer passed on through the edge doesn't keep (send() sets Content-Length itself).
+_HOP = {"connection", "keep-alive", "transfer-encoding", "content-length", "proxy-connection", "upgrade", "te", "trailer"}
+
+
+def handle_edge(req, call):
+    """A visitor's HTTPS request to a host name, as Cloudflare's edge handles it (CF.edge: DNS, Access, the connector, the
+    tunnel's rules, the origin), over a real TLS handshake with the edge's certificate for that name (EdgeCerts). Gitberth's
+    uptime checks come here through GITBERTH_UPTIME_CONNECT_TO. When the edge would never have answered (the name doesn't
+    resolve, say), the connection is dropped, as a client then sees it."""
+    target = req.path + (f"?{req.query_string}" if req.query_string else "")
+    headers = {k: v for k, v in req.headers.items()}
+    out = CF.edge(f"https://{req.host}{target}", req.method, headers, req.body, client_ip=req.client or "203.0.113.10",
+                  verify_tls=False, keep_raw=True)
+    call["route"] = out.get("route")
+    if out["status"] is None:
+        call["status"] = 0
+        call["error"] = out["error"]
+        return None
+    call["status"] = out["status"]
+    return Response(out["status"], out.get("raw") or b"", {k: v for k, v in (out.get("headers") or {}).items() if k.lower() not in _HOP})
+
+
 def handle_api(req):
     kind = "git" if req.host in ("github.com", "www.github.com") else "github" if req.host == "api.github.com" \
-        else "cloudflare" if req.host == "api.cloudflare.com" else "notify" if req.host in NOTIFY_HOSTS else "other"
+        else "cloudflare" if req.host == "api.cloudflare.com" else "notify" if req.host in NOTIFY_HOSTS \
+        else "other" if req.host in API_HOSTS or not req.host else "edge"
     call = REC.start(req, kind)
     try:
         # Which repo the call is about (and for git, what it asked for), before anything answers it: a call an injected
@@ -265,6 +294,8 @@ def handle_api(req):
             resp = CF.api(req, call)
         elif kind == "notify":
             resp = notify_answer(req)
+        elif kind == "edge":
+            return handle_edge(req, call)
         else:
             call["unrouted"] = True
             log(f"no stand-in route: {req.method} {req.host}{req.path}")
@@ -325,7 +356,17 @@ def c_reset(req):
     MAIL.clear()
     with NOTIFY_LOCK:
         NOTIFY_ANSWERS.clear()
+    with EDGE_CERTS.lock:
+        EDGE_CERTS.days.clear()
     return {"ok": True, "seq": REC.seq, "tunnel_version": CF.version}
+
+
+@route("PUT", "/cloudflare/certificate")
+def c_cf_certificate(req):
+    """How long the edge's certificate for a host name is valid from now on: {host, days} (days null: the usual 90)."""
+    b = body_of(req)
+    EDGE_CERTS.days_for(b["host"], b.get("days"))
+    return {"host": b["host"].lower(), "days": b.get("days")}
 
 
 @route("POST", "/notify/answer")
@@ -487,7 +528,8 @@ def c_gh_delete(req, o, r):
 @route("POST", "/github/repos/(?P<o>[^/]+)/(?P<r>[^/]+)/commits")
 def c_gh_commit(req, o, r):
     b = body_of(req)
-    files = {k: (v if v is None else str(v)) for k, v in (b.get("files") or {}).items()}
+    # Text, None to delete, or {"symlink": target} for a link.
+    files = {k: (v if v is None or isinstance(v, dict) and "symlink" in v else str(v)) for k, v in (b.get("files") or {}).items()}
     result, jobs = GH.commit(gh_repo(o, r), b.get("branch") or gh_repo(o, r).default_branch, files, b.get("message") or "A change",
                              base=b.get("base"), force=bool(b.get("force")), author=b.get("author"), pusher=b.get("pusher") or "e2e-bot")
     result["deliveries"] = summary(wait_for(jobs, req))
@@ -892,11 +934,14 @@ def main():
     crt, key = certs.ensure(STATE, TRUST)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(crt, key)
+    # Any other name a client asks for (SNI) gets Cloudflare's edge certificate for it.
+    context.sni_callback = EDGE_CERTS.sni
     https = TlsServer(("0.0.0.0", 443), make_handler(handle_api, "https"), context)
     control = PlainServer(("0.0.0.0", 8099), make_handler(handle_control, "control"))
     threading.Thread(target=https.serve_forever, name="https", daemon=True).start()
     threading.Thread(target=serve_smtp, name="smtp", daemon=True).start()
-    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com and the notification hosts; SMTP on 2525; "
+    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com and the notification hosts, and Cloudflare's "
+        "edge for any other name; SMTP on 2525; "
         f"control on 8099; deliveries go through the tunnel's connector (or straight to {GITBERTH_URL} when a scenario asks)")
     control.serve_forever()
 

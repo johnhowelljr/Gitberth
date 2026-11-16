@@ -1,0 +1,168 @@
+/* The audit log page: a day-grouped list of entries, and a side panel with all of one. Tokens from app.css. */
+
+.audit-meta strong { color: var(--gb-text-1); font-weight: 600; }
+
+.audit-toolbar { gap: 10px; }
+
+.audit-search { flex: 1 1 300px; max-width: 420px; }
+
+.audit-filters { flex-wrap: wrap; }
+
+::deep .audit-menu-on { font-weight: 600; color: var(--gb-text-1); }
+
+.audit-fresh {
+    display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin: 0 0 10px; padding: 8px 12px;
+    border: 1px solid var(--gb-accent-line); border-radius: var(--gb-r-md); background: var(--gb-accent-soft); color: var(--gb-accent-text);
+    font: 600 12.5px var(--gb-sans); cursor: pointer;
+}
+
+.audit-fresh:hover { background: rgba(76, 141, 255, .2); }
+
+.audit-fresh ::deep .gb-i { width: 15px; height: 15px; }
+
+.audit-list {
+    border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-lg); background: var(--gb-surface-1); box-shadow: var(--gb-e1); overflow: hidden;
+}
+
+.audit-day {
+    position: sticky; top: var(--gb-top-h); z-index: 4; display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding: 9px 18px 8px; border-top: 1px solid var(--gb-line-1); background: rgba(15, 18, 24, .96); backdrop-filter: blur(8px);
+    font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--gb-text-2);
+}
+
+.audit-day:first-child { border-top: 0; }
+
+.audit-day-n { font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--gb-text-3); font-variant-numeric: tabular-nums; }
+
+.audit-row {
+    display: grid; grid-template-columns: 28px minmax(0, 1fr) minmax(150px, 210px) 64px; align-items: center; gap: 12px; width: 100%;
+    padding: 10px 18px; border: 0; border-top: 1px solid var(--gb-line-1); background: transparent; color: var(--gb-text-1);
+    font: inherit; text-align: left; cursor: pointer; transition: background var(--gb-t-fast) var(--gb-ease);
+}
+
+.audit-day + .audit-row { border-top-color: transparent; }
+
+.audit-row:hover { background: var(--gb-hover); }
+
+.audit-row.on { background: var(--gb-accent-soft); box-shadow: inset 2px 0 0 var(--gb-accent); }
+
+.audit-row:focus-visible { outline: none; box-shadow: inset 0 0 0 2px #7aa9ff; }
+
+.audit-row--skel { cursor: default; }
+
+.audit-mark {
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; flex: none;
+    background: color-mix(in srgb, var(--tone) 15%, var(--gb-surface-2)); color: var(--tone);
+}
+
+.audit-mark ::deep .gb-i { width: 15px; height: 15px; }
+
+.audit-what { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+
+.audit-sentence { font-size: 13.5px; font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+
+.audit-chips { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+
+.audit-chips .gb-tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.audit-action { font-size: 11px; color: var(--gb-text-4); white-space: nowrap; }
+
+.audit-who { display: flex; align-items: center; gap: 9px; min-width: 0; }
+
+.audit-who-icon {
+    width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none;
+    background: var(--gb-surface-3); border: 1px solid var(--gb-line-2); color: var(--gb-text-2);
+}
+
+.audit-who-icon ::deep .gb-i { width: 15px; height: 15px; }
+
+.audit-who-text { display: flex; flex-direction: column; min-width: 0; }
+
+.audit-who-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.audit-who-sub { font-size: 11.5px; color: var(--gb-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+
+.audit-time { justify-self: end; font-size: 12px; color: var(--gb-text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.audit-foot { justify-content: center; flex-wrap: wrap; }
+
+/* The side panel */
+
+.audit-scrim {
+    position: fixed; inset: 0; z-index: 70; background: rgba(3, 5, 8, .55); backdrop-filter: blur(2px);
+    animation: audit-fade var(--gb-t) var(--gb-ease) both;
+}
+
+.audit-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 71; width: min(520px, 100vw); display: flex; flex-direction: column;
+    background: var(--gb-surface-1); border-left: 1px solid var(--gb-line-2); box-shadow: var(--gb-e3);
+    animation: audit-slide var(--gb-t-slow) var(--gb-ease) both; outline: none;
+}
+
+.audit-panel-head {
+    display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: start;
+    padding: 18px 18px 16px; border-bottom: 1px solid var(--gb-line-1);
+}
+
+.audit-panel-kicker { font-size: 11.5px; color: var(--gb-text-3); margin-bottom: 3px; overflow-wrap: anywhere; }
+
+.audit-panel-title { font-size: 15px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+
+.audit-panel-body { flex: 1 1 auto; overflow-y: auto; padding: 16px 18px 28px; display: flex; flex-direction: column; gap: 14px; }
+
+.audit-kv { grid-template-columns: 96px minmax(0, 1fr); font-size: 13px; }
+
+.audit-kv dd ::deep .gb-i { width: 15px; height: 15px; color: var(--gb-text-3); }
+
+.audit-kv a { display: inline-flex; align-items: center; gap: 5px; }
+
+.audit-changes { border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); overflow: hidden; font-size: 12.5px; }
+
+.audit-changes-head, .audit-changes-row { display: grid; grid-template-columns: minmax(90px, .9fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10px; padding: 8px 12px; }
+
+.audit-changes-head { background: var(--gb-surface-2); color: var(--gb-text-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+
+.audit-changes-row { border-top: 1px solid var(--gb-line-1); }
+
+.audit-changes-row > span { min-width: 0; overflow-wrap: anywhere; }
+
+.audit-changes-row > span:first-child { color: var(--gb-text-2); font-weight: 500; }
+
+.audit-before { color: #ffb3b9; font-family: var(--gb-mono); font-size: 12px; }
+
+.audit-after { color: #8ff0c3; font-family: var(--gb-mono); font-size: 12px; }
+
+.audit-none { color: var(--gb-text-4); }
+
+.audit-hash { font-family: var(--gb-mono); font-size: 11px; color: var(--gb-text-2); overflow-wrap: anywhere; word-break: break-all; }
+
+@keyframes audit-fade { from { opacity: 0; } to { opacity: 1; } }
+
+@keyframes audit-slide { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Narrow screens: who and when go under the sentence. */
+@media (max-width: 760px) {
+    .audit-search { flex-basis: 100%; max-width: none; }
+
+    .audit-row { grid-template-columns: 28px minmax(0, 1fr) auto; grid-template-areas: "mark what time" ". who who"; gap: 6px 10px; padding: 11px 14px; }
+
+    .audit-mark { grid-area: mark; align-self: start; }
+
+    .audit-what { grid-area: what; }
+
+    .audit-time { grid-area: time; align-self: start; padding-top: 2px; }
+
+    .audit-who { grid-area: who; }
+
+    .audit-who-icon { width: 20px; height: 20px; border-radius: 6px; }
+
+    .audit-who-text { flex-direction: row; gap: 6px; align-items: baseline; }
+
+    .audit-day { padding: 8px 14px 7px; }
+
+    .audit-kv { grid-template-columns: 82px minmax(0, 1fr); }
+
+    .audit-changes-head, .audit-changes-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+
+    .audit-changes-head > span:first-child, .audit-changes-row > span:first-child { grid-column: 1 / -1; }
+}

@@ -12,11 +12,18 @@ using Microsoft.EntityFrameworkCore;
 namespace Gitberth.Deploy;
 
 /// <param name="Build">True: clone and build a new image. False: recreate the container from <paramref name="Image"/> (or the current image).</param>
-/// <param name="GitRef">Build this ref rather than the app's branch: a preview promoted to production builds its refs/pull/12/head.</param>
-/// <param name="Commit">Build exactly this commit of <paramref name="GitRef"/> (the one the promoted preview ran), not its tip.</param>
+/// <param name="GitRef">
+/// Build this ref rather than the app's branch: a preview promoted to production builds its refs/pull/12/head. The app's own
+/// branch (refs/heads/&lt;branch&gt;) with <paramref name="Commit"/> is one commit of that branch, asked for by name.
+/// </param>
+/// <param name="Commit">
+/// Build exactly this commit of <paramref name="GitRef"/>, not its tip: the one the promoted preview ran, or one of the app's
+/// own branch, which is built only when it's on the branch or production ran it before.
+/// </param>
 /// <param name="NoCache">Build without the build cache: every step runs again, and the base images are pulled.</param>
+/// <param name="FromDeployment">A Compose app's deploy without a build: the deploy whose release (its files and images) it runs again.</param>
 public sealed record DeployRequest(int AppId, int DeploymentId, bool Build, string? Image = null, string? GitRef = null, string? Commit = null,
-    bool NoCache = false);
+    bool NoCache = false, int? FromDeployment = null);
 
 public sealed class DeployException(string message) : Exception(message);
 
@@ -41,7 +48,14 @@ public sealed record BridgeCheck(bool Ok, string? Why)
 /// </summary>
 /// <param name="hostPorts">Picks the spare port a new version starts on next to the old one; without it (in tests) no host port counts as taken.</param>
 /// <param name="hostScanner">Says whether the host has an IPv6 address the internet can reach; without it (in tests) it has none.</param>
-public sealed class DeployPipeline(
+/// <param name="downStates">Puts the app's domains on the down page while a swap has to stop the running container; without it (in tests) they stay as they are.</param>
+/// <param name="databases">
+/// The app's databases (Settings › Databases), whose connection strings each deploy sets, and a preview's own, made before
+/// its first build; without it (in older tests) nothing is set from them.
+/// </param>
+/// <param name="composer">Runs docker compose for Compose apps; without it (in older tests) one is made over <paramref name="docker"/>.</param>
+/// <param name="builtIns">Where an app installed from a template is reached (APP_URL…), set at each of its deploys; without it (in tests) nothing is.</param>
+public sealed partial class DeployPipeline(
     IDbContextFactory<GitberthDb> dbFactory,
     GitClient git,
     DockerCli docker,
@@ -58,7 +72,12 @@ public sealed class DeployPipeline(
     ILogger<DeployPipeline> logger,
     HostPortMap? hostPorts = null,
     HostScanner? hostScanner = null,
-    IDeployReporter? reporter = null)
+    IDeployReporter? reporter = null,
+    DownStates? downStates = null,
+    Audit.AuditLog? audit = null,
+    Databases.DatabaseService? databases = null,
+    Compose.ComposeRunner? composer = null,
+    Templates.TemplateBuiltIns? builtIns = null)
 {
     // How long a report may hold a deploy up: GitHub being slow never delays the next deploy for long.
     private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
@@ -127,9 +146,14 @@ public sealed class DeployPipeline(
             dep.FinishedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(CancellationToken.None);
             hub.Close(request.DeploymentId);
+            Audited(app, dep, null);
             return;
         }
+        // From here it runs, as the one who asked for it (the queue runs it as them), and its outcome is recorded too.
+        Started(app, dep, noCache: request.Build && (request.NoCache || dep.NoCache));
 
+        // What ran before, for the audit log's "commit: before → after".
+        var previousCommit = app.CurrentCommit;
         // A preview is deployed with its parent's settings, copied again now, and its parent's variables for previews.
         PreviewInfo? preview = null;
         AppDefinition? parent = null;
@@ -152,6 +176,7 @@ public sealed class DeployPipeline(
                 dep.FinishedAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(CancellationToken.None);
                 hub.Close(request.DeploymentId);
+                Audited(app, dep, null);
                 return;
             }
             await db.Entry(app).Collection(a => a.Networks).LoadAsync(CancellationToken.None);
@@ -178,12 +203,32 @@ public sealed class DeployPipeline(
         // Without the cache only when it builds: a recreate has nothing to build.
         dep.NoCache = request.Build && (request.NoCache || dep.NoCache);
         SkipVerdict? skipped = null;
+        // Which of the app's databases this deploy set: one added or taken off while it ran is still to be made live.
+        string? databasesStamp = null;
         try
         {
             // The repo's variables in GitHub come first; the app's own values in Gitberth win. Like on Vercel, the GitHub
             // ones are there at build time too: they're plain config the repo already shares.
-            var repo = await repoVariables.ForDeployAsync(app.Owner, app.Repo, CancellationToken.None);
-            await ForgetVariablesIfDeletedAsync(db, app);
+            // An inline Compose app has no repo, so no GitHub variables either.
+            var repo = app.FromRepo ? await repoVariables.ForDeployAsync(app.Owner, app.Repo, CancellationToken.None) : new RepoVariablesResult([], null);
+            if (app.FromRepo) await ForgetVariablesIfDeletedAsync(db, app);
+            var usable = repo.Variables.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
+            // Set by Gitberth from the app's databases (Settings › Databases): its own connection strings, or a preview's own,
+            // made for it now before anything is built. They win over the Environment tab's values and GitHub's, and are
+            // secret wherever they go, the build included.
+            var provided = databases is null ? [] : await DatabaseValuesAsync(app, parent, usable, log, ct);
+            var providedKeys = provided.Select(p => p.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            databasesStamp = databases is null || parent is not null ? null : await databases.StampAsync(app.Id, CancellationToken.None);
+            if (provided.Count > 0)
+            {
+                // The URL, and its password on its own: an app or a build that prints one part of it never shows it.
+                log.Mask(provided.SelectMany(p => p.Secrets));
+                var replaced = own.Where(e => providedKeys.Contains(e.Key)).Select(e => e.Key).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                own = own.Where(e => !providedKeys.Contains(e.Key)).Concat(provided.Select(p => new EnvValue(p.Key, p.Value, IsSecret: true))).ToList();
+                log.Step($"Set by Gitberth from {(parent is null ? "its" : "the preview's own")} databases: {string.Join(", ", provided.Select(p => $"{p.Key} ({p.From})"))}");
+                if (replaced.Count > 0)
+                    log.Line($"In place of the value{(replaced.Count == 1 ? "" : "s")} set on the Environment tab: {string.Join(", ", replaced)}.");
+            }
             var ownKeys = own.Select(e => e.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             // Marked secret in Gitberth, even when the value itself comes from GitHub.
             var secretKeys = (parent ?? app).EnvVars.Where(v => v.IsSecret).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -198,12 +243,11 @@ public sealed class DeployPipeline(
                 foreach (var (tmpfs, volume) in Previews.PreviewCopy.TmpfsUnderVolumes(Apps.GitExtras.Parse(parent.RuntimeExtras), app.Volumes))
                     log.Line($"No tmpfs at {tmpfs.Target}: the preview keeps its volume {VolumeNames.Resolve(app.Slug, volume.Source)} there, and Docker mounts one thing at a path.");
             }
-            var usable = repo.Variables.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
             // A preview never gets production's database without being told to: stopped before anything is built, since a
-            // build can run migrations.
+            // build can run migrations. A database of its own that Gitberth made for it takes production's place.
             if (parent is not null && preview is not null
                 && Previews.PreviewDatabases.Find(parent.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)),
-                    usable.Select(v => (v.Name, v.Value))) is { Count: > 0 } shared)
+                    usable.Select(v => (v.Name, v.Value)), providedKeys) is { Count: > 0 } shared)
                 throw new DeployException(Previews.PreviewDatabases.Refusal(shared, parent.Name));
             var overridden = usable.Where(v => ownKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var listener = usable.Where(v => !ownKeys.Contains(v.Name) && ListenerKeys.Contains(v.Name)).Select(v => v.Name).ToList();
@@ -220,41 +264,59 @@ public sealed class DeployPipeline(
             if (overridden.Count > 0) log.Line($"Set in Gitberth for this app, so the GitHub value isn't used: {string.Join(", ", overridden)}");
             if (listener.Count > 0) log.Line($"Not used from GitHub, because Gitberth sets where the app listens: {string.Join(", ", listener)}. Set it on the app in Gitberth to override.");
             var runtimeEnv = fromGitHub.Concat(own).ToList();
-            var buildEnv = fromGitHub.Concat(env.Where(x => x.Var.BuildTime).Select(x => new EnvValue(x.Var.Key, x.Value, Secret(x.Var, x.Value)))).ToList();
+            // A database's connection string reaches the build too (frameworks migrate there), always as a secret.
+            var buildEnv = fromGitHub
+                .Concat(env.Where(x => x.Var.BuildTime && !providedKeys.Contains(x.Var.Key)).Select(x => new EnvValue(x.Var.Key, x.Value, Secret(x.Var, x.Value))))
+                .Concat(provided.Select(p => new EnvValue(p.Key, p.Value, IsSecret: true)))
+                .ToList();
             var gitHubKeys = fromGitHub.Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
             // What Vercel's variables tell the app: its main domain, and whether its branch is the repo's production one. A
             // preview is a preview whatever its branch: its own domain, and its parent's as the production one.
-            var vercelFor = !app.VercelVariables ? null
+            var vercelFor = !app.VercelVariables || !app.FromRepo ? null
                 : preview is not null && parent is not null
                     ? new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), Production: false,
                         await domains.MainHostnameAsync(parent.Id, CancellationToken.None), preview.PullRequest, Preview: true)
                     : new VercelContext(await domains.MainHostnameAsync(app.Id, CancellationToken.None), await IsProductionBranchAsync(app),
-                        Branch: request.GitRef is null ? null : await PromotedBranchAsync(db, app.Id, request.GitRef));
-            // What the build fetches: the preview's ref, or the promoted preview's exact commit; the app's branch otherwise.
-            var fetch = new BuildSource(request.GitRef ?? preview?.Ref, request.GitRef is null ? null : request.Commit, Promoted: request.GitRef is not null);
+                        Branch: request.GitRef is null || request.GitRef == OwnBranchRef(app) ? null : await PromotedBranchAsync(db, app.Id, request.GitRef));
+            // What the build fetches: one commit of the app's own branch asked for by name (deploy_app's commit, checked to be on
+            // the branch when it's fetched); the promoted preview's exact commit; the preview's ref; the branch's tip otherwise.
+            var fetch = request.GitRef is { } gitRef && gitRef == OwnBranchRef(app) ? new BuildSource(null, request.Commit, Promoted: false)
+                : request.GitRef is not null ? new BuildSource(request.GitRef, request.Commit, Promoted: true)
+                : preview is not null ? new BuildSource(preview.Ref, null, Promoted: false)
+                : new BuildSource(null, null, Promoted: false);
 
-            var prepared = request.Build
-                ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), fetch, workDir, log, ct)
-                : await PrepareImageAsync(app, request, dep, log);
-
-            ct.ThrowIfCancellationRequested();
-            if (vercelFor is not null)
+            Prepared prepared;
+            SwapOutcome outcome;
+            if (app.IsCompose)
             {
-                var facts = vercelFor.Facts(app, dep.CommitSha, dep.CommitMessage, dep.CommitAuthor, prepared.Traits);
-                foreach (var line in DescribeVercelVariables(runtimeEnv, facts)) log.Line(line);
-                runtimeEnv = VercelEnv.AddTo(runtimeEnv, VercelEnv.For(facts));
+                // A Compose app: its services from its Compose file, as one project, with the same variables.
+                (prepared, outcome) = await ComposeAsync(db, app, dep, request, preview, runtimeEnv, buildEnv, gitHubKeys, vercelFor, fetch, provided, workDir, log, ct);
             }
             else
             {
-                log.Line("Vercel's variables are turned off for this app.");
+                prepared = request.Build
+                    ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), fetch, workDir, log, ct)
+                    : await PrepareImageAsync(app, request, dep, log);
+
+                ct.ThrowIfCancellationRequested();
+                if (vercelFor is not null)
+                {
+                    var facts = vercelFor.Facts(app, dep.CommitSha, dep.CommitMessage, dep.CommitAuthor, prepared.Traits);
+                    foreach (var line in DescribeVercelVariables(runtimeEnv, facts)) log.Line(line);
+                    runtimeEnv = VercelEnv.AddTo(runtimeEnv, VercelEnv.For(facts));
+                }
+                else
+                {
+                    log.Line("Vercel's variables are turned off for this app.");
+                }
+                var owners = await VolumeOwners.LoadAsync(db, CancellationToken.None);
+                await KeepDeclaredVolumesAsync(db, app, prepared.Image, owners, log);
+                // A preview never starts on another app's volume, nor another app on a preview's: the data would be both's, and
+                // removing the preview would delete it. Saves and the names above keep it from happening; this is the last word.
+                if (owners.SharedWithPreview(app, app.Volumes) is { } sharedNow) throw new DeployException(SharedVolume(app, sharedNow));
+                await SetStatusAsync(db, dep, DeployStatus.Starting);
+                outcome = await SwapAsync(app, prepared.Image, runtimeEnv, PortsFor(app, prepared.Port), (dep.Id, dep.Trigger), log, ct);
             }
-            var owners = await VolumeOwners.LoadAsync(db, CancellationToken.None);
-            await KeepDeclaredVolumesAsync(db, app, prepared.Image, owners, log);
-            // A preview never starts on another app's volume, nor another app on a preview's: the data would be both's, and
-            // removing the preview would delete it. Saves and the names above keep it from happening; this is the last word.
-            if (owners.SharedWithPreview(app, app.Volumes) is { } sharedNow) throw new DeployException(SharedVolume(app, sharedNow));
-            await SetStatusAsync(db, dep, DeployStatus.Starting);
-            var outcome = await SwapAsync(app, prepared.Image, runtimeEnv, PortsFor(app, prepared.Port), (dep.Id, dep.Trigger), log, ct);
             if (!outcome.Ok && lifetime.ApplicationStopping.IsCancellationRequested)
             {
                 // Not the new version's fault: Gitberth is stopping. Counted as a failed build so it's retried.
@@ -271,7 +333,8 @@ public sealed class DeployPipeline(
                 // nothing pending that it made live. Written either way, over whatever a save wrote meanwhile.
                 var ran = AppService.Fingerprint(app, protector, options.Network, outcome.Networks);
                 var now = await SavedFingerprintAsync(app.Id);
-                app.ConfigChangePending = now is { } saved && saved.Runtime != ran.Runtime;
+                app.ConfigChangePending = now is { } saved && saved.Runtime != ran.Runtime
+                    || databasesStamp is not null && databases is not null && databasesStamp != await databases.StampAsync(app.Id, CancellationToken.None);
                 db.Entry(app).Property(a => a.ConfigChangePending).IsModified = true;
                 if (request.Build)
                 {
@@ -308,7 +371,7 @@ public sealed class DeployPipeline(
                 dep.Status = outcome.RolledBack ? DeployStatus.RolledBack : DeployStatus.Failed;
                 dep.Error = outcome.Error;
                 log.Step(outcome.OldKeptRunning ? $"The new version didn't pass its checks, so the current one kept running throughout. {outcome.Error}"
-                    : outcome.RolledBack ? $"Rolled back to the previous container. {outcome.Error}"
+                    : outcome.RolledBack ? $"Rolled back to the previous {(app.IsCompose ? "release" : "container")}. {outcome.Error}"
                     : $"Failed: {outcome.Error}");
             }
         }
@@ -361,12 +424,84 @@ public sealed class DeployPipeline(
         // A preview's commit that didn't make it to production: production follows its branch again, unless a newer
         // promote waits to run. Asked once this one's outcome is saved.
         if (dep.Trigger == DeployTrigger.Promote && dep.Status != DeployStatus.Succeeded) await ForgetPromotionAsync(db, dep);
+        Audited(app, dep, previousCommit);
         await ReportAsync(started: false, dep, skipped?.Kind);
-        if (dep.Status == DeployStatus.Succeeded) await PruneImagesAsync(db, app);
+        if (dep.Status == DeployStatus.Succeeded)
+        {
+            if (app.IsCompose) await PruneComposeAsync(db, app, dep.Id);
+            else await PruneImagesAsync(db, app);
+        }
+    }
+
+    // The deploy's start, in the audit log, as the one who asked for it (the queue runs it as them).
+    private void Started(AppDefinition app, Deployment dep, bool noCache)
+    {
+        if (audit is null) return;
+        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)) };
+        if (dep.CommitSha is { Length: >= 7 } sha) changes.Add(new("Commit", null, sha[..7]));
+        if (dep.ImageTag is { Length: > 0 } image) changes.Add(new("Image", null, image));
+        if (noCache) changes.Add(new("Build cache", null, "not used"));
+        if (dep.HookName is { } hook) changes.Add(new("Deploy hook", null, hook));
+        audit.Record(new Audit.AuditEntry("app.deploy.started", Audit.AuditText.Started(app.Name, dep))
+        {
+            AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
+            Target = $"deploy #{Audit.AuditText.N(dep.Id)}",
+            Correlation = Audit.AuditCorrelation.ForDeployment(dep.Id),
+            Changes = changes,
+        });
+    }
+
+    // How the deploy ended, in the audit log, as the one who asked for it (the queue runs it as them).
+    private void Audited(AppDefinition app, Deployment dep, string? previousCommit)
+    {
+        if (audit is null) return;
+        var (action, summary, outcome) = Audit.AuditText.Ended(app.Name, dep);
+        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)) };
+        if (dep.Status == DeployStatus.Succeeded && dep.CommitSha is { Length: >= 7 } sha)
+            changes.Add(new("Commit", previousCommit is { Length: >= 7 } before ? before[..7] : null, sha[..7]));
+        if (dep.Status == DeployStatus.Succeeded && dep.ImageTag is { Length: > 0 } image) changes.Add(new("Image", null, image));
+        if (dep.NoCache) changes.Add(new("Build cache", null, "not used"));
+        if (dep.FinishedAt is { } finished && dep.StartedAt is { } started)
+            changes.Add(new("Took", null, $"{Math.Max(1, (int)(finished - started).TotalSeconds)} s"));
+        audit.Record(new Audit.AuditEntry(action, summary)
+        {
+            Outcome = outcome,
+            AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
+            Target = $"deploy #{Audit.AuditText.N(dep.Id)}",
+            Correlation = Audit.AuditCorrelation.ForDeployment(dep.Id),
+            Changes = changes,
+        });
     }
 
     private static string LowerFirst(string text) =>
         text.Length > 1 && char.IsUpper(text[0]) && !char.IsUpper(text[1]) ? char.ToLowerInvariant(text[0]) + text[1..] : text;
+
+    /// <summary>
+    /// What the deploy sets from databases: production's own (Settings › Databases), or a preview's own, made now when it has
+    /// none yet (empty, or a copy of production's, as its parent's Settings › Previews says). One that should be there but
+    /// can't be made stops the deploy before anything is built; the next deploy tries again.
+    /// </summary>
+    /// <param name="usable">The repo's GitHub variables the deploy can use.</param>
+    private async Task<IReadOnlyList<Databases.ProvidedVariable>> DatabaseValuesAsync(AppDefinition app, AppDefinition? parent, IReadOnlyList<RepoVariable> usable,
+        DeployLog log, CancellationToken ct)
+    {
+        try
+        {
+            if (parent is null) return await databases!.ValuesAsync(app.Id, CancellationToken.None);
+            // What production gets: the parent's own values for every deploy and for production, over the repo's GitHub ones.
+            var production = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in usable) production[v.Name] = v.Value;
+            foreach (var v in Apps.EnvScopes.ForDeploy(parent.EnvVars, preview: false))
+                if (protector.TryUnprotect(v.ProtectedValue) is { Length: > 0 } value) production[v.Key] = value;
+            var forPreviews = parent.EnvVars.Where(v => v.Scope == EnvScope.Preview && protector.TryUnprotect(v.ProtectedValue).Length > 0)
+                .Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return await databases!.ForPreviewAsync(app, parent, production, forPreviews, log, ct);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new DeployException(ex.Message);
+        }
+    }
 
     // A promote that didn't work lets production follow its branch again (RepoWatcher); when that can't be saved now, the
     // watcher does it on its next look.
@@ -639,9 +774,50 @@ public sealed class DeployPipeline(
 
     /// <summary>What a build fetches when it isn't the app's branch tip.</summary>
     /// <param name="Ref">A preview's ref (refs/pull/12/head, refs/heads/feature); null: the app's branch.</param>
-    /// <param name="Commit">The exact commit to build (a promoted preview's); null: the ref's tip.</param>
+    /// <param name="Commit">
+    /// The exact commit to build: a promoted preview's (with <paramref name="Ref"/>), or, without a ref, one of the app's own
+    /// branch asked for by name, which is built only when it's on the branch or production ran it before. Null: the tip.
+    /// </param>
     /// <param name="Promoted">Production builds a preview's commit.</param>
-    private sealed record BuildSource(string? Ref, string? Commit, bool Promoted);
+    private sealed record BuildSource(string? Ref, string? Commit, bool Promoted)
+    {
+        /// <summary>The branch's newest commit is what's built: what the watcher knows about the branch follows it.</summary>
+        public bool FollowsBranch => !Promoted && Commit is null;
+    }
+
+    /// <summary>The app's own branch as a ref (refs/heads/main): with a commit, a deploy of one commit of it, asked for by name.</summary>
+    public static string OwnBranchRef(AppDefinition app) => "refs/heads/" + app.Branch;
+
+    /// <summary>
+    /// The whole SHA of a commit production was asked to build by name (deploy_app's commit): one production ran before (a
+    /// deploy of it succeeded: its branch's, or a promoted preview's), or one on the app's branch, which is told by reading
+    /// the branch's history without its files. Anything else, such as a fork's commit that GitHub serves by its SHA too, is
+    /// refused: production only ever builds its own branch.
+    /// </summary>
+    /// <exception cref="GitException">It isn't on the branch ("That commit isn't on main."), or the branch couldn't be read.</exception>
+    private async Task<string> CommitOfBranchAsync(GitberthDb db, AppDefinition app, Deployment dep, string asked, string workDir, DeployLog log, CancellationToken ct)
+    {
+        if (!GitClient.IsSha(asked)) throw new GitException($"'{asked}' isn't a commit.");
+        var ran = await db.Deployments.AsNoTracking()
+            .Where(d => d.AppId == app.Id && d.Id != dep.Id && d.Status == DeployStatus.Succeeded && d.CommitSha != null)
+            .Select(d => d.CommitSha!).Distinct().ToListAsync(CancellationToken.None);
+        if (ran.FirstOrDefault(sha => sha.StartsWith(asked, StringComparison.OrdinalIgnoreCase)) is { } before)
+        {
+            log.Line($"{before[..Math.Min(7, before.Length)]} ran in production before, so it can be built again.");
+            return before;
+        }
+        log.Line($"Checking that {asked} is on {app.Branch}");
+        var history = Path.Combine(workDir, "history");
+        try
+        {
+            return await git.CommitOnBranchAsync(new GitHubRepoRef(app.Owner, app.Repo), app.Branch, asked, history, ct)
+                ?? throw new GitException($"That commit isn't on {app.Branch}.");
+        }
+        finally
+        {
+            DeployPaths.TryDeleteDirectory(history);
+        }
+    }
 
     /// <param name="gitHubKeys">Which of <paramref name="buildEnv"/> come from the repo's GitHub variables rather than the app's own.</param>
     /// <param name="vercelFor">What Vercel's variables tell the app; null when they're off for it.</param>
@@ -650,24 +826,45 @@ public sealed class DeployPipeline(
     private async Task<Prepared> BuildAsync(GitberthDb db, AppDefinition app, Deployment dep, List<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys,
         VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, BuildSource fetch, string workDir, DeployLog log, CancellationToken ct)
     {
-        DeployPaths.TryDeleteDirectory(workDir);
-        var srcDir = Path.Combine(workDir, "src");
+        var (commit, srcDir) = await FetchSourceAsync(db, app, dep, fetch, workDir, log, ct);
         var buildDir = Path.Combine(workDir, "build");
         Directory.CreateDirectory(buildDir);
+
+        var appDir = app.Subdirectory?.Trim().Trim('/') ?? "";
+        var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist on {app.Branch}.");
+
+        // Vercel's variables are there while it builds too (front ends build NEXT_PUBLIC_VERCEL_URL in). What the build
+        // finds out goes on the image, so a later recreate from it sets the same ones.
+        var traits = VercelEnv.Detect(folder, srcDir);
+        return await BuildFetchedAsync(db, app, dep, commit, srcDir, appDir, folder, traits, buildEnv, gitHubKeys, vercelFor, runtimeKeys, buildDir, log, ct);
+    }
+
+    /// <summary>
+    /// The deploy's source: the clone or fetch of what it builds into &lt;work&gt;/src, its commit recorded on the deploy (and
+    /// as the app's last attempt), the build filters asked whether to skip it, and GitHub told a build started.
+    /// </summary>
+    private async Task<(CommitInfo Commit, string SrcDir)> FetchSourceAsync(GitberthDb db, AppDefinition app, Deployment dep, BuildSource fetch, string workDir,
+        DeployLog log, CancellationToken ct)
+    {
+        DeployPaths.TryDeleteDirectory(workDir);
+        var srcDir = Path.Combine(workDir, "src");
+        Directory.CreateDirectory(workDir);
 
         await SetStatusAsync(db, dep, DeployStatus.Cloning);
         log.Step(fetch switch
         {
             { Promoted: true, Commit: { Length: >= 7 } sha } => $"Fetching {sha[..7]} of {app.RepoFullName} from {fetch.Ref}, the preview promoted to production",
             { Ref: { } named } => $"Fetching {app.RepoFullName} ({named})",
+            { Commit: { Length: >= 7 } asked } => $"Fetching {asked[..Math.Min(asked.Length, 12)]} of {app.RepoFullName} ({app.Branch})",
             _ => $"Cloning {app.RepoFullName} ({app.Branch})",
         });
         CommitInfo commit;
         try
         {
-            commit = fetch.Ref is { } gitRef
-                ? await git.FetchAsync(new GitHubRepoRef(app.Owner, app.Repo), gitRef, fetch.Commit, srcDir, log.Line, ct)
-                : await git.CloneAsync(new GitHubRepoRef(app.Owner, app.Repo), app.Branch, srcDir, log.Line, ct);
+            var repo = new GitHubRepoRef(app.Owner, app.Repo);
+            commit = fetch.Ref is { } gitRef ? await git.FetchAsync(repo, gitRef, fetch.Commit, srcDir, log.Line, ct)
+                : fetch.Commit is { } asked ? await git.FetchAsync(repo, OwnBranchRef(app), await CommitOfBranchAsync(db, app, dep, asked, workDir, log, ct), srcDir, log.Line, ct)
+                : await git.CloneAsync(repo, app.Branch, srcDir, log.Line, ct);
         }
         catch (GitException ex)
         {
@@ -676,22 +873,25 @@ public sealed class DeployPipeline(
         dep.CommitSha = commit.Sha;
         dep.CommitMessage = commit.Subject.Length > 500 ? commit.Subject[..500] : commit.Subject;
         dep.CommitAuthor = commit.Author;
-        // A promoted preview's commit isn't its branch's: what the watcher knows about the branch stays as it was, so a
-        // promote that fails never makes the branch's commit look untried (and deployed over a rollback).
-        if (!fetch.Promoted) app.LastAttemptedCommit = commit.Sha;
+        // Only a build of the branch's newest commit tells the watcher about the branch. A promoted preview's commit isn't
+        // the branch's, and neither need one asked for by name (an earlier one, say): what the watcher knows stays as it was,
+        // so it doesn't deploy the branch's tip straight over it, and a build that fails never makes the tip look untried. A
+        // new commit on the branch is deployed as usual.
+        if (fetch.FollowsBranch) app.LastAttemptedCommit = commit.Sha;
         // Saved now, so a restart during the build still knows which commit was being tried.
         await db.SaveChangesAsync(CancellationToken.None);
         log.Step($"Commit {commit.Sha[..7]} by {commit.Author}: {commit.Subject}");
         // Before GitHub hears of a build: a skipped commit never gets a pending status, only the success its skip reports.
         if (BuildFilters.CanSkip(dep.Trigger) && await SkipVerdictAsync(app, commit, srcDir, log, ct) is { } skip) throw new DeploySkippedException(skip);
         await ReportAsync(started: true, dep);
+        return (commit, srcDir);
+    }
 
-        var appDir = app.Subdirectory?.Trim().Trim('/') ?? "";
-        var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist on {app.Branch}.");
-
-        // Vercel's variables are there while it builds too (front ends build NEXT_PUBLIC_VERCEL_URL in). What the build
-        // finds out goes on the image, so a later recreate from it sets the same ones.
-        var traits = VercelEnv.Detect(folder, srcDir);
+    // The build of a fetched commit into one image (a Git app that isn't a Compose one).
+    private async Task<Prepared> BuildFetchedAsync(GitberthDb db, AppDefinition app, Deployment dep, CommitInfo commit, string srcDir, string appDir, string folder,
+        AppTraits traits, List<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys, VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, string buildDir,
+        DeployLog log, CancellationToken ct)
+    {
         var vercel = vercelFor is null
             ? []
             : VercelEnv.ForBuild(vercelFor.Facts(app, commit.Sha, dep.CommitMessage, commit.Author, traits));
@@ -1038,40 +1238,108 @@ public sealed class DeployPipeline(
             if (bridge.Ok && await SwapWithBridgeAsync(app, image, env, ports, with, log, ct) is { } bridged) return bridged with { Networks = saved };
         }
 
-        if (hadOld)
+        // Visitors of the app's domains get the down page while the container is replaced, rather than Cloudflare's error:
+        // it's routed, and cloudflared runs it, before the old container stops, and they go back once the new version
+        // passed its checks, or the old one is back.
+        var downPage = hadOld && await ShowDownPageAsync(app, log);
+        try
         {
-            log.Step("Stopping the current container");
-            await docker.StopAsync(name);
-            var moved = await docker.RenameAsync(name, previous);
-            if (!moved.Ok)
+            if (hadOld)
             {
-                await docker.StartAsync(name);
-                return new SwapOutcome(false, false, "Couldn't move the old container aside: " + moved.ErrorText);
+                log.Step("Stopping the current container");
+                await docker.StopAsync(name);
+                var moved = await docker.RenameAsync(name, previous);
+                if (!moved.Ok)
+                {
+                    await docker.StartAsync(name);
+                    return new SwapOutcome(false, false, "Couldn't move the old container aside: " + moved.ErrorText);
+                }
+            }
+
+            var spec = Spec(app, image, env, ports, with);
+            log.Step("Starting the new container");
+            log.Line(spec.ToDisplayString());
+            var (args, processEnv) = spec.BuildRunCommand();
+            var run = await docker.RunAsync(args, new ProcessOptions { Environment = processEnv });
+            var failure = run.Ok ? null : "docker run failed: " + run.ErrorText;
+            failure ??= await VerifyAsync(app, spec, log, ct);
+            if (failure is null)
+            {
+                if (hadOld) await docker.RemoveAsync(previous);
+                return new SwapOutcome(true, false, null, Networks: saved);
+            }
+
+            await ShowLastOutputAsync(name, log);
+            await docker.RemoveAsync(name);
+            if (!hadOld) return new SwapOutcome(false, false, failure);
+
+            var restored = await docker.RenameAsync(previous, name);
+            if (restored.Ok) restored = await docker.StartAsync(name);
+            return restored.Ok
+                ? new SwapOutcome(false, true, failure)
+                : new SwapOutcome(false, false, $"{failure} Restoring the previous container also failed: {restored.ErrorText}");
+        }
+        finally
+        {
+            if (downPage) await HideDownPageAsync(app, log);
+        }
+    }
+
+    /// <summary>
+    /// Before a swap stops the running container: the app's domains go to the down page (its down page on, domains on with
+    /// a token, and the app has a domain), and the deploy waits until cloudflared runs that. True when the down page was
+    /// asked for, so <see cref="HideDownPageAsync"/> has to send them back; a sync that failed is only logged.
+    /// </summary>
+    private async Task<bool> ShowDownPageAsync(AppDefinition app, DeployLog log)
+    {
+        if (downStates is null || !app.DownPage) return false;
+        var begun = false;
+        try
+        {
+            if (!await domains.EnabledAsync() || !await domains.TokenSavedAsync()) return false;
+            var hostnames = await domains.HostnamesAsync(app.Id);
+            if (hostnames.Count == 0) return false;
+            log.Step($"Sending {string.Join(", ", hostnames)} to the down page while the container is replaced");
+            downStates.BeginUpdate(app.Id);
+            begun = true;
+            var since = DateTime.UtcNow;
+            var report = await domains.SyncAsync(CancellationToken.None);
+            foreach (var note in report.Notes.Where(n => n.Problem && (n.Hostname is null || hostnames.Contains(n.Hostname)))) log.Line("warning: " + note.Text);
+            await WaitForTunnelAsync(report.TunnelVersion is long version ? new TunnelChange(version, since) : null, log);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Sending the domains of {App} to the down page failed", app.Slug);
+            log.Line("warning: the app's domains couldn't be sent to the down page: " + ex.Message);
+        }
+        return begun;
+    }
+
+    /// <summary>
+    /// After the swap, whichever way it went: the app's domains go back to it, once cloudflared runs that. When no container
+    /// of it runs now (the restore failed too), they stay on the down page as for any app whose container is down.
+    /// </summary>
+    private async Task HideDownPageAsync(AppDefinition app, DeployLog log)
+    {
+        try
+        {
+            if (await docker.InspectStateAsync(app.ContainerName) is not { Running: true }) downStates!.Set(app.Id, DownReason.NotRunning);
+            downStates!.EndUpdate(app.Id);
+            var since = DateTime.UtcNow;
+            var report = await domains.SyncAsync(CancellationToken.None);
+            var hostnames = await domains.HostnamesAsync(app.Id);
+            foreach (var note in report.Notes.Where(n => n.Problem && (n.Hostname is null || hostnames.Contains(n.Hostname)))) log.Line("warning: " + note.Text);
+            if (report.TunnelVersion is long version)
+            {
+                log.Step("Sending visitors back to the app");
+                await WaitForTunnelAsync(new TunnelChange(version, since), log);
             }
         }
-
-        var spec = Spec(app, image, env, ports, with);
-        log.Step("Starting the new container");
-        log.Line(spec.ToDisplayString());
-        var (args, processEnv) = spec.BuildRunCommand();
-        var run = await docker.RunAsync(args, new ProcessOptions { Environment = processEnv });
-        var failure = run.Ok ? null : "docker run failed: " + run.ErrorText;
-        failure ??= await VerifyAsync(app, spec, log, ct);
-        if (failure is null)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (hadOld) await docker.RemoveAsync(previous);
-            return new SwapOutcome(true, false, null, Networks: saved);
+            logger.LogWarning(ex, "Sending the domains of {App} back from the down page failed", app.Slug);
+            log.Line("warning: the app's domains couldn't be sent back from the down page yet: " + ex.Message);
         }
-
-        await ShowLastOutputAsync(name, log);
-        await docker.RemoveAsync(name);
-        if (!hadOld) return new SwapOutcome(false, false, failure);
-
-        var restored = await docker.RenameAsync(previous, name);
-        if (restored.Ok) restored = await docker.StartAsync(name);
-        return restored.Ok
-            ? new SwapOutcome(false, true, failure)
-            : new SwapOutcome(false, false, $"{failure} Restoring the previous container also failed: {restored.ErrorText}");
     }
 
     // Only when the container exists; if docker run failed before creating it there's nothing to show.
@@ -1095,6 +1363,8 @@ public sealed class DeployPipeline(
     {
         if (!await domains.EnabledAsync(ct) || !await domains.TokenSavedAsync(ct) || (await domains.HostnamesAsync(app.Id, ct)).Count == 0) return BridgeCheck.Unseen;
         if (await docker.InspectStateAsync(app.ContainerName, ct) is not { Running: true }) return BridgeCheck.Unseen;
+        // docker compose up replaces a Compose app's services in place: its domains get the down page meanwhile.
+        if (app.IsCompose) return new BridgeCheck(false, "docker compose replaces its services in place");
         var main = PortRules.WebOf(ports ?? app.Ports);
         var saved = PortRules.WebOf(app.Ports);
         // The same rules as the Ports card's "domain visitors aren't affected", then what only a deploy can find out.
@@ -1527,18 +1797,29 @@ public sealed class DeployPipeline(
             if (state.Health == "unhealthy") return "The image's HEALTHCHECK reports unhealthy.";
             if (DateTime.UtcNow > until + HealthTimeout) return "The image's HEALTHCHECK never reported healthy.";
         }
+        return await HealthPathAsync(app, spec.Name, spec.Ports, log, ct);
+    }
 
+    /// <summary>The app's health URL on the container's web port, when the app has one; null once it answers (or there's none).</summary>
+    /// <param name="asLocalhost">
+    /// Asks as localhost (its Host header): a Compose app's container is called gb-&lt;app&gt;_&lt;service&gt;, and a name with
+    /// '_' in it isn't a host name to Django or Nextcloud, which answer such a request 400 whatever they allow. Every app
+    /// takes localhost.
+    /// </param>
+    private async Task<string?> HealthPathAsync(AppDefinition app, string container, IReadOnlyList<PortMapping> ports, DeployLog log, CancellationToken ct,
+        bool asLocalhost = false)
+    {
         if (string.IsNullOrWhiteSpace(app.HealthCheckPath)) return null;
-        if (WebAddress(spec.Name, spec.Ports) is not (var host, var number, _))
+        if (WebAddress(container, ports) is not (var host, var number, _))
         {
-            log.Line(PortRules.WebOf(spec.Ports) is null
+            log.Line(PortRules.WebOf(ports) is null
                 ? "The app has no web port, so the health URL check is skipped."
                 : "The web port isn't published, and Gitberth runs outside Docker here, so the health URL check is skipped.");
             return null;
         }
         var path = app.HealthCheckPath.StartsWith('/') ? app.HealthCheckPath : "/" + app.HealthCheckPath;
         var url = $"http://{host}:{number}{path}";
-        log.Step($"Checking {url}");
+        log.Step($"Checking {url}{(asLocalhost ? " (as localhost)" : "")}");
         var client = httpFactory.CreateClient("health");
         var deadline = DateTime.UtcNow + HealthTimeout;
         var last = "";
@@ -1547,7 +1828,9 @@ public sealed class DeployPipeline(
             if (ct.IsCancellationRequested) return "Cancelled while checking the new container.";
             try
             {
-                using var response = await client.GetAsync(url, CancellationToken.None);
+                using var request = new HttpRequestMessage(HttpMethod.Get, url);
+                if (asLocalhost) request.Headers.Host = $"localhost:{number.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                using var response = await client.SendAsync(request, CancellationToken.None);
                 if ((int)response.StatusCode < 400)
                 {
                     log.Line($"Health check OK ({(int)response.StatusCode})");
@@ -1559,7 +1842,7 @@ public sealed class DeployPipeline(
             {
                 last = ex.Message;
             }
-            var current = await docker.InspectStateAsync(spec.Name);
+            var current = await docker.InspectStateAsync(container);
             if (current is null || !current.Running) return "The new container exited during the health check.";
             await Task.Delay(2000, CancellationToken.None);
         }

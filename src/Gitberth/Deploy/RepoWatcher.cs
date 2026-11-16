@@ -44,14 +44,21 @@ public sealed class WatchState
     /// GitHub said something changed in a repo (a push, a pull request, a branch deleted): the watcher looks now, and the
     /// deploys that pass starts for that repo are counted as started by GitHub (<see cref="DeployTrigger.Webhook"/>).
     /// </summary>
-    public void CheckNowFromWebhook(string owner, string repo)
+    public void CheckNowFromWebhook(string owner, string repo, string? sender = null)
     {
+        if (!string.IsNullOrWhiteSpace(sender)) _webhookSenders[$"{owner}/{repo}"] = sender.Trim();
         _webhookRepos[$"{owner}/{repo}"] = 0;
         CheckNow();
     }
 
+    // Where GitHub's last delivery about each repo came from, for the audit log's "GitHub, from 140.82.115.1".
+    private readonly ConcurrentDictionary<string, string> _webhookSenders = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Whether GitHub told about this repo since the last time it was asked; asking clears it.</summary>
     public bool TakeWebhookPoke(string owner, string repo) => _webhookRepos.TryRemove($"{owner}/{repo}", out _);
+
+    /// <summary>The address GitHub's last delivery about this repo came from, once; null when there was none.</summary>
+    public string? TakeWebhookSender(string owner, string repo) => _webhookSenders.TryRemove($"{owner}/{repo}", out var sender) ? sender : null;
 
     internal void Record(int appId, string? sha, string? error) => _apps[appId] = new WatchInfo(DateTime.UtcNow, sha, error);
 
@@ -140,6 +147,8 @@ public sealed class RepoWatcher(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // What the watcher starts is Gitberth's own, through the watcher; a pass GitHub asked for is GitHub's (CheckAsync).
+        using var actor = Audit.AuditScope.Begin(Audit.AuditActor.System(Audit.AuditVia.Watcher));
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
@@ -187,6 +196,9 @@ public sealed class RepoWatcher(
             var poked = state.TakeWebhookPoke(first.Owner, first.Repo);
             if (state.InBackoff(repo.Key) && !poked) continue;
             var trigger = poked ? DeployTrigger.Webhook : DeployTrigger.Poll;
+            var sender = state.TakeWebhookSender(first.Owner, first.Repo);
+            // GitHub asked for this look: what it starts (deploys, previews) is GitHub's, through its webhook.
+            using var asked = poked ? Audit.AuditScope.Begin(new Audit.AuditActor(Audit.AuditActorKind.GitHub, "GitHub", Audit.AuditVia.Webhook, sender)) : null;
             RemoteInfo remote;
             try
             {

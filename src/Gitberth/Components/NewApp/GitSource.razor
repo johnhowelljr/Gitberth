@@ -78,7 +78,61 @@
         </div>
     </section>
 
-    @if (detection is not null)
+    @if (detection is not null && composeInfo is { Error: null, Services.Count: > 0 } compose)
+    {
+        <section class="gb-card gb-sec" aria-labelledby="gb-compose-title">
+            <div class="gb-sec-head">
+                <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" /></span>
+                <div style="min-width:0">
+                    <div class="gb-h3" id="gb-compose-title">This repo has a @composeFile with @Count(compose.Services.Count, "service")</div>
+                    <p>Deploy it with Compose, as one app with all its services, or build one container from the repo.</p>
+                </div>
+            </div>
+            <div class="gb-sec-body">
+                <div class="gb-choices" role="radiogroup" aria-label="How to deploy it">
+                    <button type="button" class="gb-choice @(useCompose ? "on" : null)" role="radio" aria-checked="@(useCompose ? "true" : "false")" disabled="@Busy" @onclick="() => UseComposeAsync(true)">
+                        <span class="gb-radio @(useCompose ? "on" : null)"></span>
+                        <span style="min-width:0"><span class="gb-choice-title" style="display:block">With Compose</span>
+                            <span class="gb-choice-sub">@string.Join(", ", compose.Services.Select(s => s.Name)): one app, deployed with docker compose</span></span>
+                    </button>
+                    <button type="button" class="gb-choice @(useCompose ? null : "on")" role="radio" aria-checked="@(useCompose ? "false" : "true")" disabled="@Busy" @onclick="() => UseComposeAsync(false)">
+                        <span class="gb-radio @(useCompose ? null : "on")"></span>
+                        <span style="min-width:0"><span class="gb-choice-title" style="display:block">As one container</span>
+                            <span class="gb-choice-sub">@(detection.CanBuild ? detection.Title : "Nothing else was found to build: it needs a Dockerfile of its own")</span></span>
+                    </button>
+                </div>
+                @if (useCompose)
+                {
+                    <div class="gb-fgrid">
+                        @if (composeFiles.Count > 1)
+                        {
+                            <Field Label="Compose file" For="git-compose-file">
+                                <select id="git-compose-file" class="gb-input gb-input--mono" value="@composeFile" @onchange="e => PickComposeFileAsync(e.Value?.ToString())">
+                                    @foreach (var f in composeFiles)
+                                    {
+                                        <option value="@f">@f</option>
+                                    }
+                                </select>
+                            </Field>
+                        }
+                        <Field Label="Web service" Help="Its container is the app's: its domains, LAN port, health URL and logs. The others stay inside the app.">
+                            <Seg T="string" Options="@(compose.Services.Select(s => new SegOption<string>(s.Name, s.Name)).ToList())" Value="composeWeb" ValueChanged="PickWebAsync" Label="Web service" />
+                        </Field>
+                    </div>
+                    @foreach (var problem in Gitberth.Compose.ComposeApps.Problems(composeTexts.GetValueOrDefault(composeFile ?? "") ?? "", composeWeb))
+                    {
+                        <Banner Tone="warn" Title="Worth knowing">@problem</Banner>
+                    }
+                    <p class="gb-help">
+                        Gitberth reads it with docker compose, names its containers gb-@(Slug)_<em>service</em>, publishes the web service on the ports below,
+                        and builds each service that has a build section. Its variables are the app's own, below.
+                    </p>
+                }
+            </div>
+        </section>
+    }
+
+    @if (detection is not null && !useCompose)
     {
         <section class="gb-card gb-sec">
             <div class="gb-sec-head">
@@ -130,8 +184,11 @@
                 }
             </div>
         </section>
+    }
 
-        @if (detection.CanBuild || customize)
+    @if (detection is not null)
+    {
+        @if (detection.CanBuild || customize || useCompose)
         {
             <section class="gb-card gb-sec">
                 <div class="gb-sec-head">
@@ -147,10 +204,13 @@
                             <input id="git-health" class="gb-input gb-input--mono" placeholder="/health" value="@model.HealthCheckPath" @onchange="e => model.HealthCheckPath = e.Value?.ToString()" />
                         </Field>
                     </div>
-                    @* The restart policy in the words Settings and Configure give it. *@
-                    <Field Label="Restart">
-                        <Seg T="string" Options="AppFacts.RestartOptions" Value="model.RestartPolicy" ValueChanged="v => model.RestartPolicy = v" Label="Restart policy" />
-                    </Field>
+                    @* The restart policy in the words Settings and Configure give it; a Compose app's services have their file's. *@
+                    @if (!useCompose)
+                    {
+                        <Field Label="Restart">
+                            <Seg T="string" Options="AppFacts.RestartOptions" Value="model.RestartPolicy" ValueChanged="v => model.RestartPolicy = v" Label="Restart policy" />
+                        </Field>
+                    }
                     <SwitchRow Title="Deploy on push" Sub="A new commit on the branch deploys by itself." Value="model.AutoDeploy" ValueChanged="v => model.AutoDeploy = v" />
                 </div>
                 <div class="gb-sec-head" style="border-top:1px solid var(--gb-line-1)">
@@ -160,20 +220,23 @@
                 </div>
                 <PortsTable Draft="ports" Name="@Slug" LanHost="@lanHost" LanIpv4Only="lanIpv4Only" Problems="portProblems" Disabled="@Busy" Marks="false" OnChanged="PortsChanged" />
                 <div class="gb-sec-body">
-                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />Environment variables</div>
+                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />@(useCompose ? "Variables (they fill the Compose file's ${…})" : "Environment variables")</div>
                     <EnvEditor Rows="model.Env" />
-                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Storage" Size="sm" />Volumes</div>
-                    <VolumesEditor Rows="model.Volumes" Slug="@Slug" />
-                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Speed" Size="sm" />Resources</div>
-                    @* The same fields as its Settings tab and Configure; CreateAsync stores them as Settings would. *@
-                    <ResourceFields Draft="resources" Create="true" HostCpus="HostCpus" />
+                    @if (!useCompose)
+                    {
+                        <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Storage" Size="sm" />Volumes</div>
+                        <VolumesEditor Rows="model.Volumes" Slug="@Slug" />
+                        <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Speed" Size="sm" />Resources</div>
+                        @* The same fields as its Settings tab and Configure; CreateAsync stores them as Settings would. *@
+                        <ResourceFields Draft="resources" Create="true" HostCpus="HostCpus" />
+                    }
                     @if (errors.Count > 0)
                     {
                         <Banner Tone="critical" Title="Not created yet">@string.Join(" ", errors)</Banner>
                     }
                 </div>
                 <div class="gb-card-foot" style="justify-content:flex-end;gap:10px">
-                    <span class="gb-help" style="margin-right:auto">Creates gb-@Slug, then builds and deploys it. The deploy's log shows every step.</span>
+                    <span class="gb-help" style="margin-right:auto">@(useCompose ? $"Creates the Compose project gb-{Slug}, then builds and starts its services. The deploy's log shows every step." : $"Creates gb-{Slug}, then builds and deploys it. The deploy's log shows every step.")</span>
                     <Btn Kind="BtnKind.Ghost" Href="apps">Cancel</Btn>
                     <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="Busy">Create and deploy</Btn>
                 </div>
@@ -218,6 +281,70 @@
     // The name the app gets on the shared network, and the name it was worked out for.
     private NetworkName? networkName;
     private string? networkNameFor;
+    // The Compose files in the analyzed folder, their text (read while the clone was there), the one chosen, what it has,
+    // and whether the app is deployed with it, and which service is its web one.
+    private List<string> composeFiles = [];
+    private Dictionary<string, string> composeTexts = new(StringComparer.Ordinal);
+    private string? composeFile;
+    private Gitberth.Compose.ComposeFileInfo? composeInfo;
+    private bool useCompose;
+    private string composeWeb = "";
+
+    private static string Count(int n, string what) => n == 1 ? $"1 {what}" : $"{n} {what}s";
+
+    /// <summary>
+    /// Whether a repo's Compose file is the way to deploy it, as New app first offers: when it has several services, or
+    /// nothing else in the folder can be built.
+    /// </summary>
+    internal static bool PreferCompose(Gitberth.Compose.ComposeFileInfo info, bool somethingElse) =>
+        info is { Error: null, Services.Count: > 0 } && (info.Services.Count > 1 || !somethingElse);
+
+    private void ReadCompose(string? file)
+    {
+        composeFile = file;
+        composeInfo = file is not null && composeTexts.TryGetValue(file, out var text) ? Gitberth.Compose.ComposeFiles.Read(text) : null;
+        composeWeb = composeInfo is { Services.Count: > 0 } info ? Gitberth.Compose.ComposeFiles.PickWeb(info.Services)?.Service ?? info.Services[0].Name : "";
+    }
+
+    private async Task UseComposeAsync(bool on)
+    {
+        if (useCompose == on) return;
+        useCompose = on;
+        await PrefillAsync(analyzedDir is { Length: > 0 } d ? d : null);
+    }
+
+    private async Task PickComposeFileAsync(string? file)
+    {
+        ReadCompose(file);
+        await PrefillAsync(analyzedDir is { Length: > 0 } d ? d : null);
+    }
+
+    private async Task PickWebAsync(string service)
+    {
+        composeWeb = service;
+        await ComposePortsAsync();
+    }
+
+    // The web service's ports, as its Compose file has them: each one it publishes on the LAN (at the file's host port when
+    // it's free), the ones it only exposes inside Docker, and the web port first.
+    private async Task ComposePortsAsync()
+    {
+        if (composeInfo?.Service(composeWeb) is not { } web)
+        {
+            ports = ContainerPortsDraft.ForNew([], null);
+            model.Ports = [];
+            return;
+        }
+        var port = Gitberth.Compose.ComposeFiles.WebPortOf(web);
+        var rules = new List<PortRule>();
+        foreach (var p in web.Ports.DistinctBy(p => (p.Target, p.Protocol)))
+            rules.Add(p.Published is int published
+                ? new PortRule(p.Target, p.Protocol, PortAccess.Lan, await SuggestHostPortAsync(published))
+                : new PortRule(p.Target, p.Protocol, p.Target == port ? PortAccess.Lan : PortAccess.Internal, p.Target == port ? await SuggestHostPortAsync(p.Target) : null));
+        if (port is int webPort && rules.All(r => r.ContainerPort != webPort)) rules.Insert(0, new PortRule(webPort, "tcp", PortAccess.Lan, await SuggestHostPortAsync(webPort)));
+        ports = ContainerPortsDraft.ForNew(rules.OrderBy(r => r.ContainerPort == port ? 0 : 1).ToList(), port);
+        model.Ports = ports.ToPortRows().ToList();
+    }
 
     private bool Busy => checking || analyzing || creating;
 
@@ -240,8 +367,11 @@
         : AppService.Slugify(model.Name) is { Length: > 0 } slug ? slug : "app";
 
     private string? NameHelp => AppService.Slugify(model.Name).Length == 0 ? null
-        : networkNameFor == model.Name && networkName is { Taken: { } taken } ? $"Network name {Slug} ({taken}) · container gb-{Slug}"
-        : $"Network name {Slug} · container gb-{Slug}";
+        : networkNameFor == model.Name && networkName is { Taken: { } taken } ? $"Network name {Slug} ({taken}) · container {ContainerShown}"
+        : $"Network name {Slug} · container {ContainerShown}";
+
+    // The app's container: with Compose, its web service's.
+    private string ContainerShown => useCompose && composeWeb.Length > 0 ? Gitberth.Compose.ComposeNames.Member(Slug, composeWeb) : $"gb-{Slug}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -313,6 +443,7 @@
         resources = ContainerSettingsDraft.From(new ContainerSettings());
         (errors, portProblems, triedCreate) = ([], [], false);
         analyzedDir = lastAnalyzedDir = null;
+        (composeFiles, composeTexts, composeFile, composeInfo, useCompose, composeWeb) = ([], new(StringComparer.Ordinal), null, null, false, "");
         await OnStage.InvokeAsync(NewAppStep.Source);
         if (!GitHubRepoRef.TryParse(url, out var parsed, out var parseError))
         {
@@ -409,7 +540,15 @@
             detection = await Task.Run(() => Analyzer.Analyze(dir, new AnalyzeOptions(hint, AppDir: sub)));
             // Keeps a Dockerfile variant as the hint; for .NET, the project that was picked.
             if (detection.SelectedProject is not null) projectHint = detection.SelectedProject;
-            customize = detection.Kind == ProjectKind.Unknown;
+            // A Compose file in the folder: read now, while the clone is here. With several services, or nothing else to
+            // build, the app is deployed with it unless the owner picks one container.
+            var folder = sub.Length == 0 ? dir : Path.Combine(dir, sub.Replace('/', Path.DirectorySeparatorChar));
+            // Never one that's a link out of the repo: Gitberth reads it itself, and a deploy refuses it anyway.
+            composeFiles = Gitberth.Compose.ComposeFiles.Find(folder).Where(f => !Gitberth.Compose.ComposeTransform.LinksOut(dir, Path.Combine(folder, f))).ToList();
+            composeTexts = composeFiles.ToDictionary(f => f, f => File.ReadAllText(Path.Combine(folder, f)), StringComparer.Ordinal);
+            ReadCompose(composeFiles.FirstOrDefault());
+            useCompose = composeInfo is { } found && PreferCompose(found, detection.Kind != ProjectKind.Unknown);
+            customize = detection.Kind == ProjectKind.Unknown && !useCompose;
             customDockerfile = detection.Dockerfile ?? DockerfileTemplates.Starter;
             (analyzedDir, analyzedHint, analyzedBranch, lastAnalyzedDir) = (sub, projectHint, branch, sub);
             await PrefillAsync(sub.Length == 0 ? null : sub);
@@ -435,6 +574,21 @@
         model = new AppSettingsModel { Name = name, RestartPolicy = model.RestartPolicy, AutoDeploy = model.AutoDeploy };
         (portProblems, triedCreate) = ([], false);
         await ChooseNameAsync();
+        if (useCompose && composeInfo is { } compose)
+        {
+            // The web service's ports, and the variables the Compose file uses: empty ones take its defaults.
+            await ComposePortsAsync();
+            var shared = (await RepoVars.GetAsync(repo!.Owner, repo.Repo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in compose.Variables)
+                model.Env.Add(new EnvRow
+                {
+                    Key = v.Name, Value = "", IsSecret = Security.Masking.IsSecret(v.Name, ""),
+                    Hint = shared.Contains(v.Name) ? "Set in the repo's GitHub variables"
+                        : v.Default is { Length: > 0 } d ? $"{composeFile} uses {d} when it's empty"
+                        : v.Required ? $"{composeFile} needs it" : $"Used by {composeFile}",
+                });
+            return;
+        }
         // On the LAN, at its own port when that's free (5.13).
         var rules = new List<PortRule>();
         if (detection!.ContainerPort is int port) rules.Add(new PortRule(port, "tcp", PortAccess.Lan, await SuggestHostPortAsync(port)));
@@ -479,10 +633,11 @@
         model.Branch = analyzedBranch;
         model.Subdirectory = analyzedDir.Length == 0 ? null : analyzedDir;
         model.ProjectHint = analyzedHint;
-        model.DockerfileMode = customize ? DockerfileMode.Custom : DockerfileMode.Auto;
-        model.CustomDockerfile = customize ? customDockerfile : null;
+        model.DockerfileMode = customize && !useCompose ? DockerfileMode.Custom : DockerfileMode.Auto;
+        model.CustomDockerfile = customize && !useCompose ? customDockerfile : null;
         model.Ports = ports.ToPortRows().ToList();
-        SetLimits(model, resources);
+        (model.ComposeFile, model.WebService) = useCompose ? (composeFile, composeWeb) : (null, null);
+        if (!useCompose) SetLimits(model, resources);
         creating = true;
         try
         {
@@ -492,6 +647,11 @@
             var all = await Apps.ValidateAsync(null, model);
             errors = all.Where(e => portProblems.All(p => p.Message != e)).ToList();
             if (errors.Count == 0 && portProblems.Count > 0) errors = ["Some ports need changing: see the Ports table."];
+            if (useCompose && Gitberth.Compose.ComposeApps.Problems(composeTexts.GetValueOrDefault(composeFile ?? "") ?? "", composeWeb) is { Count: > 0 } composeProblems)
+            {
+                errors.AddRange(composeProblems);
+                return;
+            }
             if (all.Count > 0 || portProblems.Count > 0) return;
             var appId = await Apps.CreateAsync(repo, model, detection);
             await Actions.DeployAsync(appId, DeployTrigger.Created);
