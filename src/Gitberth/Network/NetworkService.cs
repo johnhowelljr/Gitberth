@@ -912,14 +912,13 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
         if (lowPriority) endpoint["GwPriority"] = -1;
         if (aliases.Count > 0) endpoint["Aliases"] = new JsonArray(aliases.Select(a => (JsonNode?)a).ToArray());
         if (ipv4 is not null) endpoint["IPAMConfig"] = new JsonObject { ["IPv4Address"] = ipv4 };
-        return api.SendAsync(HttpMethod.Post, $"networks/{Uri.EscapeDataString(network)}/connect",
-            new JsonObject { ["Container"] = container, ["EndpointConfig"] = endpoint }, ct: ct);
+        // A late answer is checked on: joined all the same once the container is on the network.
+        return api.ConnectNetworkAsync(network, container, endpoint, ct);
     }
 
-    // Not forced: Docker says why it can't rather than tearing the endpoint down regardless.
+    // Not forced: Docker says why it can't rather than tearing the endpoint down regardless. A late answer is checked on.
     private Task DisconnectAsync(string container, string network, CancellationToken ct) =>
-        api.SendAsync(HttpMethod.Post, $"networks/{Uri.EscapeDataString(network)}/disconnect",
-            new JsonObject { ["Container"] = container, ["Force"] = false }, ct: ct);
+        api.DisconnectNetworkAsync(network, container, ct);
 
     // Joins the container to the network again with what its endpoint there had before: its aliases, fixed address and
     // gateway priority.

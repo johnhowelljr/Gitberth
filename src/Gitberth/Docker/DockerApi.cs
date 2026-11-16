@@ -54,8 +54,37 @@ public sealed partial class DockerApi : IDisposable
     /// </summary>
     public static readonly Version OldestChangingApi = new(1, 44);
 
-    /// <summary>How long a call may take when it doesn't say.</summary>
-    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>
+    /// How long a call that reads may take when it doesn't say: a busy engine (builds, pulls, many containers changing at
+    /// once) can take well over ten seconds to answer.
+    /// </summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// How long a change (making, starting, renaming, updating or removing a container, a network's change) is waited for
+    /// before Gitberth asks Docker what became of it: see <see cref="DefaultSettleWait"/>.
+    /// </summary>
+    public static readonly TimeSpan DefaultChangeTimeout = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// How long, once a change's answer is late, Gitberth keeps asking Docker whether it did it all the same: an engine
+    /// finishes what it was asked even when it answers late, and a change it made isn't a failure.
+    /// </summary>
+    public static readonly TimeSpan DefaultSettleWait = TimeSpan.FromSeconds(60);
+
+    /// <summary>How long a change is waited for (<see cref="DefaultChangeTimeout"/>; shorter in tests).</summary>
+    internal TimeSpan ChangeTimeout { get; init; } = DefaultChangeTimeout;
+
+    /// <summary>How long a late change is checked on (<see cref="DefaultSettleWait"/>; shorter in tests).</summary>
+    internal TimeSpan SettleWait { get; init; } = DefaultSettleWait;
+
+    /// <summary>How often a late change is checked on.</summary>
+    internal TimeSpan SettlePoll { get; init; } = TimeSpan.FromSeconds(2);
+
+    // A container made, or started, more than this before Gitberth asked can't be its own doing. The engine's clock and
+    // Gitberth's may differ a little (the same host's clock, over the socket); a larger difference only means a late
+    // change isn't recognized, and is a timeout as before, never the other way round.
+    private static readonly TimeSpan ClockSkew = TimeSpan.FromSeconds(10);
 
     /// <summary>The longest Gitberth waits for Docker to say a container stopped, for one that's never killed (--stop-timeout -1).</summary>
     public static readonly TimeSpan LongestStop = TimeSpan.FromMinutes(10);
@@ -163,9 +192,15 @@ public sealed partial class DockerApi : IDisposable
     /// <summary>POST networks/create: a network as <paramref name="body"/> describes it. Returns its ID.</summary>
     public async Task<string> CreateNetworkAsync(JsonObject body, CancellationToken ct = default)
     {
-        var answer = JsonNode.Parse(await SendAsync(HttpMethod.Post, "networks/create", body, ct: ct));
-        return answer?["Id"] is JsonValue id && id.TryGetValue<string>(out var made) && made.Length > 0
-            ? made
+        var name = body["Name"] is JsonValue n && n.TryGetValue<string>(out var s) ? s : "";
+        var answer = JsonNode.Parse(await SendChangeAsync(HttpMethod.Post, "networks/create", body,
+            // Made all the same: the network of that name is there now.
+            async token => name.Length > 0 && await GetObjectAsync($"networks/{Uri.EscapeDataString(name)}", token) is { } made
+                ? new JsonObject { ["Id"] = made["Id"]?.DeepClone() }.ToJsonString()
+                : null,
+            ct));
+        return answer?["Id"] is JsonValue id && id.TryGetValue<string>(out var madeId) && madeId.Length > 0
+            ? madeId
             : throw new DockerApiException(0, $"Docker didn't say which network it made for {body["Name"]}.");
     }
 
@@ -174,7 +209,35 @@ public sealed partial class DockerApi : IDisposable
     /// prunes networks.
     /// </summary>
     public async Task RemoveNetworkAsync(string idOrName, CancellationToken ct = default) =>
-        await SendAsync(HttpMethod.Delete, $"networks/{Uri.EscapeDataString(idOrName)}", ct: ct);
+        await SendChangeAsync(HttpMethod.Delete, $"networks/{Uri.EscapeDataString(idOrName)}", null,
+            async token => await GetObjectAsync($"networks/{Uri.EscapeDataString(idOrName)}", token) is null ? "" : null, ct);
+
+    /// <summary>
+    /// POST networks/{network}/connect: <paramref name="container"/> joins it with <paramref name="endpoint"/> (its aliases,
+    /// address and gateway priority). Joined all the same when its answer was late, once the container is on it.
+    /// </summary>
+    public async Task ConnectNetworkAsync(string network, string container, JsonObject endpoint, CancellationToken ct = default) =>
+        await SendChangeAsync(HttpMethod.Post, $"networks/{Uri.EscapeDataString(network)}/connect",
+            new JsonObject { ["Container"] = container, ["EndpointConfig"] = endpoint.DeepClone() },
+            async token => await OnNetworkAsync(container, network, token) == true ? "" : null, ct);
+
+    /// <summary>
+    /// POST networks/{network}/disconnect, not forced: Docker says why it can't rather than tearing the endpoint down
+    /// regardless. Left all the same when its answer was late, once the container isn't on it (or is gone).
+    /// </summary>
+    public async Task DisconnectNetworkAsync(string network, string container, CancellationToken ct = default) =>
+        await SendChangeAsync(HttpMethod.Post, $"networks/{Uri.EscapeDataString(network)}/disconnect",
+            new JsonObject { ["Container"] = container, ["Force"] = false },
+            async token => await OnNetworkAsync(container, network, token) != true ? "" : null, ct);
+
+    // Whether the container is on the network (by its name, or its ID's start); null when there's no such container.
+    private async Task<bool?> OnNetworkAsync(string container, string network, CancellationToken ct)
+    {
+        if (await GetObjectAsync($"containers/{Uri.EscapeDataString(container)}/json", ct) is not { } inspect) return null;
+        if (inspect["NetworkSettings"]?["Networks"] is not JsonObject networks) return false;
+        return networks.Any(n => n.Key == network
+            || (n.Value?["NetworkID"] is JsonValue id && id.TryGetValue<string>(out var s) && network.Length >= 12 && s.StartsWith(network, StringComparison.Ordinal)));
+    }
 
     /// <summary>
     /// Containers' events from <paramref name="since"/> on (the engine remembers recent ones), then as they happen. Only
@@ -223,9 +286,15 @@ public sealed partial class DockerApi : IDisposable
     public async Task<string> CreateContainerAsync(string name, JsonObject body, CancellationToken ct = default)
     {
         await ChangingAsync(ct);
-        var answer = JsonNode.Parse(await SendAsync(HttpMethod.Post, $"containers/create?name={Uri.EscapeDataString(name)}", body, ct: ct));
-        return answer?["Id"] is JsonValue id && id.TryGetValue<string>(out var made) && made.Length > 0
-            ? made
+        var asked = DateTime.UtcNow;
+        var answer = JsonNode.Parse(await SendChangeAsync(HttpMethod.Post, $"containers/create?name={Uri.EscapeDataString(name)}", body,
+            // Made all the same: a container of that name, made since Gitberth asked (a name another one had is Docker's 409).
+            async token => await GetObjectAsync($"containers/{Uri.EscapeDataString(name)}/json", token) is { } made && Since(made["Created"], asked)
+                ? new JsonObject { ["Id"] = made["Id"]?.DeepClone() }.ToJsonString()
+                : null,
+            ct));
+        return answer?["Id"] is JsonValue id && id.TryGetValue<string>(out var madeId) && madeId.Length > 0
+            ? madeId
             : throw new DockerApiException(0, $"Docker didn't say which container it made for {name}.");
     }
 
@@ -233,7 +302,9 @@ public sealed partial class DockerApi : IDisposable
     public async Task UpdateRestartPolicyAsync(string idOrName, JsonObject policy, CancellationToken ct = default)
     {
         await ChangingAsync(ct);
-        await SendAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/update", new JsonObject { ["RestartPolicy"] = policy.DeepClone() }, ct: ct);
+        var update = new JsonObject { ["RestartPolicy"] = policy.DeepClone() };
+        await SendChangeAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/update", update,
+            async token => await HasAsync(idOrName, update, token) ? "" : null, ct);
     }
 
     /// <summary>
@@ -244,10 +315,31 @@ public sealed partial class DockerApi : IDisposable
     public async Task<JsonObject> UpdateContainerAsync(string idOrName, JsonObject update, CancellationToken ct = default)
     {
         await ChangingAsync(ct);
-        var answer = await SendAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/update", update.DeepClone(), ct: ct);
+        var answer = await SendChangeAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/update", update.DeepClone(),
+            async token => await HasAsync(idOrName, update, token) ? "" : null, ct);
         var parsed = answer.Trim().Length == 0 ? null : JsonNode.Parse(answer) as JsonObject;
         var warnings = parsed?["Warnings"] as JsonArray ?? [];
         return new JsonObject { ["Warnings"] = warnings.DeepClone() };
+    }
+
+    // Whether the container's HostConfig already says what an update asked for: each value it names, but 0, which Docker
+    // reads as "unchanged".
+    private async Task<bool> HasAsync(string idOrName, JsonObject update, CancellationToken ct)
+    {
+        if (await GetObjectAsync($"containers/{Uri.EscapeDataString(idOrName)}/json", ct) is not { } inspect
+            || inspect["HostConfig"] is not JsonObject host) return false;
+        foreach (var (key, wanted) in update)
+        {
+            if (wanted is JsonValue v && v.TryGetValue<long>(out var number) && number == 0) continue;
+            if (wanted is JsonObject asked)
+            {
+                // A part of a setting, such as the restart policy's name: the parts asked for must match.
+                if (host[key] is not JsonObject has || asked.Any(p => !JsonNode.DeepEquals(p.Value, has[p.Key]))) return false;
+                continue;
+            }
+            if (!JsonNode.DeepEquals(wanted, host[key])) return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -261,7 +353,10 @@ public sealed partial class DockerApi : IDisposable
         var t = Math.Max(timeoutSeconds, -1);
         try
         {
-            await SendAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/stop?t={t.ToString(CultureInfo.InvariantCulture)}", timeout: StopWait(t), ct: ct);
+            await SendChangeAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/stop?t={t.ToString(CultureInfo.InvariantCulture)}", null,
+                // Stopped all the same: it isn't running (or is gone).
+                async token => await GetObjectAsync($"containers/{Uri.EscapeDataString(idOrName)}/json", token) is not { } c || !Running(c) ? "" : null,
+                ct, StopWaitFor(t));
         }
         catch (DockerApiException ex) when (ex.Status == 304)
         {
@@ -272,20 +367,47 @@ public sealed partial class DockerApi : IDisposable
     internal static TimeSpan StopWait(int timeoutSeconds) =>
         timeoutSeconds < 0 || TimeSpan.FromSeconds(timeoutSeconds + 15) > LongestStop ? LongestStop : TimeSpan.FromSeconds(timeoutSeconds + 15);
 
+    /// <summary>How long past a stop's own timeout Docker's answer is waited for (15 s, as <see cref="StopWait"/>; shorter in tests).</summary>
+    internal TimeSpan StopGrace { get; init; } = TimeSpan.FromSeconds(15);
+
+    // A stop over the API is waited for its own timeout and the grace (or LongestStop), and never less than any other
+    // change: a busy engine is as slow to answer a stop as anything else.
+    private TimeSpan StopWaitFor(int timeoutSeconds)
+    {
+        var wait = timeoutSeconds < 0 || TimeSpan.FromSeconds(timeoutSeconds) + StopGrace > LongestStop
+            ? LongestStop
+            : TimeSpan.FromSeconds(timeoutSeconds) + StopGrace;
+        return wait > ChangeTimeout ? wait : ChangeTimeout;
+    }
+
     /// <summary>POST containers/{id}/rename?name=. A name another container has is Docker's 409.</summary>
     public async Task RenameContainerAsync(string idOrName, string name, CancellationToken ct = default)
     {
         await ChangingAsync(ct);
-        await SendAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/rename?name={Uri.EscapeDataString(name)}", ct: ct);
+        await SendChangeAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/rename?name={Uri.EscapeDataString(name)}", null,
+            async token =>
+            {
+                // Renamed all the same: the new name is there, and it's this container (by its ID), or its old name is gone.
+                if (await GetObjectAsync($"containers/{Uri.EscapeDataString(name)}/json", token) is not { } renamed) return null;
+                if (renamed["Id"] is JsonValue id && id.TryGetValue<string>(out var full) && idOrName.Length >= 12 && full.StartsWith(idOrName, StringComparison.Ordinal))
+                    return "";
+                return await GetObjectAsync($"containers/{Uri.EscapeDataString(idOrName)}/json", token) is null ? "" : null;
+            },
+            ct);
     }
 
     /// <summary>POST containers/{id}/start. One that runs already counts as started (Docker's 304).</summary>
     public async Task StartContainerAsync(string idOrName, CancellationToken ct = default)
     {
         await ChangingAsync(ct);
+        var asked = DateTime.UtcNow;
         try
         {
-            await SendAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/start", ct: ct);
+            await SendChangeAsync(HttpMethod.Post, $"containers/{Uri.EscapeDataString(idOrName)}/start", null,
+                // Started all the same: it runs, or it started since Gitberth asked (and has stopped again: its own business).
+                async token => await GetObjectAsync($"containers/{Uri.EscapeDataString(idOrName)}/json", token) is { } c
+                    && (Running(c) || Since(c["State"]?["StartedAt"], asked)) ? "" : null,
+                ct);
         }
         catch (DockerApiException ex) when (ex.Status == 304)
         {
@@ -320,8 +442,58 @@ public sealed partial class DockerApi : IDisposable
     public async Task RemoveContainerAsync(string idOrName, bool force, CancellationToken ct = default)
     {
         await ChangingAsync(ct);
-        await SendAsync(HttpMethod.Delete, $"containers/{Uri.EscapeDataString(idOrName)}?force={(force ? "true" : "false")}", ct: ct);
+        await SendChangeAsync(HttpMethod.Delete, $"containers/{Uri.EscapeDataString(idOrName)}?force={(force ? "true" : "false")}", null,
+            // Removed all the same: it's gone.
+            async token => await GetObjectAsync($"containers/{Uri.EscapeDataString(idOrName)}/json", token) is null ? "" : null, ct);
     }
+
+    /// <summary>
+    /// A change, as <see cref="SendAsync"/>, waited for up to <see cref="ChangeTimeout"/> (or <paramref name="timeout"/>).
+    /// When its answer still hasn't come, Docker may have done it all the same: a busy engine finishes what it was asked
+    /// even when it answers late. So <paramref name="happened"/> asks what became of it, every <see cref="SettlePoll"/> for
+    /// up to <see cref="SettleWait"/>, and the answer it gives stands for Docker's. Only a change that still hasn't happened
+    /// is a <see cref="TimeoutException"/>. The audit log knows the change as Gitberth's own all that time.
+    /// </summary>
+    private async Task<string> SendChangeAsync(HttpMethod method, string path, JsonNode? body, Func<CancellationToken, Task<string?>> happened,
+        CancellationToken ct, TimeSpan? timeout = null)
+    {
+        using var expected = Expected?.ForApi(method, path, body);
+        var versioned = await VersionedAsync(path, ct);
+        try
+        {
+            return await SendCoreAsync(method, versioned, body, timeout ?? ChangeTimeout, ct);
+        }
+        catch (TimeoutException late)
+        {
+            var until = DateTime.UtcNow + SettleWait;
+            while (true)
+            {
+                try
+                {
+                    if (await happened(ct) is { } answer) return answer;
+                }
+                catch (Exception ex) when (ex is TimeoutException or HttpRequestException or IOException or JsonException)
+                {
+                    // Still too busy to say: ask again.
+                }
+                if (DateTime.UtcNow >= until)
+                    throw new TimeoutException(
+                        $"{late.Message.TrimEnd('.')}, and it still hadn't happened {SettleWait.TotalSeconds.ToString("0.#", CultureInfo.InvariantCulture)} seconds later.");
+                await Task.Delay(SettlePoll, ct);
+            }
+        }
+    }
+
+    // Whether the container runs now.
+    private static bool Running(JsonObject inspect) =>
+        inspect["State"]?["Running"] is JsonValue running && running.TryGetValue<bool>(out var yes) && yes;
+
+    // Whether a time Docker gave (RFC 3339, such as "2026-11-16T20:28:43.123456789Z") is since Gitberth asked, give or take
+    // the clocks' difference. Docker's zero time ("0001-01-01T00:00:00Z", never started) never is.
+    private static bool Since(JsonNode? time, DateTime asked) =>
+        time is JsonValue v && v.TryGetValue<string>(out var text)
+        && DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at)
+        && at.Year > 1 && at.UtcDateTime >= asked - ClockSkew;
 
     // Changing a container needs API 1.44: below it Gitberth only reads, and says why.
     private async Task ChangingAsync(CancellationToken ct)
