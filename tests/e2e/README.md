@@ -13,23 +13,151 @@ either.
 
 ## Running it
 
+**Testing a change takes 10 minutes in all**: the unit tests, the rigs' setup, and the scenario tests the change
+touches. **The whole suite is on demand**, before a release: about 25 minutes on GitHub Actions, or about an hour on
+CT 101's two rigs.
+
 On a Docker host that allows privileged containers:
 
 ```sh
-sh tests/e2e/run.sh test                      # bring the rig up, start from a fresh Gitberth, run every scenario
-sh tests/e2e/run.sh test -k branch_previews   # only the scenarios matching a pytest -k expression
-sh tests/e2e/run.sh up                        # only start the rig, or bring it up to date
+sh tests/e2e/run.sh impact --base origin/next --lanes 2   # the default way to test a change: 10 minutes in all
+sh tests/e2e/run.sh plan --base origin/next --lanes 2     # what that would run, and why; touches nothing
+sh tests/e2e/run.sh smoke --lanes 2                       # the smoke (6 tests)
+sh tests/e2e/run.sh groups 29 12+slow @t28-paste          # the groups and aliases named (impact.toml)
+sh tests/e2e/run.sh groups 31 --templates memos,miniflux  # the template smoke, for those templates only
+sh tests/e2e/run.sh wide | full | release --lanes 2       # the hub set; every group (slow tests too); full + every template
+sh tests/e2e/run.sh run-plan plan.tsv                     # a plan made elsewhere (impact.py plan --format tsv)
+sh tests/e2e/run.sh unit                                  # the unit tests, in mcr.microsoft.com/dotnet/sdk:10.0
+sh tests/e2e/run.sh test [pytest args]                    # one rig, pytest as given (no args: every group but 31)
+sh tests/e2e/run.sh up | down | status                    # start or update the rig; remove everything it made
 sh tests/e2e/run.sh logs [gitberth|standin|cloudflared|<container>] [lines]
-sh tests/e2e/run.sh password                  # the rig's admin password, to look at its UI on port 18092
-sh tests/e2e/run.sh down                      # remove everything the rig made
+sh tests/e2e/run.sh password                              # the rig's admin password, for its UI on port 18092
+sh tests/e2e/run.sh help
 ```
 
-`E2E_KEEP=1` leaves the apps the scenarios made in place, so you can look at them afterwards.
+A bare `run.sh` is `run.sh impact` (its base defaults to `origin/main`). Every command but `plan`, `test`, `unit` and
+the rig's own ends in `run-plan`: it prints the plan, runs the unit tests beside the rigs' `up` (a unit failure stops
+the scenarios), runs the lanes side by side, and ends with an `E2E SUMMARY` block and a one-line `in short:`. It exits 0
+only when everything passed.
 
-The app templates' smoke run, `sh tests/e2e/run.sh test -k test_31_template_smoke`, installs every template in the
-gallery, waits for each to answer on its LAN port and deletes it. It pulls every template's images (many GB the first
-time), so a run of every scenario skips it: select it by name. Their images stay in the rig's engine, so the next run
-doesn't pull them again.
+Options: `--base REF` (impact's base, with git) or `--base-tree DIR` (a copy of the base, for a copy of the tree
+without git); `--lanes 1|2|3`; `--budget MIN` (impact's minutes in all, 10 by default; 0: no limit); `--no-unit`;
+`--smoke` (add the smoke to groups); `--templates a,b`; `--timings test|production`; `--out FILE` (plan: keep the plan).
+
+Variables: `E2E_KEEP=1` leaves the apps the scenarios made in place, so you can look at them afterwards.
+`E2E_INSTANCE=b|c` picks the rig for one lane. `E2E_TIMINGS`, `E2E_TEST_TIMINGS` and `E2E_TEMPLATES`: see
+"Timings" below. `E2E_DIND_IMAGE` (`docker:29-dind`) and `E2E_DIND_ARGS` (dockerd's flags, for example
+`--registry-mirror=https://mirror.gcr.io`): a rig whose engine had others is started again, its volume kept.
+`E2E_NUGET_VOLUME` is the unit tests' NuGet cache (`gbe2e-nuget`; CT 101 uses its warm `dotnet-nuget`).
+
+From a PC without Docker, a wrapper such as `e2e-run.ps1 -Tree <tree>` does all of it on the Docker host: it plans
+against a local copy of the base (or next as last pushed, on the host), uploads the tree, runs the plan on both rigs
+and copies each lane's outputs back next to its log. Its `-Tier`, `-Groups`, `-Templates`, `-Budget`, `-Lanes`,
+`-Timings`, `-NoUnit` and `-DryRun` match the options above.
+
+The app templates' smoke, `run.sh release` or `run.sh groups 31 --templates memos,miniflux`, installs each template in
+the gallery, waits for it to answer on its LAN port and deletes it. It always runs on its own (`-k
+test_31_template_smoke`), with production timings, and on the first rig: it pulls every template's images (many GB the
+first time), and they stay in that rig's engine, so the next run doesn't pull them again. A catalog change smokes just
+its own templates.
+
+## What a change runs
+
+`tests/e2e/impact.py` reads the change and the map, `tests/e2e/impact.toml`, and picks a tier. The report names the
+strongest that applies, with each file's reason:
+
+| Tier | When | What runs |
+|---|---|---|
+| `none` | Every changed file maps to `@none`: docs, unit tests, the e2e tooling, workflows | the unit tests only |
+| `scenarios` | Only scenario files (`scenarios/test_*.py`) changed | their groups, and the groups that import a name they changed |
+| `impact` | Product or rig files with specific rules | the unit tests, their groups, the smoke |
+| `wide` | A hub file with no narrowing word, or a file only the catch-all matches | `@wide`: the smoke and 00 01 06 12 19 20 22 23 24 25, and any other groups selected |
+| `full` | A package or target change in `Gitberth.csproj`, or asked for | every group, slow tests included; no template smoke |
+| `release` | Asked for | `full`, then every template with production timings |
+| `smoke`, `groups` | Asked for | the smoke, or the groups named |
+
+**The 10-minute budget.** An impact pass (the default: a bare `run.sh`, `run.sh impact`, `e2e-run.ps1 -Tree`) fits
+10 minutes in all: about 3.5 for the unit tests beside the rigs' setup, then both lanes. It fills them by priority:
+
+1. the core smoke, `@core`: sign in, and one app from GitHub deployed and answering. Always in;
+2. one test of each thing the change points at, most specific first: refine hits and changed scenario files, then
+   rules in the map's order (single files before folders), `@wide` last;
+3. the rest of those groups' tests. A group that doesn't fit whole is taken test by test (a test class whole), by
+   node ID;
+4. the rest of the smoke (`@smoke`, 6 tests: sign in and out, a pull request's preview, a domain's commit status, the
+   audit log, MCP, an agent installing a template).
+
+Whatever doesn't fit is listed in the report as **left for the full suite**, and the tier line says the budget cut
+it; nothing is dropped silently. `--budget 0` (`-Budget 0`) keeps everything. `full` and `release` have no budget:
+they're the whole suite, on demand.
+
+**How the map decides.** For each changed file (both sides of a rename), the first rule whose globs match decides.
+A rule with `refine` entries looks at each changed hunk: its changed lines, 3 lines around them, and the declaration it
+sits in (the method, constructor or type in a `.cs` file; in `.razor` markup the nearest `id="..."`, in `@code` the
+method; a `.py` def or class). When an entry's regex matches, only the matching entries' groups count; otherwise the
+rule's own groups do. A changed scenario file runs its own group, plus each group that imports a name it changed
+(a fixture that calls a changed helper counts as changed too). Slow tests (`@pytest.mark.slow`) stay out unless a
+rule says `NN+slow` or names the test. `notes` name what no scenario reaches, such as the engine tests
+(`GITBERTH_ENGINE_IT=1`) or the UI tests, and the report prints them.
+
+**Keeping the map right.** `python3 tests/e2e/impact.py check` checks it against the tree (the Build workflow runs it
+on every push): a scenario file without its group, a test an alias names that doesn't exist, slow lists that don't
+match the marks, a regex that doesn't compile. A new scenario file needs its group; moved code needs its globs. A file
+only the catch-all matches runs `@wide` and the report warns: add a rule. The selector's own tests:
+`python3 -m unittest discover -s tests/e2e -p impact_test.py`.
+
+## Timings
+
+Gitberth in the rig runs with shorter waits, `GITBERTH_TEST_TIMINGS`, whose list is in `rig/compose.e2e.yml`: a new
+container's stay-up check (3 s instead of 15), the pull-request list (every 20 s instead of 5 min), and restart
+schedules (a schedule minute lasts 20 s, looked at every 2 s). The log says which Gitberth has: `[rig] Gitberth's test
+timings: ...`, or `none (production timings)`.
+
+- `E2E_TIMINGS=production` (`--timings production`, `-Timings production`) runs with none: as an install runs.
+  `E2E_TEST_TIMINGS`, when set, is passed on as the list itself.
+- The template smoke always runs with production timings.
+- The guard: only `rig/compose.e2e.yml` sets the variable (an install's compose file never passes it); unset, every wait
+  is the production one; anything it doesn't understand, or a value that isn't shorter, stops Gitberth from starting.
+
+The map's `minutes` are production timings'. With test timings, a plan estimates a group by its `test_minutes` when it
+has them, else by its minutes times `[test_timings] factor` (0.5).
+
+## Lanes
+
+`--lanes 2` runs the first rig and `b` side by side (`--lanes 3` adds `c`), each with its own engine, volume and
+Gitberth; the template smoke stays on the first rig. With one lane, `E2E_INSTANCE=b` (or `c`) picks the rig:
+`gitberth-e2e-b` on `gbe2e-lan-b` (192.168.71.0/24, UI on port 18093), or `gitberth-e2e-c` (192.168.72.0/24, port
+18094). `run.sh down` with the same `E2E_INSTANCE` removes it.
+
+A rig is never shared: every run starts by resetting it. A run holds its rigs (a flock on `/tmp/gbe2e-lock-<rig>`,
+which the runs it starts inherit through `E2E_LOCKED`), and also looks inside each rig for a run of an older `run.sh`.
+A second run on a busy rig stops at once: `rig b (gitberth-e2e-b) is running scenarios; try again when it's done`.
+
+## On GitHub Actions
+
+The whole suite runs on GitHub's hosted runners, each run in a rig of its own: `.github/workflows/e2e.yml`, about 11
+jobs and about 25 minutes, leaving CT 101 free. It's on demand; nothing starts it on a push. Two ways:
+
+- **By hand:** Actions › E2E › Run workflow, or `gh workflow run e2e.yml --ref next -f suite=release`. `suite` is
+  release, full, impact (against `base`), groups (with `groups`) or smoke; `timings` and `shards` too.
+- **By a tag, with git alone:** push a tag named `e2e-*`, for example
+  `git tag e2e-1.4-rc1 && git push origin e2e-1.4-rc1`. It runs the release suite with test timings on 8 runners, plus
+  3 for the templates. It needs no API token, so a bot that pushes over SSH can start it.
+
+The plan job's summary shows the plan; each job uploads its outputs (`junit.xml`, `report.txt`, screenshots, and
+Gitberth's and the stand-ins' logs) as an `e2e-<id>` artifact for 14 days; the summary job puts every job's results in
+one table. Docker Hub is reached through `mirror.gcr.io`. The repo is public, so the runners cost nothing.
+
+The Build workflow's "E2E impact" job writes every push's and pull request's plan, with what it leaves for the full
+suite, to the run's summary; nothing runs in a rig there.
+
+## Measuring
+
+Every run writes `junit.xml` (each test's time, its fixtures included) to `tests/e2e/out/<a|b|c>/`, next to
+`report.txt` and the screenshots; a lane's further runs go to `out/<lane>-2` and so on. `python3 tests/e2e/impact.py
+minutes tests/e2e/out` sets the measured minutes next to the map's and prints the lines to paste into `impact.toml`:
+`test_minutes` from a run with test timings (the default), `minutes` with `--timings production`. `impact.py report
+DIR...` turns `junit.xml` files into one Markdown table.
 
 The rig is quick to run again. Its engine's volume keeps base images and build caches, and `up` rebuilds and restarts
 only what changed. So a change to Gitberth rebuilds Gitberth alone, and with no changes nothing restarts. `test` starts
@@ -215,10 +343,10 @@ Rules of thumb:
   failures are cleared for it, before its apps are removed.
 - A scenario that fails because of Gitberth itself stays failing. Report it with its evidence; never weaken the check.
 
-A failing scenario's report carries its assertion and Gitberth's warnings and errors from its run. Screenshots of its
-pages are saved in the rig at `/e2e/out` (`docker cp gitberth-e2e:/e2e/out .` fetches them).
+- A new scenario file needs its group in `impact.toml`, and rules for the code it covers (`impact.py check` fails
+  without the group).
 
-Run one `run.sh test` at a time on each rig: every run starts by resetting it. To run two at once, give the second its
-own rig with `E2E_INSTANCE=b` (or `c`): `gitberth-e2e-b` on `gbe2e-lan-b` (192.168.71.0/24, UI on port 18093), or
-`gitberth-e2e-c` (192.168.72.0/24, port 18094), each with its own engine, volume and Gitberth. `run.sh down` with the
-same `E2E_INSTANCE` removes it.
+A failing scenario's report carries its assertion and Gitberth's warnings and errors from its run. Screenshots of its
+pages are saved in the rig at `/e2e/out`, and `run.sh test` copies them to `tests/e2e/out/<a|b|c>` with the report and
+`junit.xml`. Before the selected tests run, every scenario file is collected: one that doesn't import stops the run
+(`a scenario file doesn't import: ...`), since the others import each other's helpers.

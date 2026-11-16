@@ -531,6 +531,12 @@
                     <dd><code>@Options.DataDir</code></dd>
                     <dt>Version</dt>
                     <dd>Gitberth @AppVersion.Display</dd>
+                    @if (Options.TestTimings is { } testTimings)
+                    {
+                        <dt>Test timings</dt>
+                        <dd><span style="color:#ffb3b9">On: @testTimings (in seconds). Shorter waits, for Gitberth's own test rig only; an
+                            install never sets @TestTimings.Variable.</span></dd>
+                    }
                 </dl>
             </div>
         </section>

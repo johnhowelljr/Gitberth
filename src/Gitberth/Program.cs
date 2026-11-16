@@ -260,6 +260,14 @@ await app.Services.GetRequiredService<RestartSchedules>().LoadAsync();
 await app.Services.GetRequiredService<NotificationSettings>().LoadAsync();
 await app.Services.GetRequiredService<Gitberth.Audit.AuditSettings>().LoadAsync();
 
+// The end-to-end rig's shorter waits, before any background job starts. An install never sets them: see TestTimings.
+if (options.TestTimings is { } testTimings)
+{
+    testTimings.Apply(app.Services);
+    app.Logger.LogWarning("{Variable} is set ({Timings}): Gitberth runs with shorter waits, for its end-to-end rig only.",
+        TestTimings.Variable, testTimings);
+}
+
 // The very first: a request for one of Gitberth's marker hosts (a tunnel rule's httpHostHeader under gitberth.invalid) is
 // answered with a public page (a domain's down page, the status page) or a bare 404, and goes no further. Nothing else of
 // Gitberth's (sign-in, Blazor, the hooks, static files, the "not found" page) ever answers one.

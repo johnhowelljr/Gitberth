@@ -153,7 +153,7 @@ def set_github_switch(gitberth, page, title, on):
 def wait_deployment(gitberth, deployment_id, ends=("Succeeded",), timeout=300):
     """Waits for this deployment to be over, and checks it ended in one of `ends`; returns its row."""
     d = until(lambda: (lambda x: x if x and x["Status"] in FINAL else None)(gitberth.db.deployment(deployment_id)), timeout,
-              f"deploy #{deployment_id} to finish", interval=2, seen=lambda: gitberth.db.deployment(deployment_id))
+              f"deploy #{deployment_id} to finish", interval=0.5, seen=lambda: gitberth.db.deployment(deployment_id))
     if d["Status"] not in ends:
         raise AssertionError(f"Deploy #{deployment_id} ended {d['Status']}, not {'/'.join(ends)}: {d['Error']}\n"
                              f"--- the end of its log ---\n{gitberth.deploy_log(deployment_id, tail=40)}")

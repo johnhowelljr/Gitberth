@@ -1,0 +1,946 @@
+# Which end-to-end groups a change needs. tests/e2e/impact.py reads this file (impact.py plan), and impact.py check
+# checks it against the tree. Paths are repo-relative globs: "*" stays within a folder, "**" crosses folders. For each
+# changed file the FIRST rule whose globs match decides, so specific rules come first, then folders, then the catch-all.
+# A rule's groups name groups ("12"; "12+slow" keeps its slow tests), aliases ("@smoke") and single tests (node IDs).
+# A rule's refine entries look at the changed hunks (the changed lines, 3 lines around them, and the declaration they
+# sit in): when any entry's regex matches, only the matching entries' groups count; otherwise the rule's own groups do.
+# notes (on a rule or a refine entry) name what else to run when no scenario reaches the code: impact.py prints them.
+# "@self+importers" (a scenario file): its own group, plus every group that imports a name the change touched.
+# The content and its reasons: the impact map of 2026-11-16 (each group's coverage, the hubs and the smoke).
+version = 1
+
+# The default tier (impact) fits a wall-time budget: the unit tests (beside the rigs' setup), then both lanes. Within it,
+# by priority: the core smoke (@core, always), one test of each thing the change points at (refine hits and scenario
+# files first, then rules in this file's order, @wide last), the rest of those groups' tests one by one, then the rest
+# of the smoke. What doesn't fit is listed as left for the full suite (full and release, on demand). impact.py plan
+# --budget overrides the minutes; 0 means no limit.
+[budget]
+minutes = 10
+setup = 3.6        # the unit tests (about 2.5 min, plus 1 to build), beside the rigs' up: 3.6 min measured on 2026-11-16
+
+# Estimates with the rig's test timings (GITBERTH_TEST_TIMINGS, the default for every run but the template smoke): a
+# group's test_minutes (and test_slow) when it has them, else its minutes times this factor. impact.py minutes
+# DIR... --timings test reads a run's junit.xml and prints the lines to refresh them with.
+[test_timings]
+# 0.75, not 0.5: the first two-lane impact run (2026-11-16) took 9.7 and 8.7 min of pytest time on lanes estimated at
+# 6.5 min each with 0.5 (a single test carries its own app's setup, which the per-test share of a group's minutes misses).
+factor = 0.75
+
+# Each group: its file; its minutes of pytest time without its slow tests, with production timings (refresh them with
+# impact.py minutes --timings production); its slow tests and their minutes (left out unless a rule or alias says
+# "NN+slow"); optionally test_minutes and test_slow, the same with test timings. The template smoke is always a run of
+# its own (-k test_31_template_smoke), with production timings and E2E_TEMPLATES.
+[groups]
+"00" = { file = "test_00_rig.py", minutes = 0.8 }
+"01" = { file = "test_01_branch_previews.py", minutes = 1.7, test_minutes = 2.2 }
+"02" = { file = "test_02_pull_request_previews.py", minutes = 10.5 }
+"03" = { file = "test_03_forks.py", minutes = 4 }
+"04" = { file = "test_04_preview_limit.py", minutes = 4.5 }
+"05" = { file = "test_05_preview_removal.py", minutes = 9 }
+"06" = { file = "test_06_copying.py", minutes = 2.75 }
+"07" = { file = "test_07_crons.py", minutes = 3.75 }
+"09" = { file = "test_09_scoped_variables.py", minutes = 2.5 }
+"10" = { file = "test_10_build_time_secrets.py", minutes = 4 }
+"11" = { file = "test_11_promote.py", minutes = 5.5 }
+"12" = { file = "test_12_commit_statuses.py", minutes = 7, slow = { test_a_scheduled_restart_posts_no_status = 6.5 }, test_slow = { test_a_scheduled_restart_posts_no_status = 1.9 } }
+"13" = { file = "test_13_pr_comments.py", minutes = 5 }
+"14" = { file = "test_14_instant_deploys.py", minutes = 13, slow = { test_a_repo_deployed_later_gets_the_webhook_at_the_keepers_own_next_look = 10 }, test_slow = { test_a_repo_deployed_later_gets_the_webhook_at_the_keepers_own_next_look = 10 } }
+"15" = { file = "test_15_refusals.py", minutes = 9 }
+"16" = { file = "test_16_protect.py", minutes = 2.6 }
+"17" = { file = "test_17_fail_closed.py", minutes = 1.6 }
+"18" = { file = "test_18_unprotect.py", minutes = 1.0 }
+"19" = { file = "test_19_declared_volumes.py", minutes = 6 }
+"20" = { file = "test_20_smoke.py", minutes = 2.5 }
+"21" = { file = "test_21_notifications.py", minutes = 4.5 }
+"22" = { file = "test_22_build_filters.py", minutes = 4 }
+"23" = { file = "test_23_deploy_hooks.py", minutes = 2 }
+"24" = { file = "test_24_audit_log.py", minutes = 5 }
+"25" = { file = "test_25_down_page.py", minutes = 2.5 }
+"26" = { file = "test_26_uptime_status.py", minutes = 2 }
+"27" = { file = "test_27_databases.py", minutes = 10 }
+"28" = { file = "test_28_compose.py", minutes = 10 }
+"29" = { file = "test_29_mcp.py", minutes = 1.6 }
+"30" = { file = "test_30_templates.py", minutes = 3.5 }
+"31" = { file = "test_31_template_smoke.py", minutes = 20, template_smoke = true }
+"32" = { file = "test_32_agent_templates.py", minutes = 1.25 }
+
+[aliases]
+# The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside
+# the scenario files, whatever the budget.
+"@core" = ["test_20_smoke.py::test_sign_in_and_out", "test_20_smoke.py::test_new_app_from_github_deploys_and_answers"]
+"@smoke" = [
+    "test_02_pull_request_previews.py::TestOpenedPullRequest::test_it_gets_a_preview_built_from_its_pull_ref",
+    "test_12_commit_statuses.py::test_the_success_link_is_the_main_domain_once_the_app_has_one",
+    "test_20_smoke.py::test_sign_in_and_out",
+    "test_24_audit_log.py::test_changes_are_recorded_with_who_made_them_and_nothing_secret",
+    "test_29_mcp.py::test_an_agent_deploys_an_app_over_mcp_and_the_api_as_its_token",
+    "test_32_agent_templates.py::test_an_agent_installs_a_template_with_its_database_and_deletes_it",
+]  # the core smoke (impact-map.md section 3): ≈9.5-10 min serial
+# What a hub file without a narrowing word runs: ≈39 min serial.
+"@wide" = ["@smoke", "00", "01", "06", "12", "19", "20", "22", "23", "24", "25"]
+# Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
+"@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
+           "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32"]
+"@release" = ["@full", "31"]  # and every template: + 16-30 min
+"@none" = []
+# Single tests the rules name.
+"@t00-cloudflared" = ["test_00_rig.py::test_gitberth_finds_the_fake_cloudflared"]
+"@t02-opened" = ["test_02_pull_request_previews.py::TestOpenedPullRequest"]  # 3 tests, one fixture
+"@t12-switches" = ["test_12_commit_statuses.py::test_settings_github_shows_the_switches_and_what_each_needs"]
+"@t12-failed" = ["test_12_commit_statuses.py::test_a_failed_deploy_links_to_its_log_and_github_gets_no_error_or_secret"]
+"@t12-cancel" = ["test_12_commit_statuses.py::test_a_cancelled_deploy_ends_its_status_as_an_error"]
+"@t12-recreate" = ["test_12_commit_statuses.py::test_recreates_restarts_and_settings_changes_post_no_status"]
+"@t12-sched" = ["test_12_commit_statuses.py::test_a_scheduled_restart_posts_no_status"]  # slow
+"@t12-domain" = ["test_12_commit_statuses.py::test_the_success_link_is_the_main_domain_once_the_app_has_one"]
+"@t13-comment" = ["test_13_pr_comments.py::test_a_pull_requests_preview_keeps_one_comment_up_to_date"]
+"@t14-settings" = [
+    "test_14_instant_deploys.py::test_instant_deploys_need_domains_and_a_host_name_of_their_own",
+    "test_14_instant_deploys.py::test_the_webhook_host_answers_only_with_status_codes",
+    "test_14_instant_deploys.py::test_bad_signatures_from_one_sender_are_throttled_but_its_signed_ones_get_through",
+]
+"@t14-push" = ["test_14_instant_deploys.py::test_a_signed_push_deploys_at_once"]
+"@t20-new" = ["test_20_smoke.py::test_new_app_from_github_deploys_and_answers"]
+"@t20-settings" = ["test_20_smoke.py::test_settings_save"]
+"@t22-cache" = ["test_22_build_filters.py::test_settings_shows_the_build_cache_and_asks_before_clearing_it"]
+"@t24-audit" = ["test_24_audit_log.py::test_changes_are_recorded_with_who_made_them_and_nothing_secret"]
+"@t24-registry" = ["test_24_audit_log.py::test_a_registry_update_and_its_roll_back_through_gitberth_are_never_outside_changes"]
+"@t28-repo" = ["test_28_compose.py::test_a_repo_with_a_compose_file_is_one_app_with_all_its_services"]  # ≈9 min
+"@t28-paste" = ["test_28_compose.py::test_a_pasted_compose_file_is_one_inline_app_with_all_its_services"]  # ≈1.1 min
+"@t30-gallery" = ["test_30_templates.py::test_the_gallery_lists_searches_and_filters_the_templates"]
+
+# Minutes of the single tests that aliases name (a class counts with its fixture). Any other single test counts as its
+# group's minutes divided by its number of tests.
+[minutes]
+"test_02_pull_request_previews.py::TestOpenedPullRequest" = 2.2
+"test_02_pull_request_previews.py::TestOpenedPullRequest::test_it_gets_a_preview_built_from_its_pull_ref" = 1.7
+"test_12_commit_statuses.py::test_the_success_link_is_the_main_domain_once_the_app_has_one" = 1.75
+"test_20_smoke.py::test_sign_in_and_out" = 0.2
+"test_20_smoke.py::test_new_app_from_github_deploys_and_answers" = 1.0
+"test_24_audit_log.py::test_changes_are_recorded_with_who_made_them_and_nothing_secret" = 3.0
+"test_24_audit_log.py::test_a_registry_update_and_its_roll_back_through_gitberth_are_never_outside_changes" = 2.25
+"test_28_compose.py::test_a_repo_with_a_compose_file_is_one_app_with_all_its_services" = 9.0
+"test_28_compose.py::test_a_pasted_compose_file_is_one_inline_app_with_all_its_services" = 1.1
+"test_29_mcp.py::test_an_agent_deploys_an_app_over_mcp_and_the_api_as_its_token" = 1.6
+"test_30_templates.py::test_the_gallery_lists_searches_and_filters_the_templates" = 0.1
+"test_32_agent_templates.py::test_an_agent_installs_a_template_with_its_database_and_deletes_it" = 1.25
+
+# The same with test timings, measured (impact.py minutes --timings test; the first rig run of 2026-11-16).
+[test_minutes]
+"test_20_smoke.py::test_new_app_from_github_deploys_and_answers" = 0.3
+"test_02_pull_request_previews.py::TestClosedAndMergedPullRequests" = 0.6
+# Measured with test timings in the first two-lane impact run (2026-11-16; impact.py minutes --timings test).
+"test_02_pull_request_previews.py::TestOpenedPullRequest::test_it_gets_a_preview_built_from_its_pull_ref" = 0.3
+"test_20_smoke.py::test_sign_in_and_out" = 0.1
+"test_24_audit_log.py::test_changes_are_recorded_with_who_made_them_and_nothing_secret" = 2.7
+"test_29_mcp.py::test_an_agent_deploys_an_app_over_mcp_and_the_api_as_its_token" = 0.7
+"test_32_agent_templates.py::test_an_agent_installs_a_template_with_its_database_and_deletes_it" = 0.8
+
+# How the template smoke is split into shards: heavier templates count for more (the default is 1).
+[templates]
+weight = { nextcloud = 3, stirling-pdf = 3, paperless-ngx = 2, jellyfin = 2, ghost = 2, wordpress = 2 }
+
+# ===== A. Nothing to run in the rig (the unit suite still runs) =====
+[[rule]]
+globs = ["docs/**", "README.md", "PLAN.md", "CONTRIBUTING.md", "LICENSE.md", ".gitleaks.toml", ".github/**",
+         ".gitignore", ".env.example", "tests/e2e/README.md", "tests/e2e/impact.py", "tests/e2e/impact.toml",
+         "tests/e2e/impact_test.py"]
+groups = ["@none"]
+
+[[rule]]
+globs = ["tests/Gitberth.Tests/**", "tests/Gitberth.UiTests/**", "tests/samples/**", "dotnet-tools.json",
+         "Gitberth.slnx", "install.sh"]
+groups = ["@none"]
+
+
+# ===== B. The rig and the scenarios =====
+[[rule]]
+globs = ["tests/e2e/scenarios/test_*.py"]
+groups = ["@self+importers"]
+
+[[rule]]
+globs = ["tests/e2e/scenarios/e2e/audit.py"]
+groups = ["12", "14", "24", "27", "28", "29", "30", "32"]
+
+[[rule]]
+globs = ["tests/e2e/scenarios/e2e/github_reports.py"]
+groups = ["12", "13", "15", "16", "17", "22", "24", "25"]
+
+[[rule]]
+globs = ["tests/e2e/scenarios/e2e/**", "tests/e2e/scenarios/conftest.py"]
+groups = ["00", "@wide"]
+
+[[rule]]
+globs = ["tests/e2e/scenarios/Dockerfile", "tests/e2e/scenarios/pytest.ini"]
+groups = ["00", "@smoke"]
+
+[[rule]]
+globs = ["tests/e2e/standins/cloudflared/**", "tests/e2e/standins/ingress.py", "tests/e2e/standins/cf.py"]
+groups = ["00", "05", "16", "17", "18", "23", "25", "26"]
+
+[[rule]]
+globs = ["tests/e2e/standins/gh.py"]
+groups = ["00", "02", "12", "14"]
+refine = [
+    { match = 'pull', groups = ["00", "01", "02", "03", "04"] },
+    { match = 'status|comment', groups = ["00", "12", "13", "15"] },
+    { match = 'hook|deliver|signature|ping', groups = ["00", "14", "15", "23"] },
+    { match = 'variable', groups = ["00", "09", "24"] },
+    { match = 'rate|limit|permission|token', groups = ["00", "15"] },
+]
+
+[[rule]]
+globs = ["tests/e2e/standins/standin.py"]
+groups = ["00", "@smoke"]
+refine = [
+    { match = 'notif|discord|slack|ntfy|smtp|mail', groups = ["00", "21", "26"] },
+]
+
+[[rule]]
+globs = ["tests/e2e/standins/**", "tests/e2e/rig/**", "tests/e2e/run.sh"]
+groups = ["00", "@smoke"]
+
+[[rule]]
+globs = ["tests/e2e/apps/testapp/**"]  # every Git-app scenario builds it; /cron, /build and the build step are 07, 10, 02
+groups = ["@wide", "02", "07", "10"]
+
+
+# ===== C. Product-wide files =====
+[[rule]]
+globs = ["src/Gitberth/TestTimings.cs"]
+groups = ["@smoke"]                            # every deploy waits on stableFor
+
+[[rule]]
+globs = ["src/Gitberth/Gitberth.csproj"]
+groups = ["@smoke"]
+refine = [
+    { match = 'PackageReference|TargetFramework|Sdk', groups = ["@full"] },  # MudBlazor, EF Core, MCP SDK... reach every page
+]
+
+[[rule]]
+globs = ["Dockerfile", ".dockerignore", "docker-compose.yml", "docker-compose.build.yml"]
+groups = ["@wide"]
+refine = [
+    { match = 'docker|compose|buildx|cli', groups = ["@wide", "28", "30"] },  # the docker and compose CLIs in the image
+]
+
+[[rule]]
+globs = ["src/Gitberth/Program.cs"]
+groups = ["@wide"]
+refine = [
+    { match = 'Notif|Mailer', groups = ["21", "26"] },
+    { match = 'Uptime|StatusPage|PublicPages|DownWatcher|DownStates|/status|down-page', groups = ["25", "26"] },
+    { match = 'Agent|Mcp|ApiToken', groups = ["29", "32"] },
+    { match = 'Audit', groups = ["24"] },
+    { match = 'Compose', groups = ["28", "32"] },
+    { match = 'Template', groups = ["30", "32"] },
+    { match = 'Database', groups = ["27", "32"] },
+    { match = 'Webhook', groups = ["14", "15", "23"] },
+    { match = 'DeployHook', groups = ["23"] },
+    { match = 'GitHubReporter|GitHubWrites|GitHubIntegrationState|DeployReporter|"github"', groups = ["12", "13", "15"] },
+    { match = 'Preview|GitHubPulls', groups = ["01", "02", "05"] },
+    { match = 'Cron', groups = ["07"] },
+    { match = 'Restart', groups = ["@t12-sched"] },
+    { match = 'Update|ImageService|Registry', groups = ["@t24-registry", "32"] },
+    { match = 'Domain|Cloudflare|Tunnel|RemovalRetry', groups = ["16", "17", "25"] },
+    { match = 'Cookie|Authentication|Authorization|Antiforgery|logout|renew|Login|StampRevalidator|AdminAuth', groups = ["20", "@t24-audit"] },
+    { match = 'PortChanger|ContainerService|ContainerUpdater|HostHelpers|IContainerEngine|NetworkKeeper|HostPortMap', groups = ["24", "27"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Data/Migrations/*.Designer.cs"]
+groups = ["@none"]                             # generated: the migration file and the model snapshot carry the change
+notes = ["A migration: also rehearse the upgrade on a copy of the live server's data, GITBERTH_REHEARSAL=<snapshot folder> dotnet test tests/Gitberth.Tests (UpgradeRehearsalTests). The rig always starts from an empty database."]
+
+[[rule]]
+globs = ["src/Gitberth/Data/**"]  # Entities, GitberthDb, migrations, snapshot (the rig always migrates an empty database)
+groups = ["@wide"]
+refine = [
+    { match = 'Preview', groups = ["01", "02", "04", "05"] },
+    { match = 'Domain', groups = ["05", "16", "25"] },
+    { match = 'Hook', groups = ["14", "23"] },
+    { match = 'ApiToken', groups = ["29", "32"] },
+    { match = 'Database', groups = ["27", "32"] },
+    { match = 'Compose|WebService|Template', groups = ["28", "30", "32"] },
+    { match = 'Uptime|DownPage', groups = ["25", "26"] },
+    { match = 'RequestedBy', groups = ["24", "29"] },
+    { match = 'Watch|Ignored|Skip|BuildFilter|NoCache', groups = ["22"] },
+    { match = 'Notification', groups = ["21"] },
+    { match = 'EnvVar|Scope|BuildTime', groups = ["09", "10"] },
+    { match = 'Promot', groups = ["11"] },
+    { match = 'Cron', groups = ["07"] },
+    { match = 'Volume|Mount|Tmpfs', groups = ["06", "19"] },
+    { match = 'ContainerChange|Journal', groups = ["24", "27"] },
+    { match = 'Activity', groups = ["20", "02"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/GitberthOptions.cs"]
+groups = ["20"]
+refine = [
+    { match = 'Uptime', groups = ["26"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/appsettings*.json", "src/Gitberth/Properties/**", "src/Gitberth/AppVersion.cs",
+         "src/Gitberth/BuildStamp.cs", "src/Gitberth/Components/RenderModes.cs",
+         "src/Gitberth/Components/GitberthTheme.cs"]
+groups = ["@smoke"]
+
+
+# ===== D. Single files and small sets =====
+# --- deploy pipeline
+[[rule]]
+globs = ["src/Gitberth/Deploy/DeployPipeline.Compose.cs"]
+groups = ["28", "30", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/DeployPipeline.cs"]
+groups = ["@wide"]
+refine = [
+    { match = 'Compose', groups = ["28", "32"] },
+    { match = 'Preview|IsPreview|[Pp]arent', groups = ["01", "02", "06", "19"] },
+    { match = 'Promot|GitRef|PromotedBranch|BuildSource', groups = ["10", "11"] },
+    { match = 'DeclaredVolume|VolumeOwners|SharedVolume|TakenVolume|[Tt]mpfs|Mount', groups = ["06", "19"] },
+    { match = 'Skip', groups = ["22", "29"] },
+    { match = 'BuildValues|BuildSecret|GITBERTH_SECRETS|DeclaredArgs|buildEnv|BuildAsync|BuildFetched|WriteDockerfile|DockerfileMarker|[Nn]oCache|BasePull', groups = ["10", "22"] },
+    { match = 'Vercel|VERCEL_|MainDomain', groups = ["01", "02", "10", "@t12-domain"] },
+    { match = 'Swap|Bridge|ComeHome|RoutedTo|Spare|HostTraits|DownPage|Tunnel|RouteDomains', groups = ["05", "12", "16", "25"] },
+    { match = 'Verify|HealthPath|Listening|ShowLastOutput', groups = ["06", "12", "21"] },
+    { match = 'PortsFor|PortToFollow|Follow|DefaultPort|WebAddress', groups = ["06", "20", "28"] },
+    { match = 'Database|ProvidedVariable', groups = ["27", "32"] },
+    { match = 'Report', groups = ["12", "13", "22"] },
+    { match = 'Audit|RequestedBy', groups = ["24", "29"] },
+    { match = 'Prune', groups = ["05", "20"] },
+    { match = 'CommitOfBranch|OwnBranchRef|FetchSource|CommitInfo', groups = ["11", "20", "29"] },
+    { match = 'Network', groups = ["06", "24", "28"] },
+    { match = 'SaveOutcome|SetStatus|Cancel', groups = ["12", "20"] },
+    { match = 'RepoVariable|gitHubKeys|EnvValue', groups = ["09", "10", "20"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/BuildFilters.cs"]
+groups = ["22", "29"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/BuildSecrets.cs"]
+groups = ["10"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/BuildCache.cs", "src/Gitberth/Docker/DockerApi.BuildCache.cs",
+         "src/Gitberth/Components/Shared/BuildCacheRow.razor"]
+groups = ["22"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/CronScheduler.cs", "src/Gitberth/Detection/CronJobs.cs",
+         "src/Gitberth/Detection/CronSchedule.cs", "src/Gitberth/Components/Shared/ScheduledJobsCard.razor"]
+groups = ["07"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/DeclaredVolumes.cs", "src/Gitberth/Deploy/VolumeOwners.cs",
+         "src/Gitberth/Components/Shared/VolumesEditor.razor"]
+groups = ["06", "19"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/BridgeRules.cs"]
+groups = ["05", "25", "@t12-domain"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/VercelEnv.cs", "src/Gitberth/Docker/ImageLabels.cs"]
+groups = ["01", "07", "10", "20"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/RepoWatcher.cs"]
+groups = ["01", "02", "11", "20", "22"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/GitHubReporter.cs", "src/Gitberth/Deploy/DeployReporter.cs",
+         "src/Gitberth/Services/GitHubWrites.cs", "src/Gitberth/Services/GitHubIntegrationState.cs"]
+groups = ["12", "13", "15", "22"]
+
+[[rule]]
+globs = ["src/Gitberth/Deploy/DeployQueue.cs", "src/Gitberth/Deploy/AppLocks.cs", "src/Gitberth/Deploy/LiveLog.cs",
+         "src/Gitberth/Deploy/DeployLog.cs"]
+groups = ["12", "20", "22"]
+
+# --- previews
+[[rule]]
+globs = ["src/Gitberth/Previews/PreviewDatabases.cs"]
+groups = ["27"]
+
+[[rule]]
+globs = ["src/Gitberth/Previews/PreviewCopy.cs"]
+groups = ["03", "06", "09", "19"]
+
+[[rule]]
+globs = ["src/Gitberth/Previews/PreviewNames.cs"]
+groups = ["01", "02", "05", "06", "16"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/PreviewSettingsSection.razor"]
+groups = ["01", "03", "04", "05", "16"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/AppPreviewsTab.razor"]
+groups = ["01", "02", "04", "05", "11"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/GitHubPulls.cs"]
+groups = ["01", "02", "03", "04"]
+
+# --- GitHub, webhooks, deploy hooks
+[[rule]]
+globs = ["src/Gitberth/Services/WebhookKeeper.cs"]
+groups = ["14+slow", "15", "23"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/GitHubWebhook.cs"]
+groups = ["00", "14", "15", "23"]
+
+[[rule]]
+globs = ["src/Gitberth/Domains/DomainService.Webhook.cs"]
+groups = ["14", "15", "23"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/RepoVariables.cs", "src/Gitberth/Components/Shared/RepoVariablesEditor.razor"]
+groups = ["09", "24"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/GitHubApi.cs"]
+groups = ["09", "15", "20", "24"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/DeployHooks.cs", "src/Gitberth/Components/Apps/DeployHooksSection.razor"]
+groups = ["23", "24"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/RestartScheduler.cs", "src/Gitberth/Services/RestartSchedules.cs",
+         "src/Gitberth/Components/Shared/RestartSchedule*.razor"]
+groups = ["@t12-sched"]
+
+# --- domains, public pages, uptime, notifications
+[[rule]]
+globs = ["src/Gitberth/Domains/DomainService.Status.cs", "src/Gitberth/Public/StatusPage.cs",
+         "src/Gitberth/Components/Shared/UptimeSection.razor", "src/Gitberth/Components/Apps/UptimeCard.razor",
+         "src/Gitberth/wwwroot/css/uptime.css"]
+groups = ["26"]
+
+[[rule]]
+globs = ["src/Gitberth/Domains/DomainService.Protection.cs"]
+groups = ["16", "17", "18", "25"]
+
+[[rule]]
+globs = ["src/Gitberth/Domains/RemovalRetry.cs"]
+groups = ["05", "17", "25"]
+
+[[rule]]
+globs = ["src/Gitberth/Domains/DownWatcher.cs", "src/Gitberth/Domains/DownStates.cs"]
+groups = ["25", "26"]
+
+[[rule]]
+globs = ["src/Gitberth/Domains/CloudflareApi.cs", "src/Gitberth/Domains/TunnelRoutes.cs"]
+groups = ["00", "05", "16", "17", "18", "23", "25", "26"]
+
+[[rule]]
+globs = ["src/Gitberth/Domains/DomainService.cs", "src/Gitberth/Components/Shared/Network/DomainsCard.razor"]
+groups = ["05", "16", "17", "18", "25", "26"]
+refine = [
+    { match = 'Protect|Access|Zero ?Trust|[Tt]eam', groups = ["16", "17", "18", "25"] },
+    { match = 'Preview', groups = ["05", "16"] },
+    { match = 'Remov|Delete', groups = ["05", "18"] },
+    { match = 'Down|Marker', groups = ["25", "26"] },
+    { match = 'Webhook|Hook', groups = ["14", "23"] },
+    { match = 'Status', groups = ["26"] },
+    { match = 'Main|Publish|Port', groups = ["05", "25"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Notifications/ContainerAlerts.cs", "src/Gitberth/Notifications/DeployNotifier.cs"]
+groups = ["21"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Shared/NotificationsSection.razor",
+         "src/Gitberth/Components/Shared/DestinationDialog.razor"]
+groups = ["21", "26"]
+
+# --- agents
+[[rule]]
+globs = ["src/Gitberth/Agents/AgentDocs.cs"]
+groups = ["@none"]                             # a unit test compares it with docs/reference/api.md
+
+[[rule]]
+globs = ["src/Gitberth/Agents/Tools/AppAdminTools.cs", "src/Gitberth/Agents/Tools/SettingsAdminTools.cs"]
+groups = ["29", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Agents/Tools/NetworkAdminTools.cs"]
+groups = ["29"]                                # no scenario calls the domain tools (unit AgentToolTests, AgentGuardTests)
+
+[[rule]]
+globs = ["src/Gitberth/Components/Shared/ApiTokensSection.razor"]
+groups = ["29", "32"]
+
+# --- templates, compose, databases
+[[rule]]
+globs = ["src/Gitberth/Templates/catalog/*.svg"]
+groups = ["@t30-gallery"]
+
+[[rule]]
+globs = ["src/Gitberth/Templates/catalog/miniflux.*"]
+groups = ["30", "31", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Templates/catalog/memos.*"]
+groups = ["30", "31"]
+
+[[rule]]
+globs = ["src/Gitberth/Templates/catalog/**"]
+groups = ["31"]                                # -k test_31_template_smoke, E2E_TEMPLATES=<changed ids> (see section 5)
+
+[[rule]]
+globs = ["src/Gitberth/Templates/TemplateBuiltIns.cs"]
+groups = ["30"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/NewApp/TemplateSource.razor", "src/Gitberth/wwwroot/css/templates.css"]
+groups = ["30", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/AppActions.Compose.cs"]
+groups = ["28", "30", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Sources/ComposeParser.cs", "src/Gitberth/Components/NewApp/ComposeWholeForm.razor",
+         "src/Gitberth/Components/NewApp/HandSource.razor", "src/Gitberth/Components/NewApp/ParseIssues.razor",
+         "src/Gitberth/Components/Apps/ComposeSourceSection.razor"]
+groups = ["@t28-paste"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/ComposeServicesCard.razor"]
+groups = ["30", "@t28-repo"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/NewApp/GitSource.razor"]
+groups = ["20"]
+refine = [
+    { match = '[Cc]ompose', groups = ["20", "@t28-repo"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Databases/DatabaseServers.cs", "src/Gitberth/Components/Shared/DatabaseServersSection.razor",
+         "src/Gitberth/Sources/ImageHints.cs"]
+groups = ["27", "30", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/DatabasesSection.razor", "src/Gitberth/Components/Apps/DatabasesCard.razor",
+         "src/Gitberth/Components/Apps/RemoveDatabaseDialog.razor"]
+groups = ["27"]
+
+# --- new app sources, images, change engine
+[[rule]]
+globs = ["src/Gitberth/Sources/DockerRunParser.cs", "src/Gitberth/Sources/ShellWords.cs",
+         "src/Gitberth/Components/NewApp/RegistrySource.razor", "src/Gitberth/Components/NewApp/LocalSource.razor"]
+groups = ["@smoke"]                            # no scenario makes an app from an image or a docker run (section 5)
+
+[[rule]]
+globs = ["src/Gitberth/Sources/AppCreator.cs", "src/Gitberth/Sources/SourceContracts.cs"]
+groups = ["20", "27", "32", "@t28-paste"]
+
+[[rule]]
+globs = ["src/Gitberth/Images/RegistryService.cs"]
+groups = ["@smoke"]                            # registry sign-ins: no scenario
+notes = ["Also run the engine tests on a Docker host: GITBERTH_ENGINE_IT=1 dotnet test tests/Gitberth.Tests (EngineIntegrationTests, ImageEngineIntegrationTests). No scenario reaches these engine calls themselves."]
+
+[[rule]]
+globs = ["src/Gitberth/Images/UpdateService.cs", "src/Gitberth/Images/UpdateWatcher.cs",
+         "src/Gitberth/Images/UpdateSettingsSave.cs"]
+groups = ["@t24-registry"]
+notes = ["Also run the engine tests on a Docker host: GITBERTH_ENGINE_IT=1 dotnet test tests/Gitberth.Tests (EngineIntegrationTests, ImageEngineIntegrationTests). No scenario reaches these engine calls themselves."]
+
+[[rule]]
+globs = ["src/Gitberth/Docker/DockerApi.Images.cs"]
+groups = ["27", "32", "@t24-registry"]
+notes = ["Also run the engine tests on a Docker host: GITBERTH_ENGINE_IT=1 dotnet test tests/Gitberth.Tests (EngineIntegrationTests, ImageEngineIntegrationTests). No scenario reaches these engine calls themselves."]
+
+[[rule]]
+globs = ["src/Gitberth/Network/PortChanger*.cs", "src/Gitberth/Network/PortChange*.cs",
+         "src/Gitberth/Network/ContainerUpdater.cs", "src/Gitberth/Network/CloneSpec.cs",
+         "src/Gitberth/Network/SettingsDiff.cs", "src/Gitberth/Network/SettingsRules.cs",
+         "src/Gitberth/Network/RecreateRules.cs", "src/Gitberth/Network/ImageRebase.cs",
+         "src/Gitberth/Network/ComposeSnippet.cs", "src/Gitberth/Network/ChangeJournal.cs",
+         "src/Gitberth/Network/DbChangeJournal.cs", "src/Gitberth/Network/HostPortChecks.cs",
+         "src/Gitberth/Network/HealthProbe.cs", "src/Gitberth/Network/HostHelpers.cs",
+         "src/Gitberth/Network/IContainerEngine.cs", "src/Gitberth/Network/NameCheck.cs",
+         "src/Gitberth/Docker/DockerEngine.cs", "src/Gitberth/Components/Shared/ChangeDialog.razor"]
+groups = ["24", "27"]                          # the only scenarios that recreate a container Gitberth didn't build
+notes = ["Also run the engine tests on a Docker host: GITBERTH_ENGINE_IT=1 dotnet test tests/Gitberth.Tests (EngineIntegrationTests, ImageEngineIntegrationTests). No scenario reaches these engine calls themselves."]
+
+[[rule]]
+globs = ["src/Gitberth/Network/ContainerSettingsJson.cs"]
+groups = ["06", "24", "27"]
+
+[[rule]]
+globs = ["src/Gitberth/Network/NetworkKeeper.cs"]
+groups = ["24", "@t28-repo"]
+
+[[rule]]
+globs = ["src/Gitberth/Network/LanAddresses.cs"]
+groups = ["@smoke"]                            # own LAN addresses: no scenario
+notes = ["Also run the own-LAN-address test on CT 101: GITBERTH_LAN_IT=1 dotnet test tests/Gitberth.Tests (LanEngineTests). No scenario gives a container an address of its own."]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Shared/Network/LanAddressCard.razor",
+         "src/Gitberth/Components/Shared/Network/LanAddressCheck.cs",
+         "src/Gitberth/Components/Shared/Network/LanBlockText.cs"]
+groups = ["@smoke"]                            # own LAN addresses: no scenario
+
+# --- docker client and events
+[[rule]]
+globs = ["src/Gitberth/Docker/DockerApi.cs"]
+groups = ["21", "24", "25", "26"]              # events (crash, health, stopped outside, outside changes), stats
+notes = ["Also run the engine tests on a Docker host: GITBERTH_ENGINE_IT=1 dotnet test tests/Gitberth.Tests (EngineIntegrationTests, ImageEngineIntegrationTests). No scenario reaches these engine calls themselves."]
+
+[[rule]]
+globs = ["src/Gitberth/Docker/DockerCli.cs", "src/Gitberth/Docker/ProcessRunner.cs",
+         "src/Gitberth/Docker/ContainerSpec.cs"]
+groups = ["@wide"]
+refine = [
+    { match = '[Bb]uild', groups = ["10", "22"] },
+    { match = '[Vv]olume|Mount|[Tt]mpfs', groups = ["06", "19"] },
+    { match = '[Ll]ogs', groups = ["@t20-new"] },
+    { match = '[Cc]ompose', groups = ["28", "32"] },
+    { match = '[Nn]etwork', groups = ["24", "28"] },
+    { match = 'Cap|Device|Privileged|Ulimit|Init|ReadOnly|Shm|StopSignal|ExtraHost|Label|Gpu|Security', groups = ["03", "06"] },
+    { match = '[Ii]mage|Tag|Rmi|Prune|Pull', groups = ["05", "20", "@t24-registry"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Health/ContainerEventWatcher.cs", "src/Gitberth/Health/ContainerEvents.cs"]
+groups = ["21", "24", "25", "26"]
+
+# --- security, services, apps, audit, detection
+[[rule]]
+globs = ["src/Gitberth/Security/Masking.cs"]
+groups = ["10", "24", "27", "30", "@t12-failed", "@t13-comment"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/AppActions.cs", "src/Gitberth/Components/Apps/AppCommands.cs"]
+groups = ["05", "11", "12", "20", "24", "25"]
+refine = [
+    { match = 'Delete|Remove', groups = ["05", "24", "27"] },
+    { match = 'Restart', groups = ["@t12-recreate"] },
+    { match = 'Stop|Start', groups = ["24", "25"] },
+    { match = 'Roll[Bb]ack', groups = ["11", "20", "@t12-recreate"] },
+    { match = 'Promot', groups = ["11"] },
+    { match = 'Cancel', groups = ["@t12-cancel"] },
+    { match = 'Preview', groups = ["05", "11"] },
+    { match = 'Deploy', groups = ["20", "22", "23"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Services/ContainerService.cs", "src/Gitberth/Services/ContainerLocks.cs",
+         "src/Gitberth/Apps/AppSync.cs"]
+groups = ["24", "27"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/SettingsService.cs"]
+groups = ["20"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/StartupTasks.cs"]
+groups = ["@smoke"]                            # restart recovery has no scenario (unit RevSafetyBackgroundTests)
+
+[[rule]]
+globs = ["src/Gitberth/Services/AppService.cs", "src/Gitberth/Services/AppModels.cs",
+         "src/Gitberth/Services/PortRules.cs"]
+groups = ["06", "20", "22"]
+
+[[rule]]
+globs = ["src/Gitberth/Apps/EnvScopes.cs"]
+groups = ["09", "10", "11"]
+
+[[rule]]
+globs = ["src/Gitberth/Apps/GitAppSettings.cs"]
+groups = ["03", "06", "10", "19", "22"]
+
+[[rule]]
+globs = ["src/Gitberth/Apps/AppSettingsService.cs"]
+groups = ["06", "09", "19", "21", "22", "24"]
+
+[[rule]]
+globs = ["src/Gitberth/Apps/SettingsAudit.cs"]
+groups = ["24"]
+
+[[rule]]
+globs = ["src/Gitberth/Apps/ActivityLog.cs", "src/Gitberth/Components/Apps/AppActivityTab.razor",
+         "src/Gitberth/Components/Shared/ActivityTimeline.razor"]
+groups = ["02", "05", "11", "20", "23"]
+
+[[rule]]
+globs = ["src/Gitberth/Apps/AppCatalog.cs", "src/Gitberth/Apps/AppContracts.cs"]
+groups = ["01", "24", "27", "28"]
+
+[[rule]]
+globs = ["src/Gitberth/Audit/ExpectedChanges.cs", "src/Gitberth/Audit/OutsideChanges.cs"]
+groups = ["24", "27", "@t12-recreate", "@t14-push", "@t28-repo"] # every "never outside Gitberth" check
+
+[[rule]]
+globs = ["src/Gitberth/Audit/AuditCircuitHandler.cs"]
+groups = ["24", "29"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Pages/AuditLog.razor*", "src/Gitberth/Components/Shared/AuditLogSection.razor",
+         "src/Gitberth/Components/Shared/AuditLook.cs"]
+groups = ["@t24-audit"]
+
+[[rule]]
+globs = ["src/Gitberth/Detection/DockerfileTemplates.cs"]
+groups = ["10", "20"]                          # the build-args marker the test app's Dockerfile uses
+
+[[rule]]
+globs = ["src/Gitberth/Detection/ProjectAnalyzer.cs", "src/Gitberth/Detection/AppFinder.cs",
+         "src/Gitberth/Detection/RepoFiles.cs", "src/Gitberth/Detection/DetectionResult.cs",
+         "src/Gitberth/Detection/EnvScanner.cs", "src/Gitberth/Detection/VercelConfig.cs",
+         "src/Gitberth/Detection/Languages.cs"]
+groups = ["07", "20"]
+
+# --- UI pages and tabs
+[[rule]]
+globs = ["src/Gitberth/Components/Pages/SettingsPage.razor"]
+groups = ["16", "20", "@t00-cloudflared", "@t12-switches", "@t22-cache"]
+refine = [
+    { match = 'id="github"|gh-token', groups = ["@t20-settings", "@t12-switches"] },
+    { match = 'github-integration|hook-host|Instant', groups = ["15", "@t12-switches", "@t14-settings"] },
+    { match = 'id="domains"|cf-token|[Pp]rotect|Zero Trust|Access|[Tt]unnel', groups = ["16", "17", "@t00-cloudflared"] },
+    { match = 'id="deploys"|watch-interval|build-cache|BuildCache', groups = ["@t20-settings", "@t22-cache"] },
+    { match = 'NotificationsSection', groups = ["21"] },
+    { match = 'UptimeSection', groups = ["26"] },
+    { match = 'DatabaseServersSection', groups = ["27"] },
+    { match = 'ApiTokensSection', groups = ["29"] },
+    { match = 'AuditLogSection', groups = ["@t24-audit"] },
+    # Sections no scenario opens:
+    { match = 'registries|reg-|updates|upd-|own-lan|lan-|id="network"|password|pw-|id="system"', groups = ["@smoke"], notes = ["No scenario opens this page or section: also run Gitberth.UiTests against the dev instance (GITBERTH_UI_URL and GITBERTH_UI_PASSWORD)."] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Pages/AppPage.razor"]
+groups = ["01", "20", "22", "24", "25", "@t02-opened", "@t12-recreate"]
+refine = [
+    { match = '[Pp]review', groups = ["01", "05", "@t02-opened"] },
+    { match = 'Promot', groups = ["11"] },
+    { match = 'Restart', groups = ["@t12-recreate"] },
+    { match = 'Stop|Start', groups = ["24", "25"] },
+    { match = 'Rebuild|not live yet|Apply now|[Pp]ending', groups = ["10", "30"] },
+    { match = '[Cc]ache', groups = ["22"] },
+    { match = 'Update|Roll back|Check for update', groups = ["@t24-registry"] },
+    { match = 'Template', groups = ["30"] },
+    { match = 'Compose|Service', groups = ["@t28-repo"] },
+    { match = 'Uptime', groups = ["26"] },
+    { match = '[Tt]ab', groups = ["01", "09", "@t02-opened"] },
+    { match = 'Deploy', groups = ["20", "22"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/AppSettingsTab.razor"]
+groups = ["06", "19", "22", "23", "24"]
+refine = [
+    { match = 'sec-general|[Nn]otification|health URL|set-health-url', groups = ["21", "@t24-audit"] },
+    { match = 'sec-source|set-ignored|set-watch|set-dockerfile|Vercel|[Ff]ilter', groups = ["10", "22"] },
+    { match = 'sec-previews|PreviewSettings', groups = ["03", "04", "05"] },
+    { match = 'sec-hooks|DeployHooks', groups = ["23"] },
+    { match = 'sec-databases|Databases', groups = ["27"] },
+    { match = 'sec-command|set-cmd', groups = ["06"] },
+    { match = 'sec-env', groups = ["09"] },
+    { match = 'sec-volumes|Volumes', groups = ["06", "19"] },
+    { match = 'sec-restart|RestartSchedule', groups = ["@t12-sched"] },
+    { match = 'sec-resources|sec-health|sec-labels|sec-logging|sec-advanced', groups = ["03", "06"] },
+    { match = 'sec-remove|Remove', groups = ["05", "24", "27"] },
+    { match = 'Compose|set-compose-yaml', groups = ["@t28-paste"] },
+    { match = 'updates|Image', groups = ["@t24-registry"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/AppEnvironmentTab.razor", "src/Gitberth/Components/Shared/EnvEditor.razor",
+         "src/Gitberth/Components/Apps/PasteEnvDialog.razor"]
+groups = ["09", "10", "@t24-audit", "@t12-recreate"]
+refine = [
+    { match = '[Dd]atabase', groups = ["27"] },
+    { match = 'GitHub|RepoVariables', groups = ["09", "@t24-audit"] },
+    { match = 'APP_URL|[Aa]ddress', groups = ["30"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/ContainerSettingsDraft.cs", "src/Gitberth/Components/Shared/ApplyBar.razor"]
+groups = ["06", "09", "19", "24"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/SettingsAdvanced.razor", "src/Gitberth/Components/Apps/SettingsLabels.razor",
+         "src/Gitberth/Components/Apps/ResourceFields.razor", "src/Gitberth/Components/Apps/SettingsLogging.razor"]
+groups = ["03", "06"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/AppOverviewTab.razor"]
+groups = ["06", "19", "20"]
+refine = [
+    { match = 'Job|Cron', groups = ["07"] },
+    { match = 'Database', groups = ["27"] },
+    { match = 'Compose|Service', groups = ["@t28-repo"] },
+    { match = 'Uptime', groups = ["26"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/RemoveAppDialog.razor",
+         "src/Gitberth/Components/Shared/DeleteAppDialog.razor",
+         "src/Gitberth/Components/Shared/ConfirmNameDialog.razor"]
+groups = ["05", "24", "27", "30"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/NetworkTab.razor", "src/Gitberth/Components/Shared/Network/**",
+         "src/Gitberth/wwwroot/css/network-newapp.css"]
+groups = ["17", "18", "20", "25"]              # the Network tab renders in every domain scenario; ReachDiagram is in New app too
+
+[[rule]]
+globs = ["src/Gitberth/Components/Pages/Apps.razor", "src/Gitberth/Components/Apps/AppRow.razor",
+         "src/Gitberth/Components/Apps/AppListView.cs", "src/Gitberth/Components/Pages/Home.razor",
+         "src/Gitberth/Components/Layout/TopSearch.razor", "src/Gitberth/Components/Apps/HostStrip.razor"]
+groups = ["01", "20"]
+refine = [
+    { match = 'Running|[Mm]ember|Compose', groups = ["01", "@t28-repo"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Pages/DeploymentView.razor", "src/Gitberth/Components/Shared/DeploymentLog.razor",
+         "src/Gitberth/Components/Shared/LogView.razor", "src/Gitberth/Components/Shared/LogLine.cs",
+         "src/Gitberth/Components/Shared/ContainerLogs.razor"]
+groups = ["20", "22", "@t02-opened", "@t12-failed", "@t12-cancel"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Shared/CopyButton.razor", "src/Gitberth/Components/Shared/CopyText.razor",
+         "src/Gitberth/wwwroot/js/gitberth.js"]
+groups = ["20", "23", "27"]                    # gitberth.js also removes the splash every scenario waits for
+
+[[rule]]
+globs = ["src/Gitberth/Components/Shared/TimeChart.razor", "src/Gitberth/Components/Shared/Sparkline.razor",
+         "src/Gitberth/Components/Shared/SparkPath.cs", "src/Gitberth/Components/Shared/ChartMath.cs",
+         "src/Gitberth/Components/Shared/Meter.razor", "src/Gitberth/Components/Shared/Waffle.razor",
+         "src/Gitberth/Components/Shared/HeroStat.razor"]
+groups = ["20", "26"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Pages/Health.razor", "src/Gitberth/Components/Pages/NetworkPage.razor",
+         "src/Gitberth/Components/Pages/NetworkPageView.cs",
+         "src/Gitberth/Components/Shared/RenameContainerDialog.razor", "src/Gitberth/wwwroot/css/network-page.css"]
+groups = ["@smoke"]                            # no scenario opens these (Gitberth.UiTests does)
+notes = ["No scenario opens this page or section: also run Gitberth.UiTests against the dev instance (GITBERTH_UI_URL and GITBERTH_UI_PASSWORD)."]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Pages/Login.razor", "src/Gitberth/Components/Shared/RedirectToLogin.razor",
+         "src/Gitberth/Components/Layout/NavMenu.razor", "src/Gitberth/Components/Layout/MainLayout.razor"]
+groups = ["20"]
+
+
+# ===== E. Folders (new files and anything not named above) =====
+[[rule]]
+globs = ["src/Gitberth/Agents/**"]
+groups = ["29", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Audit/**"]
+groups = ["29", "@t24-audit"]
+
+[[rule]]
+globs = ["src/Gitberth/Compose/**"]
+groups = ["28", "30", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Databases/**"]
+groups = ["27", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Templates/**"]
+groups = ["30", "32"]
+
+[[rule]]
+globs = ["src/Gitberth/Previews/**"]  # PreviewService, PreviewPlanner, PreviewStates, PreviewGate
+groups = ["01", "02", "03", "04", "05", "11"]
+refine = [
+    { match = 'Promot', groups = ["10", "11"] },
+    { match = '[Ll]imit|Waiting|[Ww]aits', groups = ["04"] },
+    { match = '[Ff]ork', groups = ["03"] },
+    { match = 'Remov|Delete|Gate|Expir', groups = ["05"] },
+    { match = 'Domain|Protect', groups = ["05", "16"] },
+    { match = '[Bb]ranch', groups = ["01"] },
+    { match = '[Pp]ull', groups = ["02"] },
+]
+
+[[rule]]
+globs = ["src/Gitberth/Domains/**"]
+groups = ["05", "16", "17", "18", "25", "26"]
+
+[[rule]]
+globs = ["src/Gitberth/Public/**"]  # PublicPages is the very first middleware
+groups = ["16", "17", "25", "26"]
+
+[[rule]]
+globs = ["src/Gitberth/Uptime/**"]
+groups = ["26"]
+
+[[rule]]
+globs = ["src/Gitberth/Notifications/**"]
+groups = ["21", "26"]
+
+[[rule]]
+globs = ["src/Gitberth/Images/**"]
+groups = ["27", "32", "@t24-registry"]
+notes = ["Also run the engine tests on a Docker host: GITBERTH_ENGINE_IT=1 dotnet test tests/Gitberth.Tests (EngineIntegrationTests, ImageEngineIntegrationTests). No scenario reaches these engine calls themselves."]
+
+[[rule]]
+globs = ["src/Gitberth/Health/**"]  # stats, Health page: no scenario
+groups = ["@smoke"]
+
+[[rule]]
+globs = ["src/Gitberth/Network/**", "src/Gitberth/Docker/HostScan.cs", "src/Gitberth/Docker/ProcNet.cs",
+         "src/Gitberth/Docker/NetworkContainer.cs"]
+groups = ["17", "18", "24"]
+
+[[rule]]
+globs = ["src/Gitberth/Docker/**"]
+groups = ["@wide"]
+
+[[rule]]
+globs = ["src/Gitberth/Git/**"]
+groups = ["01", "02", "03", "11", "20", "29"]
+
+[[rule]]
+globs = ["src/Gitberth/Security/**"]
+groups = ["20", "@t24-audit"]
+
+[[rule]]
+globs = ["src/Gitberth/Detection/**"]  # language detectors: unit tests and tests/samples; New app's analysis runs in the smoke
+groups = ["@smoke"]
+
+[[rule]]
+globs = ["src/Gitberth/Sources/**"]
+groups = ["20", "@t28-paste"]
+
+[[rule]]
+globs = ["src/Gitberth/Services/**", "src/Gitberth/Apps/**", "src/Gitberth/Deploy/**"]
+groups = ["@wide"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/NewApp/**"]
+groups = ["20", "30", "@t28-paste"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Apps/**"]
+groups = ["06", "20"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/**", "src/Gitberth/wwwroot/**"]
+groups = ["01", "20"]
+
+
+# ===== F. Anything else: @wide, and impact.py warns that a rule is missing =====
+[[rule]]
+globs = ["**"]
+groups = ["@wide"]
+catch_all = true

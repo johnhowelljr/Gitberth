@@ -9,7 +9,7 @@
 - A deploy cancelled while it builds (not the commit's fault) ends as an error, linking to its log.
 - A restart (the app page's, and one on a schedule), a settings change and a rollback post none: the scheduled
   restart, the settings change and the rollback are deploys without a build. (The scheduled one waits about 6
-  minutes: its shortest schedule is 5.)
+  minutes: its shortest schedule is 5. About 2 with the rig's test timings.)
 - Turning commit statuses off in Settings › GitHub stops them; turned on again, the next deploy reports.
 - A branch's preview reports under "Gitberth preview: <parent>", linking to its own address, and gets no comment (it
   has no pull request).
@@ -312,7 +312,8 @@ def test_recreates_restarts_and_settings_changes_post_no_status(page, gitberth, 
 @pytest.mark.slow
 def test_a_scheduled_restart_posts_no_status(page, gitberth, github, standins, apps, uniq):
     """A restart on a schedule recreates the app through a deploy without a build (trigger Restart). The shortest schedule
-    is every 5 minutes, counted from when the container last started, so this waits about 6 minutes."""
+    is every 5 minutes, counted from when the container last started, so this waits about 6 minutes; about 2 with the
+    rig's test timings (a schedule's minute lasts 20 s there, and the schedules are looked at every 2 s)."""
     repo = github.create_repo(uniq("sr"), files={"marker.txt": "scheduled v1"})
     sha = repo.branch_sha("main")
     app = apps.track(gitberth.create_git_app(page, repo.url))

@@ -36,6 +36,12 @@ public sealed class GitberthOptions
     /// </summary>
     public string? UptimeConnectTo { get; init; }
 
+    /// <summary>
+    /// The end-to-end rig's shorter waits (<see cref="Gitberth.TestTimings"/>, from <see cref="Gitberth.TestTimings.Variable"/>);
+    /// null everywhere else, which leaves every wait as it is.
+    /// </summary>
+    public TestTimings? TestTimings { get; init; }
+
     public string DbPath => Path.Combine(DataDir, "gitberth.db");
     public string KeysDir => Path.Combine(DataDir, "keys");
     public string LogsDir => Path.Combine(DataDir, "logs");
@@ -57,6 +63,8 @@ public sealed class GitberthOptions
             Network = NullIfBlank(config["GITBERTH_NETWORK"]) ?? "gitberth",
             DockerHost = NullIfBlank(config["DOCKER_HOST"]) ?? "unix:///var/run/docker.sock",
             UptimeConnectTo = NullIfBlank(config["GITBERTH_UPTIME_CONNECT_TO"]),
+            // Unset or blank: null. Anything it doesn't understand throws here, before anything starts.
+            TestTimings = Gitberth.TestTimings.Parse(config[Gitberth.TestTimings.Variable]),
         };
     }
 

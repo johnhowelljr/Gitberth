@@ -53,12 +53,36 @@ jobs:
 
   installer:
     name: Installer
-    # install.sh is piped into sh on machines of every kind: POSIX sh only, and nothing ShellCheck warns about.
+    # install.sh is piped into sh on machines of every kind: POSIX sh only, and nothing ShellCheck warns about. The
+    # end-to-end rig's scripts are held to the same.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - name: ShellCheck
-        run: shellcheck -s sh install.sh
+        run: shellcheck -s sh install.sh tests/e2e/run.sh tests/e2e/rig/inner.sh
+
+  e2e-impact:
+    name: E2E impact
+    # Which end-to-end tests this change needs (tests/e2e/impact.toml) within the 10-minute budget, and what it leaves
+    # for the full suite, as a report in the run's summary; nothing runs in a rig here. Fails only when the map or the
+    # selector is broken. No other job needs it, so releases never wait on it.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check the map and the selector
+        run: |
+          python3 tests/e2e/impact.py check
+          python3 -m unittest discover -s tests/e2e -p impact_test.py
+      - name: The change's tier
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          case "$BASE" in ''|0000000000000000000000000000000000000000) BASE=origin/main ;; esac
+          python3 tests/e2e/impact.py plan --git "$BASE" --lanes 2 --format markdown >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Release
@@ -204,6 +228,8 @@ jobs:
               tags="\`${version%.*}\` follows the newest ${version%.*}.x release, and \`latest\` the newest release."
             fi
             assets="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            # The notes' backticks are Markdown's, in single quotes on purpose.
+            # shellcheck disable=SC2016
             {
               printf '## Docker image\n\n'
               printf '`%s:%s`, for Intel/AMD and ARM. %s\n\n' "$image" "$version" "$tags"
