@@ -503,11 +503,12 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
             entries.Add(new Entry(new AppSummary(
                 key, row?.Id, row?.Name ?? titles.For(key) ?? key, key, row?.Source ?? AppSource.Existing, role, origin,
                 image ?? row?.ImageRef ?? row?.CurrentImage ?? "",
-                row is { FromRepo: true } ? $"{row.Owner}/{row.Repo} · {row.Branch}{(row.CurrentCommit is { Length: >= 7 } sha ? " · " + sha[..7] : "")}" : null,
+                row is { FromRepo: true } ? $"{row.RepoFullName} · {row.Branch}{(row.CurrentCommit is { Length: >= 7 } sha ? " · " + sha[..7] : "")}" : null,
                 state, text, c?.Id, addresses?.Chips ?? [], reading?.MemoryBytes, reading is { Recent.Count: > 0 } r ? r.Recent[^1].Cpu : null,
                 badges.GetValueOrDefault(key), row?.Pinned ?? false, role is ContainerRole.Self or ContainerRole.Tunnel, null)
             {
                 RenamedTo = renamedTo,
+                GitLab = row is { FromRepo: true, FromGitLab: true },
                 Database = role == ContainerRole.Database,
                 TagMoved = c is not null && (rolledBack || image != c.Image && ImageReference.IsImageId(c.Image) && IsTag(image)),
             }, addresses));

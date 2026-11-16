@@ -8,29 +8,40 @@
 @inject GitberthOptions Options
 @inject HostScanner Scanner
 @inject ContainerStatsCollector Stats
+@inject GitLabApi GitLab
 @inject NavigationManager Nav
 
 @*
-    New app › GitHub repository (architecture.md 3.7): the repository, what Gitberth detected and how it'll build it, then
-    its settings and Create and deploy. The steps and the backend are the ones New app always had (AppService.CreateAsync,
-    then a deploy); they look like the rest of New app now.
+    New app › Git repository (architecture.md 3.7): the repository (a github.com one, or a project on Gitberth's GitLab), what
+    Gitberth detected and how it'll build it, then its settings and Create and deploy. The steps and the backend are the ones
+    New app always had (AppService.CreateAsync, then a deploy); they look like the rest of New app now.
 *@
 <div class="gb-stack">
     <section class="gb-card gb-sec">
         <div class="gb-sec-head">
-            <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Custom.Brands.GitHub" /></span>
-            <div style="min-width:0"><div class="gb-h3">GitHub repository</div><p>Any github.com URL works, including links to a branch or a folder. Other Git hosts aren't supported yet.</p></div>
+            <span class="gb-sec-icon"><SvgIcon Icon="@HostIcon" /></span>
+            <div style="min-width:0">
+                <div class="gb-h3">Git repository</div>
+                <p>A github.com repository, or a project on your GitLab (@GitLabHost), groups and subgroups too. A link to a branch or a folder works as well.</p>
+            </div>
         </div>
         <div class="gb-sec-body">
             <div class="gb-row gb-row--wrap" style="flex-wrap:nowrap">
                 <label class="gb-input gb-grow">
-                    <SvgIcon Icon="@Icons.Custom.Brands.GitHub" />
-                    <input placeholder="https://github.com/you/your-app" value="@url" @oninput="e => url = e.Value?.ToString() ?? string.Empty" @onkeydown="OnUrlKeyDown"
+                    <SvgIcon Icon="@HostIcon" />
+                    <input placeholder="https://github.com/you/your-app or @(gitLabInstance)/group/project" value="@url" @oninput="e => url = e.Value?.ToString() ?? string.Empty" @onkeydown="OnUrlKeyDown"
                            disabled="@Busy" aria-label="Repository URL" spellcheck="false" />
                 </label>
                 <Btn Kind="@(remote is null ? BtnKind.Primary : BtnKind.Secondary)" OnClick="CheckAsync" Busy="checking" Disabled="@(Busy || string.IsNullOrWhiteSpace(url))">Check</Btn>
             </div>
-            @if (!hasToken)
+            @if (TypedGitLab)
+            {
+                @if (!hasGitLabToken)
+                {
+                    <Banner Tone="info" Title="Public projects only, for now">No GitLab token is saved yet. <a href="settings#gitlab">Add one in Settings › GitLab</a> for private ones.</Banner>
+                }
+            }
+            else if (!hasToken)
             {
                 <Banner Tone="info" Title="Public repositories only, for now">No GitHub token is saved yet. <a href="settings">Add one in Settings</a> for private ones.</Banner>
             }
@@ -253,9 +264,21 @@
 
     private string url = "";
     private bool checking, analyzing, creating, customize;
-    private bool hasToken = true;
+    private bool hasToken = true, hasGitLabToken = true;
+    // Gitberth's GitLab (Settings › GitLab): a URL on it is a GitLab project's.
+    private string gitLabInstance = GitLabRepoRef.DefaultInstance;
     private string? error;
-    private GitHubRepoRef? repo;
+    private RepoRef? repo;
+
+    private string GitLabHost => Uri.TryCreate(gitLabInstance, UriKind.Absolute, out var u) ? u.Authority : gitLabInstance;
+
+    // What's typed is on Gitberth's GitLab (or the checked repo is a GitLab project): its mark and its token's banner.
+    private bool TypedGitLab => repo is GitLabRepoRef && remote is not null || GitLabRepoRef.TryParse(url, gitLabInstance, out _, out _);
+
+    private string HostIcon => TypedGitLab ? GitberthIcons.GitLab : Icons.Custom.Brands.GitHub;
+
+    // Where the repo's own variables are kept, as a hint says it.
+    private string VariablesWhere => repo is GitLabRepoRef ? "Set in the project's GitLab CI/CD variables" : "Set in the repo's GitHub variables";
     private RemoteInfo? remote;
     private string branch = "";
     private string? subdir;
@@ -376,6 +399,8 @@
     protected override async Task OnInitializedAsync()
     {
         hasToken = await Settings.GetAsync(SettingKeys.GitHubToken) is not null;
+        hasGitLabToken = await Settings.GetAsync(SettingKeys.GitLabToken) is not null;
+        gitLabInstance = await GitLab.InstanceAsync();
         if (!string.IsNullOrWhiteSpace(PrefillUrl)) url = PrefillUrl;
         lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));
         try
@@ -445,7 +470,8 @@
         analyzedDir = lastAnalyzedDir = null;
         (composeFiles, composeTexts, composeFile, composeInfo, useCompose, composeWeb) = ([], new(StringComparer.Ordinal), null, null, false, "");
         await OnStage.InvokeAsync(NewAppStep.Source);
-        if (!GitHubRepoRef.TryParse(url, out var parsed, out var parseError))
+        // A github.com repository, or a project on Gitberth's GitLab.
+        if (!RepoUrls.TryParse(url, gitLabInstance, out var parsed, out var parseError))
         {
             error = parseError;
             return;
@@ -463,7 +489,7 @@
             }
             branch = remote.DefaultBranch ?? remote.Branches[0].Name;
             subdir = null;
-            if (repo.TreePath is not null && GitHubRepoRef.ResolveTreePath(repo.TreePath, remote.Branches.Select(b => b.Name)) is { } resolved)
+            if (repo.TreeOf is { } tree && GitHubRepoRef.ResolveTreePath(tree, remote.Branches.Select(b => b.Name)) is { } resolved)
             {
                 branch = resolved.Branch;
                 subdir = resolved.Subdirectory;
@@ -569,8 +595,8 @@
     private async Task PrefillAsync(string? sub)
     {
         var name = !string.IsNullOrWhiteSpace(model.Name) ? model.Name
-            : sub is null ? repo!.Repo
-            : $"{repo!.Repo}-{sub.Split('/')[^1]}";
+            : sub is null ? repo!.Name
+            : $"{repo!.Name}-{sub.Split('/')[^1]}";
         model = new AppSettingsModel { Name = name, RestartPolicy = model.RestartPolicy, AutoDeploy = model.AutoDeploy };
         (portProblems, triedCreate) = ([], false);
         await ChooseNameAsync();
@@ -578,12 +604,12 @@
         {
             // The web service's ports, and the variables the Compose file uses: empty ones take its defaults.
             await ComposePortsAsync();
-            var shared = (await RepoVars.GetAsync(repo!.Owner, repo.Repo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var shared = (await RepoVars.GetAsync(repo!.AppOwner, repo.AppRepo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var v in compose.Variables)
                 model.Env.Add(new EnvRow
                 {
                     Key = v.Name, Value = "", IsSecret = Security.Masking.IsSecret(v.Name, ""),
-                    Hint = shared.Contains(v.Name) ? "Set in the repo's GitHub variables"
+                    Hint = shared.Contains(v.Name) ? VariablesWhere
                         : v.Default is { Length: > 0 } d ? $"{composeFile} uses {d} when it's empty"
                         : v.Required ? $"{composeFile} needs it" : $"Used by {composeFile}",
                 });
@@ -594,15 +620,15 @@
         if (detection!.ContainerPort is int port) rules.Add(new PortRule(port, "tcp", PortAccess.Lan, await SuggestHostPortAsync(port)));
         ports = ContainerPortsDraft.ForNew(rules, detection.ContainerPort);
         model.Ports = ports.ToPortRows().ToList();
-        // A value set here wins over the repo's GitHub variables, so an example value never shadows one the repo already has.
-        var inGitHub = (await RepoVars.GetAsync(repo!.Owner, repo.Repo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A value set here wins over the repo's GitHub (or GitLab) variables, so an example value never shadows one the repo already has.
+        var inGitHub = (await RepoVars.GetAsync(repo!.AppOwner, repo.AppRepo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var s in detection.EnvSuggestions)
         {
             var shared = inGitHub.Contains(s.Key);
             model.Env.Add(new EnvRow
             {
                 Key = s.Key, Value = shared ? "" : s.Value, IsSecret = s.IsSecret, BuildTime = s.BuildTime,
-                Hint = shared ? "Set in the repo's GitHub variables" : s.Source,
+                Hint = shared ? VariablesWhere : s.Source,
             });
         }
     }

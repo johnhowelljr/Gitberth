@@ -15,6 +15,7 @@
 @inject DomainService DomainService
 @inject Gitberth.Previews.PreviewService Previews
 @inject DatabaseService Dbs
+@inject GitLabApi GitLab
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -94,7 +95,7 @@ else
             break;
         case "settings":
             <AppSettingsTab View="view" Settings="settings" Draft="draft" Options="options" Git="git" LoadError="@settingsError"
-                            Changed="DraftChanged" OnRemove="RemoveAsync" OnSaved="ReloadAsync" />
+                            Changed="DraftChanged" OnRemove="RemoveAsync" OnSaved="ReloadAsync" GitLabInstance="@gitLabInstance" />
             @ApplySection()
             break;
         case "logs":
@@ -230,6 +231,8 @@ else
             try { lanHost = await Book.LanHostAsync(Nav.BaseUri); }
             catch (Exception) { lanHost = new Uri(Nav.BaseUri).Host; }
             await LoadAsync();
+            // A GitLab app's project is on Gitberth's GitLab: its links go there.
+            if (view?.Row is { FromGitLab: true }) gitLabInstance = await GitLab.InstanceAsync();
             await LoadFamilyAsync();
             timer?.Dispose();
             timer = new Timer(_ =>
@@ -368,8 +371,12 @@ else
 
     private bool IsDatabase => view is not null && (view.Summary.Role == ContainerRole.Database || ConnectionDetails.EngineOf(view.Summary.Image) is not null);
 
+    // Gitberth's GitLab's address, for a GitLab app's links.
+    private string gitLabInstance = Gitberth.Git.GitLabRepoRef.DefaultInstance;
+
     private RenderFragment HeroMeta(AppSummary app) => @<text>
-        <SourceBadge Source="app.Source" Large="true" Href="@(view?.Row is { } row && app.Source == AppSource.Git ? row.RepoWebUrl : null)" />
+        <SourceBadge Source="app.Source" Large="true" GitLab="@(view?.Row is { FromGitLab: true })"
+                     Href="@(view?.Row is { } row && app.Source == AppSource.Git ? row.RepoWebUrlOn(gitLabInstance) : null)" />
         @if (app.Source == AppSource.Git && view?.Row is { } r)
         {
             <span class="gb-mono">@r.RepoFullName</span>
@@ -633,7 +640,7 @@ else
                     }
                 </ChildContent>
                 <Actions>
-                    <Btn Size="BtnSize.Sm" Href="@of.Url" Target="_blank" Icon="@Icons.Custom.Brands.GitHub">@(of.Info.Kind == PreviewKind.PullRequest ? "Pull request" : "Branch")</Btn>
+                    <Btn Size="BtnSize.Sm" Href="@of.Url" Target="_blank" Icon="@(of.Host == Gitberth.Git.GitHost.GitLab ? GitberthIcons.GitLab : Icons.Custom.Brands.GitHub)">@(of.Info.Kind != PreviewKind.PullRequest ? "Branch" : of.Host == Gitberth.Git.GitHost.GitLab ? "Merge request" : "Pull request")</Btn>
                     <Btn Size="BtnSize.Sm" Href="@($"apps/{Uri.EscapeDataString(of.ParentKey)}/previews")" Icon="@Icons.Material.Outlined.Preview">All previews</Btn>
                 </Actions>
             </Banner>

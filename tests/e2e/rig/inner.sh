@@ -193,11 +193,11 @@ reset() {
 
 # runner [pytest args]: pytest in the scenario runner, against this rig.
 runner() {
-  # The runner sees GitHub's and Cloudflare's names as Gitberth does (the stand-in, trusted through the rig's CA), so a
-  # scenario can call them as Gitberth would, and nothing in it can reach the real ones.
+  # The runner sees GitHub's, GitLab's and Cloudflare's names as Gitberth does (the stand-in, trusted through the rig's
+  # CA), so a scenario can call them as Gitberth would, and nothing in it can reach the real ones.
   hosts=""
   for h in github.com www.github.com api.github.com codeload.github.com uploads.github.com raw.githubusercontent.com \
-           objects.githubusercontent.com api.cloudflare.com; do hosts="$hosts --add-host $h:$STANDIN_IP"; done
+           objects.githubusercontent.com api.cloudflare.com gitlab.e2e.test gitlab.com; do hosts="$hosts --add-host $h:$STANDIN_IP"; done
   # shellcheck disable=SC2086
   docker run --rm --name gbe2e-runner --network "$NET" --shm-size 1g $hosts \
     -v gbe2e-trust:/trust:ro -e SSL_CERT_FILE=/trust/gitberth-bundle.pem \

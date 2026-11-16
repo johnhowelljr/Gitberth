@@ -38,16 +38,28 @@ public static class PreviewNames
     /// <summary>A branch as part of a name: feature/Login_Page is feature-login-page; one with no letter or digit is "branch".</summary>
     public static string BranchSlug(string branch) => AppService.Slugify(branch) is { Length: > 0 } slug ? slug : "branch";
 
-    /// <summary>"orb · PR #12", or "orb · feature/login".</summary>
-    public static string Name(string parentName, PreviewKind kind, string branch, int? pullRequest) => $"{parentName} · {Label(kind, branch, pullRequest)}";
+    /// <summary>"orb · PR #12" (a GitLab merge request's "orb · MR !12"), or "orb · feature/login".</summary>
+    public static string Name(string parentName, PreviewKind kind, string branch, int? pullRequest, Git.GitHost host = Git.GitHost.GitHub) =>
+        $"{parentName} · {Label(kind, branch, pullRequest, host)}";
 
-    /// <summary>How the preview is called in sentences and lists: "PR #12", or the branch.</summary>
-    public static string Label(PreviewKind kind, string branch, int? pullRequest) =>
-        kind == PreviewKind.PullRequest ? $"PR #{pullRequest?.ToString(CultureInfo.InvariantCulture)}" : branch;
+    /// <summary>How the preview is called in sentences and lists: "PR #12" (on GitLab, as GitLab calls one: "MR !12"), or the branch.</summary>
+    public static string Label(PreviewKind kind, string branch, int? pullRequest, Git.GitHost host = Git.GitHost.GitHub) =>
+        kind != PreviewKind.PullRequest ? branch
+        : host == Git.GitHost.GitLab ? $"MR !{pullRequest?.ToString(CultureInfo.InvariantCulture)}"
+        : $"PR #{pullRequest?.ToString(CultureInfo.InvariantCulture)}";
 
-    /// <summary>What a deploy of it fetches: refs/pull/&lt;n&gt;/head, or refs/heads/&lt;branch&gt;.</summary>
-    public static string Ref(PreviewKind kind, string branch, int? pullRequest) =>
-        kind == PreviewKind.PullRequest ? $"refs/pull/{pullRequest?.ToString(CultureInfo.InvariantCulture)}/head" : $"refs/heads/{branch}";
+    /// <summary>The host whose merge request a preview's ref is (refs/merge-requests/… is GitLab's); GitHub for any other.</summary>
+    public static Git.GitHost HostOfRef(string? gitRef) =>
+        gitRef?.StartsWith("refs/merge-requests/", StringComparison.Ordinal) == true ? Git.GitHost.GitLab : Git.GitHost.GitHub;
+
+    /// <summary>
+    /// What a deploy of it fetches: refs/pull/&lt;n&gt;/head (a GitLab merge request's refs/merge-requests/&lt;iid&gt;/head, which
+    /// the target project keeps for one from a fork too), or refs/heads/&lt;branch&gt;.
+    /// </summary>
+    public static string Ref(PreviewKind kind, string branch, int? pullRequest, Git.GitHost host = Git.GitHost.GitHub) =>
+        kind != PreviewKind.PullRequest ? $"refs/heads/{branch}"
+        : host == Git.GitHost.GitLab ? $"refs/merge-requests/{pullRequest?.ToString(CultureInfo.InvariantCulture)}/head"
+        : $"refs/pull/{pullRequest?.ToString(CultureInfo.InvariantCulture)}/head";
 
     /// <summary>
     /// The preview's domain, from its parent's main one: the first label with -pr-&lt;n&gt; or -git-&lt;branch&gt; added, the rest

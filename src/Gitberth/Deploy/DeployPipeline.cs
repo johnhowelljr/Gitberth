@@ -55,6 +55,7 @@ public sealed record BridgeCheck(bool Ok, string? Why)
 /// </param>
 /// <param name="composer">Runs docker compose for Compose apps; without it (in older tests) one is made over <paramref name="docker"/>.</param>
 /// <param name="builtIns">Where an app installed from a template is reached (APP_URL…), set at each of its deploys; without it (in tests) nothing is.</param>
+/// <param name="gitLab">GitLab's API, which a GitLab app's build filters ask what a push changed (its compare); without it git compares the commits.</param>
 public sealed partial class DeployPipeline(
     IDbContextFactory<GitberthDb> dbFactory,
     GitClient git,
@@ -77,7 +78,8 @@ public sealed partial class DeployPipeline(
     Audit.AuditLog? audit = null,
     Databases.DatabaseService? databases = null,
     Compose.ComposeRunner? composer = null,
-    Templates.TemplateBuiltIns? builtIns = null)
+    Templates.TemplateBuiltIns? builtIns = null,
+    GitLabApi? gitLab = null)
 {
     // How long a report may hold a deploy up: GitHub being slow never delays the next deploy for long.
     private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
@@ -208,15 +210,20 @@ public sealed partial class DeployPipeline(
         try
         {
             // The repo's variables in GitHub come first; the app's own values in Gitberth win. Like on Vercel, the GitHub
-            // ones are there at build time too: they're plain config the repo already shares.
+            // ones are there at build time too: they're plain config the repo already shares. A GitLab project's CI/CD
+            // variables take their place, for production or for previews by their environment scope.
             // An inline Compose app has no repo, so no GitHub variables either.
-            var repo = app.FromRepo ? await repoVariables.ForDeployAsync(app.Owner, app.Repo, CancellationToken.None) : new RepoVariablesResult([], null);
+            var repo = app.FromRepo ? await repoVariables.ForDeployAsync(app.Owner, app.Repo, CancellationToken.None, preview: parent is not null) : new RepoVariablesResult([], null);
+            // Where they're kept, as the log says it: "the repo's GitHub variables", or a GitLab project's CI/CD variables.
+            var (vars, varsHost) = RepoRef.IsGitLab(app.Owner) ? ("the project's GitLab CI/CD variables", "GitLab") : ("the repo's GitHub variables", "GitHub");
             if (app.FromRepo) await ForgetVariablesIfDeletedAsync(db, app);
             var usable = repo.Variables.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
             // Set by Gitberth from the app's databases (Settings › Databases): its own connection strings, or a preview's own,
             // made for it now before anything is built. They win over the Environment tab's values and GitHub's, and are
             // secret wherever they go, the build included.
-            var provided = databases is null ? [] : await DatabaseValuesAsync(app, parent, usable, log, ct);
+            // A preview's copy of production's database is made from what production gets: for a GitLab project, its variables for production.
+            var forProduction = repo.All is null ? usable : repo.ForProduction.Where(v => v.Value.Length > 0 && EnvRules.IsValidKey(v.Name)).ToList();
+            var provided = databases is null ? [] : await DatabaseValuesAsync(app, parent, forProduction, log, ct);
             var providedKeys = provided.Select(p => p.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             databasesStamp = databases is null || parent is not null ? null : await databases.StampAsync(app.Id, CancellationToken.None);
             if (provided.Count > 0)
@@ -234,7 +241,7 @@ public sealed partial class DeployPipeline(
             var secretKeys = (parent ?? app).EnvVars.Where(v => v.IsSecret).Select(v => v.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (parent is not null && preview is not null)
             {
-                log.Step($"A preview of {parent.Name} ({Previews.PreviewNames.Label(preview.Kind, preview.Branch, preview.PullRequest)}): its settings are {parent.Name}'s, and so are its variables for previews");
+                log.Step($"A preview of {parent.Name} ({Previews.PreviewNames.Label(preview.Kind, preview.Branch, preview.PullRequest, RepoRef.HostOf(parent.Owner))}): its settings are {parent.Name}'s, and so are its variables for previews");
                 var leftOut = Previews.PreviewCopy.LeftOut(parent.Volumes);
                 if (leftOut.Count > 0)
                     log.Line($"Not mounted, because a preview never writes into production's folders: {string.Join(", ", leftOut.Select(v => $"{v.Source} at {v.Target}"))}.");
@@ -253,16 +260,21 @@ public sealed partial class DeployPipeline(
             var listener = usable.Where(v => !ownKeys.Contains(v.Name) && ListenerKeys.Contains(v.Name)).Select(v => v.Name).ToList();
             var fromGitHub = usable
                 .Where(v => !ownKeys.Contains(v.Name) && !ListenerKeys.Contains(v.Name))
-                .Select(v => new EnvValue(v.Name, v.Value, Masking.IsSecret(v.Name, v.Value, secretKeys)))
+                // A GitLab variable masked there is secret here too.
+                .Select(v => new EnvValue(v.Name, v.Value, v.Masked || Masking.IsSecret(v.Name, v.Value, secretKeys)))
                 .ToList();
             log.Mask(fromGitHub.Where(e => e.IsSecret).Select(e => e.Value));
             if (repo.Error is not null)
                 log.Line(repo.Saved
-                    ? "warning: the repo's GitHub variables couldn't be read, so the copy kept from the last read is used. " + repo.Error
-                    : "warning: the repo's GitHub variables weren't used. " + repo.Error);
-            if (fromGitHub.Count > 0) log.Step($"Using {fromGitHub.Count} variable{(fromGitHub.Count == 1 ? "" : "s")} from the repo's GitHub settings");
-            if (overridden.Count > 0) log.Line($"Set in Gitberth for this app, so the GitHub value isn't used: {string.Join(", ", overridden)}");
-            if (listener.Count > 0) log.Line($"Not used from GitHub, because Gitberth sets where the app listens: {string.Join(", ", listener)}. Set it on the app in Gitberth to override.");
+                    ? $"warning: {vars} couldn't be read, so the copy kept from the last read is used. " + repo.Error
+                    : $"warning: {vars} weren't used. " + repo.Error);
+            foreach (var note in repo.Notes) log.Line(note);
+            if (fromGitHub.Count > 0)
+                log.Step(varsHost == "GitHub"
+                    ? $"Using {fromGitHub.Count} variable{(fromGitHub.Count == 1 ? "" : "s")} from the repo's GitHub settings"
+                    : $"Using {fromGitHub.Count} variable{(fromGitHub.Count == 1 ? "" : "s")} from the project's GitLab CI/CD variables ({(parent is null ? "scopes * and production" : "scopes * and preview/*")})");
+            if (overridden.Count > 0) log.Line($"Set in Gitberth for this app, so the {varsHost} value isn't used: {string.Join(", ", overridden)}");
+            if (listener.Count > 0) log.Line($"Not used from {varsHost}, because Gitberth sets where the app listens: {string.Join(", ", listener)}. Set it on the app in Gitberth to override.");
             var runtimeEnv = fromGitHub.Concat(own).ToList();
             // A database's connection string reaches the build too (frameworks migrate there), always as a secret.
             var buildEnv = fromGitHub
@@ -437,7 +449,7 @@ public sealed partial class DeployPipeline(
     private void Started(AppDefinition app, Deployment dep, bool noCache)
     {
         if (audit is null) return;
-        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)) };
+        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep)) };
         if (dep.CommitSha is { Length: >= 7 } sha) changes.Add(new("Commit", null, sha[..7]));
         if (dep.ImageTag is { Length: > 0 } image) changes.Add(new("Image", null, image));
         if (noCache) changes.Add(new("Build cache", null, "not used"));
@@ -456,7 +468,7 @@ public sealed partial class DeployPipeline(
     {
         if (audit is null) return;
         var (action, summary, outcome) = Audit.AuditText.Ended(app.Name, dep);
-        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)) };
+        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep)) };
         if (dep.Status == DeployStatus.Succeeded && dep.CommitSha is { Length: >= 7 } sha)
             changes.Add(new("Commit", previousCommit is { Length: >= 7 } before ? before[..7] : null, sha[..7]));
         if (dep.Status == DeployStatus.Succeeded && dep.ImageTag is { Length: > 0 } image) changes.Add(new("Image", null, image));
@@ -707,7 +719,11 @@ public sealed partial class DeployPipeline(
         string? Branch = null)
     {
         public DeployFacts Facts(AppDefinition app, string? sha, string? message, string? author, AppTraits traits) =>
-            new(MainDomain, app.Owner, app.Repo, Branch is { Length: > 0 } branch ? branch : app.Branch, sha, message, author, traits, Production, ProductionDomain, PullRequest, Preview);
+            RepoRef.Of(app.Owner, app.Repo) is GitLabRepoRef project
+                // A GitLab project: its namespace as the owner, as Vercel has it for a GitLab repo.
+                ? new(MainDomain, project.Namespace, project.Project, Branch is { Length: > 0 } b ? b : app.Branch, sha, message, author, traits, Production, ProductionDomain,
+                    PullRequest, Preview, Provider: "gitlab")
+                : new(MainDomain, app.Owner, app.Repo, Branch is { Length: > 0 } branch ? branch : app.Branch, sha, message, author, traits, Production, ProductionDomain, PullRequest, Preview);
     }
 
     /// <summary>
@@ -723,12 +739,12 @@ public sealed partial class DeployPipeline(
     {
         try
         {
-            var remote = await git.LsRemoteAsync(new GitHubRepoRef(app.Owner, app.Repo), CancellationToken.None);
+            var remote = await git.LsRemoteAsync(RepoRef.Of(app.Owner, app.Repo), CancellationToken.None);
             watch.RecordDefaultBranch(app.Owner, app.Repo, remote.DefaultBranch);
         }
         catch (GitException)
         {
-            // GitHub can't be reached: the default branch the watcher saw last, else production.
+            // GitHub (or GitLab) can't be reached: the default branch the watcher saw last, else production.
         }
         return watch.DefaultBranch(app.Owner, app.Repo) is not { } main || main == app.Branch;
     }
@@ -810,7 +826,7 @@ public sealed partial class DeployPipeline(
         var history = Path.Combine(workDir, "history");
         try
         {
-            return await git.CommitOnBranchAsync(new GitHubRepoRef(app.Owner, app.Repo), app.Branch, asked, history, ct)
+            return await git.CommitOnBranchAsync(RepoRef.Of(app.Owner, app.Repo), app.Branch, asked, history, ct)
                 ?? throw new GitException($"That commit isn't on {app.Branch}.");
         }
         finally
@@ -861,7 +877,7 @@ public sealed partial class DeployPipeline(
         CommitInfo commit;
         try
         {
-            var repo = new GitHubRepoRef(app.Owner, app.Repo);
+            var repo = RepoRef.Of(app.Owner, app.Repo);
             commit = fetch.Ref is { } gitRef ? await git.FetchAsync(repo, gitRef, fetch.Commit, srcDir, log.Line, ct)
                 : fetch.Commit is { } asked ? await git.FetchAsync(repo, OwnBranchRef(app), await CommitOfBranchAsync(db, app, dep, asked, workDir, log, ct), srcDir, log.Line, ct)
                 : await git.CloneAsync(repo, app.Branch, srcDir, log.Line, ct);
@@ -1056,16 +1072,40 @@ public sealed partial class DeployPipeline(
             return null;
         }
         IReadOnlyList<string> changed;
-        try
+        var repo = RepoRef.Of(app.Owner, app.Repo);
+        if (repo is GitLabRepoRef project && gitLab is not null)
         {
-            var repo = new GitHubRepoRef(app.Owner, app.Repo);
-            if (!string.Equals(running, commit.Sha, StringComparison.OrdinalIgnoreCase)) await git.FetchCommitAsync(repo, running, srcDir, ct);
-            changed = await git.ChangedFilesAsync(srcDir, running, ct);
+            // A GitLab project: its compare says which files changed, without fetching the running commit.
+            try
+            {
+                var compared = string.Equals(running, commit.Sha, StringComparison.OrdinalIgnoreCase)
+                    ? new GitLabCompare([], TimedOut: false)
+                    : await gitLab.CompareAsync(project, running, commit.Sha, ct);
+                if (compared.TimedOut)
+                {
+                    log.Line($"The build filters can't tell what changed since {Short(running)}, the commit that runs: GitLab's compare timed out on that many changes. Building it.");
+                    return null;
+                }
+                changed = compared.Paths;
+            }
+            catch (GitLabApiException ex)
+            {
+                log.Line($"The build filters can't tell what changed since {Short(running)}, the commit that runs ({ex.Message.TrimEnd('.')}). Building it.");
+                return null;
+            }
         }
-        catch (GitException ex)
+        else
         {
-            log.Line($"The build filters can't tell what changed since {Short(running)}, the commit that runs ({ex.Message.TrimEnd('.')}). Building it.");
-            return null;
+            try
+            {
+                if (!string.Equals(running, commit.Sha, StringComparison.OrdinalIgnoreCase)) await git.FetchCommitAsync(repo, running, srcDir, ct);
+                changed = await git.ChangedFilesAsync(srcDir, running, ct);
+            }
+            catch (GitException ex)
+            {
+                log.Line($"The build filters can't tell what changed since {Short(running)}, the commit that runs ({ex.Message.TrimEnd('.')}). Building it.");
+                return null;
+            }
         }
         if (BuildFilters.Relevant(changed, app.WatchPaths, app.IgnoredPaths) is { } watched)
         {

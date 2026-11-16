@@ -72,6 +72,8 @@ builder.Services.AddDataProtection()
     .SetApplicationName("Gitberth");
 builder.Services.AddDbContextFactory<GitberthDb>(o => o.UseSqlite($"Data Source={options.DbPath}"));
 builder.Services.AddHttpClient("github", c => c.Timeout = TimeSpan.FromSeconds(15));
+// Gitberth's GitLab (Settings › GitLab): gitlab.com, or a self-hosted one.
+builder.Services.AddHttpClient(GitLabApi.ClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("cloudflare", c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient("health", c => c.Timeout = TimeSpan.FromSeconds(5))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
@@ -103,6 +105,11 @@ builder.Services.AddSingleton<LiveLogHub>();
 // through GitHub's webhook. Each does nothing until a token (and, for the webhook, a host name) is set up.
 builder.Services.AddSingleton<GitHubWrites>();
 builder.Services.AddSingleton<GitHubIntegrationState>();
+// ---- GitLab: the same for GitLab projects (statuses, a merge request's comment, the project hook, CI/CD variables),
+// with GitLab's token and state of its own. GitHubReporter and WebhookKeeper report and keep hooks for both hosts.
+builder.Services.AddSingleton<GitLabApi>();
+builder.Services.AddSingleton<GitLabIntegrationState>();
+builder.Services.AddSingleton<GitLabSettings>();
 builder.Services.AddSingleton<GitHubReporter>();
 // ---- Notifications (1.2): failed deploys, crashes and failing health checks, by mail, Discord, Slack, ntfy or a webhook.
 // Nothing is sent until Settings › Notifications has somewhere to send it.
@@ -119,6 +126,7 @@ builder.Services.AddSingleton<IDeployReporter>(sp => new DeployReporters(
 builder.Services.AddSingleton<ContainerAlerts>();
 builder.Services.AddSingleton<WebhookThrottle>();
 builder.Services.AddSingleton<GitHubWebhookEndpoint>();
+builder.Services.AddSingleton<GitLabWebhookEndpoint>();
 builder.Services.AddSingleton<WebhookKeeper>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookKeeper>());
 builder.Services.AddSingleton<DeployPipeline>();
@@ -296,6 +304,8 @@ app.MapRazorComponents<App>()
 // GitHub's webhook (instant deploys): anonymous, signed by GitHub with Gitberth's secret instead of a sign-in or a form token.
 // Every method is mapped, so its host answers a bare status code and never shows Gitberth's pages.
 GitHubWebhookEndpoint.Map(app);
+// GitLab's project hooks (instant deploys of GitLab projects): anonymous, with the secret token Gitberth set on the hook.
+GitLabWebhookEndpoint.Map(app);
 // Deploy hooks: anonymous too, the token in the path being the secret; every method and path under /hooks/deploy is mapped
 // for the same reason.
 DeployHookEndpoint.Map(app);

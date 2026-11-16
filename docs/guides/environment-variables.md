@@ -11,6 +11,7 @@ This page covers all three: how to set them, how secrets are kept, and which val
 | The app's own variables | Every app | The **Environment** tab |
 | The image's own variables | Apps that run an image | Folded on the **Environment** tab; change one to make it the app's own |
 | The repo's variables in GitHub | Git apps | The **Stored in GitHub** card on the **Environment** tab, or GitHub |
+| A GitLab project's CI/CD variables, by environment scope | Apps from GitLab | The **Stored in GitLab** card on the **Environment** tab, or GitLab ([GitLab](gitlab-integration.md#cicd-variables)) |
 | Variables Gitberth sets, like Vercel | Git apps | Turned on or off in **Settings** › **Source** |
 | Connection strings of the app's [databases](databases.md) (`DATABASE_URL`, `REDIS_URL`) | Every app | **Settings** › **Databases** |
 
@@ -119,6 +120,10 @@ How they're used:
 
 When you add an app, a suggested variable that the repo already has in GitHub shows **Set in the repo's GitHub variables**
 with an empty value, so it doesn't override the GitHub one.
+
+An app from GitLab gets its project's CI/CD variables the same way, by their environment scope (`*` for every deploy,
+`production` for the app's own, `preview/*` for its previews), on a **Stored in GitLab** card with **Save to GitLab**: see
+[GitLab](gitlab-integration.md#cicd-variables).
 
 ## Variables Gitberth sets, like Vercel
 

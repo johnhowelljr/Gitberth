@@ -9,9 +9,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Gitberth.Domains;
 
 /// <summary>
-/// GitHub's webhook and deploy hooks: with domains on, a host name chosen in Settings (hooks.example.com) sends only its
-/// paths /hooks/github and /hooks/deploy/&lt;token&gt; through the tunnel to Gitberth itself, never behind Access, and gets
-/// its DNS record like any domain. Every other path of that host gets a 404 from the tunnel.
+/// GitHub's and GitLab's webhooks and deploy hooks: with domains on, a host name chosen in Settings (hooks.example.com)
+/// sends only its paths /hooks/github, /hooks/gitlab and /hooks/deploy/&lt;token&gt; through the tunnel to Gitberth itself,
+/// never behind Access, and gets its DNS record like any domain. Every other path of that host gets a 404 from the tunnel.
 /// </summary>
 public sealed partial class DomainService
 {
@@ -20,6 +20,9 @@ public sealed partial class DomainService
 
     /// <summary>The payload URL GitHub sends deliveries to, for a webhook host name.</summary>
     public static string WebhookUrl(string host) => $"https://{host}/hooks/github";
+
+    /// <summary>The URL GitLab's project hooks send deliveries to, on the same host name.</summary>
+    public static string GitLabWebhookUrl(string host) => $"https://{host}/hooks/gitlab";
 
     /// <summary>How many earlier webhook host names are remembered.</summary>
     private const int EarlierKept = 10;
@@ -91,6 +94,9 @@ public sealed partial class DomainService
             }
             if (hostname is not null && await settings.GetSecretAsync(SettingKeys.GitHubWebhookSecret, ct) is null)
                 await settings.SetSecretAsync(SettingKeys.GitHubWebhookSecret, WebhookSignature.NewSecret(), ct);
+            // GitLab's project hooks get a secret token of their own, never GitHub's.
+            if (hostname is not null && await settings.GetSecretAsync(SettingKeys.GitLabWebhookSecret, ct) is null)
+                await settings.SetSecretAsync(SettingKeys.GitLabWebhookSecret, WebhookSignature.NewSecret(), ct);
             if (before is not null)
             {
                 List<string> earlier = [before, .. EarlierHosts(await settings.GetAsync(SettingKeys.GitHubWebhookHostsBefore, ct))];

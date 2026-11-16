@@ -17,7 +17,7 @@ public sealed class NewAppTests(GitberthBrowser gitberth)
         var (page, errors) = await gitberth.OpenAsync("/apps/new");
         var cards = page.Locator(".gb-srccard");
         await cards.First.WaitForAsync(Slow);
-        Assert.Equal(["GitHub repository", "Registry image", "Local image", "By hand", "Templates"],(await page.Locator(".gb-srccard-t").AllInnerTextsAsync()).Select(t => t.Trim()).ToList());
+        Assert.Equal(["Git repository", "Registry image", "Local image", "By hand", "Templates"],(await page.Locator(".gb-srccard-t").AllInnerTextsAsync()).Select(t => t.Trim()).ToList());
         Assert.Equal(1, await page.Locator(".gb-srccard[aria-checked=true]").CountAsync());
         Assert.Equal(["Source", "Configure", "Create"], (await page.Locator(".gb-stp-t").AllInnerTextsAsync()).Select(t => t.Trim()).ToList());
         Assert.Empty(errors);

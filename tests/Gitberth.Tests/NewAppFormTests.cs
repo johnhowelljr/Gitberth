@@ -172,8 +172,8 @@ public sealed class NewAppFormTests
         var dropped = new ParseIssue(ParseSeverity.Dropped, "Not carried over: the published ports: with --network host it has no ports of its own.", "-p");
         Assert.Equal("The published ports: with --network host it has no ports of its own.", ParseIssueView.TextOf(dropped));
         var note = new ParseIssue(ParseSeverity.Note, "It has build: as well. To build it from its code, use From GitHub.", "build");
-        Assert.Equal("It has build: as well. To build it from its code, use the GitHub repository source.", ParseIssueView.TextOf(note));
-        Assert.Equal("GitHub repository", NewAppSources.Of(NewAppSource.Git).Title);
+        Assert.Equal("It has build: as well. To build it from its code, use the Git repository source.", ParseIssueView.TextOf(note));
+        Assert.Equal("Git repository", NewAppSources.Of(NewAppSource.Git).Title);
         var compose = new ParseIssue(ParseSeverity.Note, "Compose would make the network as app_front; Gitberth joins one called front, which must exist (Network page).", "networks: front");
         Assert.EndsWith("which must exist: Configure offers to create it.", ParseIssueView.TextOf(compose));
     }

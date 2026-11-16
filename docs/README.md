@@ -1,6 +1,6 @@
 # Gitberth documentation
 
-Gitberth runs apps in Docker on your home server and gives every container on the host one place to be managed: a web page where you add apps, change their settings, watch them run and keep them up to date. Apps come from a GitHub repo (built for you and redeployed on every push, with Compose when it has a Compose file), a registry image, an image already on the host, or a `docker run` command or Compose file you paste.
+Gitberth runs apps in Docker on your home server and gives every container on the host one place to be managed: a web page where you add apps, change their settings, watch them run and keep them up to date. Apps come from a GitHub repo or a GitLab project (built for you and redeployed on every push, with Compose when it has a Compose file), a registry image, an image already on the host, or a `docker run` command or Compose file you paste.
 
 ![The Apps list: every container on the host with its status, address, ports, CPU and memory](images/apps-list.webp)
 
@@ -36,6 +36,7 @@ Gitberth runs apps in Docker on your home server and gives every container on th
 | [Networking](guides/networking.md) | Ports, who can reach them, own LAN addresses and the Network page. |
 | [Domains](guides/domains.md) | Public domains through a Cloudflare Tunnel, and protecting them with a sign-in. |
 | [GitHub integration](guides/github-integration.md) | Deploys reported on commits and pull requests, and deploys that start the moment you push. |
+| [GitLab](guides/gitlab-integration.md) | Deploy from gitlab.com or your own GitLab: merge request previews, CI/CD variables, statuses, a comment on each merge request, and instant deploys. |
 | [Deploy hooks](guides/deploy-hooks.md) | Secret URLs that deploy an app when a CMS, a scheduled job or CI calls them. |
 | [Health and monitoring](guides/health-and-monitoring.md) | The Health page, CPU and memory charts, and health checks. |
 | [Uptime checks, the status page and the down page](guides/uptime-and-status-page.md) | Each app checked from outside, a public status page, and a clean page while an app can't be served. |

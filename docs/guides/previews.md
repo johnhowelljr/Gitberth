@@ -42,6 +42,12 @@ your host, so Gitberth asks when a pull request changes, when GitHub tells it ab
 token saved in Settings, private repositories work too; the token needs **Pull requests** access to the repo. When
 GitHub can't be asked, the **Previews** tab says why, and previews already there keep following their commits.
 
+### Merge requests and GitLab
+
+An app from GitLab previews its project's merge requests the same way: GitLab's API says which are open, each preview
+is called **MR !12** and fetches `refs/merge-requests/12/head` from the project (a fork's merge request too, while
+**Also pull requests from forks** is on), and a merged or closed one takes its preview. See [GitLab](gitlab-integration.md).
+
 ## What a preview is
 
 A preview is an app of its own, made from its parent's settings:

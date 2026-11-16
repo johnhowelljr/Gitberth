@@ -198,7 +198,8 @@ def test_a_hook_through_the_tunnel_takes_the_webhooks_host_name(page, new_page, 
                 assert cloudflare.rules_for(host) == webhook_rules(host), ingress
                 assert ingress.index(webhook_rules(host)[0]) == 1 and ingress[0] == theirs, ingress
                 assert [r for r in ingress if r.get("path") in (OLD_PATH, PATH_RULE)] == [webhook_rules(host)[0]], ingress
-                assert f"https://{host}/hooks/deploy/… goes to Gitberth now too, for deploy hooks" in notes(settings), notes(settings)
+                assert f"https://{host}/hooks/deploy/… and /hooks/gitlab go to Gitberth now too, for deploy hooks and GitLab's webhooks" in notes(settings), \
+                    notes(settings)
                 cloudflare.wait_runs()
 
                 # ---- The hook's URL from the internet, on that host name.

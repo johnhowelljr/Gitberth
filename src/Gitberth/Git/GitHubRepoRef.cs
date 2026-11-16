@@ -3,11 +3,16 @@ using System.Text.RegularExpressions;
 namespace Gitberth.Git;
 
 /// <summary>A GitHub repository parsed from whatever URL form the user pasted.</summary>
-public sealed partial record GitHubRepoRef(string Owner, string Repo, string? TreePath = null)
+public sealed partial record GitHubRepoRef(string Owner, string Repo, string? TreePath = null) : RepoRef
 {
     public string CloneUrl => $"https://github.com/{Owner}/{Repo}.git";
     public string WebUrl => $"https://github.com/{Owner}/{Repo}";
-    public string FullName => $"{Owner}/{Repo}";
+    public override string FullName => $"{Owner}/{Repo}";
+    public override GitHost Host => GitHost.GitHub;
+    public override string AppOwner => Owner;
+    public override string AppRepo => Repo;
+    public override string Name => Repo;
+    public override string? TreeOf => TreePath;
 
     /// <summary>
     /// Accepts https://github.com/owner/repo, a ".git" suffix, /tree/&lt;branch&gt;/&lt;subdir&gt;,

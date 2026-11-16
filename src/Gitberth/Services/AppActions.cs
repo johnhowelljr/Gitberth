@@ -121,7 +121,7 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
     private void Queued(AppDefinition app, Deployment dep, int? fromDeployment = null)
     {
         if (audit is null) return;
-        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)) };
+        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep)) };
         if (dep.CommitSha is { Length: > 0 }) changes.Add(new("Commit", null, dep.ShortSha));
         if (dep.ImageTag is { Length: > 0 } image && !dep.NoCache) changes.Add(new("Image", null, image));
         if (dep.NoCache) changes.Add(new("Build cache", null, "not used"));
@@ -420,7 +420,7 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
                 AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
                 Target = $"deploy #{Audit.AuditText.N(dep.Id)}",
                 Correlation = Audit.AuditCorrelation.ForDeployment(dep.Id),
-                Changes = [new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)), new("Why", null, reason)],
+                Changes = [new("Trigger", null, Audit.AuditText.Trigger(dep)), new("Why", null, reason)],
             });
         }
         await RepoWatcher.ForgetUnheldPromotionAsync(db, appId);

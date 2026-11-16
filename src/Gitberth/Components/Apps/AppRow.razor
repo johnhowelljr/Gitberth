@@ -77,7 +77,7 @@
             <span class="gb-res-none">@(App.Running ? "Not gathered" : "Not running")</span>
         }
     </div>
-    <div class="gb-c-src" role="cell"><SourceBadge Source="App.Source" /></div>
+    <div class="gb-c-src" role="cell"><SourceBadge Source="App.Source" GitLab="App.GitLab" /></div>
     <div class="gb-c-act gb-arow-actions" role="cell">
         <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="gb-arow-kebab" AriaLabel="@($"Actions for {App.Title}")">
             <ActivatorContent>

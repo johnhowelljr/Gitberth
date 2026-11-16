@@ -1,8 +1,8 @@
 # Gitberth's settings
 
-The **Settings** page holds the settings for Gitberth as a whole: GitHub and registry access, notifications, image updates, domains, uptime checks and the status page, the network, deploys, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
+The **Settings** page holds the settings for Gitberth as a whole: GitHub, GitLab and registry access, notifications, image updates, domains, uptime checks and the status page, the network, deploys, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
 
-The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Network**, **Own LAN addresses**, **Deploys**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
+The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **GitLab**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Network**, **Own LAN addresses**, **Deploys**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
 
 ![The Settings page](../images/settings.webp)
 
@@ -32,10 +32,27 @@ Deploys reported on GitHub, and deploys that start the moment you push. See [Git
 |---|---|---|
 | **Commit statuses** | Each deploy that builds a commit marks it on GitHub: pending while it builds, then live (linking to the app) or failed (linking to the deploy log). A commit that was skipped gets success, saying why. One status per app, named **Gitberth: <app>**, and **Gitberth preview: <app>** for its previews. Needs **Commit statuses: Read and write**. | On |
 | **Comments on pull requests** | A preview of a pull request keeps one comment on it up to date: its state, address, commit and time. Needs **Pull requests: Read and write**. | On |
-| **Host name for GitHub's webhooks** | Instant deploys, shown while domains are on: a host name nothing else uses, like `hooks.example.com`. Only its addresses `/hooks/github` and `/hooks/deploy/<token>` ([deploy hooks](../guides/deploy-hooks.md)) go to Gitberth through the tunnel, never behind Access; every other address answers 404. **Turn on** routes it and adds the DNS record; **Save** moves it to another name; **Turn off** asks first, then takes its route out. | None: Gitberth checks every 30 seconds, and deploy hooks work on your network only |
+| **Host name for GitHub's webhooks** | Instant deploys, shown while domains are on: a host name nothing else uses, like `hooks.example.com`. Only its addresses `/hooks/github`, `/hooks/gitlab` ([GitLab's project hooks](#gitlab)) and `/hooks/deploy/<token>` ([deploy hooks](../guides/deploy-hooks.md)) go to Gitberth through the tunnel, never behind Access; every other address answers 404. **Turn on** routes it and adds the DNS record; **Save** moves it to another name; **Turn off** asks first, then takes its route out. | None: Gitberth checks every 30 seconds, and deploy hooks work on your network only |
 | **Payload URL**, **Content type**, **Secret**, **Events** | What GitHub's webhook needs, to add it by hand when the token can't (no **Webhooks: Read and write**). **Show** reveals the secret; the copy buttons copy. | |
 
 When GitHub refuses one of these on a repo, a banner says which permission is missing (for example **Commit statuses aren't set on acme/web**) and Gitberth stops asking on that repo for an hour, or until a token is saved again; the banner goes with the hour, and comes back if GitHub refuses again. Other repos carry on. A token GitHub refuses outright stops it everywhere (**Commit statuses aren't set: GitHub refused the token**). A list under the webhook values says, per repo, **Webhook added**, **Webhook set up** or why not. With domains off, the section says instant deploys need them.
+
+## GitLab
+
+Projects on gitlab.com or your own GitLab: private ones, their CI/CD variables, merge request previews, statuses and instant deploys. See [GitLab](../guides/gitlab-integration.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **GitLab address** | gitlab.com, or your own GitLab's address, with the path it's served under if it has one (`https://gitlab.example.com`, `http://10.1.1.5:8929/gitlab`). GitLab apps follow it: a project is kept by its path, never with the address. | `https://gitlab.com` |
+| **Token** (**Replace the token** once one is saved) | A personal, project or group access token. **api** does everything; **read_api** and **read_repository** alone deploy, preview and read the variables, and report nothing. Kept encrypted, never shown again. | None: public projects only |
+| **Save** / **Save token** / **Replace token** | Saves the address and, when one is typed, the token, once GitLab took it (it's asked who the token is and which scopes it has). A token GitLab refuses isn't saved. | |
+| **Check the token** | Asks GitLab again who the token is, its scopes and when it expires. | |
+| **Remove token** | Asks first, then forgets the token. Project hooks Gitberth added stay on GitLab. | |
+| **Commit statuses** | Each deploy that builds a commit marks it on GitLab: running while it builds, then success (linking to the app) or failed (linking to the deploy log); canceled when it was. Named **Gitberth: <app>** and **Gitberth preview: <app>**. Needs **api**. | On |
+| **Comments on merge requests** | A preview of a merge request keeps one comment on it up to date: its state, address, commit and time. Needs **api**. | On |
+| **URL**, **Secret token**, **Trigger** | Shown while there's a host name for webhooks (**GitHub integration › Instant deploys**): what GitLab's project hook needs, to add it by hand when the token can't (no **api**, or no Maintainer role). **Show** reveals the secret token; the copy buttons copy. | |
+
+Once saved, the section shows **Token saved**, whose it is, on which GitLab, when it expires (**renew it soon** in its last 14 days) and its scopes, and a banner naming each scope it lacks and what for. When GitLab refuses something on a project, a banner says so (for example **Commit statuses aren't set on acme/web**) and Gitberth stops asking on that project for an hour, or until a token is saved again; a token GitLab refuses outright stops it everywhere. A list under the hook's values says, per project, **Webhook added**, **Webhook set up** or why not.
 
 ## Notifications
 

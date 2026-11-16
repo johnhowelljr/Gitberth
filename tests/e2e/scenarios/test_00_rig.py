@@ -13,7 +13,11 @@
   Gitberth only when asked; GitHub's 10 seconds for an answer;
 - the fake cloudflared taking a configuration only as cloudflared would (logging to stderr, as it does), checking Access
   on a protected rule, and reaching only its own network's services when it's off the host's;
-- Gitberth finding the fake cloudflared from its token, and checking a Cloudflare token with the stand-in.
+- Gitberth finding the fake cloudflared from its token, and checking a Cloudflare token with the stand-in;
+- the GitLab stand-in (TestGitLabStandIn), as the contract has Gitberth use GitLab: its answer shapes and paging, tokens'
+  scopes and users' roles, merge requests from branches and forks, commit statuses' state machine, notes, hooks and
+  CI/CD variables, git over HTTPS with oauth2:<token> (a private project, a merge request's head), Push Hook and Merge
+  Request Hook deliveries going where their URL leads, its 429s, and calls recorded without a token in the log.
 """
 import hashlib
 import hmac
@@ -27,6 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from e2e import config
 from e2e.engine import STANDIN
+from e2e.gitlab import basic_auth, quote
 from e2e.wait import until
 
 
@@ -514,3 +519,504 @@ def test_fake_cloudflared_off_the_hosts_network(github, cloudflare, engine, uniq
         cloudflare.wait_runs(network="host")
     assert engine.networks(STANDIN) == ["gbe2e"]
     assert engine.networks("cloudflare-tunnel") == ["host"]
+
+
+# ---- the GitLab stand-in ----
+
+class RecordingOrigin:
+    """An origin in the runner that keeps every request it gets ({method, path, headers, body}) and answers 200, after
+    `delay` seconds; a tunnel rule sends deliveries to it."""
+
+    def __init__(self, delay=0):
+        origin = self
+        self.delay = delay
+        self.received = []
+
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                origin.received.append({"method": self.command, "path": self.path, "headers": dict(self.headers.items()), "body": body})
+                time.sleep(origin.delay)
+                try:
+                    self.send_response(200)
+                    self.send_header("Content-Length", "2")
+                    self.end_headers()
+                    self.wfile.write(b"ok")
+                except OSError:
+                    pass
+
+            def log_message(self, *args):
+                pass
+
+        self.server = ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+        self.server.daemon_threads = True
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://{socket.gethostbyname(socket.gethostname())}:{self.server.server_address[1]}"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def fresh_minute(margin=6):
+    """Waits for a new minute when this one has fewer than `margin` seconds left: GitLab's rate limits count per minute."""
+    left = 60 - time.time() % 60
+    if left < margin:
+        time.sleep(left + 0.2)
+
+
+class TestGitLabStandIn:
+    """The GitLab stand-in (https://gitlab.e2e.test, and https://gitlab.com) as the contract has Gitberth use GitLab. No
+    Gitberth feature is needed: these are the runner's calls, and git run in Gitberth's container."""
+
+    def test_answer_shapes_and_paging(self, gitlab, gl_token, uniq):
+        """GitLab's answers to what Gitberth reads: the token's user and the token, a project (by URL-encoded path and by
+        ID; nested groups), a branch's tip, branches paged with X-Next-Page, and compare."""
+        group = uniq("glr")
+        project = gitlab.create_project(f"{group}/team/app", visibility="private", files={"README.md": "hello"})
+        enc = quote(project.path)
+        status, _, user = gitlab.rest("GET", "/user", gl_token)
+        assert status == 200 and user["username"] == "e2e-bot" and user["bot"] is False, user
+        status, _, me = gitlab.rest("GET", "/personal_access_tokens/self", gl_token)
+        assert status == 200 and me["scopes"] == ["api"] and me["active"] is True and me["expires_at"] is None, me
+        assert me["user_id"] == user["id"] and me["revoked"] is False, me
+
+        status, _, p = gitlab.rest("GET", f"/projects/{enc}", gl_token)
+        assert status == 200, p
+        assert (p["path_with_namespace"], p["default_branch"], p["visibility"], p["archived"]) == (project.path, "main", "private", False), p
+        assert p["http_url_to_repo"] == f"https://gitlab.e2e.test/{project.path}.git" and p["web_url"] == f"https://gitlab.e2e.test/{project.path}"
+        assert p["namespace"]["full_path"] == f"{group}/team" and p["namespace"]["kind"] == "group", p["namespace"]
+        assert p["permissions"]["group_access"]["access_level"] == 50, p["permissions"]
+        assert gitlab.rest("GET", f"/projects/{p['id']}", gl_token)[2]["path_with_namespace"] == project.path
+        # Asked through gitlab.com, the same GitLab names gitlab.com.
+        status, _, there = gitlab.rest("GET", f"/projects/{p['id']}", gl_token, host="gitlab.com")
+        assert status == 200 and there["web_url"] == f"https://gitlab.com/{project.path}", there
+        # A path that isn't URL-encoded is no route of GitLab's.
+        status, _, body = gitlab.rest("GET", f"/projects/{project.path}", gl_token)
+        assert status == 404 and body == {"error": "404 Not Found"}, body
+
+        sha = project.commit({"marker.txt": "second"}, message="Second\n\nwith a body")["sha"]
+        status, _, branch = gitlab.rest("GET", f"/projects/{enc}/repository/branches/main", gl_token)
+        assert status == 200 and branch["default"] is True and branch["commit"]["id"] == sha, branch
+        assert branch["commit"]["message"] == "Second\n\nwith a body" and branch["commit"]["title"] == "Second", branch["commit"]
+        assert branch["commit"]["author_name"] == "e2e-bot" and branch["commit"]["committed_date"], branch["commit"]
+        project.create_branch("feature/x")
+        status, _, named = gitlab.rest("GET", f"/projects/{enc}/repository/branches/{quote('feature/x')}", gl_token)
+        assert status == 200 and named["name"] == "feature/x" and named["commit"]["id"] == sha, named
+        assert gitlab.rest("GET", f"/projects/{enc}/repository/branches/nope", gl_token)[2] == {"message": "404 Branch Not Found"}
+
+        for name in ("b0", "b1", "b2"):
+            project.create_branch(name)
+        status, headers, first = gitlab.rest("GET", f"/projects/{enc}/repository/branches?per_page=2", gl_token)
+        assert status == 200 and [b["name"] for b in first] == ["b0", "b1"], first
+        paging = {k: header(headers, k) for k in ("X-Page", "X-Per-Page", "X-Next-Page", "X-Prev-Page", "X-Total", "X-Total-Pages")}
+        assert paging == {"X-Page": "1", "X-Per-Page": "2", "X-Next-Page": "2", "X-Prev-Page": "", "X-Total": "5", "X-Total-Pages": "3"}, paging
+        assert 'rel="next"' in header(headers, "Link") and "page=2" in header(headers, "Link"), headers
+        status, headers, last = gitlab.rest("GET", f"/projects/{enc}/repository/branches?per_page=2&page=3", gl_token)
+        assert [b["name"] for b in last] == ["main"] and header(headers, "X-Next-Page") == "" and header(headers, "X-Prev-Page") == "2", headers
+
+        after = project.commit({"marker.txt": "third", "new.txt": "n", "README.md": None}, message="Third")["sha"]
+        status, _, cmp = gitlab.rest("GET", f"/projects/{enc}/repository/compare?from={sha}&to={after}&straight=true", gl_token)
+        assert status == 200 and cmp["compare_timeout"] is False and cmp["compare_same_ref"] is False, cmp
+        changed = sorted((d["old_path"], d["new_path"], d["new_file"], d["deleted_file"]) for d in cmp["diffs"])
+        assert changed == [("README.md", "README.md", False, True), ("marker.txt", "marker.txt", False, False), ("new.txt", "new.txt", True, False)], changed
+        assert [c["id"] for c in cmp["commits"]] == [after] and cmp["commit"]["id"] == after, cmp["commits"]
+        assert gitlab.rest("GET", f"/projects/{enc}/repository/compare?from={'0' * 40}&to={after}", gl_token)[2] == {"message": "404 Ref Not Found"}
+
+    def test_tokens_scopes_and_roles(self, gitlab, gl_token, uniq):
+        """GitLab's 401s (a token it doesn't know, an expired one, a revoked one), its 403 for a missing scope naming the
+        scopes the endpoint takes, 404 for a private project the user isn't in, 403 for a role too low; project access
+        tokens as bots; /personal_access_tokens/self's 404s."""
+        private = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}", visibility="private")
+        public = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}")
+        penc, uenc = quote(private.path), quote(public.path)
+        sha = private.branch_sha()
+
+        status, _, body = gitlab.rest("GET", "/user", "not-a-token")
+        assert status == 401 and body == {"message": "401 Unauthorized"}, body
+        expired = gitlab.token(expires_at="2020-01-01")
+        status, headers, body = gitlab.rest("GET", "/user", expired)
+        assert status == 401 and body["error"] == "invalid_token" and "expired" in body["error_description"], body
+        assert "invalid_token" in header(headers, "WWW-Authenticate"), headers
+        revoked = gitlab.token()
+        gitlab.change_token(revoked, revoked=True)
+        status, _, body = gitlab.rest("GET", "/user", revoked)
+        assert status == 401 and "revoked" in body["error_description"], body
+        # A token GitLab refuses is refused where none is needed, too.
+        assert gitlab.rest("GET", f"/projects/{uenc}", "not-a-token")[0] == 401
+        assert gitlab.rest("GET", f"/projects/{uenc}")[0] == 200
+
+        clone_only = gitlab.token(scopes=["read_repository"])
+        status, _, body = gitlab.rest("GET", f"/projects/{penc}", clone_only)
+        assert status == 403 and body["error"] == "insufficient_scope" and body["scope"] == "api read_api", body
+        status, _, body = gitlab.rest("GET", "/user", clone_only)
+        assert status == 403 and body["scope"] == "read_user api read_api", body
+        reader = gitlab.token(scopes=["read_api", "read_repository"])
+        assert gitlab.rest("GET", f"/projects/{penc}", reader)[0] == 200
+        status, _, body = gitlab.rest("POST", f"/projects/{penc}/statuses/{sha}", reader, {"state": "success", "name": "x"})
+        assert status == 403 and body["error"] == "insufficient_scope", body
+        # Every way GitLab takes a token: PRIVATE-TOKEN, Authorization: Bearer, ?private_token=.
+        for how in ("header", "bearer", "query"):
+            assert gitlab.rest("GET", f"/projects/{penc}", gl_token, how=how)[0] == 200, how
+
+        outsider = gitlab.token(username="e2e-outsider")
+        status, _, body = gitlab.rest("GET", f"/projects/{penc}", outsider)
+        assert status == 404 and body == {"message": "404 Project Not Found"}, body
+        private.add_member("e2e-outsider", "reporter")
+        assert gitlab.rest("GET", f"/projects/{penc}/merge_requests?state=opened", outsider)[0] == 200
+        status, _, body = gitlab.rest("POST", f"/projects/{penc}/statuses/{sha}", outsider, {"state": "running", "name": "x"})
+        assert status == 403 and body == {"message": "403 Forbidden"}, body
+        private.add_member("e2e-outsider", "developer")
+        assert gitlab.rest("POST", f"/projects/{penc}/statuses/{sha}", outsider, {"state": "running", "name": "x"})[0] == 201
+        assert gitlab.rest("GET", f"/projects/{penc}/hooks", outsider)[0] == 403
+        assert gitlab.rest("GET", f"/projects/{penc}/variables", outsider)[0] == 403
+        # Writing to a public project takes a token.
+        status, _, body = gitlab.rest("POST", f"/projects/{uenc}/statuses/{public.branch_sha()}", None, {"state": "success"})
+        assert status == 401 and body == {"message": "401 Unauthorized"}, body
+
+        bot = gitlab.token(kind="project", project=private.path, scopes=["api"])
+        status, _, me = gitlab.rest("GET", "/user", bot)
+        assert status == 200 and me["bot"] is True and me["username"].startswith(f"project_{private.id}_bot_"), me
+        assert gitlab.rest("GET", f"/projects/{penc}/hooks", bot)[0] == 200
+        assert gitlab.rest("GET", "/personal_access_tokens/self", bot)[2]["scopes"] == ["api"]
+        other = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}", visibility="private")
+        assert gitlab.rest("GET", f"/projects/{quote(other.path)}", bot)[0] == 404
+
+        oauth = gitlab.token(kind="oauth", scopes=["api"])
+        assert gitlab.rest("GET", "/user", oauth)[0] == 200
+        assert gitlab.rest("GET", "/personal_access_tokens/self", oauth)[0] == 404
+        try:
+            gitlab.options(self_endpoint=False)
+            assert gitlab.rest("GET", "/personal_access_tokens/self", gl_token)[2] == {"error": "404 Not Found"}
+        finally:
+            gitlab.reset_options()
+
+    def test_merge_requests_from_branches_and_forks(self, gitlab, gl_token, uniq):
+        """Merge requests as Gitberth lists and reads them: from a branch and from a fork, with refs/merge-requests/<iid>/head
+        in the target project following the source branch; draft, ready, merged, closed, reopened."""
+        project = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}")
+        enc = quote(project.path)
+        project.create_branch("feature")
+        first = project.commit({"marker.txt": "feature"}, branch="feature")["sha"]
+        mr = project.open_mr("feature", title="A feature", draft=True)
+        n = mr["iid"]
+        assert (mr["draft"], mr["title"], mr["sha"], mr["state"]) == (True, "Draft: A feature", first, "opened"), mr
+        assert project.mr_refs()[f"refs/merge-requests/{n}/head"] == first
+        second = project.commit({"marker.txt": "feature, again"}, branch="feature")["sha"]
+        assert project.mr_refs()[f"refs/merge-requests/{n}/head"] == second
+        assert any(x["system"] and x["body"].startswith("added 1 commit") for x in project.notes(mr=n)), project.notes(mr=n)
+
+        fork = project.fork()
+        fork.create_branch("from-fork")
+        forked = fork.commit({"marker.txt": "from a fork"}, branch="from-fork")["sha"]
+        m = project.open_mr("from-fork", source=fork, title="From a fork")["iid"]
+        assert project.mr_refs()[f"refs/merge-requests/{m}/head"] == forked
+
+        status, headers, mrs = gitlab.rest("GET", f"/projects/{enc}/merge_requests?state=opened&per_page=100", gl_token)
+        assert status == 200 and header(headers, "X-Next-Page") == "" and header(headers, "X-Total") == "2", headers
+        by_iid = {x["iid"]: x for x in mrs}
+        assert by_iid[n]["source_project_id"] == by_iid[n]["target_project_id"] == project.id and by_iid[n]["sha"] == second, by_iid[n]
+        assert by_iid[n]["draft"] is True and by_iid[n]["author"]["username"] == "e2e-bot", by_iid[n]
+        assert by_iid[n]["web_url"] == f"https://gitlab.e2e.test/{project.path}/-/merge_requests/{n}", by_iid[n]["web_url"]
+        assert (by_iid[m]["source_project_id"], by_iid[m]["target_project_id"], by_iid[m]["sha"]) == (fork.id, project.id, forked), by_iid[m]
+        assert (by_iid[m]["source_branch"], by_iid[m]["target_branch"], by_iid[m]["author"]["username"]) == ("from-fork", "main", "e2e-forker")
+
+        project.update_mr(n, draft=False)
+        merged = project.merge_mr(n)["sha"]
+        assert project.branch_sha("main") == merged
+        project.close_mr(m)
+        status, _, one = gitlab.rest("GET", f"/projects/{enc}/merge_requests/{n}", gl_token)
+        assert (one["state"], one["merge_commit_sha"], one["draft"], one["title"]) == ("merged", merged, False, "A feature"), one
+        assert gitlab.rest("GET", f"/projects/{enc}/merge_requests/{m}", gl_token)[2]["state"] == "closed"
+        assert gitlab.rest("GET", f"/projects/{enc}/merge_requests?state=opened", gl_token)[2] == []
+        project.reopen_mr(m)
+        assert [x["iid"] for x in gitlab.rest("GET", f"/projects/{enc}/merge_requests?state=opened", gl_token)[2]] == [m]
+        assert gitlab.rest("GET", f"/projects/{enc}/merge_requests/999", gl_token)[2] == {"message": "404 Not found"}
+        assert gitlab.rest("GET", f"/projects/{enc}/merge_requests?state=open", gl_token)[2] == {"error": "state does not have a valid value"}
+
+    def test_statuses_notes_hooks_and_variables(self, gitlab, gl_token, uniq):
+        """What Gitberth writes: commit statuses (GitLab moves one status of a name along its state machine and refuses a
+        move it doesn't make), the merge request's note (newest first among GitLab's system notes; only its author edits
+        it), project hooks (their token never shown, and lost when the URL changes without it), CI/CD variables per
+        environment scope (409 when a key alone names more than one)."""
+        project = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}")
+        enc = quote(project.path)
+        sha = project.branch_sha()
+
+        def post(body):
+            return gitlab.rest("POST", f"/projects/{enc}/statuses/{sha}", gl_token, body)
+
+        status, _, s1 = post({"state": "pending", "name": "Gitberth: app", "ref": "main", "target_url": "https://gitberth.example/d/1",
+                              "description": "Deploying"})
+        assert status == 201 and (s1["status"], s1["name"], s1["sha"], s1["ref"]) == ("pending", "Gitberth: app", sha, "main"), s1
+        status, _, s2 = post({"state": "running", "name": "Gitberth: app", "ref": "main"})
+        assert status == 201 and s2["id"] == s1["id"] and s2["status"] == "running" and s2["target_url"] == "https://gitberth.example/d/1", s2
+        status, _, body = post({"state": "running", "name": "Gitberth: app", "ref": "main"})
+        assert status == 400 and body["message"].startswith("Cannot transition status via :run from :running"), body
+        status, _, s3 = post({"state": "success", "name": "Gitberth: app", "ref": "main"})
+        assert status == 201 and s3["id"] == s1["id"] and s3["status"] == "success" and s3["finished_at"], s3
+        status, _, s4 = post({"state": "pending", "name": "Gitberth: app", "ref": "main"})
+        assert status == 201 and s4["id"] > s1["id"] > 2 ** 31, (s1, s4)
+        assert post({"state": "done"})[2] == {"error": "state does not have a valid value"}
+        assert post({"state": "success", "description": "x" * 256})[2] == {"message": {"description": ["is too long (maximum is 255 characters)"]}}
+        assert gitlab.rest("POST", f"/projects/{enc}/statuses/{'1' * 40}", gl_token, {"state": "success"})[2] == {"message": "404 Commit Not Found"}
+        listed = gitlab.rest("GET", f"/projects/{enc}/repository/commits/{sha}/statuses", gl_token)[2]
+        assert [(s["id"], s["status"]) for s in listed] == [(s4["id"], "pending")], listed
+        assert [s["status"] for s in project.statuses(sha=sha)] == ["success", "pending"]
+
+        project.create_branch("feature")
+        project.commit({"marker.txt": "feature"}, branch="feature")
+        n = project.open_mr("feature")["iid"]
+        notes = f"/projects/{enc}/merge_requests/{n}/notes"
+        status, _, note = gitlab.rest("POST", notes, gl_token, {"body": "Preview: building"})
+        assert status == 201 and note["id"] > 2 ** 31 and note["system"] is False and note["noteable_iid"] == n, note
+        assert note["author"]["username"] == "e2e-bot" and note["noteable_type"] == "MergeRequest", note
+        status, _, edited = gitlab.rest("PUT", f"{notes}/{note['id']}", gl_token, {"body": "Preview: ready"})
+        assert status == 200 and edited["body"] == "Preview: ready", edited
+        project.add_note(n, "Looks good")
+        project.commit({"marker.txt": "feature, again"}, branch="feature")
+        listed = gitlab.rest("GET", f"{notes}?per_page=100", gl_token)[2]
+        assert [x["id"] for x in listed] == sorted((x["id"] for x in listed), reverse=True), listed
+        assert {(x["body"].split("\n")[0], x["system"]) for x in listed} >= {("Preview: ready", False), ("Looks good", False), ("added 1 commit", True)}, listed
+        theirs = next(x for x in listed if x["body"] == "Looks good")
+        assert gitlab.rest("PUT", f"{notes}/{theirs['id']}", gl_token, {"body": "mine now"})[2] == {"message": "403 Forbidden"}
+        assert gitlab.rest("POST", notes, gl_token, {})[2] == {"error": "body is missing"}
+
+        hooks = f"/projects/{enc}/hooks"
+        token = secrets.token_hex(12)
+        status, _, hook = gitlab.rest("POST", hooks, gl_token, {"url": "https://hooks.example.test/hooks/gitlab", "token": token, "push_events": True,
+                                                                "merge_requests_events": True, "enable_ssl_verification": True})
+        assert status == 201 and hook["push_events"] and hook["merge_requests_events"] and not hook["tag_push_events"], hook
+        assert "token" not in hook and token not in json.dumps(hook), hook
+        assert [h["id"] for h in gitlab.rest("GET", hooks, gl_token)[2]] == [hook["id"]]
+        kept = project.hooks()[0]
+        assert (kept["token"], kept["made_by"], kept["instance"]) == (token, "api", "gitlab.e2e.test"), kept
+        status, _, moved = gitlab.rest("PUT", f"{hooks}/{hook['id']}", gl_token, {"url": "https://hooks2.example.test/hooks/gitlab"})
+        assert status == 200 and moved["url"] == "https://hooks2.example.test/hooks/gitlab" and moved["merge_requests_events"], moved
+        assert project.hooks()[0]["token"] is None, "GitLab drops a hook's token when its URL changes without one"
+        gitlab.rest("PUT", f"{hooks}/{hook['id']}", gl_token, {"url": "https://hooks2.example.test/hooks/gitlab", "token": token})
+        assert project.hooks()[0]["token"] == token
+        status, _, body = gitlab.rest("POST", hooks, gl_token, {"url": "not a url"})
+        assert status == 422 and body == {"error": "Invalid url given"}, body
+        # GitLab doesn't call the local network from a webhook: a LAN address is refused the same way.
+        for local in ("http://192.168.70.10:8080/hooks/gitlab", "http://localhost:8080/hooks/gitlab", "http://gitberth:8080/hooks/gitlab"):
+            assert gitlab.rest("POST", hooks, gl_token, {"url": local})[0] == 422, local
+        assert gitlab.rest("DELETE", f"{hooks}/{hook['id']}", gl_token)[0] == 204
+        assert gitlab.rest("GET", hooks, gl_token)[2] == []
+
+        variables = f"/projects/{enc}/variables"
+        assert gitlab.rest("POST", variables, gl_token, {"key": "DB_URL", "value": "postgres://prod", "environment_scope": "production"})[0] == 201
+        status, _, v = gitlab.rest("POST", variables, gl_token, {"key": "DB_URL", "value": "postgres://review", "environment_scope": "review/*"})
+        assert status == 201 and (v["environment_scope"], v["masked"], v["variable_type"]) == ("review/*", False, "env_var"), v
+        status, _, body = gitlab.rest("GET", f"{variables}/DB_URL", gl_token)
+        assert status == 409 and "filter[environment_scope]" in body["message"], body
+        scoped = f"{variables}/DB_URL?filter%5Benvironment_scope%5D=production"
+        assert gitlab.rest("GET", scoped, gl_token)[2]["value"] == "postgres://prod"
+        assert gitlab.rest("PUT", scoped, gl_token, {"value": "postgres://prod2"})[2]["value"] == "postgres://prod2"
+        status, _, body = gitlab.rest("POST", variables, gl_token, {"key": "DB_URL", "value": "x", "environment_scope": "production"})
+        assert status == 400 and body == {"message": {"key": ["(DB_URL) has already been taken"]}}, body
+        assert gitlab.rest("POST", variables, gl_token, {"key": "SHORT", "value": "abc", "masked": True})[2] == {"message": {"value": ["is invalid"]}}
+        assert gitlab.rest("POST", variables, gl_token, {"key": "BAD-KEY", "value": "x"})[0] == 400
+        project.set_variable("FROM_UI", "1")
+        status, headers, page = gitlab.rest("GET", f"{variables}?per_page=2", gl_token)
+        assert len(page) == 2 and header(headers, "X-Next-Page") == "2" and header(headers, "X-Total") == "3", headers
+        assert gitlab.rest("DELETE", f"{variables}/DB_URL?filter%5Benvironment_scope%5D=review%2F%2A", gl_token)[0] == 204
+        assert sorted((v["key"], v["environment_scope"]) for v in project.variables()) == [("DB_URL", "production"), ("FROM_UI", "*")]
+
+    def test_git_clones_a_private_project_and_a_merge_requests_head(self, gitlab, gl_token, engine, standins, uniq):
+        """git, run where Gitberth runs it, with the token as oauth2:<token> in an http.extraHeader: a private project
+        clones, and a fork's merge request head is fetched from the target project. Without credentials GitLab asks
+        for them (401), a token without a repository scope gets 403, a user who isn't in the project 404."""
+        project = gitlab.create_project(f"{uniq('glr')}/team/{uniq('app')}", visibility="private", files={"marker.txt": "a private one"})
+        fork = project.fork()
+        fork.create_branch("from-fork")
+        forked = fork.commit({"marker.txt": "from a fork"}, branch="from-fork")["sha"]
+        iid = project.open_mr("from-fork", source=fork)["iid"]
+
+        def sh(script, token=None):
+            env = {"GIT_TERMINAL_PROMPT": "0", "URL": project.clone_url, "IID": str(iid)}
+            if token:
+                env["GL_AUTH"] = f"Authorization: {basic_auth(token)}"
+            return engine.exec(config.GITBERTH_CONTAINER, "sh", "-c", script + "\necho rc=$?", env=env)
+
+        git = 'git -c credential.helper= -c "http.extraHeader=$GL_AUTH"'
+        mark = standins.seq()
+        out = sh(f'd=$(mktemp -d)\n{git} clone -q "$URL" "$d/r" 2>&1 && cat "$d/r/marker.txt" && echo && '
+                 f'{git} -C "$d/r" fetch -q origin "refs/merge-requests/$IID/head" 2>&1 && git -C "$d/r" rev-parse FETCH_HEAD\n'
+                 'rc=$?; rm -rf "$d"; (exit $rc)', token=gl_token)
+        lines = out.strip().splitlines()
+        assert lines[-1] == "rc=0" and "a private one" in lines and forked in lines, out
+        calls = project.git_calls(mark)
+        assert calls and all(c["token"] == gl_token and c["status"] == 200 for c in calls), [(c["method"], c["path"], c["status"]) for c in calls]
+        assert f"refs/merge-requests/{iid}/head" in [r for c in calls for r in (c["git"].get("ref_prefixes") or [])], [c["git"] for c in calls]
+        assert forked in [w for c in calls for w in (c["git"].get("wants") or [])], [c["git"] for c in calls]
+        # ls-remote lists the merge request's head, as GitLab advertises it: the watcher sees a merge request move.
+        listed = sh(f'{git} ls-remote "$URL"', token=gl_token)
+        assert f"{forked}\trefs/merge-requests/{iid}/head" in listed.splitlines(), listed
+
+        mark = standins.seq()
+        sh('git -c credential.helper= ls-remote "$URL"')
+        anonymous = project.wait_watcher_passes(1, since=mark, timeout=10)
+        assert anonymous["status"] == 401 and anonymous["token"] is None, anonymous
+        sh(f'{git} ls-remote "$URL"', token=gitlab.token(scopes=["read_api"]))
+        assert project.wait_watcher_passes(2, since=mark, timeout=10)["status"] == 403
+        sh(f'{git} ls-remote "$URL"', token=gitlab.token(username="e2e-stranger", scopes=["read_repository"]))
+        assert project.wait_watcher_passes(3, since=mark, timeout=10)["status"] == 404
+        sh(f'{git} ls-remote "$URL"', token="not-a-token")
+        assert project.wait_watcher_passes(4, since=mark, timeout=10)["status"] == 401
+        assert project.ls_remotes(mark) == [], "a refused look got as far as ls-refs"
+
+    def test_deliveries_go_where_their_url_leads(self, gitlab, gl_token, cloudflare, standins, uniq):
+        """GitLab's Push Hook and Merge Request Hook, as sent to Gitberth's hook: X-Gitlab-Event, X-Gitlab-Token,
+        X-Gitlab-Event-UUID and the JSON body (Rails' encoding), through DNS and the tunnel; nowhere without DNS; every
+        merge request action in order; a branch deleted; a token changed or left out; straight to Gitberth; GitLab's
+        patience."""
+        project = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}")
+        zone = f"{uniq('glh')}.test"
+        host = f"hooks.{zone}"
+        token = secrets.token_hex(16)
+        status, _, hook = gitlab.rest("POST", f"/projects/{quote(project.path)}/hooks", gl_token, {
+            "url": f"https://{host}/hooks/gitlab", "token": token, "push_events": True, "merge_requests_events": True,
+            "enable_ssl_verification": True})
+        assert status == 201, hook
+        project.add_foreign_hook(f"https://ci.{zone}/hook", token=secrets.token_hex(8))
+
+        mark = standins.seq()
+        project.commit({"marker.txt": "pushed"})
+        records = project.deliveries(mark, event="push")
+        assert len(records) == 2 and all(r["status"] is None and "resolve" in r["error"] for r in records), records
+
+        origin = RecordingOrigin()
+        cloudflare.zone(zone)
+        cloudflare.add_dns_record(zone, "CNAME", host, f"{cloudflare.state()['tunnel_id']}.cfargotunnel.com", proxied=True)
+        before = cloudflare.tunnel()["config"]
+        try:
+            version = cloudflare.set_tunnel_config({"ingress": [{"hostname": host, "service": origin.url}, {"service": "http_status:404"}]})["version"]
+            cloudflare.wait_runs(version)
+            mark = standins.seq()
+            message = "Grüße: café ✓ <&>"
+            pushed = project.commit({"marker.txt": "routed", "docs/new.md": "new"}, message=message)
+            record = next(d for d in project.deliveries(mark, event="push") if d["hook_id"] == hook["id"])
+            assert record["status"] == 200 and record["error"] is None and record["route"]["cloudflared"]["rule"] == "1", record
+            got = origin.received[-1]
+            assert got["path"] == "/hooks/gitlab", got["path"]
+            assert header(got["headers"], "X-Gitlab-Event") == "Push Hook" and header(got["headers"], "X-Gitlab-Token") == token, got["headers"]
+            assert header(got["headers"], "Content-Type") == "application/json", got["headers"]
+            assert header(got["headers"], "X-Gitlab-Event-UUID") == record["event_uuid"] and header(got["headers"], "X-Gitlab-Instance") == "https://gitlab.e2e.test"
+            body = json.loads(got["body"])
+            assert (body["object_kind"], body["ref"], body["before"], body["after"], body["checkout_sha"]) == \
+                ("push", "refs/heads/main", pushed["before"], pushed["sha"], pushed["sha"]), body
+            assert body["project"]["path_with_namespace"] == project.path and body["project"]["id"] == body["project_id"] == project.id, body["project"]
+            assert body["total_commits_count"] == 1 and len(body["commits"]) == 1, body["commits"]
+            c = body["commits"][0]
+            assert (c["id"], c["message"], c["added"], c["modified"], c["removed"]) == (pushed["sha"], message, ["docs/new.md"], ["marker.txt"], []), c
+            # Rails' JSON: unicode as it is, <, > and & escaped.
+            assert "café ✓".encode() in got["body"] and b"\\u003c\\u0026\\u003e" in got["body"], got["body"][:400]
+            # Resent, as GitLab's Resend Request: the same body, Idempotency-Key and event UUID.
+            again = project.resend_delivery(record["id"])
+            assert again["status"] == 200 and again["id"] == record["id"] and again["event_uuid"] == record["event_uuid"], again
+            assert origin.received[-1]["body"] == got["body"] and header(origin.received[-1]["headers"], "Idempotency-Key") == record["id"]
+
+            mark = standins.seq()
+            created = project.create_branch("feature")
+            iid = project.open_mr("feature", title="Feature")["iid"]
+            moved = project.commit({"marker.txt": "on feature"}, branch="feature")["sha"]
+            project.approve_mr(iid)
+            project.close_mr(iid)
+            project.reopen_mr(iid)
+            project.merge_mr(iid, remove_source_branch=True)
+            mrs = [d for d in project.deliveries(mark, event="merge_request") if d["hook_id"] == hook["id"]]
+            assert [d["action"] for d in mrs] == ["open", "update", "approved", "close", "reopen", "merge"], [d["action"] for d in mrs]
+            assert all(d["status"] == 200 and d["headers"]["X-Gitlab-Event"] == "Merge Request Hook" for d in mrs), mrs
+            update = mrs[1]["payload"]["object_attributes"]
+            assert update["oldrev"] == created["sha"] and update["last_commit"]["id"] == moved, update
+            assert "oldrev" not in mrs[0]["payload"]["object_attributes"]
+            last = mrs[-1]["payload"]["object_attributes"]
+            assert (last["state"], last["iid"], last["source_branch"], last["target_branch"], last["source_project_id"], last["target_project_id"]) == \
+                ("merged", iid, "feature", "main", project.id, project.id), last
+            pushes = [d["payload"] for d in project.deliveries(mark, event="push") if d["hook_id"] == hook["id"]]
+            new = next(p for p in pushes if p["ref"] == "refs/heads/feature" and p["before"] == "0" * 40)
+            assert new["commits"] == [] and new["total_commits_count"] == 0, new
+            gone = next(p for p in pushes if p["ref"] == "refs/heads/feature" and p["after"] == "0" * 40)
+            assert gone["checkout_sha"] is None and gone["commits"] == [], gone
+
+            assert project.send_delivery(token="bad")["status"] == 200
+            assert header(origin.received[-1]["headers"], "X-Gitlab-Token") == "not-the-hook-token"
+            assert project.send_delivery(token="none")["status"] == 200
+            assert header(origin.received[-1]["headers"], "X-Gitlab-Token") is None
+            assert project.send_delivery(event="merge_request", mr=iid, action="update")["hook_id"] == hook["id"]
+            # Straight to Gitberth's container, for checks of its endpoint alone (its /hooks/gitlab comes with the product).
+            direct = project.send_delivery(via_tunnel=False, cf_connecting_ip=None)
+            assert direct["status"] is not None and direct["route"] is None and "CF-Connecting-IP" not in direct["headers"], direct
+
+            origin.delay = 3
+            gitlab.options(webhook_timeout=1)
+            started = time.monotonic()
+            late = project.send_delivery()
+            assert late["status"] is None and late["error"] == "timed out" and time.monotonic() - started < 2.5, late
+        finally:
+            gitlab.reset_options()
+            cloudflare.set_tunnel_config(before)
+            origin.close()
+
+    def test_rate_limits_and_a_429_on_demand(self, gitlab, gl_token, uniq):
+        """GitLab's RateLimit-* headers on every answer; its 429 on demand (Retry later, Retry-After, RateLimit-*); and
+        its limits per minute, for each address without a token and each user with one."""
+        project = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}")
+        path = f"/projects/{quote(project.path)}"
+        status, headers, _ = gitlab.rest("GET", path, gl_token)
+        assert status == 200 and header(headers, "RateLimit-Limit") == "2000" and int(header(headers, "RateLimit-Remaining")) < 2000, headers
+
+        gitlab.throttle(path=r"/merge_requests$", retry_after=7)
+        status, headers, body = gitlab.rest("GET", f"{path}/merge_requests?state=opened", gl_token)
+        assert status == 429 and body == "Retry later\n" and header(headers, "Retry-After") == "7", (status, headers, body)
+        assert header(headers, "RateLimit-Remaining") == "0" and header(headers, "RateLimit-Name") == "throttle_authenticated_api", headers
+        assert abs(int(header(headers, "RateLimit-Reset")) - (time.time() + 7)) < 3 and header(headers, "RateLimit-ResetTime").endswith(" GMT"), headers
+        assert gitlab.rest("GET", f"{path}/merge_requests?state=opened", gl_token)[0] == 200
+
+        try:
+            gitlab.options(unauthenticated_limit=3)
+            fresh_minute()
+            gitlab.reset_rate_limits()
+            seen = [gitlab.rest("GET", path)[:2] for _ in range(4)]
+            assert [s for s, _ in seen] == [200, 200, 200, 429], [(s, h) for s, h in seen]
+            assert header(seen[-1][1], "RateLimit-Name") == "throttle_unauthenticated_api" and int(header(seen[-1][1], "Retry-After")) <= 60
+            assert gitlab.rest("GET", path, gl_token)[0] == 200, "a user with a token has a limit of its own"
+        finally:
+            gitlab.reset_options()
+            gitlab.reset_rate_limits()
+
+    def test_calls_are_recorded_and_no_token_reaches_the_log(self, gitlab, gl_token, standins, engine, uniq):
+        """Every call about a project is found by it, however it was answered (an injected failure, GitLab's 401, by ID
+        too), with the token it carried; a call no route answers is marked; a token sent in the query stays off the
+        record's query; and no token ever reaches the stand-ins' log."""
+        project = gitlab.create_project(f"{uniq('glr')}/{uniq('app')}", visibility="private")
+        enc = quote(project.path)
+        mark = standins.seq()
+        standins.fail(r"/merge_requests$", status=502, host="gitlab.e2e.test", times=1)
+        status, _, body = gitlab.rest("GET", f"/projects/{enc}/merge_requests", gl_token)
+        assert status == 502 and body == {"message": "502 Bad Gateway"}, body
+        assert gitlab.rest("GET", f"/projects/{project.id}/hooks", "not-a-token")[0] == 401
+        calls = project.api_calls(mark, by_gitberth=False)
+        assert [(c["method"], c["status"], c["token"], c["kind"]) for c in calls] == \
+            [("GET", 502, gl_token, "gitlab"), ("GET", 401, "not-a-token", "gitlab")], calls
+        assert calls[0]["injected"] and project.api_calls(mark) == [], "the runner's own calls aren't Gitberth's"
+
+        status, _, body = gitlab.rest("GET", f"/projects/{enc}/no-such-endpoint", gl_token)
+        assert status == 404 and body == {"error": "404 Not Found"}, body
+        marked = standins.calls(mark, unrouted=True)
+        assert [(c["host"], c["kind"], c["repo"]) for c in marked] == [("gitlab.e2e.test", "gitlab", project.path.lower())], marked
+
+        gitlab.rest("GET", f"/projects/{enc}", gl_token, how="query")
+        last = project.api_calls(mark, by_gitberth=False)[-1]
+        assert last["status"] == 200 and last["token"] == gl_token and last["query"]["private_token"] == "[FILTERED]", last
+
+        hook_token = secrets.token_hex(16)
+        gitlab.rest("POST", f"/projects/{enc}/hooks", gl_token, {"url": f"https://nowhere.{uniq('gl')}.test/hooks/gitlab", "token": hook_token})
+        project.commit({"marker.txt": "a push to a hook that goes nowhere"})
+        log = engine.logs(STANDIN)
+        assert "gitlab delivery Push Hook" in log, log[-2000:]
+        for t in (gl_token, hook_token, "not-a-token"):
+            assert t not in log, "a token reached the stand-ins' log"

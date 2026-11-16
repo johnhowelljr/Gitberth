@@ -288,8 +288,9 @@ public sealed partial class AppService(
             .Where(d => d.AppId == app.Id && d.CommitSha == app.CurrentCommit && d.Status == DeployStatus.Succeeded)
             .OrderByDescending(d => d.Id).FirstOrDefaultAsync(ct);
         var production = watch.DefaultBranch(app.Owner, app.Repo) is not { } main || main == app.Branch;
-        var all = VercelEnv.For(new DeployFacts(await domains.MainHostnameAsync(app.Id, ct), app.Owner, app.Repo, app.Branch,
-            app.CurrentCommit, deployed?.CommitMessage, deployed?.CommitAuthor, traits, production));
+        var gitLab = RepoRef.Of(app.Owner, app.Repo) as GitLabRepoRef;
+        var all = VercelEnv.For(new DeployFacts(await domains.MainHostnameAsync(app.Id, ct), gitLab?.Namespace ?? app.Owner, app.Repo, app.Branch,
+            app.CurrentCommit, deployed?.CommitMessage, deployed?.CommitAuthor, traits, production, Provider: gitLab is null ? "github" : "gitlab"));
         var own = EnvScopes.ForDeploy(app.EnvVars, preview: false).Select(v => new EnvValue(v.Key, protector.TryUnprotect(v.ProtectedValue), v.IsSecret))
             .Where(e => e.Value.Length > 0).ToList();
         var added = VercelEnv.AddTo(own, all).Skip(own.Count).ToList();
@@ -310,14 +311,15 @@ public sealed partial class AppService(
     }
 
     /// <summary>Adds the app with its settings and ports, under the network name <see cref="ChooseSlugAsync"/> gives it.</summary>
-    public async Task<int> CreateAsync(GitHubRepoRef repo, AppSettingsModel m, DetectionResult? detection, CancellationToken ct = default)
+    /// <param name="repo">A GitHub repository, or a project on Gitberth's GitLab.</param>
+    public async Task<int> CreateAsync(RepoRef repo, AppSettingsModel m, DetectionResult? detection, CancellationToken ct = default)
     {
         var slug = (await ChooseSlugAsync(m.Name, ct)).Slug;
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = new AppDefinition
         {
-            Owner = repo.Owner,
-            Repo = repo.Repo,
+            Owner = repo.AppOwner,
+            Repo = repo.AppRepo,
             Slug = slug,
             // A new Git app goes in the menu, as every one did before the menu listed only the pinned ones.
             Source = AppSource.Git,
@@ -346,9 +348,13 @@ public sealed partial class AppService(
         if (notify is not null) await notify.SetMutedAsync(app.ContainerName, false, ct);
         if (audit is not null)
         {
+            // github.com/owner/repo, or the project on Gitberth's GitLab: gitlab.com/group/sub/project.
+            var source = repo is GitLabRepoRef project
+                ? $"{new GitLabConnection(GitLabRepoRef.NormalizeInstance(await settings.GetAsync(SettingKeys.GitLabUrl, ct), out _) ?? GitLabRepoRef.DefaultInstance, null).Host}/{project.PathWithNamespace}"
+                : $"github.com/{app.Owner}/{app.Repo}";
             var changes = new List<Audit.AuditChange>
             {
-                new("Source", null, $"github.com/{app.Owner}/{app.Repo}"),
+                new("Source", null, source),
                 new("Branch", null, app.Branch),
                 new("Ports", null, Apps.SettingsAudit.Ports(app.Ports)),
             };
@@ -361,8 +367,8 @@ public sealed partial class AppService(
             else if (detection is not null) changes.Add(new("Detected", null, detection.Title));
             if (app.EnvVars.Count > 0) changes.Add(new("Variables", null, string.Join(", ", app.EnvVars.Select(v => v.Key).Order(StringComparer.Ordinal))));
             audit.Record(new Audit.AuditEntry("app.created", app.ComposeFile is { } compose
-                ? $"Created {app.Name} from github.com/{app.Owner}/{app.Repo} ({app.Branch}), deployed with Compose from {compose}."
-                : $"Created {app.Name} from github.com/{app.Owner}/{app.Repo} ({app.Branch}).")
+                ? $"Created {app.Name} from {source} ({app.Branch}), deployed with Compose from {compose}."
+                : $"Created {app.Name} from {source} ({app.Branch}).")
             {
                 AppId = app.Id, AppName = app.Name, Container = app.ContainerName, Changes = changes,
             });

@@ -1,7 +1,8 @@
 namespace Gitberth.Audit;
 
-/// <summary>Who made a change: a person, a token, a hook, GitHub, Gitberth itself, or something outside Gitberth.</summary>
-public enum AuditActorKind { Gitberth, User, ApiToken, DeployHook, GitHub, Docker, Cloudflare }
+/// <summary>Who made a change: a person, a token, a hook, GitHub or GitLab, Gitberth itself, or something outside Gitberth.</summary>
+/// <remarks>Kept by name (the log and Deployment.RequestedBy), so names are only ever added, at the end.</remarks>
+public enum AuditActorKind { Gitberth, User, ApiToken, DeployHook, GitHub, Docker, Cloudflare, GitLab }
 
 /// <summary>Where the change came in: the UI, an AI agent or script, a webhook, or one of Gitberth's own jobs.</summary>
 public enum AuditVia { Gitberth, UI, Mcp, Api, Webhook, Hook, Watcher, Schedule, Startup, Updates, Health, Docker, Sync }
@@ -11,7 +12,7 @@ public enum AuditOutcome { Succeeded, Failed, Denied }
 
 /// <summary>Who made a change, as the audit log shows them.</summary>
 /// <param name="Kind">What sort of actor it is.</param>
-/// <param name="Name">"admin", a token's name, a deploy hook's name, "GitHub", "Gitberth", "outside Gitberth".</param>
+/// <param name="Name">"admin", a token's name, a deploy hook's name, "GitHub", "GitLab", "Gitberth", "outside Gitberth".</param>
 /// <param name="Via">Where it came in.</param>
 /// <param name="Ip">The client's address, when the change came over HTTP or from a browser.</param>
 public sealed record AuditActor(AuditActorKind Kind, string Name, AuditVia Via, string? Ip = null)
@@ -128,7 +129,7 @@ public static class AuditAreas
         AuditArea.Apps => (["app.", "preview.", "image."], ["app.deploy.", "app.update.", "app.domain."]),
         AuditArea.Deploys => (["app.deploy.", "app.update."], []),
         AuditArea.Domains => (["app.domain.", "domains.", "cloudflare."], []),
-        AuditArea.Settings => (["settings.", "audit.", "github."], []),
+        AuditArea.Settings => (["settings.", "audit.", "github.", "gitlab."], []),
         AuditArea.SignIns => (["auth."], []),
         _ => (["docker."], []),
     };

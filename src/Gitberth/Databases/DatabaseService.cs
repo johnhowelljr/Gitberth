@@ -240,12 +240,14 @@ public sealed class DatabaseService(
     private async Task<IReadOnlySet<string>> GitHubNamesAsync(AppDefinition app, CancellationToken ct)
     {
         if (repoVariables is null) return new HashSet<string>();
-        if (_github.TryGetValue(app.RepoFullName, out var known) && DateTime.UtcNow - known.At < TimeSpan.FromMinutes(1)) return known.Names;
+        // By Owner and Repo, as stored: a GitLab project's (gitlab:group/project) is never a GitHub repo's (group/project).
+        var key = $"{app.Owner}/{app.Repo}";
+        if (_github.TryGetValue(key, out var known) && DateTime.UtcNow - known.At < TimeSpan.FromMinutes(1)) return known.Names;
         try
         {
             var names = (await repoVariables.ForDeployAsync(app.Owner, app.Repo, ct)).Variables.Where(v => v.Value.Length > 0).Select(v => v.Name)
                 .ToHashSet(StringComparer.Ordinal);
-            _github[app.RepoFullName] = (DateTime.UtcNow, names);
+            _github[key] = (DateTime.UtcNow, names);
             return names;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

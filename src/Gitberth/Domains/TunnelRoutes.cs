@@ -542,13 +542,13 @@ public static class TunnelRoutes
             ? uri.Port
             : null;
 
-    // ---- GitHub's webhook and deploy hooks: two paths of one host name go to Gitberth itself ----
+    // ---- GitHub's and GitLab's webhooks and deploy hooks: three paths of one host name go to Gitberth itself ----
 
     /// <summary>
-    /// The path rule GitHub's webhook deliveries and deploy hooks' calls take to Gitberth: exactly /hooks/github, or
-    /// /hooks/deploy/ and a token, nothing else.
+    /// The path rule GitHub's and GitLab's webhook deliveries and deploy hooks' calls take to Gitberth: exactly /hooks/github,
+    /// exactly /hooks/gitlab, or /hooks/deploy/ and a token, nothing else.
     /// </summary>
-    public const string WebhookPath = "^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$";
+    public const string WebhookPath = "^/hooks/(github|gitlab|deploy/[A-Za-z0-9_-]{20,100})$";
 
     /// <summary>
     /// The rule Gitberth wrote before deploy hooks (1.1): /hooks/github alone. It's still Gitberth's own wherever the webhook's
@@ -556,15 +556,25 @@ public static class TunnelRoutes
     /// </summary>
     public const string OldWebhookPath = "^/hooks/github$";
 
+    /// <summary>
+    /// The rule Gitberth wrote before GitLab (1.2 and 1.3): /hooks/github and deploy hooks. Gitberth's own too, and rewritten
+    /// to <see cref="WebhookPath"/> where it stands, so /hooks/gitlab gets through as well.
+    /// </summary>
+    public const string DeployHooksWebhookPath = "^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$";
+
+    /// <summary>The webhook's rules Gitberth wrote before this one: each is its own, and is brought up to <see cref="WebhookPath"/> where it stands.</summary>
+    private static readonly string[] EarlierWebhookPaths = [OldWebhookPath, DeployHooksWebhookPath];
+
     /// <summary>What the tunnel answers for every other address of the webhook's host name.</summary>
     public const string NotFoundService = "http_status:404";
 
     /// <summary>
-    /// The ingress with GitHub's webhook and deploy hooks routed: on <paramref name="host"/> only the paths /hooks/github and
-    /// /hooks/deploy/&lt;token&gt; go to Gitberth (<paramref name="service"/>), and every other path gets a 404 of its own
-    /// (unless someone else has rules on that host, which then stay theirs). Never behind Access: the rule has no
-    /// originRequest. The rule from before deploy hooks (<see cref="OldWebhookPath"/>) is Gitberth's: it gets the new path
-    /// where it stands, and is never left behind or written twice. On the hosts in <paramref name="drop"/> (being removed)
+    /// The ingress with GitHub's and GitLab's webhooks and deploy hooks routed: on <paramref name="host"/> only the paths
+    /// /hooks/github, /hooks/gitlab and /hooks/deploy/&lt;token&gt; go to Gitberth (<paramref name="service"/>), and every other
+    /// path gets a 404 of its own (unless someone else has rules on that host, which then stay theirs). Never behind Access:
+    /// the rule has no originRequest. The rules from before deploy hooks (<see cref="OldWebhookPath"/>) and before GitLab
+    /// (<see cref="DeployHooksWebhookPath"/>) are Gitberth's: each gets the new path where it stands, and is never left
+    /// behind or written twice. On the hosts in <paramref name="drop"/> (being removed)
     /// only the webhook's own rules go: its path rule when it goes to Gitberth, and on a host that was the webhook's
     /// (<paramref name="earlier"/>, or with that path rule) its path rule and the 404 for the rest. Anyone else's rules there
     /// stay, on the same path or not. With no service (Gitberth can't be reached from the tunnel) the host's rules stay as
@@ -601,8 +611,10 @@ public static class TunnelRoutes
             var wanted = new List<JsonObject> { new() { ["hostname"] = host, ["path"] = WebhookPath, ["service"] = service } };
             if (foreign.Count == 0) wanted.Add(new JsonObject { ["hostname"] = host, ["service"] = NotFoundService });
             var mine = own.Except(foreign).ToList();
-            // The rule from before deploy hooks, with today's path: when that's all that differs, it's rewritten where it stands.
-            var upgraded = mine.Select(r => Path(r) == OldWebhookPath ? WithPath(r, WebhookPath) : r).ToList();
+            // A rule from before deploy hooks or before GitLab, with today's path: when that's all that differs, it's rewritten
+            // where it stands, and the note says which paths it takes now.
+            var earlierPath = mine.Select(Path).FirstOrDefault(p => p is not null && EarlierWebhookPaths.Contains(p));
+            var upgraded = mine.Select(r => Path(r) is { } p && EarlierWebhookPaths.Contains(p) ? WithPath(r, WebhookPath) : r).ToList();
             var inPlace = upgraded.Count == wanted.Count && upgraded.Zip(wanted).All(p => JsonNode.DeepEquals(Bare(p.First), p.Second))
                 && output.IndexOf(mine[0]) + mine.Count - 1 == output.IndexOf(mine[^1]) && !ShadowedByWildcard(output, host);
             if (inPlace)
@@ -614,7 +626,10 @@ public static class TunnelRoutes
                     output[output.IndexOf(mine[i])] = upgraded[i];
                     rewritten = true;
                 }
-                if (rewritten) notes.Add(new DomainNote(host, $"https://{host}{DeployHookPathText} goes to Gitberth now too, for deploy hooks"));
+                if (rewritten)
+                    notes.Add(new DomainNote(host, earlierPath == OldWebhookPath
+                        ? $"https://{host}{DeployHookPathText} and {GitLabWebhookPathText} go to Gitberth now too, for deploy hooks and GitLab's webhooks"
+                        : $"https://{host}{GitLabWebhookPathText} goes to Gitberth now too, for GitLab's webhooks"));
             }
             else
             {
@@ -622,7 +637,8 @@ public static class TunnelRoutes
                 // Right after the rules for every host, like a new domain: ahead of any wildcard that would catch it.
                 var at = output.TakeWhile(r => Host(r) is null && !IsCatchAll(r)).Count();
                 output.InsertRange(at, wanted);
-                notes.Add(new DomainNote(host, $"Routed https://{host}{GitHubWebhookPathText} and {DeployHookPathText} to Gitberth, for GitHub's webhooks and deploy hooks"));
+                notes.Add(new DomainNote(host,
+                    $"Routed https://{host}{GitHubWebhookPathText}, {GitLabWebhookPathText} and {DeployHookPathText} to Gitberth, for GitHub's and GitLab's webhooks and deploy hooks"));
             }
         }
         if (output.Count == 0 || !IsCatchAll(output[^1])) output.Add(new JsonObject { ["service"] = NotFoundService });
@@ -632,10 +648,12 @@ public static class TunnelRoutes
 
     private const string GitHubWebhookPathText = "/hooks/github";
 
+    private const string GitLabWebhookPathText = "/hooks/gitlab";
+
     private const string DeployHookPathText = "/hooks/deploy/…";
 
-    // The webhook's path rule on the host, as Gitberth writes it now or wrote it before deploy hooks.
-    private static bool IsWebhookRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) is WebhookPath or OldWebhookPath;
+    // The webhook's path rule on the host, as Gitberth writes it now or wrote it before deploy hooks or before GitLab.
+    private static bool IsWebhookRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) is WebhookPath or OldWebhookPath or DeployHooksWebhookPath;
 
     private static bool IsNotFoundRule(JsonObject rule, string host) => SameHost(rule, host) && Path(rule) is null && Service(rule) == NotFoundService;
 

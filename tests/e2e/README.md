@@ -1,12 +1,13 @@
 # End-to-end tests
 
 The unit tests use stand-ins inside the test process. These tests run the real Gitberth image, built from this tree, in
-a Docker engine of its own, against stand-ins for GitHub (git and its API) and Cloudflare (its API and cloudflared).
-A browser drives the UI, and each scenario checks what really happened: containers, images, volumes and environments in
-the engine, and the calls the stand-ins recorded.
+a Docker engine of its own, against stand-ins for GitHub (git and its API), GitLab (git and its API) and Cloudflare (its
+API and cloudflared). A browser drives the UI, and each scenario checks what really happened: containers, images,
+volumes and environments in the engine, and the calls the stand-ins recorded.
 
-Gitberth and the scenario runner never reach the real GitHub or Cloudflare: those names lead to the stand-ins, whose
-test CA they trust. The rig's engine itself resolves names as usual, though. So image pulls go to the real registries
+Gitberth and the scenario runner never reach the real GitHub, GitLab or Cloudflare: those names (gitlab.com, and
+gitlab.e2e.test for a self-managed GitLab) lead to the stand-ins, whose test CA they trust. The rig's engine itself
+resolves names as usual, though. So image pulls go to the real registries
 (Docker Hub, and ghcr.io for the uv image in Gitberth's Python Dockerfiles), and a build step or an app that fetched
 something from github.com would reach the real one. The test app does neither, and an app a scenario deploys mustn't
 either.
@@ -172,7 +173,8 @@ removes only those names. (The `docker:29-dind` image stays, since other things 
 host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privileged, 192.168.70.10, UI on host port 18092)
                                        │  its own engine, volume gitberth-e2e for /var/lib/docker
                                        ├─ gbe2e-standin   10.89.0.2 on gbe2e: HTTPS 443 for github.com, api.github.com,
-                                       │                  api.cloudflare.com, and Cloudflare's edge; control API on :8099
+                                       │                  gitlab.e2e.test, gitlab.com, api.cloudflare.com, and
+                                       │                  Cloudflare's edge; control API on :8099
                                        ├─ gitberth        Gitberth, as docker-compose.yml starts it, plus rig/compose.e2e.yml
                                        ├─ cloudflare-tunnel  the fake cloudflared, on the host's network (edge port 7844)
                                        ├─ gbe2e-runner    pytest + Playwright, on gbe2e (only while tests run)
@@ -183,7 +185,7 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
   runs **`rig/inner.sh`** there to build and start everything else.
 - **Gitberth** is the image built from the repo's `Dockerfile`. It's started with `docker-compose.yml` plus
   `rig/compose.e2e.yml`, which adds only test settings:
-  - `extra_hosts` send GitHub's and Cloudflare's names to the stand-in;
+  - `extra_hosts` send GitHub's, GitLab's and Cloudflare's names to the stand-in;
   - `SSL_CERT_FILE` and `GIT_SSL_CAINFO` name a CA bundle made of the image's own CAs plus the rig's test CA;
   - Gitberth also joins the rig's network.
 
@@ -208,9 +210,47 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
     signed (`X-Hub-Signature-256`) with the hook's secret, and goes where the hook's URL leads, as it would in real
     life (see "Deliveries" below).
   - Every call is recorded with the repo it's about, however it was answered: an injected failure, GitHub's 401 or
-    404, a refused git request. A call no route answers gets GitHub's 404 (or Cloudflare's 7003), is logged as `no
-    stand-in route`, and is marked `unrouted`: Gitberth would read that answer as a missing permission or "not set up",
-    so a scenario during which Gitberth made one fails, and so does the run.
+    404, a refused git request. A call no route answers gets GitHub's 404 (or Cloudflare's 7003, or GitLab's `{"error":
+    "404 Not Found"}`), is logged as `no stand-in route`, and is marked `unrouted`: Gitberth would read that answer as a
+    missing permission or "not set up", so a scenario during which Gitberth made one fails, and so does the run.
+  - **The GitLab stand-in** (`gl.py`) is one GitLab answering as `https://gitlab.e2e.test` (a self-managed instance's
+    address) and as `https://gitlab.com` (Gitberth's default instance); each answer names the host it was asked
+    through. It answers what Gitberth calls of GitLab's REST API v4 (the GitLab contract): `/user` and
+    `/personal_access_tokens/self`, projects (nested groups or a user's namespace; public, internal or private; by ID or
+    URL-encoded path), branches, compare, merge requests from the same project or a fork, commit statuses, merge request
+    notes, project hooks and CI/CD variables, with GitLab's shapes, its errors (401, 403 naming the scopes an endpoint
+    takes, 404 Project Not Found, Grape's 400s, 409, 422) and offset paging (`X-Next-Page`, empty on the last page).
+    - Tokens are personal, project or group access tokens with GitLab's scopes (`api`, `read_api`, `read_repository`,
+      ...), an expiry date and revocation, sent as `PRIVATE-TOKEN`, `Authorization: Bearer` or `?private_token=`. They act
+      as their user, whose role in the project or its groups (guest to owner) decides what it may do: a private project a
+      user isn't in is a 404, a role too low a 403. A project or group token is a bot that's a member there; an "oauth"
+      token gets 404 from `/personal_access_tokens/self`, as every token does on a GitLab older than 15.5
+      (`gitlab.options(self_endpoint=False)`).
+    - git over smart HTTP at `https://<host>/<path_with_namespace>.git`, with `oauth2:<token>` (or any username with an
+      access token) as Basic credentials: no credentials for a private project is a 401, a token without a repository
+      scope a 403, a user who isn't in it a 404. A merge request's head is `refs/merge-requests/<iid>/head` in its target
+      project, a fork's commits fetched in.
+    - Commit statuses follow GitLab's state machine: a pending or running status of the same name, ref and user moves
+      on, and a move GitLab doesn't make (running to running) is its 400 `Cannot transition status ...`. GitLab adds its
+      own system notes to a merge request (commits added, closed, merged, ...), and lists notes newest first. A hook's
+      token is never shown, and is dropped when its URL changes without a new one; a hook URL on the local network
+      (localhost, a private address, a name without a dot) is GitLab's 422 `Invalid url given`. A variable's key alone
+      naming more than one environment scope is GitLab's 409.
+    - GitLab.com's API rate limits hold (2,000 requests a minute for a user, 500 for an address without a token), with
+      `RateLimit-*` headers on every answer; past them, or when a scenario asks (`gitlab.throttle()`), comes Rack::Attack's
+      429: `Retry later`, `Retry-After` and `RateLimit-*`. An injected failure on a GitLab host without a body answers
+      `{"message": "<status> <reason>"}` (a line of text for git).
+    - A push, or a merge request opened, changed, closed, reopened, merged or approved through the control API, sends
+      GitLab's Push Hook or Merge Request Hook to each hook that asked for it: JSON as Rails writes it, with
+      `X-Gitlab-Event`, `X-Gitlab-Token` (the hook's token), `X-Gitlab-Event-UUID`, `X-Gitlab-Webhook-UUID`,
+      `X-Gitlab-Instance` and `Idempotency-Key`. It goes where the hook's URL leads, as GitHub's deliveries do (see
+      "Deliveries"), and GitLab waits 10 seconds for the answer. The stand-in sends each delivery once (GitLab's docs
+      describe no automatic retry, but say to expect duplicates after a timeout: `resend_delivery` sends one again with
+      its Idempotency-Key, as GitLab's Resend Request does), and it doesn't disable a failing hook as GitLab does after 4
+      failures in a row.
+    - Its calls are recorded as kind `gitlab` (the API) and `gitlab-git` (git), with the project they're about (`repo`:
+      its path, also when asked for by ID) and the token they carried; a token sent in the query is `[FILTERED]` in the
+      record's query. No token ever goes to the stand-ins' log.
   - **The Cloudflare stand-in** answers what `CloudflareApi.cs` calls in Cloudflare's envelope: token checks, zones,
     DNS records, the tunnel's configuration (each PUT bumps its version, which is kept across restarts), the Zero Trust
     organization, and Access applications. Its tokens have Cloudflare's permission groups. Access is two groups there:
@@ -258,20 +298,23 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
   - calls found by their repo however they were answered, and calls without a route marked;
   - deliveries following DNS and the tunnel to Gitberth, signed over UTF-8, with GitHub's 10 seconds;
   - the fake cloudflared refusing a bad configuration, logging to stderr, and off the host's network;
-  - Gitberth finding the fake cloudflared.
+  - Gitberth finding the fake cloudflared;
+  - the GitLab stand-in (`TestGitLabStandIn`): its answer shapes and paging, tokens' scopes and users' roles, merge
+    requests from branches and forks, statuses, notes, hooks and variables, git with `oauth2:<token>`, its deliveries
+    and its 429s.
 
   The shared fixtures are in `conftest.py`, and the helpers in `scenarios/e2e/`.
-- The runner resolves GitHub's and Cloudflare's names to the stand-in and trusts the rig's CA, just as Gitberth does.
-  So `github.rest(...)` and `cloudflare.rest(...)` get the answers Gitberth gets.
+- The runner resolves GitHub's, GitLab's and Cloudflare's names to the stand-in and trusts the rig's CA, just as Gitberth
+  does. So `github.rest(...)`, `gitlab.rest(...)` and `cloudflare.rest(...)` get the answers Gitberth gets.
 
 ### Deliveries
 
 A webhook delivery reaches Gitberth only the way it would in real life:
 
 1. A proxied CNAME for the hook's host leads to the tunnel.
-2. The first tunnel rule matching the host and path (`^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$`, which deploy
-   hooks' calls take too) goes to Gitberth's service. With cloudflared on the host's network that's
-   `http://localhost:8080`, Gitberth's published port.
+2. The first tunnel rule matching the host and path (`^/hooks/(github|gitlab|deploy/[A-Za-z0-9_-]{20,100})$`, which
+   GitLab's project hooks and deploy hooks' calls take too) goes to Gitberth's service. With cloudflared on the host's
+   network that's `http://localhost:8080`, Gitberth's published port.
 
 Gitberth writes both itself once instant deploys have a host name. Until then, or when either is wrong (no record, a
 missing or shadowed rule, a host that moved away), the delivery's record shows what happened instead:
@@ -297,6 +340,7 @@ The fixtures (see `conftest.py` and `scenarios/e2e/`):
 |---|---|
 | `gitberth` | Gitberth: `url()`, `new_page()`, `open(page, path)`, `sign_in`/`attempt_sign_in`/`sign_out`, `create_git_app(page, repo.url)`, `deploy`, `set_previews`, `delete_app`, `save_watch_interval`, `save_github_token`, `snackbar`, `confirm`, `banners`, `tabs`, `app_list_keys`, `app_list_total`, `dashboard_app_total`, `top_search`; waits: `wait_deploy(app_id, after=, statuses=)`, `wait_idle`, `wait_app`, `wait_preview`, `wait_no_preview`, `wait_answers(url, path)`; `lan_url(app_id)`, `deploy_log(id)`, `logs(since)`; `gitberth.db` reads its database (`app`, `deployments`, `last_deployment_id`, `previews`, `ports`, `web_port`, `volumes`, `env_vars`, `domains`, `activity`, `setting`, or `query(sql)`). |
 | `github` | `token(login=, permissions=, repos=)` (a fine-grained token: `{"statuses": False}` or `"none"` takes a permission away, `"read"` makes it read-only), `change_token`, `rest(verb, path, token)`, `rate_limits()`, `reset_rate_limits()`, `create_repo(name, files=..., private=)` → a `Repo`: `commit`, `create_branch`, `delete_branch`, `fork`, `open_pull`, `update_pull`, `close_pull`, `merge_pull`, `set_variables`, `delete_comment`, `add_foreign_hook` (another service's), `add_pasted_hook` (Gitberth's, made by hand), `state`, `branch_sha`, `statuses`, `comments`, `hooks` (each with `made_by`: api, pasted or foreign), `deliveries`, `send_delivery(..., hook_id=, via_tunnel=, content_type=)`, `git_calls`, `ls_remotes`, `ls_remote_attempts`, `api_calls`, `wait_watcher_passes`, `wait_pulls_listed` (every one of these finds a call however it was answered). |
+| `gitlab` | `token(username=, scopes=, expires_at=, kind=personal\|project\|group\|oauth, project=, group=, access_level=)`, `change_token`, `tokens`, `add_member(target, username, level)`, `rest(verb, path, token, how=header\|bearer\|query, host=)`, `options(self_endpoint=, webhook_timeout=, authenticated_limit=, unauthenticated_limit=)`, `reset_options`, `throttle(path, times=, retry_after=)` (a 429 on demand), `reset_rate_limits`, `calls`, `deliveries`, `create_project("group/sub/name", files=, visibility=)` → a `Project` (`url`, `clone_url`, `id`): `commit`, `create_branch`, `delete_branch`, `fork(namespace, owner)`, `open_mr(source_branch, source=<a fork>, draft=)`, `update_mr`, `close_mr`, `reopen_mr`, `merge_mr`, `approve_mr`, `unapprove_mr`, `add_note`, `delete_note`, `set_variables`/`set_variable`, `add_member`, `add_foreign_hook`, `add_pasted_hook`, `change(archived=, visibility=)`, `state`, `branch_sha`, `mr_refs`, `merge_requests`, `statuses`, `notes`, `hooks` (with their tokens), `variables`, `deliveries`, `send_delivery(event=push\|merge_request, token=, hook_id=, via_tunnel=)`, `resend_delivery(id)`, `git_calls`, `ls_remotes`, `ls_remote_attempts`, `api_calls`, `wait_watcher_passes`, `wait_mrs_listed`. `gl_token` is a token of e2e-bot with `api`; `e2e.gitlab.quote(path)` URL-encodes a project's path, `basic_auth(token)` is git's header. |
 | `cloudflare` | `token(permissions)` (all of `Cloudflare.ALL` by default), `settings_token()` (exactly what Gitberth's Settings asks for: `Cloudflare.AS_SETTINGS_ASKS`), `change_token`, `rest(verb, path, token)`, `zone(name)`, `set_team(name)`, `tunnel()`, `ingress()`, `rules_for(host)`, `set_tunnel_config`, `connector()`, `wait_runs(version, network=)`, `visit(url, signed_in_as=)`, `dns_records`, `add_dns_record`, `delete_dns_record`, `access_apps`, `add_access_app`, `delete_access_app`, `options`, `cloudflared_token`. |
 | `standins` | `seq()` (a marker), `calls(since, host=, method=, path=, kind=, repo=, unrouted=)`, `fail(path, status=, host=, rate_limit=, ...)` to inject a failure, `clear_failures()`. |
 | `engine` | The rig's engine: `inspect`, `running`, `wait_running`, `wait_gone`, `containers`, `container_names`, `env`, `labels`, `image_of`, `mounts`, `host_ports`, `networks`, `address(name, network)`, `exec(name, *cmd, env=)`, `logs(name, since=, streams=)`, `images`, `image_labels`, `volumes`, `anonymous_volumes`, `recreate_fake_cloudflared(token, network)` (then `cloudflare.wait_runs(network=...)`). |
@@ -336,6 +380,8 @@ Rules of thumb:
 - GitHub's rate limits: `standins.fail(path, host="api.github.com", rate_limit="primary")` or `"secondary"`. An injected
   failure without a body answers in the service's own shape, with the caller's own rate-limit headers (60 an hour
   without a token). The real limits hold too: a scenario that uses one up calls `github.reset_rate_limits()` after.
+- GitLab's 429: `gitlab.throttle(path, times=1, retry_after=5)`, for the next calls whose path matches (git's too). A
+  scenario that changes `gitlab.options(...)` puts them back with `gitlab.reset_options()` in a `finally`.
 - A call Gitberth makes that no stand-in route answers fails the scenario (and the run): add the route to the stand-in,
   in GitHub's or Cloudflare's real shape. The scenarios' own `rest()` calls are left out, so a check may ask for a
   missing route on purpose.

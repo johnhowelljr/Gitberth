@@ -21,7 +21,7 @@ public static class AuditText
             DeployTrigger.Poll => $"Queued a deploy of {app}: a new commit{at}.",
             DeployTrigger.Retry => $"Queued another try of {app}{at}, whose last build failed.",
             DeployTrigger.Restart => $"Queued the scheduled restart of {app}.",
-            DeployTrigger.Webhook => $"Queued a deploy of {app}: GitHub said its branch changed{at}.",
+            DeployTrigger.Webhook => $"Queued a deploy of {app}: {WebhookHost(dep)} said its branch changed{at}.",
             DeployTrigger.Promote => $"Queued the promotion of a preview's commit to {app}{at}.",
             DeployTrigger.Hook => $"Queued a deploy of {app} for the deploy hook {dep.HookName ?? "?"}{noCache}.",
             _ => $"Queued a deploy of {app}{noCache}.",
@@ -53,6 +53,16 @@ public static class AuditText
             _ => ("app.deploy.failed", $"Deploy {id} of {app} failed{why}.", AuditOutcome.Failed),
         };
     }
+
+    /// <summary>
+    /// Whose webhook asked for a deploy: GitLab's when the deploy was asked for by GitLab (its <see cref="Deployment.RequestedBy"/>),
+    /// else GitHub's, as every one was before GitLab.
+    /// </summary>
+    public static string WebhookHost(Deployment dep) => AuditActors.Parse(dep.RequestedBy)?.Kind == AuditActorKind.GitLab ? "GitLab" : "GitHub";
+
+    /// <summary>The deploy's trigger in the words the deploy pages use: a GitLab push's is "GitLab webhook".</summary>
+    public static string Trigger(Deployment dep) =>
+        dep.Trigger == DeployTrigger.Webhook && WebhookHost(dep) == "GitLab" ? "GitLab webhook" : Trigger(dep.Trigger);
 
     /// <summary>The trigger in the words the deploy pages use.</summary>
     public static string Trigger(DeployTrigger trigger) => trigger switch

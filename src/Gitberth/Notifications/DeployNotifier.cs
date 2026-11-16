@@ -27,7 +27,7 @@ public sealed class DeployNotifier(IDbContextFactory<GitberthDb> dbFactory, Noti
         if (app is null) return;
         var link = await notifier.LinkAsync($"apps/{app.Id}/deployments/{report.DeploymentId}", ct);
         var main = app.IsPreview || kind != NotifyEvent.DeploySucceeded ? null : DomainService.MainOf(app.Domains);
-        notifier.Publish(Build(report, kind, app.Name, app.ContainerName, app.IsPreview, main, link, DateTime.UtcNow));
+        notifier.Publish(Build(report, kind, app.Name, app.ContainerName, app.IsPreview, main, link, DateTime.UtcNow, gitLab: app.FromGitLab));
     }
 
     /// <summary>What a finished deploy is told as, or null when it isn't told. A skipped commit changed nothing that runs, so it isn't.</summary>
@@ -42,10 +42,13 @@ public sealed class DeployNotifier(IDbContextFactory<GitberthDb> dbFactory, Noti
     };
 
     /// <summary>The message: pure, so each wording is tested.</summary>
-    public static Notice Build(DeployReport report, NotifyEvent kind, string app, string container, bool preview, string? mainDomain, string? link, DateTime at)
+    /// <param name="gitLab">The app is from a GitLab project: a push its webhook told about is GitLab's.</param>
+    public static Notice Build(DeployReport report, NotifyEvent kind, string app, string container, bool preview, string? mainDomain, string? link, DateTime at,
+        bool gitLab = false)
     {
         var commit = report.CommitSha is { Length: >= 7 } sha ? sha[..7] : null;
-        var what = $"{Format.Trigger(report.Trigger, report.HookName)}{(commit is null ? "" : $", commit {commit}")}";
+        var trigger = gitLab && report.Trigger == DeployTrigger.Webhook ? "Push on GitLab" : Format.Trigger(report.Trigger, report.HookName);
+        var what = $"{trigger}{(commit is null ? "" : $", commit {commit}")}";
         var (level, title, text) = (kind, report.Status) switch
         {
             (NotifyEvent.DeploySucceeded, _) => (NoticeLevel.Good, $"{app} is live",

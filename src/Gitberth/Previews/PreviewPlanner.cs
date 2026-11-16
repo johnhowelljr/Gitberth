@@ -4,23 +4,26 @@ using Gitberth.Git;
 
 namespace Gitberth.Previews;
 
-/// <summary>An open pull request, as GitHub lists it.</summary>
+/// <summary>An open pull request, as GitHub lists it, or a GitLab merge request (its iid as the number).</summary>
 /// <param name="HeadRef">The branch it comes from (in the fork, for one from a fork).</param>
-/// <param name="FromFork">Its branch is in another repo: someone else's code.</param>
+/// <param name="FromFork">Its branch is in another repo (another project, on GitLab): someone else's code.</param>
 public sealed record PullRequestInfo(int Number, string Title, string HeadRef, string HeadSha, bool FromFork, string? Url = null);
 
 /// <summary>Something that should get a preview: a branch, or a pull request.</summary>
 public sealed record PreviewTarget(PreviewKind Kind, string Branch, int? PullRequest, string? Title, string HeadSha, bool FromFork)
 {
+    /// <summary>What its deploys fetch from a GitHub repo; <see cref="PreviewNames.Ref"/> gives a GitLab project's.</summary>
     public string Ref => PreviewNames.Ref(Kind, Branch, PullRequest);
     public string SkipKey => PreviewPlanner.SkipKeyOf(Kind, Branch, PullRequest);
 }
 
 /// <summary>A preview Gitberth has, as the planner needs it.</summary>
-public sealed record ExistingPreview(int AppId, PreviewKind Kind, string Branch, int? PullRequest, string? Title, string? HeadSha, bool FromFork, DateTime LastActivityAt)
+/// <param name="Host">Its repo's host, for its label (a GitLab merge request is "MR !12").</param>
+public sealed record ExistingPreview(int AppId, PreviewKind Kind, string Branch, int? PullRequest, string? Title, string? HeadSha, bool FromFork, DateTime LastActivityAt,
+    GitHost Host = GitHost.GitHub)
 {
     public string SkipKey => PreviewPlanner.SkipKeyOf(Kind, Branch, PullRequest);
-    public string Label => PreviewNames.Label(Kind, Branch, PullRequest);
+    public string Label => PreviewNames.Label(Kind, Branch, PullRequest, Host);
 }
 
 /// <summary>A preview's newest commit (and its pull request's title) changed.</summary>
@@ -60,7 +63,7 @@ public static class PreviewPlanner
     /// <summary>Set in the skips once branches' commits were noted, so only commits after that get a preview.</summary>
     public const string BaselineKey = "@branches";
 
-    /// <summary>Why a pull request's preview goes when it's no longer open (GitHub is asked which, when it can be).</summary>
+    /// <summary>Why a pull request's preview goes when it's no longer open (GitHub, or GitLab, is asked which, when it can be).</summary>
     public const string ClosedReason = "the pull request was closed or merged";
 
     /// <summary>Why a fork's pull request's preview goes when forks are turned off.</summary>

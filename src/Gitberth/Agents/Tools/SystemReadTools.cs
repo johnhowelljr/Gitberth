@@ -6,6 +6,7 @@ using Gitberth.Databases;
 using Gitberth.Deploy;
 using Gitberth.Docker;
 using Gitberth.Domains;
+using Gitberth.Git;
 using Gitberth.Health;
 using Gitberth.Images;
 using Gitberth.Notifications;
@@ -176,11 +177,11 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
 
     [McpServerTool(Name = "query_audit_log", Title = "Query the audit log", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [ToolAccess(ApiAccess.Read)]
-    [Description("The audit log: every change to this Gitberth, who made it (a person, a token, a hook, GitHub, Gitberth itself, or something outside Gitberth), " +
+    [Description("The audit log: every change to this Gitberth, who made it (a person, a token, a hook, GitHub or GitLab, Gitberth itself, or something outside Gitberth), " +
         "how and with what outcome, newest first, with the same filters as its page. Page with before_id (the last id you got).")]
     public async Task<object> QueryAuditLog(
         [Description("How far back: day, week (default), month or all.")] string? range = null,
-        [Description("Who made the changes, as kind:name, like User:admin, ApiToken:my-agent, DeployHook:cms, GitHub:GitHub, Docker:outside Gitberth.")] string? who = null,
+        [Description("Who made the changes, as kind:name, like User:admin, ApiToken:my-agent, DeployHook:cms, GitHub:GitHub, GitLab:GitLab, Docker:outside Gitberth.")] string? who = null,
         [Description("Only this app's entries: its key, name or number.")] string? app = null,
         [Description("Only one part: apps, deploys, domains, settings, signins or outside (Docker changes made outside Gitberth).")] string? area = null,
         [Description("Only entries that ended so: succeeded, failed or denied.")] string? outcome = null,
@@ -379,6 +380,16 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
                 login = await settings.GetAsync(SettingKeys.GitHubLogin, ct),
                 commit_statuses = await settings.GetAsync(SettingKeys.GitHubStatuses, ct) != "false",
                 pull_request_comments = await settings.GetAsync(SettingKeys.GitHubComments, ct) != "false",
+            },
+            // Whether a token is saved and whose it is: never the token.
+            gitlab = new
+            {
+                url = GitLabRepoRef.NormalizeInstance(await settings.GetAsync(SettingKeys.GitLabUrl, ct), out _) ?? GitLabRepoRef.DefaultInstance,
+                token_saved = await settings.GetAsync(SettingKeys.GitLabToken, ct) is not null,
+                login = await settings.GetAsync(SettingKeys.GitLabLogin, ct),
+                scopes = await settings.GetAsync(SettingKeys.GitLabScopes, ct) is { Length: > 0 } scopes ? scopes.Split(',') : null,
+                commit_statuses = await settings.GetAsync(SettingKeys.GitLabStatuses, ct) != "false",
+                merge_request_comments = await settings.GetAsync(SettingKeys.GitLabComments, ct) != "false",
             },
             audit_log = new { retention_days = auditSettings.RetentionDays, record_outside_changes = auditSettings.RecordOutside },
             lan_address = await settings.GetAsync(SettingKeys.PublicHost, ct),

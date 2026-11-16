@@ -19,7 +19,7 @@ else if (parent.PreviewMode == PreviewMode.Off && rows is { Count: 0 })
     <div class="gb-card">
         <EmptyState Icon="@Icons.Material.Outlined.Preview" Title="Previews are off">
             <ChildContent>
-                Turned on, every pull request (and, if you like, every branch) of @parent.RepoFullName gets an app of its own, with its own address,
+                Turned on, every @(parent.FromGitLab ? "merge request" : "pull request") (and, if you like, every branch) of @parent.RepoFullName gets an app of its own, with its own address,
                 built with @View.Summary.Title's settings. Promote one when it's ready, and production builds that commit.
             </ChildContent>
             <Actions><Btn Kind="BtnKind.Primary" Href="@($"{View.Summary.Href}/settings#sec-previews")" Icon="@Icons.Material.Outlined.Tune">Turn previews on</Btn></Actions>
@@ -30,7 +30,7 @@ else
 {
     @if (Previews.PullsProblem(parent.Owner, parent.Repo) is { } problem)
     {
-        <Banner Tone="warn" Title="Pull requests couldn't be read">@problem</Banner>
+        <Banner Tone="warn" Title="@(parent.FromGitLab ? "Merge requests couldn't be read" : "Pull requests couldn't be read")">@problem</Banner>
     }
     <SectionCard Title="Previews" Icon="@Icons.Material.Outlined.Preview" Flush="true" Sub="@Summary(parent)"
                  Class="@(Previews.PullsProblem(parent.Owner, parent.Repo) is null ? null : "gb-mt")">
@@ -47,8 +47,8 @@ else
                 <div class="gb-card-body">
                     <EmptyState Small="true" Icon="@Icons.Material.Outlined.Preview" Title="No previews yet">
                         @(parent.PreviewMode == PreviewMode.PullRequestsAndBranches
-                            ? "Open a pull request, or push a new commit to a branch other than " + parent.Branch + ", and its preview shows up here within a minute."
-                            : "Open a pull request and its preview shows up here within a minute.")
+                            ? $"Open a {(parent.FromGitLab ? "merge request" : "pull request")}, or push a new commit to a branch other than " + parent.Branch + ", and its preview shows up here within a minute."
+                            : $"Open a {(parent.FromGitLab ? "merge request" : "pull request")} and its preview shows up here within a minute.")
                     </EmptyState>
                 </div>
             }
@@ -267,7 +267,7 @@ else
     {
         var confirmed = await Dialogs.ShowMessageBoxAsync($"Remove the preview of {p.Label}?",
             $"Its container, images and volumes go{(p.Domain is { } domain ? $", and {domain} leaves the tunnel" : "")}. A new commit on "
-            + (p.Kind == PreviewKind.PullRequest ? "the pull request" : "the branch") + " makes it again.",
+            + (p.Kind != PreviewKind.PullRequest ? "the branch" : p.Host == Gitberth.Git.GitHost.GitLab ? "the merge request" : "the pull request") + " makes it again.",
             yesText: "Remove", cancelText: "Cancel");
         if (confirmed != true) return;
         busy = true;

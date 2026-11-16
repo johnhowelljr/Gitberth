@@ -17,6 +17,8 @@ HOSTS = [
     "objects.githubusercontent.com", "uploads.github.com", "api.cloudflare.com", "gbe2e-standin",
     # Where notifications go: Discord's and Slack's webhooks, an ntfy server, any webhook.
     "discord.com", "hooks.slack.com", "ntfy.e2e.test", "notify.e2e.test",
+    # GitLab: a self-managed instance's address, and gitlab.com (Gitberth's default instance).
+    "gitlab.e2e.test", "gitlab.com",
 ]
 
 

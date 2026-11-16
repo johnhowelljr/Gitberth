@@ -55,19 +55,21 @@ public sealed record PreviewSave(string? Problem, string? Warning = null);
 /// <param name="LanUrl">Where the LAN reaches its web port.</param>
 /// <param name="DeploymentId">Its newest deploy, for its log.</param>
 /// <param name="CanPromote">It runs a commit production can build.</param>
+/// <param name="Host">Its repo's host: a GitLab merge request's preview is "MR !12".</param>
 public sealed record PreviewRow(int AppId, string Key, string Name, PreviewKind Kind, string Branch, int? PullRequest, string? Title, string Url,
     PreviewState State, string StateText, string? Commit, string? CommitMessage, string? Domain, string? LanUrl, DateTime LastActivityAt, DateTime ExpiresAt,
-    int? DeploymentId, bool CanPromote, bool FromFork, bool Running)
+    int? DeploymentId, bool CanPromote, bool FromFork, bool Running, GitHost Host = GitHost.GitHub)
 {
-    public string Label => PreviewNames.Label(Kind, Branch, PullRequest);
+    public string Label => PreviewNames.Label(Kind, Branch, PullRequest, Host);
 }
 
 /// <summary>What a preview's own page says about it.</summary>
 /// <param name="ParentKey">The parent's page's key.</param>
 /// <param name="LeftOut">The parent's host folders, which the preview doesn't mount.</param>
-public sealed record PreviewOf(PreviewInfo Info, int ParentId, string ParentName, string ParentKey, IReadOnlyList<string> LeftOut, string Url)
+/// <param name="Host">Its repo's host.</param>
+public sealed record PreviewOf(PreviewInfo Info, int ParentId, string ParentName, string ParentKey, IReadOnlyList<string> LeftOut, string Url, GitHost Host = GitHost.GitHub)
 {
-    public string Label => PreviewNames.Label(Info.Kind, Info.Branch, Info.PullRequest);
+    public string Label => PreviewNames.Label(Info.Kind, Info.Branch, Info.PullRequest, Host);
 }
 
 /// <summary>
@@ -79,6 +81,7 @@ public sealed record PreviewOf(PreviewInfo Info, int ParentId, string ParentName
 /// </summary>
 /// <param name="hostPorts">Picks a preview's host port; without it (in tests) the first one no saved port has from its container port up.</param>
 /// <param name="gate">One change to previews at a time, shared with deleting an app (AppActions); without it, one of its own.</param>
+/// <param name="gitLab">GitLab's API, for a GitLab project's merge requests; without it (in older tests) a GitLab app's previews have none.</param>
 public sealed class PreviewService(
     IDbContextFactory<GitberthDb> dbFactory,
     AppActions actions,
@@ -95,7 +98,8 @@ public sealed class PreviewService(
     RepoVariables? repoVariables = null,
     Security.SecretProtector? protector = null,
     Audit.AuditLog? audit = null,
-    Databases.DatabaseService? databases = null)
+    Databases.DatabaseService? databases = null,
+    GitLabApi? gitLab = null)
 {
     /// <summary>How often a repo's pull requests are asked for at most when nothing says they changed.</summary>
     internal TimeSpan PullsEvery { get; set; } = TimeSpan.FromMinutes(5);
@@ -197,11 +201,14 @@ public sealed class PreviewService(
         if (cache is not null && !poked && !changed && now - cache.At < PullsEvery) return cache.Pulls;
         try
         {
-            var list = await pulls.ListOpenAsync(owner, repo, ct);
+            // A GitLab project's merge requests, through GitLab's API; a GitHub repo's pull requests through GitHub's.
+            var list = RepoRef.Of(owner, repo) is GitLabRepoRef project
+                ? gitLab is not null ? await gitLab.ListOpenMergeRequestsAsync(project, ct) : throw new GitLabApiException("GitLab isn't set up in this Gitberth.")
+                : await pulls.ListOpenAsync(owner, repo, ct);
             _pulls[key] = new PullCache(now, list, current, null);
             return list;
         }
-        catch (GitHubApiException ex)
+        catch (HostApiException ex)
         {
             if (cache?.Error != ex.Message) logger.LogWarning("Can't list the pull requests of {Repo}: {Error}", key, ex.Message);
             // Asked again in PullsEvery, or sooner when the repo's pull requests change again.
@@ -222,16 +229,17 @@ public sealed class PreviewService(
         }
         if (parent is null) return;
         var skips = await LoadSkipsAsync(parentId, ct);
-        var existing = infos.Select(i => new ExistingPreview(i.AppId, i.Kind, i.Branch, i.PullRequest, i.Title, i.HeadSha, i.FromFork, i.LastActivityAt)).ToList();
+        var host = RepoRef.HostOf(parent.Owner);
+        var existing = infos.Select(i => new ExistingPreview(i.AppId, i.Kind, i.Branch, i.PullRequest, i.Title, i.HeadSha, i.FromFork, i.LastActivityAt, host)).ToList();
         var plan = PreviewPlanner.Plan(new PreviewSettingsFacts(parent.PreviewMode, parent.Branch, parent.PreviewForks, parent.PreviewExpiryDays),
             remote.Branches, open, remote.PullHeads, existing, skips, Now());
 
         foreach (var removal in plan.Remove)
         {
             var reason = removal.Reason;
-            // Closed or merged: GitHub says which, when it can.
+            // Closed or merged: GitHub (or GitLab) says which, when it can.
             if (reason == PreviewPlanner.ClosedReason && infos.FirstOrDefault(i => i.AppId == removal.AppId)?.PullRequest is int number)
-                reason = await pulls.MergedAsync(parent.Owner, parent.Repo, number, ct) switch
+                reason = await MergedAsync(parent, number, ct) switch
                 {
                     true => "the pull request was merged",
                     false => "the pull request was closed",
@@ -261,11 +269,21 @@ public sealed class PreviewService(
             }
             catch (Exception ex) when (ex is InvalidOperationException or DbUpdateException or DockerApiException or HttpRequestException or TimeoutException)
             {
-                logger.LogWarning(ex, "Couldn't make the preview of {App} for {Preview}", parent.Name, PreviewNames.Label(target.Kind, target.Branch, target.PullRequest));
+                logger.LogWarning(ex, "Couldn't make the preview of {App} for {Preview}", parent.Name, PreviewNames.Label(target.Kind, target.Branch, target.PullRequest, host));
             }
         }
         if (!SameSkips(skips, plan.Skips)) await SaveSkipsAsync(parentId, plan.Skips, ct);
     }
+
+    // Whether a pull request (or a GitLab merge request) that isn't open any more was merged; null when its host can't say.
+    private async Task<bool?> MergedAsync(AppDefinition parent, int number, CancellationToken ct) =>
+        RepoRef.Of(parent.Owner, parent.Repo) is GitLabRepoRef project
+            ? gitLab is null ? null : await gitLab.MergedAsync(project, number, ct)
+            : await pulls.MergedAsync(parent.Owner, parent.Repo, number, ct);
+
+    // A reason as the parent's host says it: a GitLab project's previews are of merge requests.
+    private static string Worded(string reason, AppDefinition? parent) =>
+        parent is not null && RepoRef.IsGitLab(parent.Owner) ? reason.Replace("pull request", "merge request", StringComparison.Ordinal) : reason;
 
     // The previews whose newest commit hasn't been tried (or whose failed build is due a retry), started oldest first while
     // the parent has room: one that runs already keeps its place, one that doesn't waits for one.
@@ -308,7 +326,9 @@ public sealed class PreviewService(
     /// </summary>
     internal async Task<int> CreateAsync(AppDefinition parent, PreviewTarget target, CancellationToken ct)
     {
-        var label = PreviewNames.Label(target.Kind, target.Branch, target.PullRequest);
+        // A GitLab merge request's preview is "MR !12", and fetches refs/merge-requests/12/head.
+        var host = RepoRef.HostOf(parent.Owner);
+        var label = PreviewNames.Label(target.Kind, target.Branch, target.PullRequest, host);
         // Its named volumes are named after its slug (gb-<slug>-<name>): a slug that gives one of them the name of another
         // app's volume, or of one Docker has already, would have the preview use, and its removal delete, someone else's data.
         var volumes = PreviewCopy.Volumes(parent.Volumes).Select(v => v.Source).ToList();
@@ -326,12 +346,13 @@ public sealed class PreviewService(
         var now = Now();
         var info = new PreviewInfo
         {
-            ParentAppId = parent.Id, Kind = target.Kind, Branch = target.Branch, PullRequest = target.PullRequest, Title = target.Title, Ref = target.Ref,
+            ParentAppId = parent.Id, Kind = target.Kind, Branch = target.Branch, PullRequest = target.PullRequest, Title = target.Title,
+            Ref = PreviewNames.Ref(target.Kind, target.Branch, target.PullRequest, host),
             HeadSha = target.HeadSha, FromFork = target.FromFork, LastActivityAt = now, CreatedAt = now,
         };
         var row = new AppDefinition
         {
-            Name = PreviewNames.Name(parent.Name, target.Kind, target.Branch, target.PullRequest),
+            Name = PreviewNames.Name(parent.Name, target.Kind, target.Branch, target.PullRequest, host),
             Slug = slug,
             ParentAppId = parent.Id,
             DesiredState = DesiredState.Running,
@@ -456,14 +477,16 @@ public sealed class PreviewService(
         foreach (var problem in report.Notes.Where(n => n.Problem)) logger.LogWarning("Removing the domain of preview {Preview}: {Problem}", previewId, problem.Text);
         if (parent is not null && info is not null)
         {
-            var label = PreviewNames.Label(info.Kind, info.Branch, info.PullRequest);
-            await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Removed, $"Preview {label} removed{(reason is null ? "" : ": " + reason)}.",
+            var host = RepoRef.HostOf(parent.Owner);
+            var label = PreviewNames.Label(info.Kind, info.Branch, info.PullRequest, host);
+            var why = reason is null ? null : Worded(reason, parent);
+            await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Removed, $"Preview {label} removed{(why is null ? "" : ": " + why)}.",
                 ActivityTone.Neutral, ct);
-            audit?.Record(new Audit.AuditEntry("preview.removed", $"Removed the preview of {parent.Name} for {label}{(reason is null ? "" : ": " + reason)}, with its container, images, volumes and domain.")
+            audit?.Record(new Audit.AuditEntry("preview.removed", $"Removed the preview of {parent.Name} for {label}{(why is null ? "" : ": " + why)}, with its container, images, volumes and domain.")
             {
                 AppId = parent.Id, AppName = parent.Name, Container = parent.ContainerName,
-                Target = PreviewNames.Name(parent.Name, info.Kind, info.Branch, info.PullRequest),
-                Changes = [new("Why", null, reason ?? "removed by hand")],
+                Target = PreviewNames.Name(parent.Name, info.Kind, info.Branch, info.PullRequest, host),
+                Changes = [new("Why", null, why ?? "removed by hand")],
             });
         }
     }
@@ -491,11 +514,12 @@ public sealed class PreviewService(
             throw new InvalidOperationException($"Gitberth can't see the newest commit on {parent.Branch} right now, so production can't be kept on the preview's. Try again in a moment.");
         // The branch's commit production stays off is saved with the promote's deploy, never without it.
         var deployment = await actions.DeployAsync(parent.Id, DeployTrigger.Promote, ct, expectedSha: commit, gitRef: info.Ref, commit: commit, promotedOver: head);
+        var label = PreviewNames.Label(info.Kind, info.Branch, info.PullRequest, RepoRef.HostOf(parent.Owner));
         await activity.AddAsync(parent.ContainerName, parent.Id, ActivityKind.Event,
-            $"Preview {PreviewNames.Label(info.Kind, info.Branch, info.PullRequest)} promoted: production builds {commit[..Math.Min(7, commit.Length)]} and stays on it until the next commit on {parent.Branch}.",
+            $"Preview {label} promoted: production builds {commit[..Math.Min(7, commit.Length)]} and stays on it until the next commit on {parent.Branch}.",
             ActivityTone.Neutral, ct);
         audit?.Record(new Audit.AuditEntry("preview.promoted",
-            $"Promoted the preview of {parent.Name} for {PreviewNames.Label(info.Kind, info.Branch, info.PullRequest)}: production builds {commit[..Math.Min(7, commit.Length)]} and stays on it until the next commit on {parent.Branch}.")
+            $"Promoted the preview of {parent.Name} for {label}: production builds {commit[..Math.Min(7, commit.Length)]} and stays on it until the next commit on {parent.Branch}.")
         {
             AppId = parent.Id, AppName = parent.Name, Container = parent.ContainerName, Target = preview.Name,
             Correlation = Audit.AuditCorrelation.ForDeployment(deployment),
@@ -507,12 +531,12 @@ public sealed class PreviewService(
     /// <summary>Stands in for reading the production branch's newest commit from GitHub, in tests.</summary>
     internal Func<AppDefinition, CancellationToken, Task<string?>>? ProductionHead { get; set; }
 
-    // The production branch's newest commit: GitHub's now, else what the watcher saw last.
+    // The production branch's newest commit: GitHub's (or GitLab's) now, else what the watcher saw last.
     private async Task<string?> BranchHeadAsync(AppDefinition parent, CancellationToken ct)
     {
         try
         {
-            return (await git.LsRemoteAsync(new GitHubRepoRef(parent.Owner, parent.Repo), ct)).Branches.FirstOrDefault(b => b.Name == parent.Branch)?.Sha;
+            return (await git.LsRemoteAsync(RepoRef.Of(parent.Owner, parent.Repo), ct)).Branches.FirstOrDefault(b => b.Name == parent.Branch)?.Sha;
         }
         catch (GitException)
         {
@@ -661,6 +685,8 @@ public sealed class PreviewService(
         var running = containers.Where(c => c.State == "running").Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
         var runs = mine.Select(m => new PreviewPlanner.Run(m.Row.Id, m.Row.CurrentImage, m.Row.DesiredState, latest.GetValueOrDefault(m.Row.Id)?.IsActive == true, m.Info.CreatedAt)).ToList();
         var occupied = runs.Count(PreviewPlanner.Occupies);
+        var host = RepoRef.HostOf(parent.Owner);
+        var instance = await GitLabInstanceAsync(parent, ct);
         return mine.Select(m =>
             {
                 var (row, info) = m;
@@ -670,10 +696,10 @@ public sealed class PreviewService(
                 var web = PortRules.WebOf(row.Ports);
                 var domain = DomainService.MainOf(row.Domains);
                 var commitMessage = deploy?.CommitSha == row.CurrentCommit ? deploy?.CommitMessage : null;
-                return new PreviewRow(row.Id, row.ContainerName, row.Name, info.Kind, info.Branch, info.PullRequest, info.Title, UrlOf(parent, info),
+                return new PreviewRow(row.Id, row.ContainerName, row.Name, info.Kind, info.Branch, info.PullRequest, info.Title, UrlOf(parent, info, instance),
                     state, text, row.CurrentCommit is { Length: >= 7 } sha ? sha[..7] : info.HeadSha is { Length: >= 7 } head ? head[..7] : null, commitMessage,
                     domain, web?.HostPort is int port ? $"http://{Host(lanHost)}:{port.ToString(CultureInfo.InvariantCulture)}" : null,
-                    info.LastActivityAt, info.LastActivityAt.AddDays(parent.PreviewExpiryDays), deploy?.Id, row.CurrentCommit is not null, info.FromFork, isRunning);
+                    info.LastActivityAt, info.LastActivityAt.AddDays(parent.PreviewExpiryDays), deploy?.Id, row.CurrentCommit is not null, info.FromFork, isRunning, host);
             })
             .OrderByDescending(r => r.LastActivityAt).ToList();
     }
@@ -681,11 +707,22 @@ public sealed class PreviewService(
     // An IPv6 host goes in brackets in a URL.
     private static string Host(string host) => host.Contains(':') && !host.StartsWith('[') ? $"[{host}]" : host;
 
+    // Gitberth's GitLab's address, for a GitLab app's links; gitlab.com's when it can't be read.
+    private async Task<string> GitLabInstanceAsync(AppDefinition parent, CancellationToken ct) =>
+        RepoRef.IsGitLab(parent.Owner) && gitLab is not null ? await gitLab.InstanceAsync(ct) : GitLabRepoRef.DefaultInstance;
+
     /// <summary>The pull request on GitHub, or the branch's code.</summary>
-    public static string UrlOf(AppDefinition parent, PreviewInfo info) =>
-        info.Kind == PreviewKind.PullRequest
-            ? $"{parent.RepoWebUrl}/pull/{info.PullRequest?.ToString(CultureInfo.InvariantCulture)}"
-            : $"{parent.RepoWebUrl}/tree/{Uri.EscapeDataString(info.Branch).Replace("%2F", "/", StringComparison.Ordinal)}";
+    public static string UrlOf(AppDefinition parent, PreviewInfo info) => UrlOf(parent, info, GitLabRepoRef.DefaultInstance);
+
+    /// <summary>The pull request on GitHub (a merge request on Gitberth's GitLab, at <paramref name="gitLabInstance"/>), or the branch's code.</summary>
+    public static string UrlOf(AppDefinition parent, PreviewInfo info, string gitLabInstance)
+    {
+        var web = parent.RepoWebUrlOn(gitLabInstance);
+        var branch = Uri.EscapeDataString(info.Branch).Replace("%2F", "/", StringComparison.Ordinal);
+        if (RepoRef.IsGitLab(parent.Owner))
+            return info.Kind == PreviewKind.PullRequest ? $"{web}/-/merge_requests/{info.PullRequest?.ToString(CultureInfo.InvariantCulture)}" : $"{web}/-/tree/{branch}";
+        return info.Kind == PreviewKind.PullRequest ? $"{web}/pull/{info.PullRequest?.ToString(CultureInfo.InvariantCulture)}" : $"{web}/tree/{branch}";
+    }
 
     /// <summary>How many previews the app has.</summary>
     public async Task<int> CountAsync(int parentId, CancellationToken ct = default)
@@ -715,11 +752,16 @@ public sealed class PreviewService(
             app = await db.Apps.AsNoTracking().Include(a => a.EnvVars).FirstOrDefaultAsync(a => a.Id == appId, ct);
         if (app is null || !app.FromRepo || app.IsPreview) return PreviewDatabasesView.None;
         IReadOnlyList<RepoVariable> github = [];
+        // What a preview gets from the repo, which may give it production's database: a GitHub repo's variables, the same as
+        // production's; a GitLab project's for previews.
+        IReadOnlyList<RepoVariable> previewGets = [];
         if (repoVariables is not null)
         {
             try
             {
-                github = (await repoVariables.ForDeployAsync(app.Owner, app.Repo, ct)).Variables;
+                var read = await repoVariables.ForDeployAsync(app.Owner, app.Repo, ct);
+                github = read.Variables;
+                previewGets = read.All is { } all ? RepoVariables.Scoped(all, preview: true).Used : github;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -745,7 +787,7 @@ public sealed class PreviewService(
                 logger.LogDebug(ex, "Couldn't work out the databases of {App}'s previews", app.Slug);
             }
         }
-        var shared = PreviewDatabases.Find(app.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)), github.Select(v => (v.Name, v.Value)),
+        var shared = PreviewDatabases.Find(app.EnvVars.Select(v => (v.Key, protector.TryUnprotect(v.ProtectedValue), v.Scope)), previewGets.Select(v => (v.Name, v.Value)),
             own.Select(o => o.Variable));
         return new PreviewDatabasesView(shared, own.Select(o => new PreviewDatabaseOf(o.Variable, o.Kind, o.Server)).ToList());
     }
@@ -758,7 +800,8 @@ public sealed class PreviewService(
         if (info is null) return null;
         var parent = await db.Apps.AsNoTracking().Include(a => a.Volumes).FirstOrDefaultAsync(a => a.Id == info.ParentAppId, ct);
         if (parent is null) return null;
-        return new PreviewOf(info, parent.Id, parent.Name, parent.ContainerName, PreviewCopy.LeftOut(parent.Volumes).Select(v => v.Source).ToList(), UrlOf(parent, info));
+        return new PreviewOf(info, parent.Id, parent.Name, parent.ContainerName, PreviewCopy.LeftOut(parent.Volumes).Select(v => v.Source).ToList(),
+            UrlOf(parent, info, await GitLabInstanceAsync(parent, ct)), RepoRef.HostOf(parent.Owner));
     }
 
     // ---- What's remembered ----

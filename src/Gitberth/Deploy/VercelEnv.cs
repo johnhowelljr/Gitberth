@@ -42,8 +42,9 @@ public sealed record AppTraits(string? Prefix, bool AuthJs, bool ChecksVercel = 
 /// </param>
 /// <param name="PullRequest">A pull request's preview: its number, for VERCEL_GIT_PULL_REQUEST_ID.</param>
 /// <param name="Preview">A preview deployment of a branch or pull request (a preview row's deploy), not an app on another branch.</param>
+/// <param name="Provider">VERCEL_GIT_PROVIDER: github, or gitlab for a GitLab project (whose namespace is the owner).</param>
 public sealed record DeployFacts(string? MainDomain, string Owner, string Repo, string Branch, string? CommitSha, string? CommitMessage, string? CommitAuthor,
-    AppTraits Traits, bool Production = true, string? ProductionDomain = null, int? PullRequest = null, bool Preview = false);
+    AppTraits Traits, bool Production = true, string? ProductionDomain = null, int? PullRequest = null, bool Preview = false, string Provider = "github");
 
 /// <summary>
 /// Vercel's system environment variables, so code written for Vercel finds what it expects: where the app lives
@@ -102,7 +103,7 @@ public static partial class VercelEnv
             ("VERCEL_BRANCH_URL", url),
             // A preview's production URL is its parent's main domain, not its own.
             ("VERCEL_PROJECT_PRODUCTION_URL", f.Preview ? f.ProductionDomain : f.MainDomain),
-            ("VERCEL_GIT_PROVIDER", "github"),
+            ("VERCEL_GIT_PROVIDER", f.Provider),
             ("VERCEL_GIT_REPO_SLUG", f.Repo),
             ("VERCEL_GIT_REPO_OWNER", f.Owner),
             ("VERCEL_GIT_COMMIT_REF", f.Branch),
