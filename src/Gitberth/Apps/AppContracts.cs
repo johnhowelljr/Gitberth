@@ -7,8 +7,12 @@ using Gitberth.Services;
 
 namespace Gitberth.Apps;
 
-/// <summary>How an app came to Gitberth. What "update" means goes by <see cref="ImageOrigin"/>, not by this.</summary>
-public enum AppSource { Git, Registry, Local, Manual, Existing }
+/// <summary>
+/// How an app came to Gitberth. What "update" means goes by <see cref="ImageOrigin"/>, not by this. Compose: a whole
+/// Compose file kept by Gitberth (pasted, or a template's) and deployed as one app; a Git repo deployed with Compose stays
+/// Git (<see cref="Data.AppDefinition.ComposeFile"/>). Stored as strings: values are only ever appended.
+/// </summary>
+public enum AppSource { Git, Registry, Local, Manual, Existing, Compose }
 
 /// <summary>
 /// Where the image an app runs comes from: a registry known to have it (Gitberth pulled it, or a check found it there), this
@@ -221,6 +225,8 @@ public enum AppState
     /// so nothing is created again by its old name. Rename it back, or forget this app and use the other one.
     /// </summary>
     Renamed,
+    /// <summary>A Compose app whose web service runs, but not every other service does (Degraded 2/3).</summary>
+    Degraded,
 }
 
 public sealed record UpdateBadge(bool Available, string Text, DateTime? CheckedAt, string? Error);
@@ -238,7 +244,7 @@ public sealed record AppSummary(
     string Image, string? Repo, AppState State, string StateText, string? ContainerId, IReadOnlyList<AddressChip> Chips,
     ulong? MemoryBytes, double? CpuPercent, UpdateBadge? Update, bool Pinned, bool System, DateTime? StartedAt)
 {
-    public bool Running => State is AppState.Running or AppState.Starting or AppState.Healthy or AppState.Unhealthy;
+    public bool Running => State is AppState.Running or AppState.Starting or AppState.Healthy or AppState.Unhealthy or AppState.Degraded;
 
     public string Href => "apps/" + Uri.EscapeDataString(Key);
 

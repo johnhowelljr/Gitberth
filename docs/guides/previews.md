@@ -162,10 +162,26 @@ would reach the preview with production's value: one set for **All deploys**, or
 build and code would use production's database. On web's Environment tab, give it a value for Previews: a database of
 the previews' own, or the same value if previews may share production's.**
 
-Give the variable a **Previews** value on the **Environment** tab: a database for previews (a second database on the same
-server is enough), or production's own value again if previews may share it. When the build uses it too (to run
-migrations, say), mark it **Build time** as well: a value set in Gitberth takes the GitHub one's place in the build too.
-The **Previews** section of the app's **Settings** says so before you turn previews on.
+Gitberth gives each preview a database of its own instead, with no variable to set, when it can: when the app has a
+[database of its own](databases.md), or when production's value is a `postgres://` URL whose host is a Postgres server on
+this host that Gitberth can use (the shared `postgres`, say). Choose what each preview gets in the app's **Settings ›
+Previews**, under **Each preview's database**:
+
+| Choice | Each preview gets |
+|---|---|
+| **None of its own** | No database: a variable that would give it production's database stops its deploy, as above. |
+| **An empty one** (the default) | A database and a role of its own on the same server (`shop_pr_12`), empty. |
+| **A copy of production's** | The same, with production's data copied in when it's made. It holds production's personal data too: choose it only when everyone who can open a pull request may see that. |
+
+The preview's database is made before its first build, its deploys set the same variable pointing at it (production's
+URL with the preview's own role, password and database), and it's dropped with the preview. An app with a Redis of its own
+gives each preview a Redis of its own too. See [Databases](databases.md#previews).
+
+For a database Gitberth can't make (one on another host, MySQL, MongoDB…), give the variable a **Previews** value on the
+**Environment** tab: a database for previews, or production's own value again if previews may share it. When the build
+uses it too (to run migrations, say), mark it **Build time** as well: a value set in Gitberth takes the GitHub one's place
+in the build too. The **Previews** section of the app's **Settings** says which variables would stop a preview, and which
+get a database of their own, before you turn previews on.
 
 ### Vercel's variables in a preview
 

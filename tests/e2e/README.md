@@ -26,6 +26,11 @@ sh tests/e2e/run.sh down                      # remove everything the rig made
 
 `E2E_KEEP=1` leaves the apps the scenarios made in place, so you can look at them afterwards.
 
+The app templates' smoke run, `sh tests/e2e/run.sh test -k test_31_template_smoke`, installs every template in the
+gallery, waits for each to answer on its LAN port and deletes it. It pulls every template's images (many GB the first
+time), so a run of every scenario skips it: select it by name. Their images stay in the rig's engine, so the next run
+doesn't pull them again.
+
 The rig is quick to run again. Its engine's volume keeps base images and build caches, and `up` rebuilds and restarts
 only what changed. So a change to Gitberth rebuilds Gitberth alone, and with no changes nothing restarts. `test` starts
 every run from a fresh Gitberth with no apps and empty stand-ins.

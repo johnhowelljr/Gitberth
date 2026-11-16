@@ -48,6 +48,11 @@
             </ChildContent>
         </SectionCard>
 
+        @if (View.Row?.IsCompose == true)
+        {
+            <ComposeServicesCard View="View" />
+        }
+
         <SectionCard Title="Resources" Icon="@Icons.Material.Outlined.Speed" Sub="@(longView ? "Last 6 hours · every 30 s" : "Last hour · every 5 s")">
             <Actions>
                 <Seg T="bool" Options="WindowOptions" Value="longView" ValueChanged="v => longView = v" Label="Time range" />
@@ -91,7 +96,7 @@
             </Foot>
         </SectionCard>
 
-        <SectionCard Title="Container" Icon="@Icons.Material.Outlined.ViewInAr">
+        <SectionCard Title="@(View.Row?.IsCompose == true ? "Web service's container" : "Container")" Icon="@Icons.Material.Outlined.ViewInAr">
             <Actions>
                 <a class="gb-card-link" href="@($"{App.Href}/settings")">Edit in Settings<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
             </Actions>
@@ -146,7 +151,12 @@
                             }
                             else
                             {
-                                <span class="gb-t2">None.</span><a href="@($"{App.Href}/settings#sec-health")">Add one</a>
+                                <span class="gb-t2">None.</span>
+                                @* A Compose app's health checks are its Compose file's. *@
+                                @if (View.Row?.IsCompose != true)
+                                {
+                                    <a href="@($"{App.Href}/settings#sec-health")">Add one</a>
+                                }
                             }
                         </dd>
                         <dt>Limits</dt>
@@ -213,6 +223,18 @@
                 }
             </ChildContent>
         </SectionCard>
+
+        @* Its uptime from outside: for any app Gitberth keeps a record of, whatever its source (previews aside). *@
+        @if (App.AppId is int uptimeId && View.Row is not { IsPreview: true } && App.Role != ContainerRole.Self)
+        {
+            <UptimeCard AppId="uptimeId" Name="@App.Title" />
+        }
+
+        @* Its own databases (Settings › Databases), a preview's own too: the card shows only when it has some. *@
+        @if (App.AppId is int databasesId && App.Role != ContainerRole.Self)
+        {
+            <DatabasesCard AppId="databasesId" Href="@App.Href" Preview="@(View.Row is { IsPreview: true })" />
+        }
 
         @if (App.Source != AppSource.Git && App.Role != ContainerRole.Self && Update is { } update)
         {

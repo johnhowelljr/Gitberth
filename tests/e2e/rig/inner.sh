@@ -162,6 +162,9 @@ remove_apps() {
   [ -z "$images" ] || docker rmi -f $images >/dev/null 2>&1 || true
   volumes=$(docker volume ls -q | grep '^gb-' || true)
   [ -z "$volumes" ] || docker volume rm -f $volumes >/dev/null 2>&1 || true
+  # Compose apps' own networks (gb-<slug>_default).
+  networks=$(docker network ls --format '{{.Name}}' | grep '^gb-' || true)
+  [ -z "$networks" ] || docker network rm $networks >/dev/null 2>&1 || true
   for n in gitberth gitberth-lan; do docker network rm "$n" >/dev/null 2>&1 || true; done
 }
 

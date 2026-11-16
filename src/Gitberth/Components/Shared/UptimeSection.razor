@@ -1,0 +1,224 @@
+@using Gitberth.Uptime
+@inject UptimeSettings Uptime
+@inject DomainService Domains
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@*
+    Settings › Uptime and status page: how often every app is checked from outside, and the public status page (off until
+    it's turned on): its title, description, apps and response times, its host name on the internet (through the tunnel,
+    like GitHub's webhook host), and its address on the LAN. Each part saves on its own.
+*@
+<section class="gb-card gb-sec" id="uptime" aria-labelledby="uptime-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.MonitorHeart" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3" id="uptime-t">Uptime and status page</div>
+            <p>Gitberth checks each app the way a visitor reaches it: its main domain through Cloudflare, or its address on the LAN. A public page can show how they're doing.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        @if (status is null)
+        {
+            <div class="gb-skel" style="height:120px"></div>
+        }
+        else
+        {
+            <div class="gb-setrow">
+                <Field Label="Check each app every" For="uptime-interval" Help="30 to 900 seconds. Two failed checks in a row make an app down: notifications say so, and when it's back.">
+                    <label class="gb-input"><input id="uptime-interval" type="number" min="30" max="900" value="@interval" @onchange="e => interval = int.TryParse(e.Value?.ToString(), out var s) ? s : interval" /><span class="gb-input-suffix">seconds</span></label>
+                </Field>
+                <div style="padding-bottom:22px"><Btn Kind="BtnKind.Secondary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveIntervalAsync" Disabled="@(busy || interval == savedInterval)">Save</Btn></div>
+            </div>
+
+            <div class="gb-up-divider"></div>
+
+            <SwitchRow @key="@($"sp{switchKey}")" Title="Status page" Value="draft.Enabled" ValueChanged="v => draft = draft with { Enabled = v }" Disabled="busy"
+                       Sub="A public page with each app's state, 90 days of uptime and the last incidents. Never an address, a container's name or an error's text." />
+            @if (draft.Enabled)
+            {
+                <div class="gb-fgrid">
+                    <Field Label="Title" For="status-title" Help="@($"Up to {StatusPageSettings.MaxTitle} characters.")">
+                        <input id="status-title" class="gb-input" maxlength="@StatusPageSettings.MaxTitle" value="@draft.Title" @oninput="e => draft = draft with { Title = e.Value?.ToString() ?? string.Empty }" />
+                    </Field>
+                    <Field Label="Description" For="status-description" Tag="optional" Help="A sentence under the title.">
+                        <input id="status-description" class="gb-input" maxlength="@StatusPageSettings.MaxDescription" value="@draft.Description" placeholder="Our home lab's apps"
+                               @oninput="e => draft = draft with { Description = e.Value?.ToString() }" />
+                    </Field>
+                </div>
+
+                <div>
+                    <div class="gb-label" style="margin-bottom:8px">Apps it lists</div>
+                    <div class="gb-up-choices" role="radiogroup" aria-label="Apps it lists">
+                        <button type="button" role="radio" aria-checked="@(draft.Apps is null ? "true" : "false")" class="gb-choice @(draft.Apps is null ? "on" : null)" @onclick="() => draft = draft with { Apps = null }">
+                            <span class="gb-radio @(draft.Apps is null ? "on" : null)"></span>
+                            <span><span class="gb-choice-title">Every app with uptime checks</span><span class="gb-choice-sub" style="display:block">Apps added later too.</span></span>
+                        </button>
+                        <button type="button" role="radio" aria-checked="@(draft.Apps is not null ? "true" : "false")" class="gb-choice @(draft.Apps is not null ? "on" : null)" @onclick="PickApps">
+                            <span class="gb-radio @(draft.Apps is not null ? "on" : null)"></span>
+                            <span><span class="gb-choice-title">Only the apps I pick</span><span class="gb-choice-sub" style="display:block">The rest stay off the page.</span></span>
+                        </button>
+                    </div>
+                    @if (draft.Apps is { } picked)
+                    {
+                        <div class="gb-up-applist" role="group" aria-label="The apps the status page lists">
+                            @if (apps.Count == 0)
+                            {
+                                <span class="gb-help">There are no apps yet.</span>
+                            }
+                            @foreach (var app in apps)
+                            {
+                                var on = picked.Contains(app.Id);
+                                <button type="button" role="checkbox" aria-checked="@(on ? "true" : "false")" class="gb-up-app @(on ? "on" : null)" @onclick="() => Toggle(app.Id)">
+                                    <span class="gb-check @(on ? "on" : null)"></span>
+                                    <span class="gb-ellipsis">@app.Name</span>
+                                    @if (!app.UptimeCheck)
+                                    {
+                                        <span class="gb-t3" style="font-size:12px;margin-left:auto">checks off</span>
+                                    }
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <SwitchRow @key="@($"rt{switchKey}")" Title="Show response times" Value="draft.ResponseTimes" ValueChanged="v => draft = draft with { ResponseTimes = v }" Disabled="busy"
+                           Sub="Each app's average response time over the last 24 hours." />
+
+                <Field Label="Host name on the internet" For="status-host" Tag="optional" Error="@hostError">
+                    <input id="status-host" class="gb-input gb-input--mono" placeholder="status.example.com" value="@draft.Host" disabled="@(!domainsOn)"
+                           @oninput="e => draft = draft with { Host = e.Value?.ToString() }" />
+                </Field>
+                <p class="gb-help" style="margin-top:-8px">
+                    @if (domainsOn)
+                    {
+                        @:The whole host goes to the status page through your Cloudflare Tunnel, with its DNS record, like any domain. Pick a name of its own: not an app's domain, nor GitHub's webhook host.
+                    }
+                    else
+                    {
+                        @:A host name on the internet needs domains: <a href="settings#domains">turn them on</a> first. On the LAN it's always here:
+                    }
+                </p>
+            }
+            <div class="gb-row gb-row--wrap" style="justify-content:space-between;gap:10px">
+                <span class="gb-help">
+                    @if (status.Enabled)
+                    {
+                        <span>On the LAN, without signing in: <a href="@LanUrl" target="_blank" rel="noopener" class="gb-mono">@LanUrl</a></span>
+                        @if (status.Host is { } shown)
+                        {
+                            <span> · on the internet: <a href="@($"https://{shown}/")" target="_blank" rel="noopener" class="gb-mono">https://@shown/</a></span>
+                        }
+                    }
+                    else
+                    {
+                        <span>Off: /status answers 404.</span>
+                    }
+                </span>
+                @* On the right, also when the links above take the whole line. *@
+                <div style="margin-left:auto">
+                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveStatusAsync" Disabled="@(busy || Same(draft, status))" Busy="busy">Save status page</Btn>
+                </div>
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    private StatusPageSettings? status;
+    private StatusPageSettings draft = new(false, StatusPageSettings.DefaultTitle, null, null, false, null);
+    private List<(int Id, string Name, bool UptimeCheck)> apps = [];
+    private int interval = UptimeMonitor.DefaultInterval, savedInterval = UptimeMonitor.DefaultInterval;
+    private bool busy, domainsOn;
+    private string? hostError;
+    private int switchKey;
+
+    private string LanUrl => Nav.ToAbsoluteUri("status").ToString();
+
+    // Nothing to save: the same settings, the apps compared by what they hold.
+    private static bool Same(StatusPageSettings a, StatusPageSettings b) =>
+        a with { Apps = null, Host = null, Description = null } == b with { Apps = null, Host = null, Description = null }
+        && (a.Apps ?? []).SequenceEqual(b.Apps ?? []) && (a.Apps is null) == (b.Apps is null)
+        && (a.Host ?? "").Trim() == (b.Host ?? "") && (a.Description ?? "").Trim() == (b.Description ?? "");
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            (interval, savedInterval) = (await Uptime.IntervalAsync(), await Uptime.IntervalAsync());
+            status = await Uptime.StatusAsync();
+            draft = status;
+            apps = await Uptime.AppsAsync();
+            domainsOn = await Domains.EnabledAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            status ??= draft;
+        }
+    }
+
+    private void PickApps()
+    {
+        if (draft.Apps is not null) return;
+        // Starts from what the page lists now: every app with its checks on.
+        draft = draft with { Apps = apps.Where(a => a.UptimeCheck).Select(a => a.Id).ToList() };
+    }
+
+    private void Toggle(int appId)
+    {
+        var picked = (draft.Apps ?? []).ToList();
+        if (!picked.Remove(appId)) picked.Add(appId);
+        draft = draft with { Apps = picked.Order().ToList() };
+    }
+
+    private async Task SaveIntervalAsync()
+    {
+        busy = true;
+        try
+        {
+            if (await Uptime.SetIntervalAsync(interval) is { } error)
+            {
+                Snackbar.Add(error, Severity.Error);
+                return;
+            }
+            savedInterval = interval;
+            Snackbar.Add($"Saved. Each app is checked every {interval} seconds.", Severity.Success);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveStatusAsync()
+    {
+        busy = true;
+        hostError = null;
+        try
+        {
+            var error = await Uptime.SaveStatusAsync(draft);
+            status = await Uptime.StatusAsync();
+            if (error is not null)
+            {
+                hostError = error;
+                draft = draft with { Title = status.Title, Description = status.Description, Apps = status.Apps, ResponseTimes = status.ResponseTimes, Enabled = status.Enabled };
+                Snackbar.Add($"Saved, but not the host name: {error}", Severity.Warning);
+                return;
+            }
+            draft = status;
+            switchKey++;
+            Snackbar.Add(status.Enabled ? "Saved. The status page is on." : "Saved. The status page is off.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

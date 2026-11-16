@@ -53,6 +53,6 @@ The image must have a tag, such as `backup-agent:1.0`. Images without one aren't
 ## Related
 
 - [Run an image from a registry](run-a-registry-image.md)
-- [Paste a docker run command or a Compose service](paste-docker-run-or-compose.md)
+- [Paste a docker run command or a Compose file](paste-docker-run-or-compose.md)
 - [Image updates](updates.md)
 - [Manage apps](manage-apps.md)

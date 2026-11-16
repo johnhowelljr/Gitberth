@@ -1,0 +1,62 @@
+id: nextcloud
+name: Nextcloud
+tagline: Your own cloud for files, calendars, contacts and much more.
+description: >-
+  Nextcloud keeps your files, calendars and contacts on your own host and syncs them to your computers and phones. Its
+  app store adds office documents, photos, notes, talk and hundreds more. This template keeps its data in Postgres and
+  its cache in Redis.
+category: Files
+website: https://nextcloud.com
+source: https://github.com/nextcloud/server
+license: AGPL-3.0
+icon: nextcloud.svg
+icon_source: monogram
+memory: 1024
+web:
+  service: nextcloud
+  port: 80
+  health: /status.php
+inputs:
+  - name: ADMIN_USER
+    label: Admin's user name
+    default: admin
+    required: true
+    kind: text
+secrets:
+  - name: ADMIN_PASSWORD
+    length: 20
+databases:
+  - kind: postgres
+    variable: DATABASE_URL
+  - kind: redis
+    variable: REDIS_URL
+notes:
+  - Sign in as ADMIN_USER with the password in ADMIN_PASSWORD. Both are on its Environment tab, where Show reveals the password.
+  - Its first start installs Nextcloud, which takes a few minutes.
+  - It answers at APP_HOST, the address it was installed for. For another one, add it to trusted_domains with its occ command.
+compose: |
+  services:
+    nextcloud:
+      image: nextcloud:34.0.6-apache
+      environment:
+        POSTGRES_HOST: ${DATABASE_URL_HOST}:${DATABASE_URL_PORT}
+        POSTGRES_DB: ${DATABASE_URL_NAME}
+        POSTGRES_USER: ${DATABASE_URL_USER}
+        POSTGRES_PASSWORD: ${DATABASE_URL_PASSWORD}
+        REDIS_HOST: ${REDIS_URL_HOST}
+        REDIS_HOST_PORT: ${REDIS_URL_PORT}
+        REDIS_HOST_PASSWORD: ${REDIS_URL_PASSWORD}
+        NEXTCLOUD_ADMIN_USER: ${ADMIN_USER}
+        NEXTCLOUD_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+        NEXTCLOUD_TRUSTED_DOMAINS: ${APP_HOST}
+        OVERWRITEPROTOCOL: ${APP_SCHEME}
+      volumes:
+        - html:/var/www/html
+      healthcheck:
+        test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/status.php"]
+        interval: 10s
+        timeout: 5s
+        retries: 30
+        start_period: 10m
+  volumes:
+    html:

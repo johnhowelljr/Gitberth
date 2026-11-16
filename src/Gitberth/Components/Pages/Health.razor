@@ -2,6 +2,7 @@
 @using System.Text.RegularExpressions
 @implements IDisposable
 @inject ContainerStatsCollector Stats
+@inject Gitberth.Uptime.UptimeMonitor Uptime
 @inject HealthSettings HealthSettings
 @inject ContainerTitles Titles
 @inject AppService Apps
@@ -10,6 +11,7 @@
 @inject IDialogService Dialogs
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject Gitberth.Audit.AuditLog Audit
 
 <PageTitle>Health · Gitberth</PageTitle>
 
@@ -223,6 +225,19 @@ else
 
     private static string TitleId(ContainerHealth c) => $"hc-title-{c.Name}";
 
+    // An app's uptime from outside (its checks through its domain or the LAN), under its container's own state.
+    private static string UptimeTone(Gitberth.Uptime.UptimeStatus s) => s switch
+    {
+        Gitberth.Uptime.UptimeStatus.Up => "gb-tone-good",
+        Gitberth.Uptime.UptimeStatus.Down => "gb-tone-critical",
+        _ => "gb-tone-neutral",
+    };
+
+    private static string UptimeTitle(Gitberth.Uptime.AppUptime u) =>
+        u.Open is { } open ? $"Down since {Format.Local(open.Started)}: {open.Cause}"
+        : u.Last is { } last ? $"Checked {Format.Ago(last.At)}{(u.Address is { } a ? $": {a}" : "")}"
+        : u.Why ?? "Not checked yet";
+
     private static string GatherId(ContainerHealth c) => $"hc-gather-{c.Name}";
 
     private static string Href(ContainerHealth c) => "apps/" + Uri.EscapeDataString(c.Name);
@@ -248,7 +263,15 @@ else
                         <span class="gb-arow-sub" title="@c.Image">@(title != c.Name ? $"{c.Name} · {c.Image}" : c.Image)</span>
                     </div>
                 </div>
-                <div class="gb-c-st">@StateLabel(c)</div>
+                <div class="gb-c-st" style="display:flex;flex-direction:column;gap:3px;align-items:flex-start">
+                    @StateLabel(c)
+                    @if (Uptime.ForContainer(c.Name) is { } uptime && uptime.Status != Gitberth.Uptime.UptimeStatus.NotChecked)
+                    {
+                        <span class="gb-hc-uptime @UptimeTone(uptime.Status)" title="@UptimeTitle(uptime)">
+                            <i class="gb-st-dot"></i>Uptime: @Gitberth.Components.Apps.UptimeCard.StateText(uptime).ToLowerInvariant()
+                        </span>
+                    }
+                </div>
                 <div class="gb-c-cpu gb-row" style="gap:10px" title="CPU, the last few minutes (100% is one core)">
                     <Sparkline Values="cpu" Width="96" Height="20" Hot="@(latest?.Cpu >= 50)" />
                     <span class="gb-num" style="font-size:12.5px">@(latest is { } l ? Format.Cpu(l.Cpu) : "–")</span>
@@ -384,7 +407,14 @@ else
                 var before = Title(c);
                 await Titles.SetAsync(c.Name, title);
                 if (Title(c) != before)
-                    Snackbar.Add(title.Length == 0 || title == c.Name ? $"{c.Name} shows its own name again." : $"{c.Name} is called {title} here now.", Severity.Success);
+                {
+                    var said = title.Length == 0 || title == c.Name ? $"{c.Name} shows its own name again." : $"{c.Name} is called {title} here now.";
+                    Audit.Record(new Gitberth.Audit.AuditEntry("app.title.changed", said)
+                    {
+                        Container = c.Name, AppName = Title(c), Changes = [new("Title", before, Title(c))],
+                    });
+                    Snackbar.Add(said, Severity.Success);
+                }
             }
         }
         catch (Exception ex)
@@ -422,6 +452,11 @@ else
         try
         {
             await HealthSettings.SetGatheredAsync(c.Name, gather);
+            var app = AppFor(c);
+            Audit.Record(new Gitberth.Audit.AuditEntry("app.stats.changed", gather ? $"Gathering stats for {Title(c)} again." : $"Stopped gathering stats for {Title(c)}.")
+            {
+                AppId = app?.Id, AppName = Title(c), Container = c.Name, Changes = [new("Gather stats", gather ? "off" : "on", gather ? "on" : "off")],
+            });
             Snackbar.Add(gather ? $"Gathering stats for {Title(c)} again." : $"Stopped gathering stats for {Title(c)}. Its last 6 hours are kept.", Severity.Info);
         }
         catch (Exception ex)

@@ -50,6 +50,8 @@ public sealed partial class DockerApi : IImageEngine
     {
         var path = $"images/create?fromImage={Uri.EscapeDataString(fromImage)}&tag={Uri.EscapeDataString(tagOrDigest)}";
         if (!string.IsNullOrWhiteSpace(platform)) path += $"&platform={Uri.EscapeDataString(platform.Trim())}";
+        // The pull is Gitberth's own for as long as it streams.
+        using var expected = Expected?.ForApi(HttpMethod.Post, path);
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
         idle.CancelAfter(PullIdle);
         using var request = new HttpRequestMessage(HttpMethod.Post, await VersionedAsync(path, ct));

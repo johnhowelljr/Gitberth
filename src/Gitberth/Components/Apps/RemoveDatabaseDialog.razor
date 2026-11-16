@@ -1,0 +1,61 @@
+@*
+    Removing one of an app's databases: its variable goes either way. Keep the data leaves a Postgres database on its server
+    as it is (or a Redis's volume); Delete the data drops it, once its name is typed in. A database Gitberth didn't make is
+    only ever kept.
+*@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title"><span class="gb-banner-icon gb-tone-critical" style="width:30px;height:30px"><SvgIcon Icon="@Icons.Material.Outlined.Delete" /></span>Remove @Database.Name?</div>
+        <div class="gb-dialog-sub">@AppTitle stops getting <span class="gb-mono">@Database.Variable</span>: it's taken out of its next container.</div>
+    </TitleContent>
+    <DialogContent>
+        <div class="gb-stack" style="gap:12px">
+            <div class="gb-choices" role="radiogroup" aria-label="Its data" style="grid-template-columns:minmax(0,1fr)">
+                <button type="button" role="radio" aria-checked="@(deleteData ? "false" : "true")" class="gb-choice @(deleteData ? null : "on")" @onclick="() => deleteData = false">
+                    <span class="gb-radio @(deleteData ? null : "on")"></span>
+                    <span>
+                        <span class="gb-choice-title">Keep the data</span>
+                        <span class="gb-choice-sub" style="display:block">@KeepText</span>
+                    </span>
+                </button>
+                <button type="button" role="radio" aria-checked="@(deleteData ? "true" : "false")" class="gb-choice @(deleteData ? "on" : null)" disabled="@(!Database.Created)"
+                        title="@(Database.Created ? null : "Gitberth didn't make it, so it never deletes its data.")" @onclick="() => deleteData = true">
+                    <span class="gb-radio @(deleteData ? "on" : null)"></span>
+                    <span>
+                        <span class="gb-choice-title">Delete the data</span>
+                        <span class="gb-choice-sub" style="display:block">@DeleteText</span>
+                    </span>
+                </button>
+            </div>
+            @if (deleteData)
+            {
+                <Field Label="@($"Type {Database.Name} to delete its data")" For="gb-remove-db">
+                    <input id="gb-remove-db" class="gb-input gb-input--mono" @bind="typed" @bind:event="oninput" autocomplete="off" spellcheck="false" />
+                </Field>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <Btn Kind="BtnKind.Ghost" OnClick="() => MudDialog.Cancel()">Cancel</Btn>
+        <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Delete" OnClick="Confirm" Disabled="@(deleteData && typed.Trim() != Database.Name)">@(deleteData ? "Delete it" : "Remove it")</Btn>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter, EditorRequired] public DatabaseView Database { get; set; } = default!;
+    [Parameter] public string AppTitle { get; set; } = "";
+
+    private bool deleteData;
+    private string typed = "";
+
+    private string KeepText => Database.Kind == DatabaseKind.Redis
+        ? $"Its container goes; its data stays in the volume {Database.Server}-data."
+        : $"{Database.Name} stays on {Database.Server} as it is, with its role: Gitberth forgets it.";
+
+    private string DeleteText => Database.Kind == DatabaseKind.Redis
+        ? "Its container and its volume go: the data is gone for good."
+        : $"{Database.Name} and its role are dropped from {Database.Server}, whoever is connected: the data is gone for good.";
+
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(deleteData));
+}

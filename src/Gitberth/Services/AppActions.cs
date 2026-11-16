@@ -21,10 +21,19 @@ namespace Gitberth.Services;
 /// <param name="changer">Creates a missing app's container again from its saved settings; it depends on ContainerService, so it comes when it's first needed.</param>
 /// <param name="settings">An app's ports, for any app that isn't a Git app (AppSettingsService, which depends on this class).</param>
 /// <param name="previewGate">The previews' gate (PreviewService's): deleting an app turns its previews off under it, so the watcher never makes one again meanwhile.</param>
-public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQueue queue, DockerCli docker, AppLocks locks, GitberthOptions options, RepoVariables repoVariables,
+/// <param name="downStates">Told when an app is stopped or started, so its domains go to the down page (or back) at once rather than at the next look.</param>
+/// <param name="audit">Where deploys queued, starts, stops, restarts and deletions are recorded, with who asked; none in older tests.</param>
+/// <param name="databases">
+/// An app's databases, let go of when it's deleted (dropped with it when asked, and always a preview's); it deploys through
+/// this class, so it comes when it's first needed. Without it (in older tests) they go with the row alone.
+/// </param>
+/// <param name="composer">Runs docker compose for a Compose app's whole project; without it (in older tests) one is made over <paramref name="docker"/>.</param>
+public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQueue queue, DockerCli docker, AppLocks locks, GitberthOptions options, RepoVariables repoVariables,
     DomainService domains, RestartSchedules restarts, AppService apps, ILogger<AppActions> logger,
     AppCatalog? catalog = null, Lazy<ContainerService>? containers = null, Lazy<PortChanger>? changer = null, Lazy<AppSettingsService>? settings = null,
-    NetworkService? network = null, ContainerTitles? titles = null, HealthSettings? health = null, Previews.PreviewGate? previewGate = null)
+    NetworkService? network = null, ContainerTitles? titles = null, HealthSettings? health = null, Previews.PreviewGate? previewGate = null,
+    DownStates? downStates = null, Audit.AuditLog? audit = null, Lazy<Databases.DatabaseService>? databases = null,
+    Compose.ComposeRunner? composer = null)
 {
     /// <summary>Clone, build and run the branch tip.</summary>
     /// <param name="expectedSha">
@@ -98,12 +107,51 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         {
             AppId = appId, Trigger = trigger, CommitSha = expectedSha, NoCache = noCache,
             HookName = trigger == DeployTrigger.Hook ? hookName : null,
+            // Who asked, so the deploy's outcome is told against them, whoever's code runs it.
+            RequestedBy = Audit.AuditActors.Format(Audit.AuditScope.Current),
         };
         db.Deployments.Add(dep);
         await db.SaveChangesAsync(ct);
+        Queued(app, dep);
         queue.Enqueue(new DeployRequest(appId, dep.Id, Build: true, GitRef: gitRef, Commit: commit, NoCache: noCache));
         return dep.Id;
     }
+
+    // The deploy's entry in the audit log, the moment it's queued.
+    private void Queued(AppDefinition app, Deployment dep, int? fromDeployment = null)
+    {
+        if (audit is null) return;
+        var changes = new List<Audit.AuditChange> { new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)) };
+        if (dep.CommitSha is { Length: > 0 }) changes.Add(new("Commit", null, dep.ShortSha));
+        if (dep.ImageTag is { Length: > 0 } image && !dep.NoCache) changes.Add(new("Image", null, image));
+        if (dep.NoCache) changes.Add(new("Build cache", null, "not used"));
+        if (dep.HookName is { } hook) changes.Add(new("Deploy hook", null, hook));
+        audit.Record(new Audit.AuditEntry("app.deploy.queued", Audit.AuditText.Queued(app.Name, dep, fromDeployment))
+        {
+            AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
+            Target = $"deploy #{Audit.AuditText.N(dep.Id)}",
+            Correlation = Audit.AuditCorrelation.ForDeployment(dep.Id),
+            Changes = changes,
+        });
+    }
+
+    // Started, stopped or restarted, by whoever asked, and how it went.
+    private void Recorded(AppDefinition app, string verb, string? error, Audit.AuditOutcome failed = Audit.AuditOutcome.Failed) =>
+        Recorded(app.ContainerName, app.Id, app.Name, verb, error, failed);
+
+    private void Recorded(string container, int? appId, string name, string verb, string? error, Audit.AuditOutcome failed = Audit.AuditOutcome.Failed)
+    {
+        var action = verb switch { "started" => "app.started", "stopped" => "app.stopped", _ => "app.restarted" };
+        audit?.Record(new Audit.AuditEntry(action, error is null ? $"{Capital(verb)} {name}." : $"Couldn't {Base(verb)} {name}: {Audit.AuditLog.Clean(error, 300)?.TrimEnd('.')}.")
+        {
+            AppId = appId, AppName = name, Container = container,
+            Outcome = error is null ? Audit.AuditOutcome.Succeeded : failed,
+        });
+    }
+
+    private static string Capital(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
+
+    private static string Base(string verb) => verb switch { "started" => "start", "stopped" => "stop", _ => "restart" };
 
     /// <summary>Recreate the container without rebuilding: to apply settings, or to roll back to an earlier deploy's image.</summary>
     /// <exception cref="InvalidOperationException">The app isn't a Git app: the change engine recreates it.</exception>
@@ -112,6 +160,7 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = await db.Apps.FirstAsync(a => a.Id == appId, ct);
         if (!app.Deployed) throw NotGit(app);
+        if (app.IsCompose) return await RecreateComposeAsync(db, app, trigger, fromDeploymentId, ct);
         string? image = app.CurrentImage, sha = app.CurrentCommit, message = null, author = null;
         if (fromDeploymentId is int fromId)
         {
@@ -135,9 +184,14 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         }
 
         app.DesiredState = DesiredState.Running;
-        var dep = new Deployment { AppId = appId, Trigger = trigger, ImageTag = image, CommitSha = sha, CommitMessage = message, CommitAuthor = author };
+        var dep = new Deployment
+        {
+            AppId = appId, Trigger = trigger, ImageTag = image, CommitSha = sha, CommitMessage = message, CommitAuthor = author,
+            RequestedBy = Audit.AuditActors.Format(Audit.AuditScope.Current),
+        };
         db.Deployments.Add(dep);
         await db.SaveChangesAsync(ct);
+        Queued(app, dep, fromDeploymentId);
         queue.Enqueue(new DeployRequest(appId, dep.Id, Build: false, Image: image));
         return dep.Id;
     }
@@ -213,6 +267,7 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     public async Task<IReadOnlySet<string>> RollbackImagesAsync(int appId, CancellationToken ct = default)
     {
         if (await RowAsync(appId, ct) is not { Deployed: true } app) return new HashSet<string>();
+        if (app.IsCompose) return await ComposeRollbacksAsync(app, ct);
         try
         {
             return (await docker.ListImageTagsAsync(app.ImageRepository, ct)).ToHashSet(StringComparer.Ordinal);
@@ -234,7 +289,18 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     public async Task<string?> StartAsync(int appId)
     {
         var app = await SetDesiredStateAsync(appId, DesiredState.Running);
+        // Its domains stay on the down page until its container runs, then go back to it.
+        downStates?.Nudge(appId);
+        var error = await StartCoreAsync(app);
+        Recorded(app, "started", error);
+        return error;
+    }
+
+    private async Task<string?> StartCoreAsync(AppDefinition app)
+    {
+        var appId = app.Id;
         if (!app.Deployed) return await StartOtherAsync(app, CancellationToken.None);
+        if (app.IsCompose) return await StartComposeAsync(app);
         if (!app.ConfigChangePending || app.CurrentImage is null)
         {
             using (await locks.AcquireAsync(appId))
@@ -256,18 +322,33 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     /// False when it has none yet or it's gone: then Start builds it again.
     /// </summary>
     public async Task<bool> HasLastImageAsync(AppDefinition app, CancellationToken ct = default) =>
-        app.CurrentImage is { } image && await docker.ImageExistsAsync(image, ct);
+        app.IsCompose ? await CurrentReleaseAsync(app, ct) is not null
+        : app.CurrentImage is { } image && await docker.ImageExistsAsync(image, ct);
 
     public async Task<string?> StopAsync(int appId)
     {
         // Gitberth itself, once it has a row (pinned, say), isn't stopped from here: it would stay down.
         if (await RowAsync(appId, CancellationToken.None) is { Deployed: false } other && await RefusedAsync(other.ContainerName, ContainerAction.Stop, CancellationToken.None) is { } refused)
+        {
+            Recorded(other, "stopped", refused, Audit.AuditOutcome.Denied);
             return refused;
+        }
         var app = await SetDesiredStateAsync(appId, DesiredState.Stopped);
+        // Its domains go to the down page at once (while it stops), rather than to Cloudflare's error once it has.
+        downStates?.Nudge(appId);
+        var error = await StopCoreAsync(app);
+        Recorded(app, "stopped", error);
+        return error;
+    }
+
+    private async Task<string?> StopCoreAsync(AppDefinition app)
+    {
+        var appId = app.Id;
         if (!app.Deployed) return await RunOtherAsync(app, ContainerAction.Stop, missingIsFine: true, CancellationToken.None);
         // A deploy queued before the stop (a scheduled restart's, say) would start it again: it's cancelled, and one that's
         // under way finds the app stopped before it swaps (DeployPipeline).
-        await CancelQueuedAsync(appId, "Cancelled: the app was stopped.");
+        await CancelQueuedAsync(appId, "Cancelled: the app was stopped.", "the app was stopped");
+        if (app.IsCompose) return await ProjectAsync(app, "stop");
         using (await locks.AcquireAsync(appId))
         {
             // A temporary container a deploy left behind would keep serving the app's domains.
@@ -281,7 +362,16 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     public async Task<string?> RestartAsync(int appId)
     {
         var app = await SetDesiredStateAsync(appId, DesiredState.Running);
+        var error = await RestartCoreAsync(app);
+        Recorded(app, "restarted", error);
+        return error;
+    }
+
+    private async Task<string?> RestartCoreAsync(AppDefinition app)
+    {
+        var appId = app.Id;
         if (!app.Deployed) return await RunOtherAsync(app, ContainerAction.Restart, missingIsFine: false, CancellationToken.None);
+        if (app.IsCompose) return await ProjectAsync(app, "restart");
         using (await locks.AcquireAsync(appId))
         {
             if (!await docker.ContainerExistsAsync(app.ContainerName)) return "There's no container to restart. Start or deploy the app instead.";
@@ -290,16 +380,49 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         }
     }
 
-    public bool CancelDeploy(int appId) => queue.Cancel(appId);
+    public bool CancelDeploy(int appId)
+    {
+        var cancelled = queue.Cancel(appId);
+        if (cancelled && audit is not null)
+        {
+            var actor = Audit.AuditScope.Current;
+            _ = Task.Run(async () =>
+            {
+                var app = await RowAsync(appId, CancellationToken.None);
+                audit.Record(new Audit.AuditEntry("app.deploy.cancel", $"Asked to cancel the running deploy of {app?.Name ?? $"app {appId}"}.")
+                {
+                    Actor = actor, AppId = appId, AppName = app?.Name, Container = app?.ContainerName,
+                });
+            });
+        }
+        return cancelled;
+    }
 
     // The app's deploys still waiting in the queue: the queue's worker skips one that isn't Queued any more. A promote
-    // among them that never ran lets production follow its branch again.
-    private async Task CancelQueuedAsync(int appId, string why)
+    // among them that never ran lets production follow its branch again. Each one cancelled is recorded, as the one who
+    // asked for it, with why (<paramref name="reason"/>: "the app was stopped"), so its queued entry has its end.
+    private async Task CancelQueuedAsync(int appId, string why, string reason)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var now = DateTime.UtcNow;
-        await db.Deployments.Where(d => d.AppId == appId && d.Status == DeployStatus.Queued)
-            .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DeployStatus.Cancelled).SetProperty(d => d.Error, why).SetProperty(d => d.FinishedAt, now));
+        var queued = await db.Deployments.AsNoTracking().Where(d => d.AppId == appId && d.Status == DeployStatus.Queued).ToListAsync();
+        var app = queued.Count > 0 && audit is not null ? await db.Apps.AsNoTracking().FirstOrDefaultAsync(a => a.Id == appId) : null;
+        foreach (var dep in queued)
+        {
+            // One by one, and only while it's still queued: one the queue got to meanwhile ends as a deploy does.
+            var cancelled = await db.Deployments.Where(d => d.Id == dep.Id && d.Status == DeployStatus.Queued)
+                .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DeployStatus.Cancelled).SetProperty(d => d.Error, why).SetProperty(d => d.FinishedAt, now));
+            if (cancelled == 0 || app is null) continue;
+            audit?.Record(new Audit.AuditEntry("app.deploy.cancelled", Audit.AuditText.CancelledBeforeStart(app.Name, dep, reason))
+            {
+                Actor = Audit.AuditActors.ForDeploy(dep.RequestedBy, dep.Trigger),
+                Outcome = Audit.AuditOutcome.Failed,
+                AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
+                Target = $"deploy #{Audit.AuditText.N(dep.Id)}",
+                Correlation = Audit.AuditCorrelation.ForDeployment(dep.Id),
+                Changes = [new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger)), new("Why", null, reason)],
+            });
+        }
         await RepoWatcher.ForgetUnheldPromotionAsync(db, appId);
     }
 
@@ -307,18 +430,34 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     /// Deletes the app. Its domains come out of the tunnel too; the report says if that has to be retried. Any other app's
     /// container is removed as <see cref="RemoveAsync(string, RemoveOptions, CancellationToken)"/> does it.
     /// </summary>
-    public async Task<SyncReport> DeleteAsync(int appId, bool removeImages, bool removeVolumes)
+    /// <param name="removeDatabases">Its databases' data goes too (Settings › Databases); its previews' always does.</param>
+    public async Task<SyncReport> DeleteAsync(int appId, bool removeImages, bool removeVolumes, bool removeDatabases = false)
     {
         // From here no deploy of it starts (DeployAsync refuses, the watcher's finds it not meant to run); one already
         // queued is cancelled, and one running is cancelled and finishes before its container is removed (the app's lock).
         await _deployGate.WaitAsync();
         _deleting[appId] = 0;
         _deployGate.Release();
+        AppDefinition? before = null;
         try
         {
+            if (audit is not null)
+                await using (var db = await dbFactory.CreateDbContextAsync())
+                    before = await db.Apps.AsNoTracking().Include(a => a.Volumes).Include(a => a.Domains).AsSplitQuery().FirstOrDefaultAsync(a => a.Id == appId);
             queue.Cancel(appId);
-            await CancelQueuedAsync(appId, "The app is being deleted.");
-            return await DeleteCoreAsync(appId, removeImages, removeVolumes);
+            await CancelQueuedAsync(appId, "The app is being deleted.", "the app is being deleted");
+            var report = await DeleteCoreAsync(appId, removeImages, removeVolumes, removeDatabases);
+            // A preview's removal is its own entry, with why (PreviewService); its parent's deletion says it took them.
+            if (before is { Deployed: true, ParentAppId: null }) Deleted(before, removeImages, removeVolumes);
+            return report;
+        }
+        catch (Exception ex) when (before is { Deployed: true, ParentAppId: null })
+        {
+            audit?.Record(new Audit.AuditEntry("app.deleted", $"Couldn't delete {before.Name}: {Audit.AuditLog.Clean(ex.Message, 300)?.TrimEnd('.')}.")
+            {
+                AppId = before.Id, AppName = before.Name, Container = before.ContainerName, Outcome = Audit.AuditOutcome.Failed,
+            });
+            throw;
         }
         finally
         {
@@ -327,12 +466,33 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         }
     }
 
-    private async Task<SyncReport> DeleteCoreAsync(int appId, bool removeImages, bool removeVolumes)
+    // A Git app's deletion, with what went with it.
+    private void Deleted(AppDefinition app, bool images, bool volumes)
+    {
+        var named = app.Volumes.Where(v => !VolumeNames.IsBind(v.Source)).Select(v => VolumeNames.Resolve(app.Slug, v.Source)).Distinct().ToList();
+        var parts = new List<string> { app.IsCompose ? "its services' containers" : "its container" };
+        if (images) parts.Add("its images");
+        if (volumes && named.Count > 0) parts.Add($"its {(named.Count == 1 ? "volume" : "volumes")} {Audit.AuditText.Join(named)}");
+        if (app.Domains.Count > 0) parts.Add($"{(app.Domains.Count == 1 ? "its domain" : "its domains")} {Audit.AuditText.Join(app.Domains.Select(d => d.Hostname).Order(StringComparer.Ordinal).ToList())}");
+        var changes = new List<Audit.AuditChange>
+        {
+            new("Images", null, images ? "removed" : "kept"),
+            new("Volumes", Audit.AuditText.Join(named) is { Length: > 0 } v ? v : "none", volumes ? "removed" : "kept"),
+        };
+        if (app.Domains.Count > 0) changes.Add(new("Domains", string.Join(", ", app.Domains.Select(d => d.Hostname).Order(StringComparer.Ordinal)), "removed"));
+        audit?.Record(new Audit.AuditEntry("app.deleted", $"Deleted {app.Name}: {Audit.AuditText.Join(parts)} went with it{(volumes || named.Count == 0 ? "" : ", and its data stays in its volumes")}.")
+        {
+            AppId = app.Id, AppName = app.Name, Container = app.ContainerName, Changes = changes,
+        });
+    }
+
+    private async Task<SyncReport> DeleteCoreAsync(int appId, bool removeImages, bool removeVolumes, bool removeDatabases)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var app = await db.Apps.AsNoTracking().Include(a => a.Volumes).FirstOrDefaultAsync(a => a.Id == appId);
         if (app is null) return SyncReport.Nothing;
-        if (!app.Deployed) return (await RemoveOtherAsync(app.ContainerName, app, new RemoveOptions(removeVolumes, removeImages), CancellationToken.None)).Domains ?? SyncReport.Nothing;
+        if (!app.Deployed)
+            return (await RemoveOtherAsync(app.ContainerName, app, new RemoveOptions(removeVolumes, removeImages, removeDatabases), CancellationToken.None)).Domains ?? SyncReport.Nothing;
         // Its previews go first, each with its container, images, own volumes and domain: they're nothing without it. Under
         // the previews' gate, previews are turned off and the app stops being meant to run first, so a watcher's pass under
         // way finishes before, and every later one finds nothing of it to make, deploy or preview.
@@ -365,6 +525,11 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         }
         var skips = Previews.PreviewService.SkipsKey(appId);
         if (app.ParentAppId is null) await db.Settings.Where(s => s.Key == skips).ExecuteDeleteAsync();
+        if (app.IsCompose)
+        {
+            using (await locks.AcquireAsync(appId)) await DownComposeAsync(app, removeImages, removeVolumes);
+        }
+        else
         using (await locks.AcquireAsync(appId))
         {
             await docker.RemoveAsync(app.ContainerName);
@@ -387,6 +552,8 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
             }
         }
         await restarts.SetAsync(app.ContainerName, null);
+        // Its databases, once its container is gone: dropped when asked (a preview's always are), else left as they are.
+        await LetGoOfDatabasesAsync(app, removeDatabases);
         var deploymentIds = await db.Deployments.Where(d => d.AppId == appId).Select(d => d.Id).ToListAsync();
         // The row goes together with the removal of its domains, under the domains' lock, so no route is left behind on a
         // port the next new app may get, and nothing adopts one in between.
@@ -399,7 +566,7 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
         }
         // The kept copy of the repo's GitHub variables goes with the repo's last app.
         var (owner, repo) = (app.Owner.ToLowerInvariant(), app.Repo.ToLowerInvariant());
-        if (!await db.Apps.AnyAsync(a => a.Owner.ToLower() == owner && a.Repo.ToLower() == repo))
+        if (app.FromRepo && !await db.Apps.AnyAsync(a => a.Owner.ToLower() == owner && a.Repo.ToLower() == repo))
             await repoVariables.ForgetAsync(app.Owner, app.Repo);
         return report;
     }
@@ -462,11 +629,37 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     {
         var app = await RowAsync(key, ct);
         if (app is { Deployed: true })
-            return new RemoveResult(true, $"{app.Name} is deleted.", await DeleteAsync(app.Id, removeImages: options.Image, removeVolumes: options.Volumes));
+            return new RemoveResult(true, $"{app.Name} is deleted.", await DeleteAsync(app.Id, removeImages: options.Image, removeVolumes: options.Volumes, removeDatabases: options.Databases));
         return await RemoveOtherAsync(key, app, options, ct);
     }
 
+    // An app's databases as it goes (Settings › Databases): never a reason to keep the app.
+    private async Task LetGoOfDatabasesAsync(AppDefinition app, bool deleteData)
+    {
+        if (databases is null) return;
+        try
+        {
+            await databases.Value.DeleteWithAppAsync(app.Id, deleteData);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Couldn't let go of the databases of {App}", app.Slug);
+        }
+    }
+
     private async Task<RemoveResult> RemoveOtherAsync(string name, AppDefinition? app, RemoveOptions options, CancellationToken ct)
+    {
+        var result = await RemoveOtherCoreAsync(name, app, options, ct);
+        audit?.Record(new Audit.AuditEntry("app.deleted", result.Ok ? result.Message : $"Couldn't remove {app?.Name ?? titles?.For(name) ?? name}: {Audit.AuditLog.Clean(result.Message, 300)?.TrimEnd('.')}.")
+        {
+            AppId = app?.Id, AppName = app?.Name ?? titles?.For(name) ?? name, Container = name,
+            Outcome = result.Ok ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+            Changes = [new("Volumes", null, options.Volumes ? "removed" : "kept"), new("Image", null, options.Image ? "removed unless in use" : "kept")],
+        });
+        return result;
+    }
+
+    private async Task<RemoveResult> RemoveOtherCoreAsync(string name, AppDefinition? app, RemoveOptions options, CancellationToken ct)
     {
         if (containers is null) return new RemoveResult(false, $"Gitberth can't remove {name} from here.", null);
         var title = app?.Name ?? titles?.For(name) ?? name;
@@ -515,6 +708,8 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
             if (health is not null) await health.SetGatheredAsync(name, true, ct);
             if (app is not null)
             {
+                // Its databases go before its row does, which keeps them: dropped when asked, else left as they are.
+                await LetGoOfDatabasesAsync(app, options.Databases);
                 report = await domains.DeleteAppAsync(app.Id, ct);
                 foreach (var problem in report.Notes.Where(n => n.Problem)) logger.LogWarning("Removing the domains of {App}: {Problem}", name, problem.Text);
             }
@@ -546,7 +741,13 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
     private async Task<string?> RunUnadoptedAsync(string key, ContainerAction action, CancellationToken ct)
     {
         if (containers is null) return $"Gitberth can't act on {key} from here.";
-        return await containers.Value.FindAsync(key, ct) is { } row ? await containers.Value.RunAsync(row, action, ct) : $"There's no container called {key}.";
+        if (await containers.Value.FindAsync(key, ct) is not { } row) return $"There's no container called {key}.";
+        var error = await containers.Value.RunAsync(row, action, ct);
+        // An app's own container went through the app's actions, which say it themselves.
+        if (row is not { Role: ContainerRole.App, App: not null } && action != ContainerAction.Remove)
+            Recorded(key, null, row.Title, action switch { ContainerAction.Start => "started", ContainerAction.Stop => "stopped", _ => "restarted" }, error,
+                ContainerService.Refusal(row, action) is null ? Audit.AuditOutcome.Failed : Audit.AuditOutcome.Denied);
+        return error;
     }
 
     // An app that isn't a Git app, with a container: as any container. One that's missing: created again from its saved settings.
@@ -651,7 +852,8 @@ public sealed class AppActions(IDbContextFactory<GitberthDb> dbFactory, DeployQu
 
 /// <param name="Volumes">Remove the volumes it mounts too (an Existing app's may be postgres-data: the page asks for its name typed in).</param>
 /// <param name="Image">Remove its image too, when nothing else uses it.</param>
-public sealed record RemoveOptions(bool Volumes, bool Image);
+/// <param name="Databases">Delete its databases' data too (Settings › Databases): its Postgres databases dropped, its Redis's volume removed.</param>
+public sealed record RemoveOptions(bool Volumes, bool Image, bool Databases = false);
 
 /// <param name="Domains">The domains' sync after its row went; null when it had no row, or what's kept stays for a change's original.</param>
 public sealed record RemoveResult(bool Ok, string Message, SyncReport? Domains);

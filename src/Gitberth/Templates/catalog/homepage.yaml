@@ -1,0 +1,29 @@
+id: homepage
+name: Homepage
+tagline: A start page for your home lab, with your services and their status.
+description: >-
+  Homepage is a fast, static start page for everything you run: links to your services with their live status, widgets
+  for dozens of apps, search, bookmarks and the weather. It's set up in a few YAML files and needs no database.
+category: Home
+website: https://gethomepage.dev
+source: https://github.com/gethomepage/homepage
+license: GPL-3.0
+icon: homepage.svg
+icon_source: monogram
+memory: 128
+web:
+  service: homepage
+  port: 3000
+  health: /api/healthcheck
+notes:
+  - Its page is set in the YAML files of its config volume (services.yaml, widgets.yaml, bookmarks.yaml). It makes examples on its first start.
+compose: |
+  services:
+    homepage:
+      image: ghcr.io/gethomepage/homepage:v2.8.0
+      environment:
+        HOMEPAGE_ALLOWED_HOSTS: "*"
+      volumes:
+        - config:/app/config
+  volumes:
+    config:

@@ -23,6 +23,8 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
     public DbSet<ActivityEntry> Activity => Set<ActivityEntry>();
     public DbSet<PreviewInfo> Previews => Set<PreviewInfo>();
     public DbSet<DeployHook> DeployHooks => Set<DeployHook>();
+    public DbSet<ManagedDatabase> ManagedDatabases => Set<ManagedDatabase>();
+    public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -37,6 +39,7 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
             e.Property(a => a.Source).HasConversion<string>().HasDefaultValue(Gitberth.Apps.AppSource.Git).HasSentinel(Gitberth.Apps.AppSource.Git);
             e.Property(a => a.UpdatePolicy).HasConversion<string>().HasDefaultValue(Gitberth.Apps.UpdatePolicy.Off).HasSentinel(Gitberth.Apps.UpdatePolicy.Off);
             e.Property(a => a.PreviewMode).HasConversion<string>().HasDefaultValue(PreviewMode.Off).HasSentinel(PreviewMode.Off);
+            e.Property(a => a.PreviewDatabases).HasConversion<string>().HasDefaultValue(PreviewDatabaseMode.Empty).HasSentinel(PreviewDatabaseMode.Empty);
             // A preview's row names its parent without a foreign key, for the same reason as RegistryId below.
             e.HasIndex(a => a.ParentAppId);
             // RegistryId names a credential without a foreign key: adding one would make EF Core rebuild Apps, which five
@@ -131,6 +134,21 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
             e.HasOne<AppDefinition>().WithMany().HasForeignKey(h => h.AppId).OnDelete(DeleteBehavior.Cascade);
         });
         b.Entity<Setting>().HasKey(s => s.Key);
+        b.Entity<ManagedDatabase>(e =>
+        {
+            e.ToTable("ManagedDatabases");
+            e.HasIndex(d => d.AppId);
+            e.HasIndex(d => new { d.Server, d.Name });
+            e.Property(d => d.Kind).HasConversion<string>();
+            // Goes with its app (Gitberth drops what it made first, when asked). The table that has the key changes, not Apps.
+            e.HasOne<AppDefinition>().WithMany().HasForeignKey(d => d.AppId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ApiToken>(e =>
+        {
+            e.ToTable("ApiTokens");
+            e.HasIndex(t => t.TokenHash).IsUnique();
+            e.Property(t => t.Access).HasConversion<string>();
+        });
 
         // SQLite hands DateTime back as Unspecified; everything is stored as UTC.
         var utc = new ValueConverter<DateTime, DateTime>(v => v, v => DateTime.SpecifyKind(v, DateTimeKind.Utc));

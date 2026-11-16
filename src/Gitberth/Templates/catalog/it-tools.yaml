@@ -1,0 +1,24 @@
+id: it-tools
+name: IT-Tools
+tagline: Handy tools for developers and IT people, all in one page.
+description: >-
+  IT-Tools gathers dozens of small tools people otherwise look up online: encoders and decoders, hash and token
+  generators, converters, formatters, network calculators and more. Everything runs in your browser, so nothing you paste
+  leaves it.
+category: Development
+website: https://it-tools.tech
+source: https://github.com/CorentinTh/it-tools
+license: GPL-3.0
+icon: it-tools.svg
+icon_source: monogram
+memory: 64
+web:
+  service: it-tools
+  port: 80
+  health: /
+notes:
+  - There's nothing to set up. Open it and pick a tool.
+compose: |
+  services:
+    it-tools:
+      image: corentinth/it-tools:2024.10.22-7ca5933

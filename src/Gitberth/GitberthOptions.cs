@@ -29,6 +29,13 @@ public sealed class GitberthOptions
     /// <summary>The engine address, read the same way the docker CLI reads it.</summary>
     public string DockerHost { get; init; } = "unix:///var/run/docker.sock";
 
+    /// <summary>
+    /// A diagnostic setting (GITBERTH_UPTIME_CONNECT_TO=host[:port]): every uptime check over HTTPS connects there instead of
+    /// to the address the domain's DNS gives, keeping the domain as its Host and TLS server name. For a test rig whose
+    /// stand-in plays Cloudflare's edge; unset everywhere else.
+    /// </summary>
+    public string? UptimeConnectTo { get; init; }
+
     public string DbPath => Path.Combine(DataDir, "gitberth.db");
     public string KeysDir => Path.Combine(DataDir, "keys");
     public string LogsDir => Path.Combine(DataDir, "logs");
@@ -49,6 +56,7 @@ public sealed class GitberthOptions
             RunningInContainer = inContainer,
             Network = NullIfBlank(config["GITBERTH_NETWORK"]) ?? "gitberth",
             DockerHost = NullIfBlank(config["DOCKER_HOST"]) ?? "unix:///var/run/docker.sock",
+            UptimeConnectTo = NullIfBlank(config["GITBERTH_UPTIME_CONNECT_TO"]),
         };
     }
 

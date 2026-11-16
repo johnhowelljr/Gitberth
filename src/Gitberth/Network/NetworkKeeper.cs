@@ -43,6 +43,8 @@ public sealed class NetworkKeeper(NetworkService network, DockerApi api, Contain
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Docker));
         _stopping = stoppingToken;
         events.Started += OnStarted;
         try

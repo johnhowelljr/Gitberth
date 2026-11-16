@@ -1,0 +1,44 @@
+id: miniflux
+name: Miniflux
+tagline: A minimalist, fast feed reader for RSS, Atom and JSON Feed.
+description: >-
+  Miniflux reads your feeds and nothing else: no tracking, no clutter, just articles in a clean list that's quick on any
+  device. It fetches full articles, keeps your place, and works with many mobile apps through its Fever and Google Reader
+  APIs. Its data lives in Postgres.
+category: Reading
+website: https://miniflux.app
+source: https://github.com/miniflux/v2
+license: Apache-2.0
+icon: miniflux.svg
+icon_source: monogram
+memory: 128
+web:
+  service: miniflux
+  port: 8080
+  health: /healthcheck
+inputs:
+  - name: ADMIN_USERNAME
+    label: Admin's user name
+    help: The account Miniflux makes on its first start.
+    default: admin
+    required: true
+    kind: text
+secrets:
+  - name: ADMIN_PASSWORD
+    length: 20
+databases:
+  - kind: postgres
+    variable: DATABASE_URL
+notes:
+  - Sign in as ADMIN_USERNAME with the password in ADMIN_PASSWORD. Both are on its Environment tab, where Show reveals the password.
+compose: |
+  services:
+    miniflux:
+      image: miniflux/miniflux:2.3.5
+      environment:
+        DATABASE_URL: ${DATABASE_URL}?sslmode=disable
+        RUN_MIGRATIONS: "1"
+        CREATE_ADMIN: "1"
+        ADMIN_USERNAME: ${ADMIN_USERNAME}
+        ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+        BASE_URL: ${APP_URL}

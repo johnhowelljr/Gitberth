@@ -105,6 +105,29 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
         return await ReadCommitAsync(targetDir, ct);
     }
 
+    /// <summary>
+    /// The whole SHA of <paramref name="commit"/> (whole, or its start) when it's on <paramref name="branch"/>: the branch's tip
+    /// or one of its ancestors. Null when it isn't, such as a fork's commit, which GitHub serves by its SHA through the repo
+    /// too. Reads the branch's history without any files (a bare, treeless clone in <paramref name="scratchDir"/>), which is
+    /// quick even for a large repo, and never fetches a commit that isn't in that history.
+    /// </summary>
+    /// <exception cref="GitException">The branch couldn't be read.</exception>
+    public async Task<string?> CommitOnBranchAsync(GitHubRepoRef repo, string branch, string commit, string scratchDir, CancellationToken ct = default)
+    {
+        if (!IsSha(commit)) throw new GitException($"'{commit}' isn't a commit.");
+        // A partial clone fetches what it's missing when it's asked for it: not here, so a commit that isn't in the branch's
+        // history is never fetched to be looked at.
+        var noLazyFetch = new Dictionary<string, string> { ["GIT_NO_LAZY_FETCH"] = "1" };
+        var (clone, hasToken) = await RunAsync(["clone", "--bare", "--quiet", "--filter=tree:0", "--single-branch", "--no-tags", "--branch", branch, repo.CloneUrl, scratchDir],
+            null, null, ct, extraEnv: noLazyFetch);
+        if (!clone.Ok) throw new GitException(Explain(clone.ErrorText, repo, branch, hasToken));
+        var (found, _) = await RunAsync(["rev-parse", "--verify", "--quiet", commit + "^{commit}"], scratchDir, null, ct, extraEnv: noLazyFetch);
+        var sha = found.Ok ? found.StdOut.Trim() : "";
+        if (!IsSha(sha)) return null;
+        var (ancestor, _) = await RunAsync(["merge-base", "--is-ancestor", sha, "HEAD"], scratchDir, null, ct, extraEnv: noLazyFetch);
+        return ancestor.ExitCode == 0 ? sha : null;
+    }
+
     // A ref Gitberth builds: a branch or a pull request's head, never anything that git could read as an option.
     internal static bool IsSafeRef(string gitRef) =>
         (gitRef.StartsWith("refs/heads/", StringComparison.Ordinal) && gitRef.Length > "refs/heads/".Length
@@ -187,13 +210,14 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
     }
 
     private async Task<(ProcessResult Result, bool HasToken)> RunAsync(IReadOnlyList<string> args, string? workDir, Action<string>? onLine, CancellationToken ct,
-        int maxCapture = 4 * 1024 * 1024)
+        int maxCapture = 4 * 1024 * 1024, IReadOnlyDictionary<string, string>? extraEnv = null)
     {
         var env = new Dictionary<string, string>
         {
             ["GIT_TERMINAL_PROMPT"] = "0",
             ["GCM_INTERACTIVE"] = "never",
         };
+        foreach (var (key, value) in extraEnv ?? new Dictionary<string, string>()) env[key] = value;
         var token = await settings.GetSecretAsync(SettingKeys.GitHubToken, ct);
         if (!string.IsNullOrEmpty(token))
         {

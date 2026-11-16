@@ -1,0 +1,41 @@
+id: linkding
+name: Linkding
+tagline: A simple, fast bookmark manager with tags and a browser extension.
+description: >-
+  Linkding keeps your bookmarks in one place: tag them, search them, read them later, and archive pages so they never
+  disappear. Its browser extensions and bookmarklet save a page in a click, and it can share bookmarks with others.
+category: Reading
+website: https://linkding.link
+source: https://github.com/sissbruecker/linkding
+license: MIT
+icon: linkding.svg
+icon_source: monogram
+memory: 128
+web:
+  service: linkding
+  port: 9090
+  health: /health
+inputs:
+  - name: ADMIN_USERNAME
+    label: Admin's user name
+    help: The account Linkding makes on its first start.
+    default: admin
+    required: true
+    kind: text
+secrets:
+  - name: ADMIN_PASSWORD
+    length: 20
+notes:
+  - Sign in as ADMIN_USERNAME with the password in ADMIN_PASSWORD. Both are on its Environment tab, where Show reveals the password.
+compose: |
+  services:
+    linkding:
+      image: sissbruecker/linkding:1.47.0
+      environment:
+        LD_SUPERUSER_NAME: ${ADMIN_USERNAME}
+        LD_SUPERUSER_PASSWORD: ${ADMIN_PASSWORD}
+        LD_CSRF_TRUSTED_ORIGINS: ${APP_URL}
+      volumes:
+        - data:/etc/linkding/data
+  volumes:
+    data:

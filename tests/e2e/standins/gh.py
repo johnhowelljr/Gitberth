@@ -953,6 +953,12 @@ class GitHub:
                         os.remove(target)
                     continue
                 os.makedirs(os.path.dirname(target) or work, exist_ok=True)
+                if isinstance(content, dict) and "symlink" in content:
+                    # A link, as git keeps one: {"symlink": "/proc/1/environ"}.
+                    if os.path.lexists(target):
+                        os.remove(target)
+                    os.symlink(content["symlink"], target)
+                    continue
                 with open(target, "wb") as f:
                     f.write(content if isinstance(content, (bytes, bytearray)) else str(content).encode())
             git("add", "-A", cwd=work)

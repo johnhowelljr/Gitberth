@@ -82,6 +82,8 @@ public sealed class UpdateWatcher(UpdateService updates, SettingsService setting
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Updates));
         try
         {
             await Task.Delay(StartDelay, _time, stoppingToken);

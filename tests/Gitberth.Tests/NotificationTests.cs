@@ -248,7 +248,8 @@ public sealed class NotificationTests : IDisposable
     {
         Assert.Empty(NotificationSettings.ParseDestinations("not json"));
         Assert.True(NotificationSettings.DefaultEvents.SetEquals(NotificationSettings.ParseEvents("{oops")));
-        Assert.Equal(new[] { NotifyEvent.Crashed }, NotificationSettings.ParseEvents("""["Crashed","Nonsense","Test"]"""));
+        // Chosen in 1.2 as a plain list: what it says, and the kinds added since (an app down, a certificate) as their defaults say.
+        Assert.True(NotificationSettings.ParseEvents("""["Crashed","Nonsense","Test"]""").SetEquals([NotifyEvent.Crashed, NotifyEvent.Down, NotifyEvent.CertificateExpiring]));
         Assert.Empty(NotificationSettings.ParseMuted("[]"));
     }
 

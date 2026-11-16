@@ -11,7 +11,7 @@
         <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.NotificationsActive" /></span>
         <div style="min-width:0">
             <div class="gb-h3" id="notify-t">Notifications</div>
-            <p>Failed deploys, crashes and failing health checks, by email, Discord, Slack, ntfy or a webhook.</p>
+            <p>Failed deploys, crashes, failing health checks and apps that go down, by email, Discord, Slack, ntfy or a webhook.</p>
         </div>
     </div>
     <div class="gb-sec-body">
@@ -59,6 +59,10 @@
                    Sub="Its process exits with an error, or it runs out of memory. A crash loop sends one message, then a count every 30 minutes." />
         <SwitchRow @key="@($"hc{switchKey}")" Title="A health check fails" Value="@Notify.IsOn(NotifyEvent.Unhealthy)" ValueChanged="v => SetAsync(NotifyEvent.Unhealthy, v)" Disabled="busy"
                    Sub="Docker marks it unhealthy; and again once it passes." />
+        <SwitchRow @key="@($"dn{switchKey}")" Title="An app goes down" Value="@Notify.IsOn(NotifyEvent.Down)" ValueChanged="v => SetAsync(NotifyEvent.Down, v)" Disabled="busy"
+                   Sub="Its uptime check fails twice in a row: its domain or LAN address doesn't answer, answers with a server error, or has a certificate problem. And again once it's back up." />
+        <SwitchRow @key="@($"ce{switchKey}")" Title="A certificate is about to expire" Value="@Notify.IsOn(NotifyEvent.CertificateExpiring)" ValueChanged="v => SetAsync(NotifyEvent.CertificateExpiring, v)" Disabled="busy"
+                   Sub="A domain's certificate expires in 14 days, and again at 3 days. Cloudflare renews its own well before that." />
         <SwitchRow @key="@($"pv{switchKey}")" Title="Previews too" Value="@Notify.Previews" ValueChanged="SetPreviewsAsync" Disabled="busy"
                    Sub="Deploys of previews. Off, only production apps are told about." />
         <p class="gb-help">

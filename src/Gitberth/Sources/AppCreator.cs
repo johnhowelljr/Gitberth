@@ -48,20 +48,24 @@ public sealed class AppCreator
     private readonly ImageService _images;
     private readonly GitberthOptions _options;
     private readonly ILogger<AppCreator> _logger;
+    private readonly Audit.AuditLog? _audit;
     private readonly ConcurrentDictionary<string, CreateJob> _jobs = new(StringComparer.Ordinal);
 
     public AppCreator(AppService apps, AppCatalog catalog, ImageService images, PortChanger changer, NetworkService network,
-        HostPortMap hostPorts, HostScanner scanner, ActivityLog activity, SettingsService settings, GitberthOptions options, ILogger<AppCreator> logger)
-        : this(new LiveSteps(apps, catalog, changer, network, hostPorts, activity, settings), images, options, logger)
+        HostPortMap hostPorts, HostScanner scanner, ActivityLog activity, SettingsService settings, GitberthOptions options, ILogger<AppCreator> logger,
+        Audit.AuditLog? audit = null)
+        : this(new LiveSteps(apps, catalog, changer, network, hostPorts, activity, settings), images, options, logger, audit)
     {
     }
 
-    internal AppCreator(ICreateSteps steps, ImageService images, GitberthOptions options, ILogger<AppCreator> logger)
+    /// <param name="audit">Where each create is recorded, made or not; none in older tests.</param>
+    internal AppCreator(ICreateSteps steps, ImageService images, GitberthOptions options, ILogger<AppCreator> logger, Audit.AuditLog? audit = null)
     {
         _steps = steps;
         _images = images;
         _options = options;
         _logger = logger;
+        _audit = audit;
     }
 
     /// <summary>The real-engine test's hook: the container a slug gets, in place of gb-&lt;slug&gt;, so it can make gbtest-* ones.</summary>
@@ -231,7 +235,7 @@ public sealed class AppCreator
         var slug = chosen.Slug;
         if (_jobs.TryGetValue(slug, out var running) && !running.Completion.IsCompleted)
             problems.Add(new SettingProblem(null, $"{AppDefinition.ContainerNameFor(slug)} is being created already."));
-        var container = ContainerFor?.Invoke(slug) ?? AppDefinition.ContainerNameFor(slug);
+        var container = ContainerFor?.Invoke(slug) ?? (draft.ContainerIsSlug ? slug : AppDefinition.ContainerNameFor(slug));
         var nameTaken = chosen.Taken is { } taken ? $"{taken}: it's called {slug}" : null;
 
         var settings = Final(draft, slug);
@@ -298,21 +302,55 @@ public sealed class AppCreator
     {
         if (_jobs.TryGetValue(plan.Slug, out var running) && !running.Completion.IsCompleted) return running;
         var job = new CreateJob(plan.Slug);
+        // As whoever asked: the job carries their audit actor with it.
         job.Completion = Task.Run(async () =>
         {
+            CreateResult result;
             try
             {
-                return await RunAsync(job, plan);
+                result = await RunAsync(job, plan);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Creating {Container} failed", plan.Container);
                 job.Enter("Failed");
-                return new CreateResult(false, $"Creating {plan.Container} failed: {ex.Message}", null, null, null);
+                result = new CreateResult(false, $"Creating {plan.Container} failed: {ex.Message}", null, null, null);
             }
+            Audited(plan, result);
+            return result;
         });
         _jobs[plan.Slug] = job;
         return job;
+    }
+
+    // The create in the audit log: where it came from, and how it went.
+    private void Audited(CreatePlan plan, CreateResult result)
+    {
+        if (_audit is null) return;
+        var name = plan.Draft.Name.Trim();
+        var image = plan.Settings.Image;
+        var from = plan.Draft.Source switch
+        {
+            AppSource.Local => $"the local image {image}",
+            AppSource.Manual => $"{image}, set up by hand",
+            _ => $"the image {image}",
+        };
+        var changes = new List<Audit.AuditChange>
+        {
+            new("Source", null, plan.Draft.Source.ToString()),
+            new("Image", null, image),
+            new("Container", null, plan.Container),
+        };
+        if (plan.Settings.Ports.Count > 0)
+            changes.Add(new("Ports", null, string.Join(", ", plan.Settings.Ports.Select(p => p.Published && p.HostPort is int host ? $"{p.Key} on {host}" : $"{p.Key} inside"))));
+        if (plan.Settings.Mounts.Count > 0) changes.Add(new("Storage", null, string.Join(", ", plan.Settings.Mounts.Select(m => m.Target))));
+        if (plan.Settings.Env.Count > 0) changes.Add(new("Variables", null, string.Join(", ", plan.Settings.Env.Select(e => e.Key).Distinct().Order(StringComparer.Ordinal))));
+        _audit.Record(new Audit.AuditEntry("app.created", result.Ok ? $"Created {name} from {from}." : $"Couldn't create {name} from {from}: {Audit.AuditLog.Clean(result.Message, 300)?.TrimEnd('.')}.")
+        {
+            Outcome = result.Ok ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+            AppId = result.AppId, AppName = name, Container = plan.Container,
+            Changes = changes,
+        });
     }
 
     /// <summary>The create of the slug running now, or the last one since Gitberth started; null for none.</summary>

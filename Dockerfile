@@ -29,6 +29,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=docker/buildx-bin /buildx /usr/libexec/docker/cli-plugins/docker-buildx
+# The Compose plugin, pinned: Gitberth deploys apps that come as a Compose file (a repo's compose.yaml, a pasted one)
+# with `docker compose` itself, so they don't depend on what the host has installed.
+COPY --from=docker/compose-bin:v5.7.1 /docker-compose /usr/libexec/docker/cli-plugins/docker-compose
 WORKDIR /app
 COPY --from=build /app .
 # The license travels with every copy of the image, forks' included.

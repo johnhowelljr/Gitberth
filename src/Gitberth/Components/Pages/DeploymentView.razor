@@ -5,6 +5,7 @@
 @inject AddressBook Book
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject Gitberth.Templates.TemplateCatalog Templates
 
 @if (dep is null)
 {
@@ -38,6 +39,10 @@ else
             <div class="gb-hero-meta">
                 <DeployPill Deployment="dep" />
                 <span class="gb-tag">@Format.Trigger(dep)</span>
+                @if (Format.RequestedBy(dep) is { } by)
+                {
+                    <span class="gb-t3" title="Who asked for this deploy">@by</span>
+                }
                 @if (dep.NoCache)
                 {
                     <span class="gb-tag" title="Every step ran again, and the base images were pulled">Without the build cache</span>
@@ -91,6 +96,22 @@ else
             </span>
         </Banner>
     }
+    @if (dep.Status == DeployStatus.Succeeded && dep.Trigger == DeployTrigger.Created && template is { Notes.Count: > 0 } installed)
+    {
+        @* An app installed from a template: what to do first, once its first deploy is up. *@
+        <Banner Tone="info" Icon="@Icons.Material.Outlined.Flag" Title="@($"First steps with {appName ?? installed.Name}")" Class="gb-tpl-first-steps">
+            <ul class="gb-tpl-notes">
+                @foreach (var note in installed.Notes)
+                {
+                    <li>@note</li>
+                }
+                @foreach (var host in protectedHosts)
+                {
+                    <li>@host is behind Cloudflare Access, so only the people in Settings › Domains › Protection get in while nobody has claimed it. Once you've signed in and set it up, turn that off on its Network tab.</li>
+                }
+            </ul>
+        </Banner>
+    }
     <DeploymentLog DeploymentId="DeploymentId" OnCompleted="ReloadAsync" />
 }
 
@@ -101,6 +122,9 @@ else
     private Deployment? dep;
     private string? appName;
     private string? container;
+    // The template the app was installed from: its first steps show once its first deploy is up.
+    private Gitberth.Templates.AppTemplate? template;
+    private IReadOnlyList<string> protectedHosts = [];
     private bool notFound;
     // Where the app is reached, from AddressBook, as every other page shows it.
     private AppAddresses reached = AppAddresses.None(0);
@@ -130,6 +154,9 @@ else
         var app = await Apps.GetAsync(AppId);
         appName = app?.Name;
         container = app?.ContainerName;
+        template = Templates.Find(app?.TemplateId);
+        // A template that's open until set up had its domain put behind Access at install: its first steps say to lift that.
+        protectedHosts = template is { OpenUntilSetup: true } && app is not null ? app.Domains.Where(d => d.Protected).Select(d => d.Hostname).ToList() : [];
         // Live at and Open only show once the deploy is over (DeploymentLog reloads then): while it runs, every 2-second
         // reload would read Docker's whole list for nothing.
         if (app is not null && !dep.IsActive)

@@ -35,7 +35,17 @@
                     <span class="gb-choice-sub" style="display:block">When no other container uses it.</span>
                 </span>
             </button>
-            @if (volumes)
+            @if (Databases.Count > 0)
+            {
+                <button type="button" class="gb-choice @(databases ? "on" : null)" @onclick="() => databases = !databases" role="checkbox" aria-checked="@(databases ? "true" : "false")">
+                    <span class="gb-check @(databases ? "on" : null)"></span>
+                    <span>
+                        <span class="gb-choice-title">Also delete its databases' data</span>
+                        <span class="gb-choice-sub" style="display:block">@string.Join(", ", Databases). Unticked, their data stays where it is and only Gitberth forgets them.</span>
+                    </span>
+                </button>
+            }
+            @if (volumes || databases)
             {
                 <Field Label="@($"Type {Container} to delete its data too")" For="gb-remove-name">
                     <input id="gb-remove-name" class="gb-input gb-input--mono" @bind="typed" @bind:event="oninput" autocomplete="off" spellcheck="false" />
@@ -45,7 +55,7 @@
     </DialogContent>
     <DialogActions>
         <Btn Kind="BtnKind.Ghost" OnClick="() => MudDialog.Cancel()">Cancel</Btn>
-        <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Delete" OnClick="Confirm" Disabled="@(volumes && typed.Trim() != Container)">Remove @Title</Btn>
+        <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Delete" OnClick="Confirm" Disabled="@((volumes || databases) && typed.Trim() != Container)">Remove @Title</Btn>
     </DialogActions>
 </MudDialog>
 
@@ -55,9 +65,11 @@
     [Parameter] public string Container { get; set; } = "";
     [Parameter] public IReadOnlyList<string> Volumes { get; set; } = [];
     [Parameter] public IReadOnlyList<string> Warnings { get; set; } = [];
+    /// <summary>Its databases (Settings › Databases), as "the Postgres database shop on postgres".</summary>
+    [Parameter] public IReadOnlyList<string> Databases { get; set; } = [];
 
-    private bool volumes, image;
+    private bool volumes, image, databases;
     private string typed = "";
 
-    private void Confirm() => MudDialog.Close(DialogResult.Ok(new RemoveOptions(volumes, image)));
+    private void Confirm() => MudDialog.Close(DialogResult.Ok(new RemoveOptions(volumes, image, databases)));
 }

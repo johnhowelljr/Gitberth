@@ -36,6 +36,8 @@ Under **Tell me when**:
 | **A deploy succeeds** | Deploys that build a commit: a push, **Deploy**, a promote, a rollback. Not restarts, settings changes or starts, which would say the same thing again and again, and not a [skipped commit](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy), which changed nothing. | Off |
 | **An app crashes** | Its process exits with an error, or it runs out of memory. A stop you or Gitberth asked for isn't a crash, and neither is a process ended by SIGTERM (a host shutting down, say). | On |
 | **A health check fails** | Docker marks the app unhealthy: its [health check](health-and-monitoring.md) failed several times in a row. And a second message once it passes again. | On |
+| **An app goes down** | Its [uptime check](uptime-and-status-page.md) from outside failed twice in a row: its domain or LAN address doesn't answer, answers with a server error, shows the down page, or has a certificate problem. And a second message once it's back up, saying how long it was down. | On |
+| **A certificate is about to expire** | The certificate of a domain Gitberth checks expires within 14 days, and again within 3 days. | On |
 | **Previews too** | Deploys of [previews](previews.md). Off, only production apps are told about. | Off |
 
 Crashes of any container count, not only the apps Gitberth deploys. A crash while a deploy is still checking the new version isn't told on its own: the deploy's message says it.
@@ -75,7 +77,7 @@ A `POST` with `Content-Type: application/json`, the header `X-Gitberth-Event` an
 }
 ```
 
-`event` is one of `deploy.failed`, `deploy.succeeded`, `container.crashed`, `container.unhealthy`, `container.healthy` and `test`; `level` is `critical`, `warning`, `good` or `info`. Fields that don't apply are `null`: a crash has no `deployment`, an app Gitberth doesn't deploy has no `appId`, and `hook` names the [deploy hook](deploy-hooks.md) that started the deploy (its `trigger` is `Hook`).
+`event` is one of `deploy.failed`, `deploy.succeeded`, `container.crashed`, `container.unhealthy`, `container.healthy`, `uptime.down`, `uptime.up`, `certificate.expiring` and `test`; `level` is `critical`, `warning`, `good` or `info`. The uptime events also carry `address`, what the check asked (`https://web.example.com/`). Fields that don't apply are `null`: a crash has no `deployment`, an app Gitberth doesn't deploy has no `appId`, and `hook` names the [deploy hook](deploy-hooks.md) that started the deploy (its `trigger` is `Hook`).
 
 ## When a message doesn't arrive
 

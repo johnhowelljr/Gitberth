@@ -22,10 +22,12 @@ namespace Gitberth.Apps;
 /// change that isn't settled are folded into their app.
 /// </summary>
 /// <param name="updates">The update badges (UpdateService, which depends on this class): when it fails, there are no badges, never an error.</param>
+/// <param name="databases">An app's databases, let go of when it's forgotten (DatabaseService depends on this class); none in older tests.</param>
 public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkService network, AddressBook book, AppService apps,
     ContainerStatsCollector stats, ContainerTitles titles, HealthSettings health, RestartSchedules restarts, IChangeJournal journal,
     DockerCli docker, DomainService domains, SecretProtector protector, GitberthOptions options, ActivityLog activity,
-    Lazy<UpdateService> updates, ILogger<AppCatalog> logger, Notifications.NotificationSettings? notify = null)
+    Lazy<UpdateService> updates, ILogger<AppCatalog> logger, Notifications.NotificationSettings? notify = null, Audit.AuditLog? audit = null,
+    Lazy<Databases.DatabaseService>? databases = null)
 {
     private static readonly JsonSerializerOptions SnapshotJson = new() { Converters = { new JsonStringEnumConverter() } };
 
@@ -161,6 +163,11 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
                 }
             }
             await activity.AddAsync(name, row.Id, ActivityKind.Adopted, "Gitberth keeps its own data about it from now on.", ct: ct);
+            audit?.Record(new Audit.AuditEntry("app.adopted", $"Started keeping Gitberth's own data about {row.Name}: it has an app record now.")
+            {
+                AppId = row.Id, AppName = row.Name, Container = name,
+                Changes = [new("Image", null, image), new("Ports", null, Apps.SettingsAudit.Ports(row.Ports))],
+            });
             Changed?.Invoke();
             return await RowOfAsync(name, ct) ?? row;
         }
@@ -350,13 +357,33 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
     /// <exception cref="InvalidOperationException">It's a Git app, which is deleted with its container instead.</exception>
     public async Task<SyncReport> ForgetAsync(int appId, CancellationToken ct = default)
     {
+        AppDefinition? row;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {
-            var row = await db.Apps.AsNoTracking().FirstOrDefaultAsync(a => a.Id == appId, ct);
+            row = await db.Apps.AsNoTracking().Include(a => a.Domains).FirstOrDefaultAsync(a => a.Id == appId, ct);
             if (row is null) return SyncReport.Nothing;
             if (row.Deployed) throw new InvalidOperationException($"{row.Name} is a Git app: delete it instead, which removes its container too.");
         }
+        // Its databases go with its row, their data kept: a Postgres database stays on its server, and its Redis's container
+        // goes (its data stays in its volume), rather than run on hidden with no app to keep it.
+        if (databases is not null)
+        {
+            try
+            {
+                await databases.Value.DeleteWithAppAsync(appId, deleteData: false, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Couldn't let go of the databases of {App}", row.Slug);
+            }
+        }
         var report = await domains.DeleteAppAsync(appId, ct);
+        audit?.Record(new Audit.AuditEntry("app.forgotten",
+            $"Forgot {row.Name}: Gitberth no longer keeps anything for it{(row.Domains.Count > 0 ? ", and its domains are taken off" : "")}. Its container stays as it is.")
+        {
+            AppId = row.Id, AppName = row.Name, Container = row.ContainerName,
+            Changes = row.Domains.Count > 0 ? [new("Domains", string.Join(", ", row.Domains.Select(d => d.Hostname).Order(StringComparer.Ordinal)), "removed")] : null,
+        });
         Changed?.Invoke();
         return report;
     }
@@ -372,14 +399,24 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
         List<AppDefinition> rows;
         Dictionary<int, Deployment> deploying;
         Dictionary<string, ImageCheck> checks;
+        Dictionary<int, IReadOnlyCollection<string>> released;
+        HashSet<string> members;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {
             rows = await db.Apps.AsNoTracking().Include(a => a.Ports).Include(a => a.Domains).AsSplitQuery().ToListAsync(ct);
+            // The Redis containers apps keep: folded into their app, like a deploy's temporaries.
+            members = (await db.ManagedDatabases.AsNoTracking().Where(d => d.Kind == DatabaseKind.Redis).Select(d => d.Server).ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
             checks = await db.ImageChecks.AsNoTracking().ToDictionaryAsync(c => c.Reference, StringComparer.Ordinal, ct);
             deploying = (await db.Deployments.AsNoTracking()
                     .Where(d => d.Status == DeployStatus.Queued || d.Status == DeployStatus.Cloning || d.Status == DeployStatus.Building || d.Status == DeployStatus.Starting)
                     .ToListAsync(ct))
                 .GroupBy(d => d.AppId).ToDictionary(g => g.Key, g => g.MaxBy(d => d.Id)!);
+            // A Compose app's services: the ones its current release runs.
+            var composeIds = rows.Where(r => r.IsCompose).Select(r => r.Id).ToList();
+            released = composeIds.Count == 0 ? [] : (await db.Deployments.AsNoTracking()
+                    .Where(d => composeIds.Contains(d.AppId) && d.Status == DeployStatus.Succeeded).Select(d => new { d.AppId, d.Id, d.Images }).ToListAsync(ct))
+                .GroupBy(d => d.AppId)
+                .ToDictionary(g => g.Key, g => (IReadOnlyCollection<string>)Deploy.DeployPipeline.ParseImages(g.MaxBy(d => d.Id)!.Images).Keys.ToList());
         }
         string? error = null;
         var snapshot = NetworkSnapshot.Empty;
@@ -394,8 +431,10 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
         var unsettled = await journal.UnfinishedAsync(ct);
 
         var byName = rows.GroupBy(r => r.ContainerName, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        var nav = rows.Where(r => r.Container is null).ToDictionary(r => r.Slug, r => new NavApp(r.Id, r.Name, r.Slug), StringComparer.Ordinal);
-        var labelled = rows.Where(r => r.Container is null).ToDictionary(r => r.Slug, StringComparer.Ordinal);
+        // Apps whose containers carry their slug: gb-<slug> ones, and Compose apps, whose members all do.
+        var nav = rows.Where(r => r.Container is null || r.IsCompose)
+            .ToDictionary(r => r.Slug, r => new NavApp(r.Id, r.Name, r.Slug) { Container = r.IsCompose ? r.ContainerName : null }, StringComparer.Ordinal);
+        var labelled = rows.Where(r => r.Container is null || r.IsCompose).ToDictionary(r => r.Slug, StringComparer.Ordinal);
         // The two containers of a change that isn't settled are one app, under the change's name.
         var changeOf = new Dictionary<string, ContainerChange>(StringComparer.Ordinal);
         foreach (var change in unsettled)
@@ -408,7 +447,7 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
         var picked = new Dictionary<string, (NetworkContainer? Container, AppDefinition? Row, ContainerRole Role, ContainerChange? Change)>(StringComparer.Ordinal);
         foreach (var c in snapshot.Containers)
         {
-            var role = ContainerService.RoleOf(Summary(c), nav, network.Self);
+            var role = ContainerService.RoleOf(Summary(c), nav, network.Self, members);
             // A deploy's temporary or previous container is its app's, which shows Deploying meanwhile.
             if (role is ContainerRole.Helper or ContainerRole.AppInternal || c.Labels.ContainsKey(ContainerSpecFactory.BridgeLabel)) continue;
             var change = changeOf.GetValueOrDefault(c.Name);
@@ -418,7 +457,7 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
             picked[key] = (c, byName.GetValueOrDefault(key), role, change);
         }
         foreach (var row in rows.Where(r => !picked.ContainsKey(r.ContainerName)))
-            picked[row.ContainerName] = (null, row, row.Container is null ? ContainerRole.App : ContainerService.IsDatabaseImage(row.ImageRef ?? "") ? ContainerRole.Database : ContainerRole.Other,
+            picked[row.ContainerName] = (null, row, row.Container is null || row.IsCompose ? ContainerRole.App : ContainerService.IsDatabaseImage(row.ImageRef ?? "") ? ContainerRole.Database : ContainerRole.Other,
                 changeOf.GetValueOrDefault(row.ContainerName));
         if (only is not null) picked = picked.Where(p => p.Key == only).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
         // A preview is its parent's (its Previews tab): kept out of the list, the menu, search and the dashboard. Its own
@@ -444,6 +483,9 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
             var gb = row ?? (c is not null && c.Labels.TryGetValue("gitberth.app", out var slug) && labelled.GetValueOrDefault(slug) is { } owner && owner.ContainerName == c.Name ? owner : null);
             var addresses = c is null ? null : AddressBook.ForContainer(c, snapshot.ConfigOf(c), role, lanHost, network.Shared, gb, snapshot.Containers);
             var (state, text) = StateOf(c, row, row is null ? null : deploying.GetValueOrDefault(row.Id), change, error is not null);
+            // A Compose app: how many of its services run (Running 3/3), and Degraded while its web service runs without all the others.
+            if (row is { IsCompose: true } && c is not null)
+                (state, text) = Aggregate(state, text, row.Slug, released.GetValueOrDefault(row.Id) ?? [], snapshot.Containers);
             // A row's container renamed outside Gitberth: the container with its ID, or one made for its slug, under another name.
             var renamedTo = c is null && row is { Deployed: false } && change is null ? RenamedTo(row, snapshot.Containers) : null;
             if (renamedTo is not null) (state, text) = (AppState.Renamed, $"Renamed outside Gitberth: it's {renamedTo} now");
@@ -461,7 +503,7 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
             entries.Add(new Entry(new AppSummary(
                 key, row?.Id, row?.Name ?? titles.For(key) ?? key, key, row?.Source ?? AppSource.Existing, role, origin,
                 image ?? row?.ImageRef ?? row?.CurrentImage ?? "",
-                row is { Deployed: true } ? $"{row.Owner}/{row.Repo} · {row.Branch}{(row.CurrentCommit is { Length: >= 7 } sha ? " · " + sha[..7] : "")}" : null,
+                row is { FromRepo: true } ? $"{row.Owner}/{row.Repo} · {row.Branch}{(row.CurrentCommit is { Length: >= 7 } sha ? " · " + sha[..7] : "")}" : null,
                 state, text, c?.Id, addresses?.Chips ?? [], reading?.MemoryBytes, reading is { Recent.Count: > 0 } r ? r.Recent[^1].Cpu : null,
                 badges.GetValueOrDefault(key), row?.Pinned ?? false, role is ContainerRole.Self or ContainerRole.Tunnel, null)
             {
@@ -532,6 +574,24 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
         }, label);
     }
 
+    /// <summary>
+    /// A Compose app's state over all its services: its web service's state, with how many of its services run ("Running
+    /// 3/3"), or Degraded while the web service runs and another doesn't ("Degraded 2/3"). A deploy, a change or a web
+    /// service that doesn't run says so as it is.
+    /// </summary>
+    /// <param name="released">The services the current release runs; the ones with a container count too.</param>
+    internal static (AppState State, string Text) Aggregate(AppState state, string text, string slug, IReadOnlyCollection<string> released,
+        IReadOnlyList<NetworkContainer> containers)
+    {
+        if (state is not (AppState.Running or AppState.Healthy or AppState.Starting or AppState.Unhealthy)) return (state, text);
+        var members = containers.Where(m => m.Labels.GetValueOrDefault("gitberth.app") == slug && m.Labels.ContainsKey(Compose.ComposeNames.ServiceLabel)).ToList();
+        var services = released.Concat(members.Select(m => m.Labels[Compose.ComposeNames.ServiceLabel])).ToHashSet(StringComparer.Ordinal);
+        if (services.Count <= 1) return (state, text);
+        var up = members.Where(m => m.State == "running").Select(m => m.Labels[Compose.ComposeNames.ServiceLabel]).Distinct().Count();
+        if (up < services.Count) return (AppState.Degraded, $"Degraded {up}/{services.Count}");
+        return state is AppState.Running or AppState.Healthy ? (state, $"{(state == AppState.Healthy ? "Healthy" : "Running")} {up}/{services.Count}") : (state, text);
+    }
+
     private static ContainerSummary Summary(NetworkContainer c) => new(c.Name, c.State, c.Status, c.Image, "", c.Labels, c.Command, c.Id);
 
     /// <summary>
@@ -568,9 +628,12 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
         if (HostScanHelper.IsHelper(labels)) return $"{name} is a Gitberth helper: it only runs for a moment.";
         if (labels.ContainsKey(ContainerSpecFactory.BridgeLabel)) return $"{name} is a deploy's temporary container, which Gitberth removes itself.";
         await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // An app's own Redis while the app keeps it; one no app keeps any more is a container like any other.
+        if (Databases.DatabaseNames.IsMember(labels) && await db.ManagedDatabases.AsNoTracking().AnyAsync(d => d.Kind == DatabaseKind.Redis && d.Server == name, ct))
+            return $"{name} is an app's own Redis, which Gitberth keeps with its app.";
         // A Git app's container under another name is its deploy's; an app made from an image, renamed, is an app of its own.
         if (labels.TryGetValue("gitberth.app", out var slug) && name != AppDefinition.ContainerNameFor(slug) && !RecreateRules.MadeFromImage(labels)
-            && await db.Apps.AsNoTracking().AnyAsync(a => a.Slug == slug && a.Container == null, ct))
+            && !Databases.DatabaseNames.IsMember(labels) && await db.Apps.AsNoTracking().AnyAsync(a => a.Slug == slug && a.Container == null, ct))
             return $"{name} is a deploy's temporary or previous container, which Gitberth removes itself.";
         if (await db.ContainerChanges.AsNoTracking().AnyAsync(c => (c.OldName == name || c.TempName == name)
                 && (c.Outcome == ChangeOutcome.Running || c.Outcome == ChangeOutcome.NeedsDecision), ct))

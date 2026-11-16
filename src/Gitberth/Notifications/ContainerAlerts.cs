@@ -63,6 +63,8 @@ public sealed class ContainerAlerts(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Health));
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1), _time);
         var summaries = SummariesAsync(timer, stoppingToken);
         try
@@ -118,12 +120,13 @@ public sealed class ContainerAlerts(
                 state.CrashSent = now;
                 state.MoreCrashes = 0;
             }
-            var (app, appId) = await AppOfAsync(die.Name, ct);
+            var (app, appId, key) = await AppOfAsync(die.Name, ct);
             var title = outOfMemory ? $"{app} ran out of memory" : $"{app} crashed";
             var how = outOfMemory ? "It used all the memory it may" : $"Its process exited with code {die.ExitCode}";
             var text = $"{how}{(back ? " and it restarted itself." : ", and it's stopped now.")} Its log on Gitberth has the details.";
+            // A Compose app's other service is told as the app's (and muted with it); its log is on the app's Services card.
             notifier.Publish(new Notice(NotifyEvent.Crashed, back ? NoticeLevel.Warning : NoticeLevel.Critical, title, text,
-                await notifier.LinkAsync($"apps/{Uri.EscapeDataString(die.Name)}/logs", ct), app, die.Name, die.Time) { AppId = appId });
+                await notifier.LinkAsync(key == die.Name ? $"apps/{Uri.EscapeDataString(die.Name)}/logs" : $"apps/{Uri.EscapeDataString(key)}", ct), app, key, die.Time) { AppId = appId });
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -164,11 +167,11 @@ public sealed class ContainerAlerts(
             }
         }
         if (tell is not { } kind) return;
-        var (app, appId) = await AppOfAsync(e.Name, ct);
-        var link = await notifier.LinkAsync($"apps/{Uri.EscapeDataString(e.Name)}", ct);
+        var (app, appId, key) = await AppOfAsync(e.Name, ct);
+        var link = await notifier.LinkAsync($"apps/{Uri.EscapeDataString(key)}", ct);
         notifier.Publish(kind == NotifyEvent.Unhealthy
-            ? new Notice(kind, NoticeLevel.Warning, $"{app}'s health check is failing", "Docker says it's unhealthy: its health check failed several times in a row. It still runs.", link, app, e.Name, e.Time) { AppId = appId }
-            : new Notice(kind, NoticeLevel.Good, $"{app}'s health check passes again", "Docker says it's healthy again.", link, app, e.Name, e.Time) { AppId = appId });
+            ? new Notice(kind, NoticeLevel.Warning, $"{app}'s health check is failing", "Docker says it's unhealthy: its health check failed several times in a row. It still runs.", link, app, key, e.Time) { AppId = appId }
+            : new Notice(kind, NoticeLevel.Good, $"{app}'s health check passes again", "Docker says it's healthy again.", link, app, key, e.Time) { AppId = appId });
     }
 
     /// <summary>Every minute: a container that crashed again since its notice, and whose window is over, gets a count.</summary>
@@ -211,11 +214,11 @@ public sealed class ContainerAlerts(
         {
             var events = watcher.Events;
             var running = events.LastOrDefault(x => x.Name == name && x.Action is "start" or "die") is { Action: "start" };
-            var (app, appId) = await AppOfAsync(name, ct);
+            var (app, appId, key) = await AppOfAsync(name, ct);
             var times = count == 1 ? "once more" : $"{count} more times";
             notifier.Publish(new Notice(NotifyEvent.Crashed, NoticeLevel.Critical, $"{app} keeps crashing",
                 $"It crashed {times} in the last {Window.TotalMinutes:0} minutes{(running ? ", and keeps restarting." : ", and it's stopped now.")} Its log on Gitberth has the details.",
-                await notifier.LinkAsync($"apps/{Uri.EscapeDataString(name)}/logs", ct), app, name, now) { AppId = appId });
+                await notifier.LinkAsync(key == name ? $"apps/{Uri.EscapeDataString(name)}/logs" : $"apps/{Uri.EscapeDataString(key)}", ct), app, key, now) { AppId = appId });
         }
     }
 
@@ -243,12 +246,21 @@ public sealed class ContainerAlerts(
             || status == DeployStatus.Succeeded && await db.Deployments.AsNoTracking().AnyAsync(d => d.Id == id && d.FinishedAt > die.Time, ct);
     }
 
-    /// <summary>The app's name as Gitberth shows it, and its id when it has a row; the container's name otherwise.</summary>
-    private async Task<(string Name, int? Id)> AppOfAsync(string container, CancellationToken ct)
+    /// <summary>
+    /// The app's name as Gitberth shows it, its id when it has a row, and the container its notices go by (for muting and
+    /// links); the container's name otherwise. Another service of a Compose app is told by its service's name, as the app's
+    /// ("shop's worker service"), and goes by the app's container.
+    /// </summary>
+    private async Task<(string Name, int? Id, string Key)> AppOfAsync(string container, CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var apps = await db.Apps.AsNoTracking().Select(a => new { a.Id, a.Name, a.Slug, a.Container }).ToListAsync(ct);
+        var apps = await db.Apps.AsNoTracking().Select(a => new { a.Id, a.Name, a.Slug, a.Container, a.Source, a.ComposeFile }).ToListAsync(ct);
         var app = apps.FirstOrDefault(a => (a.Container ?? AppDefinition.ContainerNameFor(a.Slug)) == container);
-        return app is null ? (container, null) : (app.Name, app.Id);
+        if (app is not null) return (app.Name, app.Id, container);
+        // gb-<slug>_<service>: a slug never has '_', so the first one ends it.
+        if (container.StartsWith("gb-", StringComparison.Ordinal) && container.IndexOf('_') is > 3 and var cut
+            && apps.FirstOrDefault(a => a.Slug == container[3..cut] && (a.Source == Apps.AppSource.Compose || a.ComposeFile != null)) is { } owner)
+            return ($"{owner.Name}'s {container[(cut + 1)..]} service", owner.Id, owner.Container ?? AppDefinition.ContainerNameFor(owner.Slug));
+        return (container, null, container);
     }
 }

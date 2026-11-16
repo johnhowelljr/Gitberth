@@ -1,0 +1,57 @@
+@inject DatabaseService Databases
+
+@*
+    The Overview's Databases card, for an app with databases of its own (Settings › Databases), a preview's own included:
+    each one's kind, name, server, size and the variable it's in.
+*@
+@if (rows is { Count: > 0 })
+{
+    <SectionCard Title="Databases" Icon="@GitberthIcons.Database" Flush="true">
+        <Actions>
+            @if (!Preview)
+            {
+                <a class="gb-card-link" href="@($"{Href}/settings#sec-databases")">Settings<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
+            }
+        </Actions>
+        <ChildContent>
+            @foreach (var d in rows)
+            {
+                <div class="gb-feed-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <span class="gb-tag @(d.Kind == DatabaseKind.Redis ? "gb-tag--warn" : "gb-tag--accent")">@d.KindText</span>
+                    <span class="gb-mono" style="font-weight:600;font-size:13px;overflow-wrap:anywhere">@d.Name</span>
+                    <span class="gb-t3" style="font-size:12.5px">@(d.Kind == DatabaseKind.Redis ? "its own" : $"on {d.Server}")@(d.SizeBytes is long size ? $" · {AppFacts.Bytes(size)}" : "")</span>
+                    <span class="gb-t3 gb-mono" style="margin-left:auto;font-size:12px">@d.Variable</span>
+                    @if (d.Problem is { } problem)
+                    {
+                        <span class="gb-db-problem" style="width:100%"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" /><span>@problem</span></span>
+                    }
+                </div>
+            }
+        </ChildContent>
+    </SectionCard>
+}
+
+@code {
+    [Parameter, EditorRequired] public int AppId { get; set; }
+    /// <summary>The app's page (apps/gb-shop), for its Settings link.</summary>
+    [Parameter, EditorRequired] public string Href { get; set; } = "";
+    /// <summary>A preview's own databases follow its parent's settings: no link to its own.</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private IReadOnlyList<DatabaseView>? rows;
+    private int? loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == AppId) return;
+        loadedFor = AppId;
+        try
+        {
+            rows = await Databases.ListAsync(AppId);
+        }
+        catch (Exception)
+        {
+            rows = [];
+        }
+    }
+}

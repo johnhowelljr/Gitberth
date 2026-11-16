@@ -1,0 +1,30 @@
+id: uptime-kuma
+name: Uptime Kuma
+tagline: Watch your sites and services, and hear about it the moment one goes down.
+description: >-
+  Uptime Kuma checks your websites, APIs, ports, DNS records and containers as often as every 20 seconds and keeps their
+  history. When something stops answering it tells you through more than 90 services (email, Discord, Telegram, ntfy and
+  others), and it can publish status pages of its own.
+category: Monitoring
+website: https://uptime.kuma.pet
+source: https://github.com/louislam/uptime-kuma
+license: MIT
+icon: uptime-kuma.svg
+icon_source: monogram
+memory: 256
+open_until_setup: true
+web:
+  service: kuma
+  port: 3001
+  health: /
+notes:
+  - The first time you open it, Uptime Kuma asks where to keep its data; Embedded SQLite is the simplest choice.
+  - Then make your account. It's the admin, and the only one.
+compose: |
+  services:
+    kuma:
+      image: louislam/uptime-kuma:2.5.11
+      volumes:
+        - data:/app/data
+  volumes:
+    data:

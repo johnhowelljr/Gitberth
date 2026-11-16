@@ -47,7 +47,7 @@ public static class DeployPaths
 }
 
 /// <summary>Writes a deploy's log to disk and to its <see cref="LiveLog"/>, masking secret values.</summary>
-public sealed class DeployLog : IDisposable
+public sealed class DeployLog : IDisposable, Databases.IDatabaseLog
 {
     private readonly StreamWriter _writer;
     private readonly LiveLog _live;

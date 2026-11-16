@@ -440,4 +440,35 @@ public sealed class AppSettingsServiceTests
         Assert.Equal("update sample-index CpuShares=512", _engine.Calls.Single(c => c.StartsWith("update sample-index Cpu", StringComparison.Ordinal)));
         Assert.Equal((512L, 50000L), (ContainerPorts.Number(_engine.Get("sample-index").HostConfig, "CpuShares"), ContainerPorts.Number(_engine.Get("sample-index").HostConfig, "CpuQuota")));
     }
+
+    /// <summary>
+    /// The plan the Environment tab shows before Apply (and set_env_vars returns) masks every variable that's secret before
+    /// the change or after it: switching a secret's mark off, changing a secret or removing one never shows the value it had.
+    /// </summary>
+    [Fact]
+    public async Task A_plan_never_shows_a_value_that_was_secret_even_when_the_change_unmarks_it()
+    {
+        const string route = "s3cr3t-route-7f4e9a", other = "0ther-s3cr3t-11aa", gone = "g0ne-s3cr3t-22bb";
+        Container("gb-kanban", AppSource.Git, new AppDefinition { Id = 1, Name = "kanban", Slug = "kanban" });
+        // PAYMENT_ROUTE and ROUTE_C are secret by the app's list of secret names, ROUTE_B by its own mark; none is named like a secret.
+        var loaded = new ContainerSettings { Env = [new EnvSetting("PAYMENT_ROUTE", route), new EnvSetting("ROUTE_B", other, Secret: true), new EnvSetting("ROUTE_C", gone)] };
+        var options = new AppOptions { SecretKeys = ["PAYMENT_ROUTE", "ROUTE_C"] };
+        // PAYMENT_ROUTE's Secret switched off and its value changed, ROUTE_B changed, ROUTE_C removed.
+        var wanted = new ContainerSettings { Env = [new EnvSetting("PAYMENT_ROUTE", "now-plain"), new EnvSetting("ROUTE_B", "new-b", Secret: true)] };
+        var edit = new SettingsEdit(null, loaded, wanted, options, options with { SecretKeys = [] });
+        _apps.Saved = new GitSaved(true, false, new HashSet<SettingField>(), []);
+
+        var plan = await _service.PlanAsync("gb-kanban", edit);
+
+        var shown = string.Join("\n", plan.Lines.Select(l => $"{l.Label}: {l.Before} -> {l.After}"));
+        Assert.Contains("PAYMENT_ROUTE: ", shown);
+        Assert.Contains("ROUTE_B: ", shown);
+        Assert.Contains("Removed ROUTE_C: ", shown);
+        foreach (var value in new[] { route, other, gone }) Assert.False(shown.Contains(value, StringComparison.Ordinal), "A secret's value is in the plan.");
+        Assert.Equal(["PAYMENT_ROUTE", "ROUTE_B", "ROUTE_C"], AppSettingsService.MaskedKeys(edit).Order(StringComparer.Ordinal));
+        // What stays plain is shown as ever.
+        var plain = await _service.PlanAsync("gb-kanban", new SettingsEdit(null, new ContainerSettings { Env = [new EnvSetting("TZ", "UTC")] },
+            new ContainerSettings { Env = [new EnvSetting("TZ", "Europe/London")] }, new AppOptions(), new AppOptions()));
+        Assert.Equal(("UTC", "Europe/London"), (Assert.Single(plain.Lines).Before, plain.Lines[0].After));
+    }
 }

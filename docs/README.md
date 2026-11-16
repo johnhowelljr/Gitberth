@@ -1,6 +1,6 @@
 # Gitberth documentation
 
-Gitberth runs apps in Docker on your home server and gives every container on the host one place to be managed: a web page where you add apps, change their settings, watch them run and keep them up to date. Apps come from a GitHub repo (built for you and redeployed on every push), a registry image, an image already on the host, or a `docker run` command or Compose service you paste.
+Gitberth runs apps in Docker on your home server and gives every container on the host one place to be managed: a web page where you add apps, change their settings, watch them run and keep them up to date. Apps come from a GitHub repo (built for you and redeployed on every push, with Compose when it has a Compose file), a registry image, an image already on the host, or a `docker run` command or Compose file you paste.
 
 ![The Apps list: every container on the host with its status, address, ports, CPU and memory](images/apps-list.webp)
 
@@ -18,7 +18,9 @@ Gitberth runs apps in Docker on your home server and gives every container on th
 | [Deploy from GitHub](guides/deploy-from-github.md) | Paste a repo URL; Gitberth works out how to build it and redeploys on every push. |
 | [Run a registry image](guides/run-a-registry-image.md) | Docker Hub, ghcr.io or your own registry. |
 | [Use a local image](guides/use-a-local-image.md) | An image already on the host, with no pull. |
-| [Paste a docker run or Compose service](guides/paste-docker-run-or-compose.md) | Bring an existing command or service across as it is. |
+| [Paste a docker run or Compose file](guides/paste-docker-run-or-compose.md) | Bring an existing command, service or whole Compose file across as it is. |
+| [Compose apps](guides/compose-apps.md) | A repo's `compose.yaml`, or a pasted one, deployed as one app with all its services. |
+| [App templates](guides/templates.md) | Popular self-hosted apps (Uptime Kuma, Vaultwarden, n8n, Nextcloud…) installed in one click with their database, secrets and domain. |
 
 ## Run your apps
 
@@ -28,6 +30,7 @@ Gitberth runs apps in Docker on your home server and gives every container on th
 | [Environment variables](guides/environment-variables.md) | Variables and secrets, and the ones Gitberth adds. |
 | [Deploys and rollbacks](guides/deploys-and-rollbacks.md) | Automatic deploys from Git, the deploy log, and going back to an earlier build. |
 | [Preview deployments](guides/previews.md) | A preview of every pull request or branch, variables for production or previews, and Promote. |
+| [Databases](guides/databases.md) | A Postgres database or a Redis of an app's own, its connection string set for it, and each preview's own. |
 | [Image updates](guides/updates.md) | Checking for newer images, update policies, what happens when an update fails, and rolling one back. |
 | [Scheduled jobs and restarts](guides/scheduled-jobs-and-restarts.md) | Commands on a schedule, and restarts on a timer. |
 | [Networking](guides/networking.md) | Ports, who can reach them, own LAN addresses and the Network page. |
@@ -35,7 +38,10 @@ Gitberth runs apps in Docker on your home server and gives every container on th
 | [GitHub integration](guides/github-integration.md) | Deploys reported on commits and pull requests, and deploys that start the moment you push. |
 | [Deploy hooks](guides/deploy-hooks.md) | Secret URLs that deploy an app when a CMS, a scheduled job or CI calls them. |
 | [Health and monitoring](guides/health-and-monitoring.md) | The Health page, CPU and memory charts, and health checks. |
-| [Notifications](guides/notifications.md) | A message by email, Discord, Slack, ntfy or webhook when a deploy fails or an app crashes. |
+| [Uptime checks, the status page and the down page](guides/uptime-and-status-page.md) | Each app checked from outside, a public status page, and a clean page while an app can't be served. |
+| [Notifications](guides/notifications.md) | A message by email, Discord, Slack, ntfy or webhook when a deploy fails, an app crashes or goes down. |
+| [Audit log](guides/audit-log.md) | Every change, who made it, from where and how it ended, Docker changes made outside Gitberth too; search, export and check it. |
+| [AI agents and the API](guides/ai-agents.md) | Let Claude Code, VS Code, Cursor, Claude Desktop or a script see and run your apps over MCP or HTTP, each with a token of its own. |
 
 ## Look after Gitberth
 
@@ -53,6 +59,7 @@ Gitberth runs apps in Docker on your home server and gives every container on th
 | [How Gitberth builds your project](reference/build-detection.md) | Every project type it recognises, and how each is built. |
 | [App settings](reference/app-settings.md) | Every field on an app's Settings, Environment and Network tabs. |
 | [Gitberth settings](reference/gitberth-settings.md) | The Settings page, section by section. |
+| [Tools for AI agents and the HTTP API](reference/api.md) | Every tool an agent or script can call, the access it needs, and its arguments. |
 | [Configuration](reference/configuration.md) | Gitberth's own environment variables, volume and port. |
 
 ## Concepts

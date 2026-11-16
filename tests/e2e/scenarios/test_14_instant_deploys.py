@@ -45,6 +45,7 @@ import pytest
 from e2e.wait import stays, until
 # Settings › Domains on with a Cloudflare token, and off again afterwards: scenario 12's, shared rather than copied.
 from test_12_commit_statuses import domains_turned_on
+from e2e.audit import last_id, no_network_change_outside
 
 # The tunnel's rule for GitHub's deliveries (and deploy hooks' calls): exactly these paths of the webhook's host, to
 # Gitberth's published port, as the fake cloudflared (on the host's network, like the live install's) reaches it.
@@ -521,7 +522,8 @@ def test_githubs_ping_for_a_webhook_gitberth_adds_is_answered(request, page, new
                 assert ping["response_body"] == "", ping
 
 
-def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github, cloudflare, standins, apps, uniq, baseline):
+def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github, cloudflare, standins, engine, apps, uniq, baseline):
+    audited = last_id()
     zone = f"{uniq('ip')}.test"
     host = f"hooks.{zone}"
     cloudflare.zone(zone)
@@ -570,6 +572,12 @@ def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github
     until(lambda: f"#{two['Id']}" in hero.inner_text() and "· push on github" in flat(hero.inner_text()), 30,
           "the app page's last deploy to be the push", seen=hero.inner_text)
     assert not gitberth.errors(page), gitberth.errors(page)
+
+    # The audit log: the deploys and the app's deletion joined and left the app's networks, and none of that is a change
+    # made outside Gitberth (rig a once recorded the deletion's leave so).
+    gitberth.delete_app(page, app)
+    engine.wait_gone(app.container)
+    no_network_change_outside(app.container, audited)
 
 
 def test_the_webhook_host_answers_only_with_status_codes(new_page, gitberth, github, cloudflare, standins, uniq):

@@ -16,7 +16,9 @@ public enum DomainFix { None, Sync, PointDnsHere, ServeAllPaths }
 /// <param name="Warning">Something to know about a domain that works, such as a name the free certificate doesn't cover.</param>
 /// <param name="Main">The app's main domain: the address Gitberth tells the app it has (see <see cref="DomainService.MainOf"/>).</param>
 /// <param name="Protected">Visitors sign in through Cloudflare Access before they reach the app (<see cref="CustomDomain.Protected"/>).</param>
-public sealed record DomainState(string Hostname, bool Working, string Summary, DomainFix Fix, string? Warning = null, bool Main = false, bool Protected = false);
+/// <param name="DownPage">The tunnel sends it to Gitberth's down page now; <paramref name="Summary"/> says why.</param>
+public sealed record DomainState(string Hostname, bool Working, string Summary, DomainFix Fix, string? Warning = null, bool Main = false, bool Protected = false,
+    bool DownPage = false);
 
 /// <param name="Problem">Why none of the app's domains can be checked or routed right now.</param>
 /// <param name="Enabled">Whether domains are turned on in Settings. Off, nothing was checked.</param>
@@ -89,9 +91,10 @@ public sealed record DomainAdd(string? Error, SyncReport Report, bool NeedsHostB
 /// <param name="actions">Recreates an app to publish its web port. Lazy: deploys route domains through here.</param>
 /// <param name="appSettings">Plans publishing the web port of an app that isn't deployed from a repo. Lazy: it depends on this class.</param>
 /// <param name="options">Gitberth's own container, which GitHub's webhook route goes to; without it Gitberth counts as running on the host.</param>
+/// <param name="down">Which apps' domains show the down page (<see cref="DownWatcher"/>, and a deploy's swap); without it only a held-back protected domain does.</param>
 public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactory, SettingsService settings, CloudflareApi cloudflare, TunnelLocator tunnels, DockerCli docker,
     ILogger<DomainService> logger, Lazy<HostPortMap>? hostPorts = null, Lazy<AppActions>? actions = null, Lazy<AppSettingsService>? appSettings = null,
-    GitberthOptions? options = null)
+    GitberthOptions? options = null, DownStates? down = null, Audit.AuditLog? audit = null)
 {
     public const string TurnedOff = "Domains are turned off in Settings, so Gitberth leaves Cloudflare alone.";
 
@@ -135,6 +138,8 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         try
         {
             await settings.SetAsync(SettingKeys.DomainsEnabled, enabled ? "true" : null, ct);
+            AuditSetting(enabled ? "domains.enabled" : "domains.disabled", enabled ? "Turned domains on: Gitberth manages apps' domains through Cloudflare."
+                : "Turned domains off: Gitberth leaves Cloudflare alone, and the tunnel and DNS stay as they are.", "domains", [new("Domains", null, enabled ? "on" : "off")]);
             if (!enabled)
             {
                 // After the setting is saved, so a check that reads it after this sees it off, and one that read it before is stopped.
@@ -210,6 +215,7 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
             foreach (var d in app.Domains) d.Main = d == chosen;
             MarkIfAddressChanged(app, before, app.Domains);
             await db.SaveChangesAsync(ct);
+            await AuditAppAsync(appId, "app.domain.main", hostname, name => $"Made {hostname} {name}'s main domain.", changes: [new("Main domain", before, hostname)]);
             return null;
         }
         finally
@@ -218,14 +224,27 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         }
     }
 
-    // A running app built with its old address needs a new build to get the new one.
+    // A running app built with its old address needs a new build to get the new one. An app installed from a template is told
+    // its address (APP_URL…) by every deploy, so one without a build applies it (Apply now).
     private static void MarkIfAddressChanged(AppDefinition app, string? before, IEnumerable<CustomDomain> now)
     {
-        if (app.CurrentImage is not null && MainOf(now) != before) app.RebuildPending = true;
+        if (app.CurrentImage is null || MainOf(now) == before) return;
+        if (app.TemplateId is not null) app.ConfigChangePending = true;
+        else app.RebuildPending = true;
     }
 
     /// <summary>Checks the token against the tunnel on this host, saves both, and routes every app's domains.</summary>
     public async Task<(string? Error, SyncReport Report, TunnelInfo? Tunnel)> SaveTokenAsync(string token, CancellationToken ct = default)
+    {
+        var saved = await SaveTokenCoreAsync(token, ct);
+        // The token itself never goes in the log: only that one was saved, for which tunnel.
+        AuditSetting("domains.token.saved", saved.Tunnel is { } t && saved.Error is null
+                ? $"Saved a Cloudflare API token for the tunnel {t.TunnelId[..Math.Min(8, t.TunnelId.Length)]} ({t.ContainerName})."
+                : "Saving a Cloudflare API token", "Cloudflare token", error: saved.Error);
+        return saved;
+    }
+
+    private async Task<(string? Error, SyncReport Report, TunnelInfo? Tunnel)> SaveTokenCoreAsync(string token, CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
@@ -273,6 +292,7 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         {
             await settings.SetSecretAsync(SettingKeys.CloudflareToken, null, ct);
             await settings.SetAsync(SettingKeys.CloudflareTunnelId, null, ct);
+            AuditSetting("domains.token.removed", "Removed the Cloudflare API token: routes already in the tunnel stay as they are.", "Cloudflare token");
         }
         finally
         {
@@ -285,7 +305,22 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
     /// Internal, the tunnel couldn't reach the app, so nothing is added and the result says NeedsHostBinding: that's
     /// <see cref="AddAndPublishAsync"/>'s to do.
     /// </summary>
-    public async Task<DomainAdd> AddAsync(int appId, string input, CancellationToken ct = default)
+    public async Task<DomainAdd> AddAsync(int appId, string input, CancellationToken ct = default) => await AuditAddAsync(appId, input, await AddCoreAsync(appId, input, ct));
+
+    // An added domain in the audit log, or why it wasn't added; nothing while it waits for its web port to be published.
+    private async Task<DomainAdd> AuditAddAsync(int appId, string input, DomainAdd added)
+    {
+        if (added.NeedsHostBinding || added.Plan is not null) return added;
+        var hostname = DomainNames.Normalize(input) ?? input.Trim();
+        await AuditAppAsync(appId, "app.domain.added", hostname,
+            name => added.HostPort is int port
+                ? $"Added the domain {hostname} to {name}: its web port is published on the host only (port {port}) so the tunnel reaches it."
+                : $"Added the domain {hostname} to {name}.",
+            name => $"Couldn't add the domain {hostname} to {name}", added.Error);
+        return added;
+    }
+
+    private async Task<DomainAdd> AddCoreAsync(int appId, string input, CancellationToken ct)
     {
         var hostname = DomainNames.Normalize(input);
         if (DomainNames.Problem(hostname) is { } problem) return new(problem, SyncReport.Nothing);
@@ -321,7 +356,10 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
     /// for publishing the web port (<see cref="DomainAdd.Plan"/>), the owner confirms it in the change dialog, and
     /// <see cref="AddWhenPublishedAsync"/> adds the domain once the port is published.
     /// </summary>
-    public async Task<DomainAdd> AddAndPublishAsync(int appId, string input, CancellationToken ct = default)
+    public async Task<DomainAdd> AddAndPublishAsync(int appId, string input, CancellationToken ct = default) =>
+        await AuditAddAsync(appId, input, await AddAndPublishCoreAsync(appId, input, ct));
+
+    private async Task<DomainAdd> AddAndPublishCoreAsync(int appId, string input, CancellationToken ct)
     {
         var hostname = DomainNames.Normalize(input);
         if (DomainNames.Problem(hostname) is { } problem) return new(problem, SyncReport.Nothing);
@@ -399,7 +437,10 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
     /// when it didn't (it failed, or was rolled back), nothing is added and the result says why.
     /// </summary>
     /// <param name="publishing">The change's completion (<see cref="PortChangeJob.Completion"/>).</param>
-    public async Task<DomainAdd> AddWhenPublishedAsync(int appId, string input, Task<PortChangeResult> publishing, CancellationToken ct = default)
+    public async Task<DomainAdd> AddWhenPublishedAsync(int appId, string input, Task<PortChangeResult> publishing, CancellationToken ct = default) =>
+        await AuditAddAsync(appId, input, await AddWhenPublishedCoreAsync(appId, input, publishing, ct));
+
+    private async Task<DomainAdd> AddWhenPublishedCoreAsync(int appId, string input, Task<PortChangeResult> publishing, CancellationToken ct)
     {
         var hostname = DomainNames.Normalize(input);
         if (DomainNames.Problem(hostname) is { } problem) return new(problem, SyncReport.Nothing);
@@ -425,11 +466,23 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         }
     }
 
+    /// <summary>
+    /// Why a domain can't be added to an app, as Add would say it: it's already the app's, another app's, GitHub's webhook
+    /// host or the status page's. Null when it's free. <paramref name="appId"/> is null for an app that's still to be made.
+    /// </summary>
+    public async Task<string?> UnavailableAsync(int? appId, string hostname, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await TakenAsync(db, appId ?? 0, hostname, ct);
+    }
+
     // Why the domain can't be added to the app: it's already this app's, or another's.
     private static async Task<string?> TakenAsync(GitberthDb db, int appId, string hostname, CancellationToken ct)
     {
         if (await db.Settings.AsNoTracking().AnyAsync(s => s.Key == SettingKeys.GitHubWebhookHost && s.Value == hostname, ct))
             return $"{hostname} is where GitHub's webhooks reach Gitberth (Settings › GitHub integration), so it can't be an app's domain.";
+        if (await db.Settings.AsNoTracking().AnyAsync(s => s.Key == SettingKeys.StatusHost && s.Value == hostname, ct))
+            return $"{hostname} is the status page's (Settings › Uptime and status page), so it can't be an app's domain.";
         if (await db.Domains.AsNoTracking().FirstOrDefaultAsync(d => d.Hostname == hostname, ct) is not { } owner) return null;
         var name = await db.Apps.AsNoTracking().Where(a => a.Id == owner.AppId).Select(a => a.Name).FirstOrDefaultAsync(ct);
         return owner.AppId == appId ? $"{hostname} is already one of this app's domains." : $"{hostname} already belongs to {name ?? "another app"}.";
@@ -475,6 +528,7 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                 MarkIfAddressChanged(app, before, app.Domains.Where(d => d != row));
                 await db.SaveChangesAsync(ct);
             }
+            await AuditAppAsync(appId, "app.domain.removed", hostname, name => $"Took the domain {hostname} off {name}: its route and the DNS record Gitberth added go.");
             return await SyncCoreAsync(widen: null, ct);
         }
         finally
@@ -538,6 +592,8 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                 row.KeepPaths = false;
                 await db.SaveChangesAsync(ct);
             }
+            await AuditAppAsync(appId, "app.domain.allpaths", hostname, name => $"{hostname} serves every path of {name} now, not only the ones kept in Cloudflare.",
+                changes: [new("Paths", "some", "all")]);
             return await SyncCoreAsync(widen: hostname, ct);
         }
         finally
@@ -650,8 +706,11 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
 
             // GitHub's webhook host, which goes to Gitberth itself (paths /hooks/github and /hooks/deploy/<token> only), and where that is.
             var webhookHost = await WebhookHostAsync(ct);
+            // The status page's host, which goes to Gitberth's public status page as a whole.
+            var statusHost = await StatusHostAsync(ct);
             var known = apps.SelectMany(a => a.Domains).Select(d => d.Hostname).Concat(removals.Select(r => r.Hostname)).ToHashSet();
             if (webhookHost is not null) known.Add(webhookHost);
+            if (statusHost is not null) known.Add(statusHost);
             // Never through a deploy's temporary container: whatever else the tunnel sends to its spare port isn't the app's.
             var adoptable = services.Where(s => !_routeTo.ContainsKey(s.Key)).ToDictionary(s => s.Key, s => s.Value);
             var mainBefore = apps.ToDictionary(a => a.Id, a => MainOf(a.Domains));
@@ -664,6 +723,14 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                     ? $"Took over {hostname}. The tunnel sends only some of its addresses to {app.Name}, and it stays that way until you choose to serve every path on {app.Name}'s Network tab."
                     : $"Took over {hostname}: the tunnel already sent it to {app.Name}."));
             }
+
+            // Gitberth's own service (where cloudflared reaches Gitberth), worked out once, and only when something needs it:
+            // GitHub's webhook host, the status page's host, or a domain that may show the down page.
+            var ownService = webhookHost is not null || statusHost is not null || apps.Any(a => a.DownPage && a.Domains.Count > 0
+                    && (!services.ContainsKey(a.Id) || down?.For(a.Id) is not null || a.Domains.Any(d => d.Protected)))
+                ? await OwnServiceAsync(tunnel, ct)
+                : null;
+            if (ownService is not null) await RememberOwnServiceAsync(ownService, ct);
 
             var routes = new List<DomainRoute>();
             var drops = removals.Where(r => r.Service is not null).Select(r => new DomainDrop(r.Hostname, r.Service!)).ToList();
@@ -679,9 +746,49 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                     }
                     continue;
                 }
-                // Not running: its routes stay as they are until it is, and move with it once it runs.
-                if (!services.TryGetValue(app.Id, out var service)) continue;
-                foreach (var d in app.Domains)
+                var running = services.TryGetValue(app.Id, out var service);
+                // Its down page: while a deploy replaces its container, once it's stopped, or when its container hasn't run
+                // for a while (DownWatcher). A domain that can't show it is routed as it would be without one: cloudflared
+                // can't reach Gitberth, or the domain's rules to the app set a Host header of the owner's, which the down
+                // page's marker would replace for good.
+                var showing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var cantShow = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (app.DownPage && down?.For(app.Id) is { } reason && (reason is DownReason.Updating or DownReason.Stopped || !running))
+                {
+                    foreach (var d in app.Domains)
+                    {
+                        if (ownService is null)
+                        {
+                            notes.Add(new DomainNote(d.Hostname, $"{d.Hostname} can't show Gitberth's down page: cloudflared ({tunnel.ContainerName}) can't reach Gitberth's own container. Visitors get Cloudflare's error page instead.", Problem: true));
+                            cantShow.Add(d.Hostname);
+                        }
+                        else if (OwnersHostHeader(ingress, tunnel, app, d, service, ownService) is { } header)
+                        {
+                            notes.Add(new DomainNote(d.Hostname, HostHeaderNote(app, d.Hostname, header), Problem: true));
+                            cantShow.Add(d.Hostname);
+                        }
+                        else
+                        {
+                            routes.Add(new DomainRoute(d.Hostname, app.Id, ownService, d.Service, d.KeepPaths, Public.MarkerHosts.Down(d.Id)));
+                            showing.Add(d.Hostname);
+                        }
+                    }
+                    if (showing.Count == app.Domains.Count) continue;
+                }
+                var rest = app.Domains.Where(d => !showing.Contains(d.Hostname)).ToList();
+                // Not running: its routes stay as they are until it is, and move with it once it runs. One left on the down
+                // page that shouldn't show it (its down page was turned off, or it can't show it now) goes back to where the
+                // app will be. With its down page on, one whose app isn't known to be down yet (its container stopped less
+                // than DownWatcher.Grace ago, or Gitberth has just started) stays where it is, rather than leaving the down
+                // page only to come back to it moments later.
+                if (!running || service is null)
+                {
+                    foreach (var d in rest.Where(d => (!app.DownPage || ownService is null || cantShow.Contains(d.Hostname)) && TunnelRoutes.ShowsDownPage(ingress, d.Hostname)))
+                        if (TunnelRoutes.ExpectedService(app, tunnel) is { } expected)
+                            routes.Add(new DomainRoute(d.Hostname, app.Id, expected, d.Service, d.KeepPaths));
+                    continue;
+                }
+                foreach (var d in rest)
                 {
                     if (!d.KeepPaths && !string.Equals(d.Hostname, widen, StringComparison.OrdinalIgnoreCase)
                         && TunnelRoutes.Narrowed(ingress, d.Hostname, app, service, d.Service))
@@ -693,28 +800,58 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                 }
             }
 
-            // Protected domains get their Access application first; one that can't be protected isn't served at all.
+            // Protected domains get their Access application first (a domain on the down page has its Access too); one that
+            // can't be protected is held back: only its down page is served, without Access (it reveals nothing of the app),
+            // or, without one, nothing at all. The Access check goes wherever this sync sends each domain: the app, its down
+            // page, or where the app will be once it runs (a domain taken off the down page while the app is stopped).
             var checks = await ChecksAsync(ct);
             var leftovers = await LeftoversAsync(db, ct);
-            var access = await PlanAccessAsync(token, tunnel, apps, removals, services, checks, leftovers, notes, ct);
+            var routed = routes.ToDictionary(r => r.Hostname, r => r.Service, StringComparer.OrdinalIgnoreCase);
+            bool HeldShowsDownPage(AppDefinition app) => app.DownPage && ownService is not null;
+            var access = await PlanAccessAsync(token, tunnel, apps, removals, services, checks, leftovers, notes, ct, routed, HeldShowsDownPage);
+            var held = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var route in routes.Where(r => access.Withheld.Contains(r.Hostname)).ToList())
             {
                 routes.Remove(route);
+                var app = apps.First(a => a.Id == route.AppId);
+                if (HeldShowsDownPage(app))
+                {
+                    var d = app.Domains.First(x => x.Hostname == route.Hostname);
+                    routes.Add(new DomainRoute(d.Hostname, app.Id, ownService!, d.Service, d.KeepPaths, Public.MarkerHosts.Down(d.Id), Bare: true));
+                    held.Add(d.Hostname);
+                    continue;
+                }
                 drops.Add(new DomainDrop(route.Hostname, route.Service));
                 if (route.Previous is { } previous) drops.Add(new DomainDrop(route.Hostname, previous));
             }
-            foreach (var d in apps.Where(a => !services.ContainsKey(a.Id)).SelectMany(a => a.Domains).Where(d => access.Withheld.Contains(d.Hostname) && d.Service is not null))
-                drops.Add(new DomainDrop(d.Hostname, d.Service!));
+            foreach (var app in apps.Where(a => !services.ContainsKey(a.Id)))
+            {
+                foreach (var d in app.Domains.Where(d => access.Withheld.Contains(d.Hostname) && !held.Contains(d.Hostname)))
+                {
+                    if (HeldShowsDownPage(app) && PortRules.WebOf(app.Ports) is not null)
+                    {
+                        routes.Add(new DomainRoute(d.Hostname, app.Id, ownService!, d.Service, d.KeepPaths, Public.MarkerHosts.Down(d.Id), Bare: true));
+                        held.Add(d.Hostname);
+                    }
+                    else if (d.Service is not null)
+                    {
+                        drops.Add(new DomainDrop(d.Hostname, d.Service));
+                    }
+                }
+            }
+            _held = held;
 
             var plan = TunnelRoutes.Plan(ingress, apps, routes, drops);
             var guarded = TunnelRoutes.ApplyAccess(plan.Ingress, access.Protect, access.StripAuds, apps);
-            var ownService = webhookHost is null ? null : await OwnServiceAsync(tunnel, ct);
             if (webhookHost is not null && ownService is null)
                 notes.Add(new DomainNote(webhookHost, $"GitHub's webhooks can't reach Gitberth through {webhookHost}: cloudflared ({tunnel.ContainerName}) can't reach Gitberth's own container.", Problem: true));
+            if (statusHost is not null && ownService is null)
+                notes.Add(new DomainNote(statusHost, $"The status page can't be reached through {statusHost}: cloudflared ({tunnel.ContainerName}) can't reach Gitberth's own container.", Problem: true));
             // An app's domain (one taken over just now too) is never an earlier webhook host any more.
             var earlierHooks = await ForgetEarlierHostsAsync(db, apps.SelectMany(a => a.Domains).Select(d => d.Hostname), ct);
             var hooked = TunnelRoutes.PlanWebhook(guarded.Ingress, webhookHost, ownService, removals.Select(r => r.Hostname).ToList(), earlierHooks);
-            var final = hooked.Ingress;
+            var statused = TunnelRoutes.PlanStatus(hooked.Ingress, statusHost, ownService, removals.Select(r => r.Hostname).ToList());
+            var final = statused.Ingress;
             var planned = WithPlanned(checks, access);
             if (!JsonNode.DeepEquals(ingress, final))
             {
@@ -727,11 +864,13 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                 notes.AddRange(plan.Notes);
                 notes.AddRange(guarded.Notes);
                 notes.AddRange(hooked.Notes);
+                notes.AddRange(statused.Notes);
+                AuditTunnel(tunnel, version, plan.Notes.Concat(guarded.Notes).Concat(hooked.Notes).Concat(statused.Notes));
             }
-            // Every protected domain is behind Access now, or out of the tunnel. One still served without it has rules
-            // Gitberth didn't make: a sync can't change those, so it's said rather than tried again.
+            // Every protected domain is behind Access now, or out of the tunnel, or held back on its down page. One still
+            // served without it has rules Gitberth didn't make: a sync can't change those, so it's said rather than tried again.
             exposed = apps.SelectMany(a => a.Domains)
-                .Where(d => d.Protected && TunnelRoutes.HasRules(final, d.Hostname) && !TunnelRoutes.BehindAccess(final, d.Hostname))
+                .Where(d => d.Protected && TunnelRoutes.ServesWithoutAccess(final, d.Hostname))
                 .Select(d => d.Hostname)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             // The tunnel has what this sync was to change.
@@ -756,8 +895,9 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
             _accessSettled = !access.Retry;
 
             // Each domain's DNS on its own: one Cloudflare refuses doesn't stop the rest.
-            var served =apps.Where(a => PortRules.WebOf(a.Ports) is not null).SelectMany(a => a.Domains).Select(d => d.Hostname).ToHashSet();
+            var served = apps.Where(a => PortRules.WebOf(a.Ports) is not null).SelectMany(a => a.Domains).Select(d => d.Hostname).ToHashSet();
             if (webhookHost is not null && ownService is not null) served.Add(webhookHost);
+            if (statusHost is not null && ownService is not null) served.Add(statusHost);
             foreach (var hostname in served.Order(StringComparer.Ordinal))
             {
                 try
@@ -939,10 +1079,13 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var domains = await db.Domains.AsNoTracking().Select(d => new { d.AppId, d.Hostname, d.Service }).ToListAsync(ct);
         var removals = await db.DomainRemovals.AsNoTracking().Select(r => new { r.Hostname, r.Service }).ToListAsync(ct);
+        // A domain on the down page goes to Gitberth itself: that port isn't the app's.
+        var own = (await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == SettingKeys.OwnService, ct))?.Value;
+        bool Routed(string? service) => TunnelRoutes.HostPortOf(service) is not null && (own is null || !TunnelRoutes.SameService(service, own));
         return
         [
-            .. domains.Where(d => TunnelRoutes.HostPortOf(d.Service) is not null).Select(d => (TunnelRoutes.HostPortOf(d.Service)!.Value, (int?)d.AppId, d.Hostname)),
-            .. removals.Where(r => TunnelRoutes.HostPortOf(r.Service) is not null).Select(r => (TunnelRoutes.HostPortOf(r.Service)!.Value, (int?)null, r.Hostname)),
+            .. domains.Where(d => Routed(d.Service)).Select(d => (TunnelRoutes.HostPortOf(d.Service)!.Value, (int?)d.AppId, d.Hostname)),
+            .. removals.Where(r => Routed(r.Service)).Select(r => (TunnelRoutes.HostPortOf(r.Service)!.Value, (int?)null, r.Hostname)),
         ];
     }
 
@@ -966,6 +1109,15 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
     /// new record can't be added, the old ones are put back rather than leaving the name with no record at all.
     /// </summary>
     public async Task<SyncReport> PointDnsHereAsync(int appId, string hostname, CancellationToken ct = default)
+    {
+        var report = await PointDnsHereCoreAsync(appId, hostname, ct);
+        var problem = report.Notes.FirstOrDefault(n => n.Problem)?.Text;
+        await AuditAppAsync(appId, "app.domain.dns", hostname, name => $"Pointed {hostname}'s DNS at this tunnel, for {name}.",
+            name => $"Couldn't point {hostname}'s DNS at this tunnel, for {name}", problem);
+        return report;
+    }
+
+    private async Task<SyncReport> PointDnsHereCoreAsync(int appId, string hostname, CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         var notes = new List<DomainNote>();
@@ -1059,7 +1211,7 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
             if (web.Access == PortAccess.Internal && tunnel.HostNetwork)
                 return await UnservedAsync(token, tunnel, app, domains,
                     domains.Select(d => new DomainState(d.Hostname, false, PortRules.NeedsHostPort(d.Hostname), DomainFix.None, Main: d.Hostname == main, Protected: d.Protected)).ToList(), ct);
-            return await UnservedAsync(token, tunnel, app, domains, Unchecked($"Not serving: {app.Name} isn't running, or its saved ports aren't live yet."), ct);
+            return await UnservedAsync(token, tunnel, app, domains, Unchecked($"Not serving: {app.Name} isn't running, or its saved ports aren't live yet."), ct, downPage: app.DownPage);
         }
         try
         {
@@ -1077,6 +1229,16 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
                 var dns = await CheckDnsAsync(token, tunnel, domain.Hostname, zones, notes: null, ct);
                 var warning = dns.Zone is { } zone ? DomainNames.CertificateWarning(domain.Hostname, zone.Name) : null;
                 var isMain = domain.Hostname == main;
+                // On the down page while the app runs: a deploy replacing its container, or held back on its protection.
+                if (TunnelRoutes.ShowsDownPage(ingress, domain.Hostname))
+                {
+                    var held = _held.Contains(domain.Hostname) || (domain.Protected && down?.For(app.Id) is null);
+                    var (why, fix) = DownSummary(app, domain, down?.For(app.Id), held, running: true, protection);
+                    // Held back, Fix tries again whenever nothing is wrong with how protection is set up (as when it's out of the tunnel).
+                    if (held) fix = protection is null || transient ? DomainFix.Sync : DomainFix.None;
+                    states.Add(new DomainState(domain.Hostname, false, dns.Ok ? why : dns.Summary, dns.Ok ? fix : dns.Fix, warning, isMain, domain.Protected, DownPage: dns.Ok));
+                    continue;
+                }
                 // A protected domain is only served behind Access: until then the tunnel has no route for it, on purpose. One
                 // it still serves without is open to anyone: through Gitberth's rules (a sync that couldn't finish), which
                 // Fix protects or takes out, or through rules someone else made, which no sync changes.
@@ -1106,14 +1268,25 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
     /// thing that can't wait. The tunnel is only read for that, and when it can't be, a protected domain says it couldn't
     /// be checked, as when the app is live.
     /// </summary>
-    private async Task<DomainsOverview> UnservedAsync(string token, TunnelInfo tunnel, AppDefinition app, List<CustomDomain> domains, List<DomainState> states, CancellationToken ct)
+    /// <param name="downPage">
+    /// The app may be showing its down page: the tunnel is read for that too, and a domain on it says so and why; one kept off
+    /// it while the app is down (its route sets a Host header of the owner's) says that.
+    /// </param>
+    private async Task<DomainsOverview> UnservedAsync(string token, TunnelInfo tunnel, AppDefinition app, List<CustomDomain> domains, List<DomainState> states, CancellationToken ct,
+        bool downPage = false)
     {
-        if (!domains.Any(d => d.Protected)) return new DomainsOverview(true, tunnel, null, states);
+        if (!domains.Any(d => d.Protected) && !downPage) return new DomainsOverview(true, tunnel, null, states);
         try
         {
             var ingress = (await cloudflare.GetTunnelConfigAsync(token, tunnel.AccountId, tunnel.TunnelId, ct))["ingress"] as JsonArray ?? [];
-            states = [.. states.Select(s => domains.FirstOrDefault(d => d.Hostname == s.Hostname) is { Protected: true } d && Unguarded(ingress, d, app, null) is { } open
-                ? s with { Summary = open.Summary, Fix = open.Fix }
+            var reason = down?.For(app.Id);
+            states = [.. states.Select(s => domains.FirstOrDefault(d => d.Hostname == s.Hostname) is not { } d ? s
+                : d.Protected && Unguarded(ingress, d, app, null) is { } open ? s with { Summary = open.Summary, Fix = open.Fix }
+                : TunnelRoutes.ShowsDownPage(ingress, d.Hostname) && DownSummary(app, d, reason, _held.Contains(d.Hostname), running: false, null) is var (why, fix)
+                    ? s with { Summary = why, Fix = fix, DownPage = true }
+                // Down, but kept off its down page: its route sets a Host header of the owner's, which the down page would replace.
+                : downPage && reason is not null && OwnersHostHeader(ingress, tunnel, app, d, null, null) is { } header
+                    ? s with { Summary = $"{s.Summary} It doesn't show the down page: its route in the tunnel sets the Host header \"{header}\", which the down page would replace." }
                 : s)];
         }
         catch (CloudflareApiException ex)
@@ -1129,11 +1302,12 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
     /// <summary>
     /// A protected domain the tunnel serves without Cloudflare Access: through Gitberth's own rules (they go to the app's
     /// service, now or before), which Fix puts behind Access or takes out; or only through rules someone else made, which
-    /// no sync changes. Null when the tunnel has no rules for it, or each one checks the sign-in.
+    /// no sync changes. Null when the tunnel has no rules for it, or each one checks the sign-in (Gitberth's down page,
+    /// which reveals nothing of the app, never counts).
     /// </summary>
     /// <param name="service">Where Gitberth sends the app's domains now; null when nothing of the app is live.</param>
     private static (bool Ok, string Summary, DomainFix Fix)? Unguarded(JsonArray ingress, CustomDomain domain, AppDefinition app, string? service) =>
-        !TunnelRoutes.HasRules(ingress, domain.Hostname) || TunnelRoutes.BehindAccess(ingress, domain.Hostname) ? null
+        !TunnelRoutes.ServesWithoutAccess(ingress, domain.Hostname) ? null
         : TunnelRoutes.OpenTo(ingress, domain.Hostname, app, service, domain.Service)
             ? (false, "Served without Cloudflare Access, so anyone can open it. Fix puts it behind Access, or stops serving it until it can be.", DomainFix.Sync)
             : (false, "Some of its rules in the tunnel aren't Gitberth's and skip Cloudflare Access: remove them in Cloudflare.", DomainFix.None);

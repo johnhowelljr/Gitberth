@@ -1,0 +1,24 @@
+id: excalidraw
+name: Excalidraw
+tagline: A virtual whiteboard for sketching diagrams that look hand-drawn.
+description: >-
+  Excalidraw is a whiteboard in the browser for sketches, diagrams and wireframes with a hand-drawn feel. Drawings are
+  saved in your browser and exported as PNG, SVG or a file of their own, and it has a library of ready-made shapes.
+category: Productivity
+website: https://excalidraw.com
+source: https://github.com/excalidraw/excalidraw
+license: MIT
+icon: excalidraw.svg
+icon_source: monogram
+memory: 64
+latest_only: Excalidraw publishes only latest; its other tags are commits from 2021.
+web:
+  service: excalidraw
+  port: 80
+  health: /
+notes:
+  - Drawings stay in your browser. Live collaboration and share links go through excalidraw.com's own servers.
+compose: |
+  services:
+    excalidraw:
+      image: excalidraw/excalidraw:latest

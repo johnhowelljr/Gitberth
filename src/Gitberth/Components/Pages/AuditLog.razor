@@ -1,0 +1,533 @@
+@page "/audit"
+@using Gitberth.Audit
+@implements IDisposable
+@inject global::Gitberth.Audit.AuditLog Log
+@inject AuditSettings AuditOptions
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>Audit log · Gitberth</PageTitle>
+
+<PageHead Title="Audit log" Lead="Every change to this Gitberth and its apps: who made it, from where, and how it ended. Docker changes made outside Gitberth are here too.">
+    <Actions>
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="Export">
+            <ActivatorContent>
+                <Btn Icon="@Icons.Material.Outlined.Download" EndIcon="@Icons.Material.Outlined.ExpandMore" OnClick="context.ToggleAsync">Export</Btn>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem Icon="@Icons.Material.Outlined.TableChart" Href="@AuditEndpoints.ExportUrl(filter, AuditExportFormat.Csv)">This view as CSV</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.DataObject" Href="@AuditEndpoints.ExportUrl(filter, AuditExportFormat.JsonLines)">This view as JSON Lines</MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+        <Btn Icon="@Icons.Material.Outlined.VerifiedUser" OnClick="VerifyAsync" Busy="verifying">Check the log's integrity</Btn>
+    </Actions>
+    <ChildContent>
+        <div class="gb-hero-meta audit-meta">
+            @if (total is long n)
+            {
+                <span><SvgIcon Icon="@Icons.Material.Outlined.FormatListBulleted" /><strong>@AuditLook.Count(n, "entry", "entries")</strong>&nbsp;@AuditLook.RangeWords(filter.Range)@(filter.IsDefault || OnlyRange ? "" : " that match")</span>
+            }
+            @if (summary is { Oldest: { } oldest })
+            {
+                <span title="@Format.Local(oldest)"><SvgIcon Icon="@Icons.Material.Outlined.History" />Kept since @oldest.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+            }
+            <span><SvgIcon Icon="@Icons.Material.Outlined.Schedule" />Keeps @AuditSettings.Days(AuditOptions.RetentionDays)</span>
+        </div>
+    </ChildContent>
+</PageHead>
+
+@if (verification is { } v)
+{
+    <Banner Tone="@(v.Ok ? "good" : "critical")" Icon="@(v.Ok ? Icons.Material.Outlined.VerifiedUser : Icons.Material.Outlined.GppBad)"
+            Title="@(v.Ok ? "The audit log is intact" : "The audit log was changed")" OnDismiss="() => verification = null">
+        <ChildContent>@v.Message@(v.Ok ? " Each entry's hash covers the one before it, so any change or gap would show." : " Entries from there on can't be trusted as recorded.")</ChildContent>
+        <Actions>
+            @if (!v.Ok && v.BrokenId is long id && entries.FirstOrDefault(e => e.Id == id) is { } broken)
+            {
+                <Btn Size="BtnSize.Sm" OnClick="() => selected = broken">Show entry @id</Btn>
+            }
+        </Actions>
+    </Banner>
+}
+
+<div class="gb-toolbar audit-toolbar" role="search">
+    <label class="gb-input audit-search">
+        <SvgIcon Icon="@Icons.Material.Outlined.Search" />
+        <input type="search" placeholder="Search what changed, who, apps, domains" value="@search" @oninput="OnSearch" aria-label="Search the audit log" autocomplete="off" />
+    </label>
+    <Seg T="AuditRange" Options="Ranges" Value="filter.Range" ValueChanged="r => ApplyAsync(filter with { Range = r })" Label="When" />
+    <div class="gb-toolbar-scroll audit-filters">
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by who" MaxHeight="420">
+            <ActivatorContent>
+                <button type="button" class="gb-filterbtn @(filter.Who is null ? null : "on")" @onclick="context.ToggleAsync">
+                    <SvgIcon Icon="@Icons.Material.Outlined.Person" />Who@(WhoWords is { } who ? $": {who}" : "")
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem OnClick="() => ApplyAsync(filter with { Who = null })" Icon="@(filter.Who is null ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">Anyone</MudMenuItem>
+                <MudDivider />
+                @foreach (var actor in actors)
+                {
+                    var key = AuditFilter.WhoKey(actor);
+                    <MudMenuItem OnClick="() => ApplyAsync(filter with { Who = key })" Icon="@(filter.Who == key ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">
+                        @(actor.Kind == AuditActorKind.Docker ? "Outside Gitberth" : actor.Name) <span class="gb-t3">@AuditLook.KindWords(actor.Kind)</span>
+                    </MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by app" MaxHeight="420">
+            <ActivatorContent>
+                <button type="button" class="gb-filterbtn @(filter.App is null ? null : "on")" @onclick="context.ToggleAsync">
+                    <SvgIcon Icon="@Icons.Material.Outlined.GridView" />App@(filter.App is { } app ? $": {AppTitle(app)}" : "")
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem OnClick="() => ApplyAsync(filter with { App = null })" Icon="@(filter.App is null ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">Every app</MudMenuItem>
+                <MudDivider />
+                @foreach (var a in apps)
+                {
+                    <MudMenuItem OnClick="() => ApplyAsync(filter with { App = a.Container })" Icon="@(filter.App == a.Container ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">
+                        @(a.Name ?? a.Container) @if (a.Name is not null && a.Name != a.Container) { <span class="gb-t3 gb-mono">@a.Container</span> }
+                    </MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by area">
+            <ActivatorContent>
+                <button type="button" class="gb-filterbtn @(filter.Area is null ? null : "on")" @onclick="context.ToggleAsync">
+                    <SvgIcon Icon="@Icons.Material.Outlined.Category" />Area@(filter.Area is { } area ? $": {AuditAreas.Label(area)}" : "")
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem OnClick="() => ApplyAsync(filter with { Area = null })" Icon="@(filter.Area is null ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">Everything</MudMenuItem>
+                <MudDivider />
+                @foreach (var area in Enum.GetValues<AuditArea>())
+                {
+                    <MudMenuItem OnClick="() => ApplyAsync(filter with { Area = area })" Icon="@AuditLook.AreaIcon(area)">
+                        <span class="@(filter.Area == area ? "audit-menu-on" : null)">@AuditAreas.Label(area)</span>
+                    </MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+        <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by outcome">
+            <ActivatorContent>
+                <button type="button" class="gb-filterbtn @(filter.Outcome is null ? null : "on")" @onclick="context.ToggleAsync">
+                    <SvgIcon Icon="@Icons.Material.Outlined.Rule" />Outcome@(filter.Outcome is { } outcome ? $": {OutcomeName(outcome)}" : "")
+                </button>
+            </ActivatorContent>
+            <ChildContent>
+                <MudMenuItem OnClick="() => ApplyAsync(filter with { Outcome = null })" Icon="@(filter.Outcome is null ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">Any outcome</MudMenuItem>
+                <MudDivider />
+                @foreach (var outcome in Enum.GetValues<AuditOutcome>())
+                {
+                    <MudMenuItem OnClick="() => ApplyAsync(filter with { Outcome = outcome })" Icon="@(filter.Outcome == outcome ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">@OutcomeName(outcome)</MudMenuItem>
+                }
+            </ChildContent>
+        </MudMenu>
+        @if (!filter.IsDefault)
+        {
+            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.FilterAltOff" OnClick="() => ApplyAsync(AuditFilter.Default)">Clear</Btn>
+        }
+    </div>
+</div>
+
+@if (fresh > 0)
+{
+    <button type="button" class="audit-fresh" @onclick="LoadAsync"><SvgIcon Icon="@Icons.Material.Outlined.ArrowUpward" />@AuditLook.Count(fresh, "new entry", "new entries"): show</button>
+}
+
+@if (entries.Count == 0 && loading)
+{
+    <div class="audit-list">
+        @for (var i = 0; i < 6; i++)
+        {
+            <div class="audit-row audit-row--skel"><div class="gb-skel" style="height:34px;grid-column:1/-1"></div></div>
+        }
+    </div>
+}
+else if (entries.Count == 0)
+{
+    <div class="gb-card">
+        <EmptyState Icon="@Icons.Material.Outlined.Policy" Title="@(filter.IsDefault ? "Nothing recorded yet" : "No entries match")">
+            <ChildContent>
+                @if (filter.IsDefault)
+                {
+                    <span>Every change made through Gitberth, and every Docker change made outside it, shows here as it happens.</span>
+                }
+                else
+                {
+                    <span>Nothing @AuditLook.RangeWords(filter.Range) matches these filters.</span>
+                }
+            </ChildContent>
+            <Actions>
+                @if (!filter.IsDefault)
+                {
+                    <Btn OnClick="() => ApplyAsync(AuditFilter.Default with { Range = AuditRange.All })" Icon="@Icons.Material.Outlined.FilterAltOff">Show everything</Btn>
+                }
+            </Actions>
+        </EmptyState>
+    </div>
+}
+else
+{
+    <div class="audit-list" role="list" aria-label="Audit log entries">
+        @foreach (var day in entries.GroupBy(e => e.At.ToLocalTime().Date))
+        {
+            <div class="audit-day" role="presentation">
+                <span>@AuditLook.Day(day.Key, DateTime.Now.Date)</span>
+                <span class="audit-day-n">@AuditLook.Count(day.Count(), "entry", "entries")</span>
+            </div>
+            @foreach (var e in day)
+            {
+                var tone = AuditLook.Tone(e);
+                <button type="button" role="listitem" class="audit-row @(selected?.Id == e.Id ? "on" : null)" @key="e.Id" @onclick="() => selected = e"
+                        aria-label="@($"{e.Summary} {e.At.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)}, by {AuditLook.ActorName(e.Actor)}")">
+                    <span class="audit-mark gb-tone-@tone"><SvgIcon Icon="@AuditLook.AreaIcon(AuditLook.AreaOf(e))" /></span>
+                    <span class="audit-what">
+                        <span class="audit-sentence">@e.Summary</span>
+                        <span class="audit-chips">
+                            @if (AuditLook.OutcomeWords(e.Outcome) is { } outcome)
+                            {
+                                <span class="gb-tag @(e.Outcome == AuditOutcome.Failed ? "gb-tag--critical" : "gb-tag--warn")">@outcome</span>
+                            }
+                            @if (e.AppName is { } app)
+                            {
+                                <span class="gb-tag gb-tag--outline"><SvgIcon Icon="@Icons.Material.Outlined.GridView" />@app</span>
+                            }
+                            else if (e.Container is { } container)
+                            {
+                                <span class="gb-tag gb-tag--outline gb-mono">@container</span>
+                            }
+                            @if (e.Target is { } target && target != e.AppName && target != e.Container)
+                            {
+                                <span class="gb-tag gb-tag--outline">@target</span>
+                            }
+                            <span class="audit-action gb-mono">@e.Action</span>
+                        </span>
+                    </span>
+                    <span class="audit-who">
+                        <span class="audit-who-icon">
+                            @if (e.Actor.Kind == AuditActorKind.Gitberth)
+                            {
+                                <Logo Size="16" />
+                            }
+                            else
+                            {
+                                <SvgIcon Icon="@AuditLook.ActorIcon(e.Actor.Kind)" />
+                            }
+                        </span>
+                        <span class="audit-who-text">
+                            <span class="audit-who-name">@AuditLook.ActorName(e.Actor)</span>
+                            <span class="audit-who-sub">@AuditLook.ActorSub(e.Actor)</span>
+                        </span>
+                    </span>
+                    <span class="audit-time" title="@Format.Local(e.At)">@e.At.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
+                </button>
+            }
+        }
+    </div>
+    <div class="gb-list-foot audit-foot">
+        @if (more)
+        {
+            <Btn OnClick="MoreAsync" Busy="loading" Icon="@Icons.Material.Outlined.ExpandMore">Load more</Btn>
+        }
+        <span>Showing @AuditLook.Count(entries.Count, "entry", "entries")@(total is long all && all > entries.Count ? $" of {all.ToString("N0", CultureInfo.InvariantCulture)}" : ""), newest first.</span>
+    </div>
+}
+
+@if (selected is { } s)
+{
+    <div class="audit-scrim" @onclick="() => selected = null"></div>
+    <aside class="audit-panel" role="dialog" aria-modal="true" aria-labelledby="audit-panel-t" @onkeydown="OnPanelKey" tabindex="-1">
+        <div class="audit-panel-head">
+            <span class="audit-mark gb-tone-@AuditLook.Tone(s)"><SvgIcon Icon="@AuditLook.AreaIcon(AuditLook.AreaOf(s))" /></span>
+            <div style="min-width:0">
+                <div class="audit-panel-kicker gb-mono">@s.Action</div>
+                <div class="audit-panel-title" id="audit-panel-t">@s.Summary</div>
+            </div>
+            <button type="button" class="gb-iconbtn" aria-label="Close" title="Close" @onclick="() => selected = null"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+        </div>
+        <div class="audit-panel-body">
+            <div class="gb-row gb-row--wrap" style="gap:6px">
+                @if (AuditLook.OutcomeWords(s.Outcome) is { } outcome)
+                {
+                    <span class="gb-pill2 @(s.Outcome == AuditOutcome.Failed ? "gb-tone-critical" : "gb-tone-warn")"><SvgIcon Icon="@Icons.Material.Outlined.ErrorOutline" />@outcome</span>
+                }
+                else
+                {
+                    <span class="gb-pill2 gb-tone-good"><SvgIcon Icon="@Icons.Material.Outlined.CheckCircle" />Done</span>
+                }
+                <span class="gb-tag">@AuditAreas.Label(AuditLook.AreaOf(s))</span>
+                @if (s.Outside)
+                {
+                    <span class="gb-tag gb-tag--serious">Outside Gitberth</span>
+                }
+            </div>
+            <dl class="gb-kv audit-kv">
+                <dt>When</dt>
+                <dd>@s.At.ToLocalTime().ToString("ddd d MMM yyyy, HH:mm:ss", CultureInfo.InvariantCulture) <span class="gb-t3 gb-mono">@AuditExport.Time(s.At)</span></dd>
+                <dt>Who</dt>
+                <dd>
+                    <span class="gb-row" style="gap:6px">
+                        @if (s.Actor.Kind == AuditActorKind.Gitberth)
+                        {
+                            <Logo Size="16" />
+                        }
+                        else
+                        {
+                            <SvgIcon Icon="@AuditLook.ActorIcon(s.Actor.Kind)" />
+                        }
+                        <strong>@s.Actor.Name</strong>
+                    </span>
+                    <span class="gb-t3">@AuditLook.KindWords(s.Actor.Kind)</span>
+                </dd>
+                <dt>Through</dt>
+                <dd>@AuditLook.ViaWords(s.Actor.Via)</dd>
+                @if (s.Actor.Ip is { } ip)
+                {
+                    <dt>From</dt>
+                    <dd><span class="gb-mono">@ip</span></dd>
+                }
+                @if (s.AppName is not null || s.Container is not null)
+                {
+                    <dt>App</dt>
+                    <dd>
+                        @if (s.Container is { } container)
+                        {
+                            <a href="@($"apps/{Uri.EscapeDataString(container)}")">@(s.AppName ?? container)</a>
+                            @if (s.AppName is not null && s.AppName != container)
+                            {
+                                <span class="gb-t3 gb-mono">@container</span>
+                            }
+                            <a class="gb-t3" href="@($"audit?range=all&app={Uri.EscapeDataString(container)}")" @onclick="() => selected = null">All its changes</a>
+                        }
+                        else
+                        {
+                            @s.AppName
+                        }
+                    </dd>
+                }
+                @if (s.Target is { } target)
+                {
+                    <dt>Target</dt>
+                    <dd>@target</dd>
+                }
+                @if (s.DeploymentId is int deployment && s.AppId is int appId)
+                {
+                    <dt>Deploy</dt>
+                    <dd><a href="@($"apps/{appId}/deployments/{deployment}")"><SvgIcon Icon="@Icons.Material.Outlined.Article" />Deploy #@deployment and its log</a></dd>
+                }
+                else if (s.Correlation is { } correlation)
+                {
+                    <dt>Follows</dt>
+                    <dd class="gb-mono">@correlation</dd>
+                }
+                <dt>Entry</dt>
+                <dd><span class="gb-mono">#@s.Id</span><CopyButton Value="@Nav.ToAbsoluteUri($"audit?range=all&entry={s.Id}").ToString()" Label="a link to this entry" /></dd>
+            </dl>
+            @if (s.Changes.Count > 0)
+            {
+                <div class="gb-h3" style="font-size:13.5px">What changed</div>
+                <div class="audit-changes" role="table" aria-label="What changed">
+                    <div class="audit-changes-head" role="row"><span role="columnheader">Field</span><span role="columnheader">Before</span><span role="columnheader">After</span></div>
+                    @foreach (var c in s.Changes)
+                    {
+                        <div class="audit-changes-row" role="row">
+                            <span role="cell">@c.Field</span>
+                            <span role="cell" class="@(c.From is null ? "audit-none" : "audit-before")">@(c.From ?? "—")</span>
+                            <span role="cell" class="@(c.To is null ? "audit-none" : "audit-after")">@(c.To ?? "—")</span>
+                        </div>
+                    }
+                </div>
+                <p class="gb-help">Secret values never go in the log: a secret variable or token shows by its name only.</p>
+            }
+            <div class="gb-h3" style="font-size:13.5px">Tamper evidence</div>
+            <dl class="gb-kv audit-kv audit-hashes">
+                <dt>Hash</dt>
+                <dd><code class="audit-hash">@s.Hash</code><CopyButton Value="@s.Hash" Label="the entry's hash" /></dd>
+                <dt>Previous</dt>
+                <dd><code class="audit-hash">@s.PrevHash</code></dd>
+            </dl>
+            <p class="gb-help">SHA-256 of the previous entry's hash and this entry's fields. Check the log's integrity to walk the whole chain.</p>
+        </div>
+    </aside>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "range")] private string? RangeQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "who")] private string? WhoQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "app")] private string? AppQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "area")] private string? AreaQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "outcome")] private string? OutcomeQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] private string? TextQuery { get; set; }
+    // One entry opened by its number (/audit?range=all&entry=1234), so it can be linked to.
+    [SupplyParameterFromQuery(Name = "entry")] private long? EntryQuery { get; set; }
+
+    private const int PageSize = 100;
+
+    private AuditFilter filter = AuditFilter.Default;
+    private string? search;
+    private List<AuditRecord> entries = [];
+    private bool more, loading = true, verifying;
+    private long? total;
+    private int fresh;
+    private AuditSummary? summary;
+    private AuditVerification? verification;
+    private AuditRecord? selected;
+    private IReadOnlyList<AuditActorRef> actors = [];
+    private IReadOnlyList<AuditAppRef> apps = [];
+    private CancellationTokenSource? typing;
+    private string? loadedFor;
+
+    private static readonly IReadOnlyList<SegOption<AuditRange>> Ranges =
+    [
+        new(AuditRange.Day, "24 h"),
+        new(AuditRange.Week, "7 days"),
+        new(AuditRange.Month, "30 days"),
+        new(AuditRange.All, "All"),
+    ];
+
+    // Only the time range differs from the defaults: the count says the range, not "that match".
+    private bool OnlyRange => filter with { Range = AuditRange.Week } == AuditFilter.Default;
+
+    private string? WhoWords => AuditFilter.SplitWho(filter.Who) is ({ } kind, { } name) ? kind == AuditActorKind.Docker ? "Outside Gitberth" : name : null;
+
+    private string AppTitle(string container) => apps.FirstOrDefault(a => a.Container == container)?.Name ?? container;
+
+    private static string OutcomeName(AuditOutcome outcome) => outcome switch
+    {
+        AuditOutcome.Failed => "Failed",
+        AuditOutcome.Denied => "Refused",
+        _ => "Done",
+    };
+
+    protected override void OnInitialized() => Log.Recorded += OnRecorded;
+
+    public void Dispose()
+    {
+        Log.Recorded -= OnRecorded;
+        typing?.Cancel();
+    }
+
+    // A new entry while the page is open: counted, and shown when asked (the list doesn't jump under the reader).
+    private void OnRecorded(AuditRecord record)
+    {
+        Interlocked.Increment(ref fresh);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        filter = AuditFilter.Parse(RangeQuery, WhoQuery, AppQuery, AreaQuery, OutcomeQuery, TextQuery);
+        search = filter.Text;
+        var key = $"{filter.ToQueryString()}#{EntryQuery}";
+        if (key == loadedFor) return;
+        loadedFor = key;
+        await LoadAsync();
+        if (EntryQuery is long wanted && selected?.Id != wanted)
+        {
+            try
+            {
+                selected = entries.FirstOrDefault(e => e.Id == wanted)
+                    ?? (await Log.QueryAsync(new AuditQuery { BeforeId = wanted + 1, Limit = 1 })).Entries.FirstOrDefault(e => e.Id == wanted);
+            }
+            catch (Exception ex)
+            {
+                Snackbar.Add($"The audit log couldn't be read: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        loading = true;
+        fresh = 0;
+        try
+        {
+            var query = filter.ToQuery(DateTime.UtcNow, PageSize);
+            var page = await Log.QueryAsync(query);
+            entries = page.Entries.ToList();
+            more = page.More;
+            total = await Log.CountAsync(query);
+            summary = await Log.SummaryAsync();
+            actors = await Log.ActorsAsync();
+            apps = await Log.AppsAsync();
+            if (selected is not null) selected = entries.FirstOrDefault(e => e.Id == selected.Id) ?? selected;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"The audit log couldn't be read: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    private async Task MoreAsync()
+    {
+        if (entries.Count == 0) return;
+        loading = true;
+        try
+        {
+            var page = await Log.QueryAsync(filter.ToQuery(DateTime.UtcNow, PageSize) with { BeforeId = entries[^1].Id });
+            entries.AddRange(page.Entries);
+            more = page.More;
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"The audit log couldn't be read: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+
+    // The filters live in the address, so a view can be linked to and the back button works.
+    private Task ApplyAsync(AuditFilter next)
+    {
+        var query = next.ToQueryString();
+        Nav.NavigateTo(query.Length == 0 ? "audit" : "audit?" + query, replace: true);
+        return Task.CompletedTask;
+    }
+
+    // Typing searches once it pauses.
+    private async Task OnSearch(ChangeEventArgs e)
+    {
+        search = e.Value?.ToString();
+        typing?.Cancel();
+        var mine = typing = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(350, mine.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        await ApplyAsync(filter with { Text = string.IsNullOrWhiteSpace(search) ? null : search.Trim() });
+    }
+
+    private async Task VerifyAsync()
+    {
+        verifying = true;
+        try
+        {
+            verification = await Log.VerifyAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"The log couldn't be checked: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            verifying = false;
+        }
+    }
+
+    private void OnPanelKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") selected = null;
+    }
+}

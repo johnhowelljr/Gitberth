@@ -1,0 +1,178 @@
+@implements IDisposable
+@inject DatabaseServers Servers
+@inject ISnackbar Snackbar
+
+@*
+    Settings › Databases: the Postgres servers on this host that apps' databases go on (an app's Settings tab › Databases),
+    whether Gitberth can use each and why not, the one new databases go on, and "Create a Postgres server", which sets one up
+    as an app like any other.
+*@
+<section class="gb-card gb-sec" id="databases" aria-labelledby="databases-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@GitberthIcons.Database" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3" id="databases-t">Databases</div>
+            <p>The Postgres servers apps' databases go on. Each app adds its own on its Settings tab › Databases: a database and a role of its own, or a Redis.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        @if (servers is null)
+        {
+            <div class="gb-skel" style="height:64px"></div>
+        }
+        else if (servers.Count == 0)
+        {
+            <EmptyState Small="true" Title="No Postgres server yet">
+                Create one and every app can get a database of its own on it, in a click. Gitberth also uses any Postgres container already here that's on its network.
+            </EmptyState>
+        }
+        else
+        {
+            <div class="gb-envtbl" role="list" aria-label="Postgres servers">
+                @foreach (var s in servers)
+                {
+                    <div class="gb-db" role="listitem" @key="s.Container">
+                        <div class="gb-db-head">
+                            <span class="gb-tag @(s.Usable ? "gb-tag--good" : null)">@(s.Usable ? "Gitberth uses it" : "Not usable")</span>
+                            <a href="@($"apps/{Uri.EscapeDataString(s.Container)}")"><strong>@s.Container</strong></a>
+                            <span class="gb-t3">Postgres @s.VersionText</span>
+                            @if (s.Container == defaultServer)
+                            {
+                                <span class="gb-tag gb-tag--accent">Default</span>
+                            }
+                            <span class="gb-db-actions">
+                                @if (s.Usable && s.Container != defaultServer)
+                                {
+                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeDefaultAsync(s)" Disabled="busy">Make it the default</Btn>
+                                }
+                            </span>
+                        </div>
+                        <dl class="gb-kv">
+                            <dt>Image</dt>
+                            <dd class="gb-mono">@s.Image</dd>
+                            <dt>Apps reach it as</dt>
+                            <dd>@(s.Alias is { } alias ? (MarkupString)$"<span class=\"gb-mono\">{System.Net.WebUtility.HtmlEncode(alias)}:5432</span> on {System.Net.WebUtility.HtmlEncode(Network)}" : (MarkupString)"Not on Gitberth's network")</dd>
+                            <dt>Gitberth signs in as</dt>
+                            <dd class="gb-mono">@s.User</dd>
+                        </dl>
+                        @if (s.Problem is { } problem)
+                        {
+                            <div class="gb-db-problem"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" /><span>@problem</span></div>
+                        }
+                    </div>
+                }
+            </div>
+            @if (defaultServer is null && servers.Count(s => s.Usable) > 1)
+            {
+                <Banner Tone="info" Title="Choose where new databases go">Gitberth can use more than one of these: make one the default, and an app can still pick another when it adds a database.</Banner>
+            }
+        }
+        @if (creation is { Completion.IsCompleted: false } running)
+        {
+            <div class="gb-ro-note"><SvgIcon Icon="@Icons.Material.Outlined.Autorenew" Size="sm" Class="gb-spin" /><span>@CreatingText(running.Phase)</span></div>
+        }
+        <div class="gb-row gb-row--wrap">
+            <Btn Kind="@(servers is { Count: 0 } ? BtnKind.Primary : BtnKind.Secondary)" Icon="@Icons.Material.Outlined.Add" OnClick="Create"
+                 Busy="@(creation is { Completion.IsCompleted: false })" Disabled="busy">Create a Postgres server</Btn>
+        </div>
+        <p class="gb-help" style="margin:0">
+            A server Gitberth sets up is an app like any other (Apps › postgres): @DatabaseServers.ServerImage, its data on a volume of its own, a generated
+            password for its superuser kept as a secret variable, reached by apps on @Network as postgres and never published on the LAN.
+            Gitberth tells you when there's a newer image, but never updates a database by itself.
+        </p>
+    </div>
+</section>
+
+@code {
+    [Inject] private GitberthOptions Options { get; set; } = default!;
+
+    private IReadOnlyList<PostgresServer>? servers;
+    private string? defaultServer;
+    private ServerCreation? creation;
+    private bool busy;
+    private Timer? timer;
+
+    private string Network => Options.Network;
+
+    protected override async Task OnInitializedAsync()
+    {
+        creation = Servers.Creation;
+        await LoadAsync();
+        if (creation is { Completion.IsCompleted: false }) Follow();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            servers = await Servers.ListAsync();
+            defaultServer = (await Servers.DefaultAsync(servers))?.Container;
+        }
+        catch (Exception ex)
+        {
+            servers = [];
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private static string CreatingText(string phase) => phase switch
+    {
+        "Pulling" => $"Pulling {DatabaseServers.ServerImage}…",
+        "Creating" or "Starting" => "Creating the server…",
+        "Checking" => "Checking that it stays up…",
+        _ => "Setting up the server…",
+    };
+
+    private async Task MakeDefaultAsync(PostgresServer server)
+    {
+        busy = true;
+        try
+        {
+            if (await Servers.SetDefaultAsync(server.Container) is { } problem) Snackbar.Add(problem, Severity.Error);
+            else Snackbar.Add($"New databases go on {server.Container} now.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void Create()
+    {
+        try
+        {
+            creation = Servers.Create();
+            Follow();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    // While a server is set up: its phase every second, then what came of it.
+    private void Follow()
+    {
+        timer?.Dispose();
+        timer = new Timer(_ => InvokeAsync(async () =>
+        {
+            if (creation is not { } c) return;
+            if (c.Completion.IsCompleted)
+            {
+                timer?.Dispose();
+                timer = null;
+                var result = await c.Completion;
+                Snackbar.Add(result.Ok ? $"The Postgres server {result.Key} is ready: new databases go on it." : result.Message, result.Ok ? Severity.Success : Severity.Error);
+                await LoadAsync();
+            }
+            StateHasChanged();
+        }), null, 1000, 1000);
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

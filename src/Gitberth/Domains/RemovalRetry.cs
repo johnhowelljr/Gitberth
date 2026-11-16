@@ -24,6 +24,8 @@ public sealed class RemovalRetry(DomainService domains, ILogger<RemovalRetry> lo
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Gitberth's own work, through this job: what it changes is recorded so in the audit log.
+        using var auditActor = Gitberth.Audit.AuditScope.Begin(Gitberth.Audit.AuditActor.System(Gitberth.Audit.AuditVia.Sync));
         try
         {
             using var timer = new PeriodicTimer(Interval);

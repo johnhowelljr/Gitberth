@@ -117,15 +117,16 @@ public sealed class AddressBook(NetworkService network, AppService apps, DomainS
         var all = await AppsAsync(ct);
         var domainsOn = await domains.EnabledAsync(ct);
         // gb-<slug> apps go by their containers' label; an Existing app by its container's name.
-        var labelled = all.Where(a => a.Container is null).ToList();
-        var nav = labelled.ToDictionary(a => a.Slug, a => new NavApp(a.Id, a.Name, a.Slug), StringComparer.Ordinal);
+        var labelled = all.Where(a => a.Container is null || a.IsCompose).ToList();
+        var nav = labelled.ToDictionary(a => a.Slug, a => new NavApp(a.Id, a.Name, a.Slug) { Container = a.IsCompose ? a.ContainerName : null }, StringComparer.Ordinal);
         var bySlug = labelled.ToDictionary(a => a.Slug, StringComparer.Ordinal);
         var byContainer = all.Where(a => a.Container is not null).ToDictionary(a => a.Container!, StringComparer.Ordinal);
         var byName = snapshot.Containers.ToDictionary(c => c.Name, StringComparer.Ordinal);
+        var members = await apps.DatabaseMembersAsync(ct);
 
         var containers = snapshot.Containers.ToDictionary(c => c.Name, c =>
         {
-            var role = ContainerService.RoleOf(new ContainerSummary(c.Name, c.State, c.Status, c.Image, "", c.Labels, c.Command, c.Id), nav, network.Self);
+            var role = ContainerService.RoleOf(new ContainerSummary(c.Name, c.State, c.Status, c.Image, "", c.Labels, c.Command, c.Id), nav, network.Self, members);
             // Only the app's own container answers to the app's name; a deploy's temporary one doesn't.
             var app = c.Labels.TryGetValue("gitberth.app", out var slug) && bySlug.GetValueOrDefault(slug) is { } owner && c.Name == owner.ContainerName ? owner
                 : byContainer.GetValueOrDefault(c.Name);

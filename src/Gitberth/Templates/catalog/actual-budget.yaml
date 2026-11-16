@@ -1,0 +1,29 @@
+id: actual-budget
+name: Actual Budget
+tagline: Envelope budgeting that's fast, private and works offline.
+description: >-
+  Actual is a budgeting app built on envelope budgeting: give every dollar a job, and see where it went. It's fast,
+  works offline, syncs between your devices through this server, and can import from banks and other apps.
+category: Finance
+website: https://actualbudget.org
+source: https://github.com/actualbudget/actual
+license: MIT
+icon: actual-budget.svg
+icon_source: monogram
+memory: 256
+open_until_setup: true
+web:
+  service: actual
+  port: 5006
+  health: /health
+notes:
+  - Browsers only run Actual over HTTPS, so give it a domain before you set it up.
+  - The first visit asks you to choose the server's password.
+compose: |
+  services:
+    actual:
+      image: actualbudget/actual-server:26.11.0
+      volumes:
+        - data:/data
+  volumes:
+    data:

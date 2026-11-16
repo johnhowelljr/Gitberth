@@ -1,0 +1,38 @@
+id: mealie
+name: Mealie
+tagline: Keep your recipes, plan meals, and make shopping lists from them.
+description: >-
+  Mealie is a recipe manager for the whole household: import a recipe from any website by its address, plan the week's
+  meals, and turn them into a shopping list. Recipes are scaled, searched and shared from a clean, mobile-friendly site.
+category: Home
+website: https://mealie.io
+source: https://github.com/mealie-recipes/mealie
+license: AGPL-3.0
+icon: mealie.svg
+icon_source: monogram
+memory: 512
+open_until_setup: true
+web:
+  service: mealie
+  port: 9000
+  health: /api/app/about
+inputs:
+  - name: TZ
+    label: Time zone
+    help: Like Europe/Berlin or America/New_York.
+    default: UTC
+    kind: text
+notes:
+  - Sign in as changeme@example.com with the password MyPassword, then change both in your profile right away.
+compose: |
+  services:
+    mealie:
+      image: ghcr.io/mealie-recipes/mealie:v3.31.0
+      environment:
+        ALLOW_SIGNUP: "false"
+        BASE_URL: ${APP_URL}
+        TZ: ${TZ}
+      volumes:
+        - data:/app/data
+  volumes:
+    data:

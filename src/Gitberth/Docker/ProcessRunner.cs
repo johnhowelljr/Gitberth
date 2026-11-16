@@ -14,10 +14,20 @@ public sealed class ProcessOptions
     public string? WorkingDirectory { get; init; }
     /// <summary>Extra environment variables for the child process (inherits ours otherwise).</summary>
     public IReadOnlyDictionary<string, string>? Environment { get; init; }
+    /// <summary>
+    /// Start the child with none of Gitberth's own environment but what a CLI needs to run and reach Docker (PATH, HOME and
+    /// the DOCKER_ ones), and <see cref="Environment"/>: for `docker compose`, which fills a Compose file's ${…} from it.
+    /// </summary>
+    public bool CleanEnvironment { get; init; }
     /// <summary>Called for every stdout and stderr line, from a background thread.</summary>
     public Action<string>? OnLine { get; init; }
     /// <summary>Keep at most this many chars of stdout/stderr in the result (the tail is kept).</summary>
     public int MaxCapture { get; init; } = 4 * 1024 * 1024;
+    /// <summary>
+    /// Written to the child's standard input (UTF-8, no byte order mark), which is then closed; null leaves it alone. What a
+    /// command reads this way (SQL for psql, say) never shows on its command line.
+    /// </summary>
+    public string? Stdin { get; init; }
 }
 
 /// <summary>Runs a CLI (docker, git) with an argument list (no shell), streaming its output.</summary>
@@ -34,9 +44,18 @@ public static class ProcessRunner
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8,
+            RedirectStandardInput = options.Stdin is not null,
         };
+        // A byte order mark would reach the child as the first characters it reads.
+        if (options.Stdin is not null) psi.StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         if (options.WorkingDirectory is not null) psi.WorkingDirectory = options.WorkingDirectory;
         foreach (var arg in args) psi.ArgumentList.Add(arg);
+        if (options.CleanEnvironment)
+        {
+            var keep = psi.Environment.Where(e => e.Value is not null && Kept(e.Key)).ToList();
+            psi.Environment.Clear();
+            foreach (var (key, value) in keep) psi.Environment[key] = value;
+        }
         if (options.Environment is not null)
         {
             foreach (var (key, value) in options.Environment) psi.Environment[key] = value;
@@ -65,6 +84,7 @@ public static class ProcessRunner
         process.BeginErrorReadLine();
         try
         {
+            if (options.Stdin is { } input) await WriteInputAsync(process, input, ct);
             await process.WaitForExitAsync(ct);
         }
         catch (OperationCanceledException)
@@ -79,6 +99,29 @@ public static class ProcessRunner
 
         return new ProcessResult(process.ExitCode, stdout.ToString(), stderr.ToString());
     }
+
+    // The input, then end of file. A child that ends before it read everything closes the pipe: that's its exit's to say.
+    private static async Task WriteInputAsync(Process process, string input, CancellationToken ct)
+    {
+        try
+        {
+            await process.StandardInput.WriteAsync(input.AsMemory(), ct);
+            await process.StandardInput.FlushAsync(ct);
+        }
+        catch (IOException)
+        {
+        }
+        finally
+        {
+            try { process.StandardInput.Close(); }
+            catch (IOException) { }
+        }
+    }
+
+    /// <summary>What a clean environment keeps of Gitberth's own: what the docker CLI needs to run and to reach the engine.</summary>
+    internal static bool Kept(string key) =>
+        key is "PATH" or "HOME" or "TMPDIR" or "SSL_CERT_FILE" or "SSL_CERT_DIR" or "HTTP_PROXY" or "HTTPS_PROXY" or "NO_PROXY"
+        || key.StartsWith("DOCKER_", StringComparison.Ordinal);
 
     private sealed class TailBuffer(int max)
     {

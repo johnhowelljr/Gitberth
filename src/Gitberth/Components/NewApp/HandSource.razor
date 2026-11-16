@@ -40,16 +40,36 @@
         }
         else
         {
-            <textarea class="gb-input gb-input--mono gb-paste" rows="7" spellcheck="false" aria-label="@(Mode == HandMode.Compose ? "A Compose service" : "A docker run command")"
+            <textarea class="gb-input gb-input--mono gb-paste" rows="7" spellcheck="false" aria-label="@(Mode == HandMode.Compose ? "A Compose file" : "A docker run command")"
                       placeholder="@(Mode == HandMode.Compose ? ComposeExample : RunExample)" value="@text" @oninput="PastedAsync"></textarea>
             @if (Mode == HandMode.Compose && services.Count > 1)
             {
-                <div class="gb-row gb-row--wrap" style="gap:10px">
-                    <span class="gb-t3" style="font-size:13px">@services.Count services: one app each. This one:</span>
-                    <Seg T="string" Options="@(services.Select(s => new SegOption<string>(s, s)).ToList())" Value="service" ValueChanged="PickServiceAsync" Label="Service" />
+                @* A whole file: all its services as one app (deployed with Compose), or one of them as an app of its own. *@
+                <div class="gb-choices" role="radiogroup" aria-label="What to make of it">
+                    <button type="button" class="gb-choice @(whole ? "on" : null)" role="radio" aria-checked="@(whole ? "true" : "false")" @onclick="() => whole = true">
+                        <span class="gb-radio @(whole ? "on" : null)"></span>
+                        <span style="min-width:0"><span class="gb-choice-title" style="display:block">One app with all @services.Count services</span>
+                            <span class="gb-choice-sub">@string.Join(", ", services), deployed together with docker compose</span></span>
+                    </button>
+                    <button type="button" class="gb-choice @(whole ? null : "on")" role="radio" aria-checked="@(whole ? "false" : "true")" @onclick="() => whole = false">
+                        <span class="gb-radio @(whole ? null : "on")"></span>
+                        <span style="min-width:0"><span class="gb-choice-title" style="display:block">One service as an app of its own</span>
+                            <span class="gb-choice-sub">Pick one; paste the file again for each of the others</span></span>
+                    </button>
                 </div>
+                @if (!whole)
+                {
+                    <div class="gb-row gb-row--wrap" style="gap:10px">
+                        <span class="gb-t3" style="font-size:13px">This one:</span>
+                        <Seg T="string" Options="@(services.Select(s => new SegOption<string>(s, s)).ToList())" Value="service" ValueChanged="PickServiceAsync" Label="Service" />
+                    </div>
+                }
             }
-            @if (parsed is { } p)
+            @if (Mode == HandMode.Compose && services.Count > 1 && whole)
+            {
+                <ComposeWholeForm Yaml="@text" />
+            }
+            else if (parsed is { } p)
             {
                 <div>
                     <div class="gb-micro" style="margin-bottom:10px">Gitberth read</div>
@@ -111,7 +131,7 @@
                     <Btn Kind="BtnKind.Primary" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="() => OnParsed.InvokeAsync(p)" Busy="Busy" Disabled="@(!p.Ok)">Continue</Btn>
                 </div>
             }
-            else if (composeIssues.Count > 0)
+            else if (composeIssues.Count > 0 && !(Mode == HandMode.Compose && services.Count > 1 && whole))
             {
                 <ParseIssues Issues="composeIssues" />
             }
@@ -143,6 +163,8 @@
     private IReadOnlyList<string> services = [];
     private IReadOnlyList<ParseIssue> composeIssues = [];
     private string? service;
+    // A paste with several services is one app with all of them unless one of them is picked.
+    private bool whole = true;
     private CancellationTokenSource? typing;
 
     private static readonly List<SegOption<HandMode>> Modes =

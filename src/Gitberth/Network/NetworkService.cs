@@ -130,7 +130,7 @@ public sealed record NetworkChange(string? Error, string? Done = null, string? W
 /// depends on ContainerService, which depends on this service, so it comes when it's first needed.
 /// </param>
 public sealed partial class NetworkService(DockerApi api, IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options,
-    ContainerLocks? containerLocks = null, AppLocks? appLocks = null, Lazy<PortChanger>? changer = null)
+    ContainerLocks? containerLocks = null, AppLocks? appLocks = null, Lazy<PortChanger>? changer = null, Audit.AuditLog? audit = null)
 {
     public const string ComposeProjectLabel = "com.docker.compose.project";
 
@@ -172,6 +172,7 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
             ["CheckDuplicate"] = true,
             ["Labels"] = new JsonObject { ["gitberth.managed"] = "true" },
         }, ct);
+        audit?.Record(new Audit.AuditEntry("app.network.created", $"Made the network {name} (a plain bridge) for a new app.") { Target = name });
     }
 
     /// <summary>Every container, helpers left out, with what each was created with for its ports.</summary>
@@ -215,7 +216,9 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
             List<NavApp> apps;
             // Apps are known by their gb-<slug> containers' label; an Existing app's container is listed by its own name.
             await using (var db = await dbFactory.CreateDbContextAsync(ct))
-                apps = await db.Apps.AsNoTracking().Where(a => a.Container == null).Select(a => new NavApp(a.Id, a.Name, a.Slug)).ToListAsync(ct);
+                apps = (await db.Apps.AsNoTracking().Where(a => a.Container == null || a.Source == Apps.AppSource.Compose || a.ComposeFile != null)
+                        .Select(a => new { a.Id, a.Name, a.Slug, a.Container, Compose = a.Source == Apps.AppSource.Compose || a.ComposeFile != null }).ToListAsync(ct))
+                    .Select(a => new NavApp(a.Id, a.Name, a.Slug) { Container = a.Compose ? a.Container ?? AppDefinition.ContainerNameFor(a.Slug) : null }).ToList();
             return Build(networks, containers, apps, Shared, Self);
         }
         catch (Exception ex) when (ex is DockerApiException or HttpRequestException or TimeoutException or System.Text.Json.JsonException)
@@ -323,6 +326,37 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
     /// <returns>Why it wasn't joined, or the line to show and a name it now shares with another container there.</returns>
     public async Task<NetworkChange> JoinAsync(string container, string network, string? alias = null, CancellationToken ct = default)
     {
+        var change = await JoinCoreAsync(container, network, alias, ct);
+        await AuditAsync(container, "app.network.joined", change, network, $"Couldn't join {container} to {network}",
+            [new("Network", null, network), .. AliasOf(alias) is { } named ? new[] { new Audit.AuditChange("Alias", null, named) } : []]);
+        return change;
+    }
+
+    // A network change in the audit log: its own sentence when it worked, why when it didn't, against the container's app.
+    private async Task AuditAsync(string container, string action, NetworkChange change, string target, string failed, IReadOnlyList<Audit.AuditChange>? changes = null)
+    {
+        if (audit is null) return;
+        try
+        {
+            var slug = container.StartsWith("gb-", StringComparison.Ordinal) ? container["gb-".Length..] : null;
+            await using var db = await dbFactory.CreateDbContextAsync();
+            var app = await db.Apps.AsNoTracking().Where(a => a.Container == container || (a.Container == null && slug != null && a.Slug == slug))
+                .Select(a => new { a.Id, a.Name }).FirstOrDefaultAsync();
+            audit.Record(new Audit.AuditEntry(action, change.Error is null ? change.Done ?? $"{target}: done." : $"{failed}: {Audit.AuditLog.Clean(change.Error, 300)?.TrimEnd('.')}.")
+            {
+                Outcome = change.Error is null ? Audit.AuditOutcome.Succeeded : Audit.AuditOutcome.Failed,
+                AppId = app?.Id, AppName = app?.Name, Container = container, Target = target, Changes = changes,
+            });
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // The change itself stands; only its record is missing.
+            _ = ex;
+        }
+    }
+
+    private async Task<NetworkChange> JoinCoreAsync(string container, string network, string? alias, CancellationToken ct)
+    {
         alias = AliasOf(alias);
         try
         {
@@ -394,6 +428,13 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
     /// </summary>
     public async Task<NetworkChange> LeaveAsync(string container, string network, CancellationToken ct = default)
     {
+        var change = await LeaveCoreAsync(container, network, ct);
+        await AuditAsync(container, "app.network.left", change, network, $"Couldn't take {container} off {network}", [new("Network", network, null)]);
+        return change;
+    }
+
+    private async Task<NetworkChange> LeaveCoreAsync(string container, string network, CancellationToken ct)
+    {
         try
         {
             var target = await TargetAsync(container, ct);
@@ -460,6 +501,8 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
             {
                 await ConnectAsync(target.Name, network, AliasesFor(target, alias), ipv4, lowPriority, ct);
                 results.Add(new NetworkChange(null, $"{target.Title} joined {network} again."));
+                await AuditAsync(target.Name, "app.network.joined", new NetworkChange(null, $"Joined {target.Title} to {network} again: Gitberth keeps it there."), network, "",
+                    [new("Network", null, network)]);
             }
             catch (DockerApiException ex)
             {
@@ -529,6 +572,15 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
     /// first. For an app, pass its container's name (gb-&lt;slug&gt;), whether or not the container exists.
     /// </summary>
     public async Task<NetworkChange> SetLanAddressAsync(string container, string? address, CancellationToken ct = default)
+    {
+        var change = await SetLanAddressCoreAsync(container, address, ct);
+        await AuditAsync(container, "app.lan.changed", change, LanNetwork,
+            address is null ? $"Couldn't take {container}'s own LAN address away" : $"Couldn't give {container} the LAN address {address}",
+            [new("Own LAN address", null, address ?? "none")]);
+        return change;
+    }
+
+    private async Task<NetworkChange> SetLanAddressCoreAsync(string container, string? address, CancellationToken ct)
     {
         try
         {
@@ -1036,7 +1088,9 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
         if (c.Labels.TryGetValue("gitberth.app", out var slug) && bySlug.TryGetValue(slug, out var app))
             return c.Name == AppDefinition.ContainerNameFor(slug)
                 ? new NetworkMember(c.Name, app.Name, page, c.Running, ip, [])
-                : new NetworkMember(c.Name, $"{c.Name} (a deploy of {app.Name})", PageOf(AppDefinition.ContainerNameFor(slug)), c.Running, ip, []);
+                : Databases.DatabaseNames.IsMember(c.Labels)
+                    ? new NetworkMember(c.Name, $"{c.Name} ({app.Name}'s Redis)", PageOf(AppDefinition.ContainerNameFor(slug)), c.Running, ip, [])
+                    : new NetworkMember(c.Name, $"{c.Name} (a deploy of {app.Name})", PageOf(AppDefinition.ContainerNameFor(slug)), c.Running, ip, []);
         return new NetworkMember(c.Name, c.Name, page, c.Running, ip, []);
     }
 

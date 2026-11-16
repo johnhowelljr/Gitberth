@@ -31,7 +31,8 @@ public sealed partial class AppService(
     HostScanner? hostScanner = null,
     HostPortMap? hostPorts = null,
     NetworkService? network = null,
-    Notifications.NotificationSettings? notify = null)
+    Notifications.NotificationSettings? notify = null,
+    Audit.AuditLog? audit = null)
 {
     public static readonly string[] RestartPolicies = ["unless-stopped", "always", "on-failure", "no"];
 
@@ -60,8 +61,27 @@ public sealed partial class AppService(
     internal async Task<List<NavApp>> ListLabelledAsync(CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        return await db.Apps.AsNoTracking().Where(a => a.Container == null).OrderBy(a => a.Name).Select(a => new NavApp(a.Id, a.Name, a.Slug)).ToListAsync(ct);
+        // A Compose app's members carry its slug too: its container is its web service's.
+        var rows = await db.Apps.AsNoTracking().Where(a => a.Container == null || a.Source == AppSource.Compose || a.ComposeFile != null).OrderBy(a => a.Name)
+            .Select(a => new { a.Id, a.Name, a.Slug, a.Container, Compose = a.Source == AppSource.Compose || a.ComposeFile != null }).ToListAsync(ct);
+        return rows.Select(a => new NavApp(a.Id, a.Name, a.Slug) { Container = a.Compose ? a.Container ?? AppDefinition.ContainerNameFor(a.Slug) : null }).ToList();
     }
+
+    /// <summary>
+    /// The containers apps keep as databases of their own (their Redis, gb-shop_redis), by the rows that keep them: part of
+    /// their app while it keeps them (ContainerService.RoleOf), and a container like any other once it doesn't.
+    /// </summary>
+    internal async Task<HashSet<string>> DatabaseMembersAsync(CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return (await db.ManagedDatabases.AsNoTracking().Where(d => d.Kind == DatabaseKind.Redis).Select(d => d.Server).ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Forgets the host ports apps have saved as the host-port map last read them, so the next suggestion sees one an app was
+    /// just given (an app made outside this service saves its own ports: an inline Compose app, a template).
+    /// </summary>
+    public void ForgetSavedPorts() => hostPorts?.ForgetSaved();
 
     /// <summary>Why a name can't be an app's, or null when it can.</summary>
     public static string? NameProblem(string? name) =>
@@ -78,9 +98,15 @@ public sealed partial class AppService(
         if (NameProblem(name) is { } problem) throw new ArgumentException(problem, nameof(name));
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = await db.Apps.FirstOrDefaultAsync(a => a.Id == appId, ct) ?? throw new InvalidOperationException("That app no longer exists.");
+        var before = app.Name;
         app.Name = name.Trim();
         app.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        if (before != app.Name)
+            audit?.Record(new Audit.AuditEntry("app.renamed", $"Renamed {before} to {app.Name}.")
+            {
+                AppId = app.Id, AppName = app.Name, Container = app.ContainerName, Changes = [new("Name", before, app.Name)],
+            });
     }
 
     public async Task<AppDetail?> GetDetailAsync(int id, CancellationToken ct = default)
@@ -301,8 +327,15 @@ public sealed partial class AppService(
             DetectedPort = detection?.ContainerPort,
         };
         Apply(app, m);
+        // Deployed with Compose: its Compose file's services as one app, its container its web service's.
+        if (m.ComposeFile is { Length: > 0 } composeFile && m.WebService is { Length: > 0 } web)
+        {
+            app.ComposeFile = composeFile.Trim().Trim('/');
+            app.WebService = web;
+            app.Container = Compose.ComposeNames.Member(slug, web);
+        }
         // The limits beyond memory and CPUs (their priority, processes, shared memory) go where the Settings tab keeps them.
-        if (m.Limits is { } limits) GitAppSettings.Apply(app, limits, GitAppSettings.Resources, protector);
+        else if (m.Limits is { } limits) GitAppSettings.Apply(app, limits, GitAppSettings.Resources, protector);
         app.Ports.AddRange(PortRules.ToMappings(m.Ports));
         db.Apps.Add(app);
         await db.SaveChangesAsync(ct);
@@ -311,6 +344,29 @@ public sealed partial class AppService(
         await health.SetGatheredAsync(app.ContainerName, m.GatherStats, ct);
         await restarts.SetAsync(app.ContainerName, m.RestartInterval, ct);
         if (notify is not null) await notify.SetMutedAsync(app.ContainerName, false, ct);
+        if (audit is not null)
+        {
+            var changes = new List<Audit.AuditChange>
+            {
+                new("Source", null, $"github.com/{app.Owner}/{app.Repo}"),
+                new("Branch", null, app.Branch),
+                new("Ports", null, Apps.SettingsAudit.Ports(app.Ports)),
+            };
+            if (app.Subdirectory is { } folder) changes.Add(new("Subfolder", null, folder));
+            if (app.ComposeFile is { } file)
+            {
+                changes.Add(new("Compose file", null, file));
+                changes.Add(new("Web service", null, app.WebService));
+            }
+            else if (detection is not null) changes.Add(new("Detected", null, detection.Title));
+            if (app.EnvVars.Count > 0) changes.Add(new("Variables", null, string.Join(", ", app.EnvVars.Select(v => v.Key).Order(StringComparer.Ordinal))));
+            audit.Record(new Audit.AuditEntry("app.created", app.ComposeFile is { } compose
+                ? $"Created {app.Name} from github.com/{app.Owner}/{app.Repo} ({app.Branch}), deployed with Compose from {compose}."
+                : $"Created {app.Name} from github.com/{app.Owner}/{app.Repo} ({app.Branch}).")
+            {
+                AppId = app.Id, AppName = app.Name, Container = app.ContainerName, Changes = changes,
+            });
+        }
         return app.Id;
     }
 
@@ -324,13 +380,17 @@ public sealed partial class AppService(
     public async Task<NetworkName> ChooseSlugAsync(string name, CancellationToken ct = default)
     {
         var slug = Slugify(name);
-        HashSet<string> apps;
+        HashSet<string> apps, redis;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {
             // An Existing app's container keeps its name while it's missing: a new app mustn't be called gb-<that>.
             var rows = await db.Apps.AsNoTracking().Select(a => new { a.Slug, a.Container }).ToListAsync(ct);
             apps = rows.Select(a => a.Slug)
                 .Concat(rows.Where(a => a.Container is { } c && c.StartsWith("gb-", StringComparison.Ordinal)).Select(a => a.Container!["gb-".Length..]))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // An app's Redis answers to its alias (shop-redis) on the shared network: no app is ever called that, even while
+            // the Redis is stopped.
+            redis = (await db.ManagedDatabases.AsNoTracking().Where(d => d.Kind == DatabaseKind.Redis).Select(d => d.Name).ToListAsync(ct))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
         // A route of a removed domain that still goes to a name keeps it taken, as a route to a port keeps the port: the
@@ -340,6 +400,7 @@ public sealed partial class AppService(
         answered.Add(GitberthName);
         string? Taken(string candidate) =>
             apps.Contains(candidate) ? $"{candidate} is another app's"
+            : redis.Contains(candidate) ? $"{candidate} is an app's Redis"
             : routed.Contains(candidate) || routed.Contains(AppDefinition.ContainerNameFor(candidate)) ? $"a removed domain still goes to {candidate}"
             : answered.Contains(candidate) || answered.Contains(AppDefinition.ContainerNameFor(candidate)) ? $"{candidate} is taken on {options.Network}"
             : null;
@@ -407,12 +468,22 @@ public sealed partial class AppService(
             if (Stale(app, loaded) is { } stale) return new PortsSaved([stale], NeedsRestart: false);
             if (AppSettingsModel.PortsKey(app.Ports) == AppSettingsModel.PortsKey(rows)) return new PortsSaved([], NeedsRestart: false);
             restart = PortRules.NeedsRestart(app.Ports, rows);
+            var before = Apps.SettingsAudit.Ports(app.Ports);
+            var webBefore = PortRules.WebOf(app.Ports)?.HostPort;
             app.Ports.Clear();
             app.Ports.AddRange(PortRules.ToMappings(rows));
             if (restart && app.CurrentImage is not null) app.ConfigChangePending = true;
+            // An app from a template is told its LAN address (APP_URL…) by each deploy: a deploy without a build applies a new one.
+            if (app.TemplateId is not null && app.CurrentImage is not null && PortRules.WebOf(app.Ports)?.HostPort != webBefore) app.ConfigChangePending = true;
             app.UpdatedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
             routed = app.Domains.Count > 0;
+            audit?.Record(new Audit.AuditEntry("app.ports.changed",
+                restart && app.CurrentImage is not null ? $"Changed {app.Name}'s ports: they apply when its container is made again." : $"Changed {app.Name}'s ports.")
+            {
+                AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
+                Changes = [new("Ports", before, Apps.SettingsAudit.Ports(app.Ports))],
+            });
         }
         hostPorts?.ForgetSaved();
         // Routes go to the web port's live binding: a moved marker re-routes the domains now, and a port that isn't live

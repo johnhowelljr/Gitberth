@@ -102,13 +102,14 @@ public sealed partial class ContainerService(
     {
         var (containers, error) = await docker.ListContainersAsync(managedOnly: false, ct);
         var appsBySlug = (await apps.ListLabelledAsync(ct)).ToDictionary(a => a.Slug, StringComparer.Ordinal);
+        var members = await apps.DatabaseMembersAsync(ct);
         var memory = stats.Current.Containers
             .Where(c => c.MemoryBytes is not null)
             .ToDictionary(c => c.Name, c => c.MemoryBytes, StringComparer.Ordinal);
         var self = options.OwnContainer;
         var rows = containers.Select(c =>
             {
-                var role = RoleOf(c, appsBySlug, self);
+                var role = RoleOf(c, appsBySlug, self, members);
                 var app = c.Labels.TryGetValue("gitberth.app", out var slug) && appsBySlug.TryGetValue(slug, out var a) ? a : null;
                 var title = role == ContainerRole.App && app is not null ? app.Name : titles.For(c.Name) ?? c.Name;
                 return new ContainerRow(c, title, role, app, memory.GetValueOrDefault(c.Name));
@@ -186,6 +187,10 @@ public sealed partial class ContainerService(
     {
         (ContainerRole.Self, ContainerAction.Stop or ContainerAction.Remove) =>
             "Gitberth can't stop or remove its own container. Use docker compose on the host for that.",
+        (ContainerRole.AppInternal, _) when Gitberth.Databases.DatabaseNames.IsMember(row.Container.Labels) =>
+            "This is an app's own Redis: Gitberth starts, keeps and removes it with its app (the app's Settings › Databases).",
+        (ContainerRole.AppInternal, _) when row.Container.Labels.ContainsKey(Compose.ComposeNames.ServiceLabel) =>
+            $"This is a service of {row.App?.Name ?? "a Compose app"}: start, stop and restart it with the app, or alone on the app's Services card.",
         (ContainerRole.AppInternal, _) => "This is a deploy's temporary or previous container, which Gitberth removes itself.",
         (ContainerRole.App, ContainerAction.Remove) => "Delete the app on its page instead: that removes its container too.",
         _ => null,
@@ -310,12 +315,23 @@ public sealed partial class ContainerService(
         && Regex.IsMatch(value, $@"(?:^|[@/=,;\s]){Regex.Escape(host)}(?=$|[:/;,?\s])", RegexOptions.IgnoreCase);
 
     /// <param name="self">Gitberth's own container (<see cref="GitberthOptions.OwnContainer"/>): its ID, or its hostname, which is its short ID unless set otherwise.</param>
-    internal static ContainerRole RoleOf(ContainerSummary c, IReadOnlyDictionary<string, NavApp> appsBySlug, string? self)
+    /// <param name="members">
+    /// The containers apps keep as databases of their own (their Redis, by the rows that keep them); null where only whether a
+    /// container is the tunnel or a database matters, and every such container counts as kept.
+    /// </param>
+    internal static ContainerRole RoleOf(ContainerSummary c, IReadOnlyDictionary<string, NavApp> appsBySlug, string? self, IReadOnlySet<string>? members = null)
     {
         if (self is not null && (c.Name == self || (c.Id.Length > 0 && c.Id.StartsWith(self, StringComparison.Ordinal)))) return ContainerRole.Self;
         if (HostScanHelper.IsHelper(c.Labels)) return ContainerRole.Helper;
-        if (c.Labels.TryGetValue("gitberth.app", out var slug) && appsBySlug.ContainsKey(slug))
+        // An app's own Redis is part of its app while the app keeps it, whatever the app's container is called. One no app
+        // keeps any more (its app forgotten, or its row lost) is a container like any other: seen, started, stopped, removed.
+        if (Gitberth.Databases.DatabaseNames.IsMember(c.Labels))
+            return members is null || members.Contains(c.Name) ? ContainerRole.AppInternal : IsDatabaseImage(c.Image) ? ContainerRole.Database : ContainerRole.Other;
+        if (c.Labels.TryGetValue("gitberth.app", out var slug) && appsBySlug.TryGetValue(slug, out var owner))
         {
+            // A Compose app's services: its web service's container is the app's, the others are its own (its Services card).
+            if (c.Labels.ContainsKey(Compose.ComposeNames.ServiceLabel))
+                return owner.Container is { } web && c.Name == web ? ContainerRole.App : ContainerRole.AppInternal;
             if (c.Name == AppDefinition.ContainerNameFor(slug)) return ContainerRole.App;
             // Under another name: a Git app's is its deploy's (as anything with the bridge label is); an app made from an
             // image, renamed outside Gitberth, is a container like any other.

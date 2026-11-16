@@ -79,6 +79,8 @@ public sealed partial class DomainService
                         var name = await db.Apps.AsNoTracking().Where(a => a.Id == owner.AppId).Select(a => a.Name).FirstOrDefaultAsync(ct);
                         return ($"{hostname} is a domain of {name ?? "an app"}. Pick a name of its own for GitHub's webhooks, like hooks.example.com.", SyncReport.Nothing);
                     }
+                    if (string.Equals(await StatusHostAsync(ct), hostname, StringComparison.OrdinalIgnoreCase))
+                        return ($"{hostname} is the status page's (Settings › Uptime and status page). Pick a name of its own for GitHub's webhooks, like hooks.example.com.", SyncReport.Nothing);
                     if (await UsedInTunnelAsync(hostname, ct) is { } used) return (used, SyncReport.Nothing);
                     // Freed by an earlier change and still on its way out: it's this one's again.
                     if (await db.DomainRemovals.FindAsync([hostname], ct) is { } pending) db.DomainRemovals.Remove(pending);
@@ -96,6 +98,10 @@ public sealed partial class DomainService
                 await settings.SetAsync(SettingKeys.GitHubWebhookHostsBefore, string.Join('\n', kept), ct);
             }
             await settings.SetAsync(SettingKeys.GitHubWebhookHost, hostname, ct);
+            AuditSetting("domains.webhook.changed", hostname is null ? $"Turned off instant deploys: GitHub's webhooks no longer reach Gitberth at {before}."
+                    : before is null ? $"Turned on instant deploys: GitHub's webhooks reach Gitberth at {hostname}."
+                    : $"Moved GitHub's webhooks from {before} to {hostname}.",
+                "webhook host", [new("Webhook host", before, hostname)]);
             return (null, await SyncIfTokenAsync(ct));
         }
         finally

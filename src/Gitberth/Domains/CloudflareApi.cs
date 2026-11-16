@@ -29,8 +29,9 @@ public sealed record AccessApp(string Id, string Name, string Domain, string Aud
 
 /// <summary>
 /// Gitberth's Cloudflare API calls: the routes of the tunnel on this host, and the DNS records that send a domain to it.
+/// Every change it makes to DNS and Cloudflare Access is recorded in the audit log, made or failed (never the token).
 /// </summary>
-public sealed class CloudflareApi(IHttpClientFactory httpFactory)
+public sealed class CloudflareApi(IHttpClientFactory httpFactory, Audit.AuditLog? audit = null)
 {
     private const string ApiRoot = "https://api.cloudflare.com/client/v4/";
 
@@ -126,17 +127,41 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
         };
         if (record.Comment is { Length: > 0 } comment) body["comment"] = comment;
         if (record.Tags is { Length: > 0 } tags) body["tags"] = new JsonArray([.. tags.Split(',').Select(tag => (JsonNode?)tag)]);
-        return SendAsync(token, HttpMethod.Post, $"zones/{zoneId}/dns_records", body, $"add a DNS record for {record.Name}", ct);
+        return AuditedAsync(() => SendAsync(token, HttpMethod.Post, $"zones/{zoneId}/dns_records", body, $"add a DNS record for {record.Name}", ct),
+            "cloudflare.dns.added", record.Name, $"Added a DNS record for {record.Name}: {record.Type} to {record.Content}{(record.Proxied ? ", proxied" : "")}.",
+            $"Couldn't add a DNS record for {record.Name}", [new("Record", null, $"{record.Type} {record.Content}")]);
     }
 
     public Task SetProxiedAsync(string token, string zoneId, string recordId, string hostname, CancellationToken ct = default) =>
-        SendAsync(token, HttpMethod.Patch, $"zones/{zoneId}/dns_records/{recordId}", new JsonObject { ["proxied"] = true }, $"turn on Cloudflare's proxy for {hostname}", ct);
+        AuditedAsync(() => SendAsync(token, HttpMethod.Patch, $"zones/{zoneId}/dns_records/{recordId}", new JsonObject { ["proxied"] = true }, $"turn on Cloudflare's proxy for {hostname}", ct),
+            "cloudflare.dns.changed", hostname, $"Turned on Cloudflare's proxy for {hostname}'s DNS record.", $"Couldn't turn on Cloudflare's proxy for {hostname}",
+            [new("Proxied", "off", "on")]);
 
     public Task SetCommentAsync(string token, string zoneId, string recordId, string hostname, string comment, CancellationToken ct = default) =>
         SendAsync(token, HttpMethod.Patch, $"zones/{zoneId}/dns_records/{recordId}", new JsonObject { ["comment"] = comment }, $"update the note on {hostname}'s DNS record", ct);
 
     public Task DeleteDnsRecordAsync(string token, string zoneId, string recordId, string hostname, CancellationToken ct = default) =>
-        SendAsync(token, HttpMethod.Delete, $"zones/{zoneId}/dns_records/{recordId}", null, $"remove a DNS record for {hostname}", ct);
+        AuditedAsync(() => SendAsync(token, HttpMethod.Delete, $"zones/{zoneId}/dns_records/{recordId}", null, $"remove a DNS record for {hostname}", ct),
+            "cloudflare.dns.deleted", hostname, $"Removed a DNS record for {hostname}.", $"Couldn't remove a DNS record for {hostname}", []);
+
+    // A change to Cloudflare in the audit log: made, or why it wasn't.
+    private async Task<JsonNode?> AuditedAsync(Func<Task<JsonNode?>> call, string action, string target, string done, string failed, IReadOnlyList<Audit.AuditChange> changes)
+    {
+        try
+        {
+            var result = await call();
+            audit?.Record(new Audit.AuditEntry(action, done) { Target = target, Changes = changes });
+            return result;
+        }
+        catch (CloudflareApiException ex)
+        {
+            audit?.Record(new Audit.AuditEntry(action, $"{failed}: {Audit.AuditLog.Clean(ex.Message, 300)?.TrimEnd('.')}.")
+            {
+                Target = target, Changes = changes, Outcome = Audit.AuditOutcome.Failed,
+            });
+            throw;
+        }
+    }
 
     // ---- Cloudflare Access (Zero Trust): protected domains ----
 
@@ -192,16 +217,21 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory)
     public async Task<AccessApp> SaveAccessAppAsync(string token, string accountId, string? appId, string hostname, IReadOnlyList<string> emails, CancellationToken ct = default)
     {
         var body = AccessAppBody(hostname, emails);
+        var who = emails.Count == 1 ? "1 email address may sign in" : $"{emails.Count} email addresses may sign in";
         var result = appId is null
-            ? await SendAsync(token, HttpMethod.Post, $"accounts/{accountId}/access/apps", body, $"put {hostname} behind Cloudflare Access", ct, WithAccess)
-            : await SendAsync(token, HttpMethod.Put, $"accounts/{accountId}/access/apps/{Uri.EscapeDataString(appId)}", body, $"change who may sign in to {hostname}", ct, WithAccess);
+            ? await AuditedAsync(() => SendAsync(token, HttpMethod.Post, $"accounts/{accountId}/access/apps", body, $"put {hostname} behind Cloudflare Access", ct, WithAccess),
+                "cloudflare.access.created", hostname, $"Put {hostname} behind Cloudflare Access: {who}.", $"Couldn't put {hostname} behind Cloudflare Access", [new("Allowed", null, who)])
+            : await AuditedAsync(() => SendAsync(token, HttpMethod.Put, $"accounts/{accountId}/access/apps/{Uri.EscapeDataString(appId)}", body, $"change who may sign in to {hostname}", ct, WithAccess),
+                "cloudflare.access.changed", hostname, $"Changed who may sign in to {hostname} through Cloudflare Access: {who}.", $"Couldn't change who may sign in to {hostname}",
+                [new("Allowed", null, who)]);
         return (result is JsonObject o ? ParseAccessApp(o) : null) ?? throw new CloudflareApiException($"Cloudflare didn't say which Access application it made for {hostname}.");
     }
 
     /// <summary>Removes an Access application; one that's gone already counts as removed.</summary>
     public Task DeleteAccessAppAsync(string token, string accountId, string appId, string hostname, CancellationToken ct = default) =>
-        SendAsync(token, HttpMethod.Delete, $"accounts/{accountId}/access/apps/{Uri.EscapeDataString(appId)}", null, $"take {hostname} out of Cloudflare Access", ct,
-            WithAccess, notFoundOk: true);
+        AuditedAsync(() => SendAsync(token, HttpMethod.Delete, $"accounts/{accountId}/access/apps/{Uri.EscapeDataString(appId)}", null, $"take {hostname} out of Cloudflare Access", ct,
+            WithAccess, notFoundOk: true), "cloudflare.access.removed", hostname, $"Took {hostname} out of Cloudflare Access: the application Gitberth made for it is gone.",
+            $"Couldn't take {hostname} out of Cloudflare Access", []);
 
     /// <summary>The application Gitberth makes for a protected host: self-hosted, one policy that allows the listed emails.</summary>
     internal static JsonObject AccessAppBody(string hostname, IReadOnlyList<string> emails) => new()

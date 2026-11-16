@@ -1,0 +1,28 @@
+id: memos
+name: Memos
+tagline: Quick notes in a timeline, written in Markdown and kept on your host.
+description: >-
+  Memos is a light place for quick notes: jot something down in Markdown, tag it, and find it again in a timeline. Notes
+  can be private, shared with your other users, or public, and it has an API and a few mobile apps.
+category: Documents
+website: https://usememos.com
+source: https://github.com/usememos/memos
+license: MIT
+icon: memos.svg
+icon_source: monogram
+memory: 128
+open_until_setup: true
+web:
+  service: memos
+  port: 5230
+  health: /healthz
+notes:
+  - The first account you make is the admin.
+compose: |
+  services:
+    memos:
+      image: neosmemo/memos:26.11.0
+      volumes:
+        - data:/var/opt/memos
+  volumes:
+    data:

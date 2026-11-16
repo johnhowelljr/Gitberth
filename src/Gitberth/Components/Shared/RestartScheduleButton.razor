@@ -1,6 +1,7 @@
 @inject RestartSchedules Restarts
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
+@inject Gitberth.Audit.AuditLog Audit
 
 @* A container's scheduled restart, on the Health page: what it is now, and a click to change it. *@
 <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.RestartAlt" OnClick="EditAsync" Class="gb-restart-btn"
@@ -26,10 +27,18 @@
         if (result is null || result.Canceled || result.Data is not RestartScheduleDialog.Choice choice) return;
         try
         {
+            var before = Restarts.For(Container);
             await Restarts.SetAsync(Container, choice.Every);
-            Snackbar.Add(choice.Every is { } every
+            var said = choice.Every is { } every
                 ? $"{Title} restarts {every}, counted from when it last started."
-                : $"{Title} isn't restarted on a schedule any more.", Severity.Success);
+                : $"{Title} isn't restarted on a schedule any more.";
+            if (before != choice.Every)
+                Audit.Record(new Gitberth.Audit.AuditEntry("app.schedule.changed", said)
+                {
+                    AppName = Title, Container = Container,
+                    Changes = [new("Scheduled restart", before?.ToString() ?? "never", choice.Every?.ToString() ?? "never")],
+                });
+            Snackbar.Add(said, Severity.Success);
         }
         catch (Exception ex)
         {

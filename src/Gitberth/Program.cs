@@ -1,4 +1,5 @@
 using Gitberth;
+using Gitberth.Agents;
 using Gitberth.Apps;
 using Gitberth.Components;
 using Gitberth.Data;
@@ -29,6 +30,17 @@ var options = GitberthOptions.FromConfiguration(builder.Configuration, builder.E
 foreach (var dir in new[] { options.DataDir, options.KeysDir, options.LogsDir, options.WorkDir })
     Directory.CreateDirectory(dir);
 builder.Services.AddSingleton(options);
+// The audit log: every change to the system, who made it and how it ended (/data/audit.db). Its writer is flushed when
+// Gitberth stops: registered first among the hosted services, it's the last to stop.
+builder.Services.AddSingleton<Gitberth.Audit.AuditLog>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Gitberth.Audit.AuditLog>());
+builder.Services.AddSingleton<Gitberth.Audit.AuditSettings>();
+// What Gitberth is about to change in Docker (DockerCli and DockerApi register it), so its own events aren't recorded as
+// changes made outside Gitberth.
+builder.Services.AddSingleton<Gitberth.Audit.ExpectedChanges>();
+// Who acts through a page: the signed-in user and the browser's address, around everything a circuit does.
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, Gitberth.Audit.AuditCircuitHandler>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -81,6 +93,9 @@ builder.Services.AddSingleton<TunnelLocator>();
 builder.Services.AddSingleton<DomainService>();
 builder.Services.AddSingleton<GitClient>();
 builder.Services.AddSingleton<DockerCli>();
+// ---- Compose apps (1.3): a repo's Compose file, or a pasted one, deployed as one app with all its services.
+builder.Services.AddSingleton<Gitberth.Compose.ComposeRunner>();
+builder.Services.AddSingleton<Gitberth.Compose.ComposeApps>();
 builder.Services.AddSingleton<ProjectAnalyzer>();
 builder.Services.AddSingleton<AppLocks>();
 builder.Services.AddSingleton<LiveLogHub>();
@@ -177,8 +192,39 @@ builder.Services.AddSingleton<GitHubPulls>();
 // Shared by PreviewService and AppActions: deleting an app never races a watcher pass that would make its previews again.
 builder.Services.AddSingleton<Gitberth.Previews.PreviewGate>();
 builder.Services.AddSingleton<Gitberth.Previews.PreviewService>();
+// ---- Databases (1.3): an app's own Postgres database or Redis, made from its page, and each preview's own ----
+// The Postgres servers (Settings › Databases), which can set one up as an app; an app's databases, which its deploys set and
+// AppActions lets go of with it (each comes to the other when first needed).
+builder.Services.AddSingleton(sp => new Lazy<ImageService>(sp.GetRequiredService<ImageService>));
+builder.Services.AddSingleton(sp => new Lazy<AppCreator>(sp.GetRequiredService<AppCreator>));
+builder.Services.AddSingleton<Gitberth.Databases.DatabaseServers>();
+builder.Services.AddSingleton<Gitberth.Databases.DatabaseService>();
+builder.Services.AddSingleton(sp => new Lazy<Gitberth.Databases.DatabaseService>(sp.GetRequiredService<Gitberth.Databases.DatabaseService>));
+// ---- App templates (1.3): a gallery of self-hosted apps, each installed as a Compose app with its databases, secrets and domain.
+builder.Services.AddSingleton(_ => Gitberth.Templates.TemplateCatalog.Bundled);
+builder.Services.AddSingleton<Gitberth.Templates.TemplateInstaller>();
+// Where a template's app is reached (APP_URL…), as each of its deploys tells it.
+builder.Services.AddSingleton<Gitberth.Templates.TemplateBuiltIns>();
+// ---- Uptime checks, the status page and the down page (1.3) ----
+// Which apps' domains show the down page (DownWatcher decides, a deploy's swap too), read by every domain sync.
+builder.Services.AddSingleton<DownStates>();
+builder.Services.AddSingleton<DownWatcher>();
+// Each app checked from outside, the way a visitor reaches it; the history in /data/uptime.db.
+builder.Services.AddSingleton<Gitberth.Uptime.UptimeCertificates>();
+builder.Services.AddHttpClient(Gitberth.Uptime.UptimeChecker.ClientName, c => c.Timeout = Gitberth.Uptime.UptimeChecker.Timeout)
+    .ConfigurePrimaryHttpMessageHandler(sp => Gitberth.Uptime.UptimeChecker.Handler(sp.GetRequiredService<Gitberth.Uptime.UptimeCertificates>(),
+        sp.GetRequiredService<GitberthOptions>().UptimeConnectTo));
+builder.Services.AddSingleton<Gitberth.Uptime.UptimeChecker>();
+builder.Services.AddSingleton<Gitberth.Uptime.UptimeStore>();
+builder.Services.AddSingleton<Gitberth.Uptime.UptimeMonitor>();
+builder.Services.AddSingleton<Gitberth.Uptime.UptimeSettings>();
+// The public pages (the down page and the status page): the only thing a marker host is ever answered with.
+builder.Services.AddSingleton<Gitberth.Public.StatusPage>();
+builder.Services.AddSingleton<Gitberth.Public.PublicPages>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Gitberth.Uptime.UptimeMonitor>());
 builder.Services.AddHostedService<StartupTasks>();
 // Before the event watcher, so they hear its first starts.
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DownWatcher>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NetworkKeeper>());
 builder.Services.AddHostedService<AppSync>();
 builder.Services.AddHostedService<UpdateWatcher>();
@@ -193,6 +239,12 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerEventWatc
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContainerStatsCollector>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CronScheduler>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<RestartScheduler>());
+// The audit log's daily prune, and its own follow of Docker's events for changes made outside Gitberth.
+builder.Services.AddHostedService<Gitberth.Audit.AuditMaintenance>();
+builder.Services.AddHostedService<Gitberth.Audit.OutsideChanges>();
+// ---- AI agents and the HTTP API (1.3): API tokens (Settings › AI agents and API), the MCP server at /mcp and the same tools
+// at /api/v1, each tool calling the service the UI calls.
+builder.Services.AddGitberthAgents();
 
 var app = builder.Build();
 
@@ -206,17 +258,27 @@ await app.Services.GetRequiredService<HealthSettings>().LoadAsync();
 await app.Services.GetRequiredService<ContainerTitles>().LoadAsync();
 await app.Services.GetRequiredService<RestartSchedules>().LoadAsync();
 await app.Services.GetRequiredService<NotificationSettings>().LoadAsync();
+await app.Services.GetRequiredService<Gitberth.Audit.AuditSettings>().LoadAsync();
+
+// The very first: a request for one of Gitberth's marker hosts (a tunnel rule's httpHostHeader under gitberth.invalid) is
+// answered with a public page (a domain's down page, the status page) or a bare 404, and goes no further. Nothing else of
+// Gitberth's (sign-in, Blazor, the hooks, static files, the "not found" page) ever answers one.
+app.Use(Gitberth.Public.PublicPages.Middleware);
 
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// /mcp and /api answer their own status codes and JSON (never the "not found" page), and refuse browser pages (an Origin header).
+app.Use(Gitberth.Agents.AgentPaths.Middleware);
 
 // Explicit (instead of the implicit ones at the top of the pipeline) so re-executed
 // status-code pages like /not-found also pass through authorization.
 app.UseAuthentication();
 app.UseAuthorization();
+// What an API token changes is the token's in the audit log.
+app.Use(Gitberth.Agents.AgentPaths.ActorMiddleware);
 app.UseAntiforgery();
 
 app.MapStaticAssets();
@@ -230,20 +292,37 @@ GitHubWebhookEndpoint.Map(app);
 // for the same reason.
 DeployHookEndpoint.Map(app);
 
-app.MapPost("/logout", async (HttpContext context, IAntiforgery antiforgery) =>
+// The status page on the LAN, without signing in, while it's on (a bare 404 while it's off).
+app.MapMethods("/status", ["GET", "HEAD"], (HttpContext context, Gitberth.Public.PublicPages pages) => pages.StatusAsync(context, json: false)).AllowAnonymous();
+app.MapMethods("/status.json", ["GET", "HEAD"], (HttpContext context, Gitberth.Public.PublicPages pages) => pages.StatusAsync(context, json: true)).AllowAnonymous();
+// A domain's down page as its visitors would see it, for the Domains card (signed in only).
+app.MapGet("/down-page/preview", (HttpContext context, Gitberth.Public.PublicPages pages, string? host) => pages.PreviewAsync(context, host)).RequireAuthorization();
+
+app.MapPost("/logout", async (HttpContext context, IAntiforgery antiforgery, Gitberth.Audit.AuditLog audit) =>
 {
     if (!await antiforgery.IsRequestValidAsync(context)) return Results.BadRequest();
+    var who = context.User.Identity is { IsAuthenticated: true, Name: { Length: > 0 } name } ? name : null;
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    if (who is not null) Gitberth.Audit.AuditEndpoints.SignedOut(audit, who, context);
     return Results.Redirect("/login");
 });
 
 // Right after the admin password changed: the browser that changed it swaps its sign-in for one under the new password,
 // with the one-time renewal it was given. Every other browser's sign-in no longer counts.
-app.MapGet("/account/renew", async (HttpContext context, AdminAuthService auth, string? renewal) =>
+app.MapGet("/account/renew", async (HttpContext context, AdminAuthService auth, Gitberth.Audit.AuditLog audit, string? renewal) =>
 {
     if (auth.RedeemRenewal(renewal) is not { } user) return Results.Redirect("/login");
     await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, user, new AuthenticationProperties { IsPersistent = true });
+    Gitberth.Audit.AuditEndpoints.Renewed(audit, user.Identity?.Name ?? AdminAuthService.UserName, context);
     return Results.Redirect("/settings?password=changed#password");
 });
+
+// The audit log's export: the page's filtered view as CSV or JSON Lines, for signed-in people.
+Gitberth.Audit.AuditEndpoints.Map(app);
+// The app templates' icons, for New app's gallery (signed in only).
+Gitberth.Templates.TemplateEndpoints.Map(app);
+
+// AI agents (MCP, /mcp) and scripts (/api/v1), with an API token only: never the sign-in cookie.
+app.MapGitberthAgents();
 
 app.Run();

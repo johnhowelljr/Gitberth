@@ -23,7 +23,10 @@ public static class PreviewCopy
     public static void Sync(AppDefinition preview, AppDefinition parent, PreviewInfo info)
     {
         preview.Source = AppSource.Git;
-        preview.Container = null;
+        // A Compose app's preview is a project of its own (gb-<preview's slug>), its container its web service's.
+        preview.ComposeFile = parent.ComposeFile;
+        preview.WebService = parent.ComposeFile is null ? null : parent.WebService;
+        preview.Container = parent.ComposeFile is not null && parent.WebService is { Length: > 0 } web ? Compose.ComposeNames.Member(preview.Slug, web) : null;
         preview.AutoDeploy = false;
         preview.PreviewMode = PreviewMode.Off;
         preview.Owner = parent.Owner;

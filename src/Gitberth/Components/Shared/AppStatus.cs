@@ -24,8 +24,10 @@ public static class AppStatus
         ? new("gb-st--renamed", "Renamed", MudBlazor.Icons.Material.Outlined.DriveFileRenameOutline, "warn")
         : state switch
     {
-        AppState.Running => new("gb-st--running", "Running", null, "good"),
-        AppState.Healthy => new("gb-st--healthy", "Healthy", null, "good"),
+        // A Compose app says how many of its services run: Running 3/3.
+        AppState.Running => new("gb-st--running", Counted(text, "Running"), null, "good"),
+        AppState.Healthy => new("gb-st--healthy", Counted(text, "Healthy"), null, "good"),
+        AppState.Degraded => new("gb-st--error", Word(text, "Degraded"), MudBlazor.Icons.Material.Outlined.WarningAmber, "serious"),
         AppState.Starting => new("gb-st--starting", "Starting", null, "warn"),
         AppState.Restarting => new("gb-st--starting", "Restarting", null, "warn"),
         AppState.Unhealthy => new("gb-st--unhealthy", "Unhealthy", MudBlazor.Icons.Material.Outlined.HealthAndSafety, "serious"),
@@ -69,4 +71,8 @@ public static class AppStatus
     };
 
     private static string Word(string? text, string fallback) => string.IsNullOrWhiteSpace(text) ? fallback : text;
+
+    // The word with a Compose app's count of running services ("Running 3/3"); just the word for any other text.
+    private static string Counted(string? text, string word) =>
+        text is { Length: > 0 } t && t.StartsWith(word + " ", StringComparison.Ordinal) && t.Contains('/') ? t : word;
 }

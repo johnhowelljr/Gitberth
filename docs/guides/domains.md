@@ -53,9 +53,31 @@ With cloudflared on the host's network, the tunnel reaches apps through a host p
 
 ## What Gitberth does in Cloudflare
 
-- **Tunnel route.** One route for the domain that covers every path: pages, `/_next` scripts, APIs and sign-in. It goes to the web port where the app's running container publishes it, so settings you haven't applied yet can't break a live domain. A stopped app's routes stay as they are.
+- **Tunnel route.** One route for the domain that covers every path: pages, `/_next` scripts, APIs and sign-in. It goes to the web port where the app's running container publishes it, so settings you haven't applied yet can't break a live domain. While the app can't be served (it's stopped, its container is down, or a deploy has to stop it), the route goes to Gitberth's [down page](#the-down-page) instead, and back to the app once it runs.
 - **DNS.** A proxied DNS record that sends the domain to the tunnel. Gitberth marks the records it adds with the comment **Added by Gitberth**.
 - **Checking.** Gitberth checks the routes and records again after every deploy and every change to an app's settings or ports, and moves a route when the app's host port changes. **Check again** at the top of the card reads them again; **Fix** writes what's missing.
+
+## The down page
+
+While an app can't be served, its domains show a clean page that says the site is temporarily unavailable (a `503` with
+`Retry-After`, never cached or indexed), instead of Cloudflare's error:
+
+- at once when you stop the app;
+- after 20 seconds when its container stops on its own (a crash, a crash loop, a stop outside Gitberth); a restart never
+  shows it;
+- while a deploy that has to stop the running container replaces it (before the old one stops, and until the new one
+  passed its checks or the old one is back);
+- while a protected domain can't be put behind Cloudflare Access: then the down page is all that's served.
+
+It goes back to the app as soon as the app runs again. The **Domains** card shows such a domain as **Down page**, with
+why. The preview button next to each domain opens its down page as visitors would see it. A domain whose route sends a
+`Host` of your own (its **HTTP Host Header** setting in Cloudflare) keeps that header and shows Cloudflare's error
+instead, as before.
+
+The card's **Down page** switch turns it off for the app (it's on unless you turn it off), and its **Message** adds a
+sentence of yours to the page, like "Back by 9:00 UTC." Both save on their own. The page never names the app, its
+container or an address; a protected domain's says nothing beyond its name. See
+[Uptime checks, the status page and the down page](uptime-and-status-page.md#the-down-page) for how it works.
 
 ## The main domain
 
@@ -80,7 +102,7 @@ A protected domain asks visitors to sign in before they reach the app, through C
 
 Changing **Who may sign in** updates every protected domain's application. Turning **Protected** off (confirm with **Stop protecting**) takes the check off the route first and then removes the application Gitberth made; removing the domain or its app does the same. Until the application is gone, visitors still have to sign in: if it can't be removed, Gitberth says **… still asks visitors to sign in: Gitberth couldn't remove its Cloudflare Access application.** with the reason (or **… may still ask visitors to sign in: …** when it couldn't see the account's Access applications at all) and how it tries again. While the app runs, the card says **Still behind Cloudflare Access, though it isn't protected any more.**, and **Fix** tries again. While it doesn't, the card has no **Fix**: when Cloudflare refused, the note asks you to click **Check again** in **Settings › Domains (Cloudflare) › Protection** once that's fixed, as for a removed domain (see [Remove a domain](#remove-a-domain)). For a domain you removed, or one whose app you deleted, Gitberth remembers the application and tries again until it's gone (see [Remove a domain](#remove-a-domain)), or until another tunnel on your Cloudflare account serves that name and uses the application (another Gitberth took the name over, say): removing it then would turn everyone away there, so Gitberth leaves it to that one. Gitberth only ever changes or removes applications it named **Gitberth: …**; your own stay as they are.
 
-While protection isn't set up, the switch is off and greyed out, and the card says why. A domain that's protected but can't be protected right now (the token lost the permission, or Zero Trust was turned off) isn't served at all rather than served open: its route is taken out of the tunnel and the card says **Not served until it's behind Cloudflare Access.** with the reason. It comes back once protection works again. When Cloudflare Access only failed for a moment (Cloudflare was busy or couldn't be reached), the note ends with **Gitberth tries again every 15 minutes.**, and it does. A problem that lasts, like the ones above, waits for you to fix it: Gitberth doesn't ask Cloudflare again every 15 minutes in vain.
+While protection isn't set up, the switch is off and greyed out, and the card says why. A domain that's protected but can't be protected right now (the token lost the permission, or Zero Trust was turned off) is never served open: only its [down page](#the-down-page) is served, which says nothing beyond the domain's name, and the card says **Shows only the down page until it can be put behind Cloudflare Access.** with the reason. With the app's down page turned off, its route is taken out of the tunnel instead, and the card says **Not served until it's behind Cloudflare Access.** It comes back once protection works again. When Cloudflare Access only failed for a moment (Cloudflare was busy or couldn't be reached), the note ends with **Gitberth tries again every 15 minutes.**, and it does. A problem that lasts, like the ones above, waits for you to fix it: Gitberth doesn't ask Cloudflare again every 15 minutes in vain.
 
 If Cloudflare can't take the change when you turn **Protected** on (it's busy, say), the domain stays marked protected but its old, open route is still there. Gitberth says so, the card says **Served without Cloudflare Access, so anyone can open it.**, and Gitberth tries again every 15 minutes until the domain is behind Access or out of the tunnel. **Fix** tries at once. Turning **Protected** off works the same way: until the tunnel takes the change, Gitberth says the domain **isn't open to everyone yet**, the card says **Still behind Cloudflare Access, though it isn't protected any more.**, and Gitberth tries again every 15 minutes. That carries on if Gitberth restarts meanwhile: within 15 minutes of starting, it syncs once by itself. Gitberth also remembers the Access check it put on each route, so turning protection off takes it off even when its application was deleted in Cloudflare's dashboard; a check you added yourself is never touched.
 
@@ -117,6 +139,9 @@ The line under a **Not working** domain says why. The button next to it fixes wh
 | Served without Cloudflare Access, so anyone can open it. … | Click **Fix**: Gitberth puts it behind Access, or stops serving it until it can. When it got that way because Cloudflare couldn't take a change, Gitberth also tries every 15 minutes by itself. |
 | Some of its rules in the tunnel aren't Gitberth's and skip Cloudflare Access: remove them in Cloudflare. | Delete those rules in the tunnel's settings in Cloudflare, or add the Access check to them yourself. Gitberth never changes them. |
 | Not served until it's behind Cloudflare Access. … | Set up [protection](#set-up-protection-once), or turn **Protected** off. When the rest says Cloudflare was busy or couldn't be reached, click **Fix**, or leave it: Gitberth tries again every 15 minutes. |
+| Shows only the down page until it can be put behind Cloudflare Access. … | The same as above: until then visitors get the down page, never the app. |
+| Shows the down page: … is stopped. / …'s container isn't running. | Start the app, or look at its logs. The domain goes back to the app as soon as it runs. |
+| The tunnel still shows the down page, though … runs again. | Click **Fix**. |
 | Still behind Cloudflare Access, though it isn't protected any more. Fix takes it out. | Click **Fix**. When the tunnel couldn't take the change, or Cloudflare was busy, Gitberth also tries every 15 minutes by itself. When Cloudflare refused to remove the Access application (the token lost **Account › Access: Apps and Policies › Edit**, say), the note under the list says so: fix that first. |
 | Couldn't be checked. | Cloudflare didn't answer while Gitberth checked the domain; the banner above the list says why. A protected domain says this even while its app isn't running, since it may still be served without Cloudflare Access. Click **Check again** in a moment. |
 
@@ -158,7 +183,7 @@ flowchart LR
 
 cloudflared makes an outbound connection to Cloudflare, so there's no port to open on your router. Visitors on the domain and devices on your LAN reach the same container. An app with an own LAN address keeps using its host port for its domains, because the tunnel can't reach own LAN addresses.
 
-For apps with a domain, a Git deploy starts the new version next to the old one and moves the domain's visitors to it before the old one stops. See [How deploys and changes work](../concepts/how-deploys-work.md#deploys-without-downtime).
+For apps with a domain, a Git deploy starts the new version next to the old one and moves the domain's visitors to it before the old one stops. When it can't (the app has a volume, say), the domain shows the [down page](#the-down-page) while the container is replaced. See [How deploys and changes work](../concepts/how-deploys-work.md#deploys-without-downtime).
 
 > **Note**
 > Gitberth's own page is an app too, so you could give it a domain. Whoever reaches Gitberth controls Docker on the host. Put Cloudflare Access in front of that domain before you add it. See [Security](../concepts/security.md#putting-a-domain-in-front-of-gitberth).
@@ -166,6 +191,7 @@ For apps with a domain, a Git deploy starts the new version next to the old one 
 ## Related
 
 - [Networking](networking.md)
+- [Uptime checks, the status page and the down page](uptime-and-status-page.md)
 - [GitHub integration](github-integration.md)
 - [Gitberth's settings](../reference/gitberth-settings.md#domains-cloudflare)
 - [Troubleshooting](troubleshooting.md#domains)

@@ -1,0 +1,35 @@
+id: jellyfin
+name: Jellyfin
+tagline: Stream your movies, shows and music to every screen you own.
+description: >-
+  Jellyfin organizes your media into a library with posters, descriptions and subtitles, then streams it to browsers,
+  phones, TVs and game consoles, transcoding when a device needs it. It's free software with no accounts or tracking.
+category: Media
+website: https://jellyfin.org
+source: https://github.com/jellyfin/jellyfin
+license: GPL-2.0
+icon: jellyfin.svg
+icon_source: monogram
+memory: 1024
+open_until_setup: true
+web:
+  service: jellyfin
+  port: 8096
+  health: /health
+notes:
+  - The first visit walks you through making the admin account and adding your libraries.
+  - Its media volume holds your files. To use a folder of your own instead, change the volume in its Compose file on the Settings tab.
+compose: |
+  services:
+    jellyfin:
+      image: jellyfin/jellyfin:12.4.20261026-211555
+      environment:
+        JELLYFIN_PublishedServerUrl: ${APP_URL}
+      volumes:
+        - config:/config
+        - cache:/cache
+        - media:/media
+  volumes:
+    config:
+    cache:
+    media:

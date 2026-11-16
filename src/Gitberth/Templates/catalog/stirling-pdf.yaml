@@ -1,0 +1,43 @@
+id: stirling-pdf
+name: Stirling-PDF
+tagline: Edit, merge, split, convert and sign PDFs on your own host.
+description: >-
+  Stirling-PDF does what people usually upload PDFs to websites for: merge, split, rotate, compress, convert to and from
+  other formats, add signatures and watermarks, and much more. Files are processed on this host and deleted afterwards.
+category: Documents
+website: https://www.stirlingpdf.com
+source: https://github.com/Stirling-Tools/Stirling-PDF
+license: MIT
+icon: stirling-pdf.svg
+icon_source: monogram
+memory: 2048
+web:
+  service: stirling-pdf
+  port: 8080
+  health: /
+inputs:
+  - name: ADMIN_USER
+    label: Admin's user name
+    help: The account Stirling-PDF makes on its first start, in place of its usual admin with a password everyone knows.
+    default: admin
+    required: true
+    kind: text
+secrets:
+  - name: ADMIN_PASSWORD
+    length: 20
+notes:
+  - Sign in as ADMIN_USER with the password in ADMIN_PASSWORD. Both are on its Environment tab, where Show reveals the password.
+compose: |
+  services:
+    stirling-pdf:
+      image: stirlingtools/stirling-pdf:3.3.0
+      environment:
+        SECURITY_ENABLELOGIN: "true"
+        SECURITY_INITIALLOGIN_USERNAME: ${ADMIN_USER}
+        SECURITY_INITIALLOGIN_PASSWORD: ${ADMIN_PASSWORD}
+      volumes:
+        - configs:/configs
+        - storage:/storage
+  volumes:
+    configs:
+    storage:

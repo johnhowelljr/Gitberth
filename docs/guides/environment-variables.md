@@ -12,9 +12,10 @@ This page covers all three: how to set them, how secrets are kept, and which val
 | The image's own variables | Apps that run an image | Folded on the **Environment** tab; change one to make it the app's own |
 | The repo's variables in GitHub | Git apps | The **Stored in GitHub** card on the **Environment** tab, or GitHub |
 | Variables Gitberth sets, like Vercel | Git apps | Turned on or off in **Settings** › **Source** |
+| Connection strings of the app's [databases](databases.md) (`DATABASE_URL`, `REDIS_URL`) | Every app | **Settings** › **Databases** |
 
 For a Git app, a value you set on the app wins over the same name in GitHub, and both win over Gitberth's Vercel-style
-variables.
+variables. A database's connection string wins over them all: it's the one the database Gitberth made answers to.
 
 ## Set an app's own variables
 

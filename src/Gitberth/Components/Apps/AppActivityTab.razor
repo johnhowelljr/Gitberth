@@ -32,7 +32,7 @@
                             {
                                 <span class="gb-mono gb-t3" style="font-size:12px">@dep.ShortSha</span>
                             }
-                            <span class="gb-t3" style="font-size:12px">@Format.Trigger(dep)@(dep.NoCache ? " · without the build cache" : "") · took @Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
+                            <span class="gb-t3" style="font-size:12px">@Format.Trigger(dep)@(Format.RequestedBy(dep) is { } by ? $" {by}" : "")@(dep.NoCache ? " · without the build cache" : "") · took @Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
                             <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Href="@($"apps/{dep.AppId}/deployments/{dep.Id}")" Icon="@Icons.Material.Outlined.Article">Log</Btn>
                             @if (CanRollBackTo(dep, View.Row?.CurrentImage, kept))
                             {
@@ -45,7 +45,11 @@
         }
     </ChildContent>
     <Foot>
-        @if (View.Summary.Source == AppSource.Git)
+        @if (View.Row?.IsCompose == true)
+        {
+            <span>The releases of the last 3 successful deploys (their files and images) are kept for rolling back.</span>
+        }
+        else if (View.Summary.Source == AppSource.Git)
         {
             <span>The images from the last 3 successful deploys are kept for rolling back.</span>
         }
@@ -53,12 +57,16 @@
         {
             <span>Docker's events are kept for 7 days; Gitberth's own entries stay.</span>
         }
+        <a class="gb-card-link" style="margin-left:auto;gap:5px" href="@AuditHref"><SvgIcon Icon="@Icons.Material.Outlined.Policy" />All changes to @View.Summary.Title in the audit log</a>
     </Foot>
 </SectionCard>
 
 @code {
     [Parameter, EditorRequired] public AppView View { get; set; } = default!;
     [Parameter] public EventCallback Changed { get; set; }
+
+    // Every change to the app, who made it and how it ended, over its whole life: the audit log, filtered to it.
+    private string AuditHref => $"audit?range=all&app={Uri.EscapeDataString(View.Summary.Container)}";
 
     private IReadOnlyList<ActivityItem>? items;
     // A Git app's build images still on this host: only their deploys can be rolled back to.
@@ -72,12 +80,14 @@
     /// went (only the last few are kept), and a deploy can't build an older commit, so nothing is offered for them.
     /// </summary>
     public static bool CanRollBackTo(Deployment dep, string? current, IReadOnlySet<string> kept) =>
-        dep.Status == DeployStatus.Succeeded && dep.ImageTag is { } image && image != current && kept.Contains(image);
+        dep.Status == DeployStatus.Succeeded
+        // A Compose app's deploy whose release is kept: its files and images run again.
+        && (kept.Contains(AppActions.ReleaseKey(dep.Id)) || dep.ImageTag is { } image && image != current && kept.Contains(image));
 
     private IReadOnlyList<SegOption<string>> Filters =>
     [
         new("all", "All"),
-        .. View.Summary.Source == AppSource.Git ? [new SegOption<string>("deploys", "Deploys")] : Array.Empty<SegOption<string>>(),
+        .. View.Row?.Deployed == true ? [new SegOption<string>("deploys", "Deploys")] : Array.Empty<SegOption<string>>(),
         new("changes", "Changes"),
         new("docker", "Starts and stops"),
     ];
@@ -102,7 +112,7 @@
             items = [];
             Snackbar.Add(ex.Message, Severity.Error);
         }
-        if (View.Summary.Source == AppSource.Git && View.Summary.AppId is int appId)
+        if (View.Row?.Deployed == true && View.Summary.AppId is int appId)
         {
             try { kept = await Actions.RollbackImagesAsync(appId); }
             catch (Exception) { kept = new HashSet<string>(); }
@@ -112,8 +122,11 @@
     private async Task RollbackAsync(Deployment to)
     {
         if (View.Summary.AppId is not int appId) return;
-        if (await Dialogs.ShowMessageBoxAsync($"Roll back to #{to.Id}?",
-                $"The container restarts from the image built from {to.ShortSha}. New commits still deploy automatically.", yesText: "Roll back", cancelText: "Cancel") != true) return;
+        var compose = View.Row?.IsCompose == true;
+        var text = compose
+            ? $"Its services run that release again ({(to.ShortSha is { Length: > 0 } sha ? sha : $"deploy #{to.Id}")}), with its images and the app's settings now.{(View.Row?.FromRepo == true ? " New commits still deploy automatically." : "")}"
+            : $"The container restarts from the image built from {to.ShortSha}. New commits still deploy automatically.";
+        if (await Dialogs.ShowMessageBoxAsync($"Roll back to #{to.Id}?", text, yesText: "Roll back", cancelText: "Cancel") != true) return;
         busy = true;
         try
         {

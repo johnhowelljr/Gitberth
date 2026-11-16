@@ -1,0 +1,60 @@
+id: wordpress
+name: WordPress
+tagline: The website and blog builder that runs much of the web.
+description: >-
+  WordPress builds anything from a blog to a business site: pick a theme, write with its block editor, and add features
+  from tens of thousands of plugins. This template runs it with a MariaDB database of its own.
+category: Websites
+website: https://wordpress.org
+source: https://github.com/WordPress/WordPress
+license: GPL-2.0
+icon: wordpress.svg
+icon_source: monogram
+memory: 512
+open_until_setup: true
+web:
+  service: wordpress
+  port: 80
+  health: /
+secrets:
+  - name: DB_PASSWORD
+    length: 32
+  - name: DB_ROOT_PASSWORD
+    length: 32
+notes:
+  - The first visit walks you through WordPress's install, where you name your site and make the admin account.
+  - WordPress remembers the address you install it from as the site's, so install it from the address you'll use.
+compose: |
+  services:
+    wordpress:
+      image: wordpress:7.1.4-php8.4-apache
+      environment:
+        WORDPRESS_DB_HOST: wordpress-db
+        WORDPRESS_DB_USER: wordpress
+        WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+        WORDPRESS_DB_NAME: wordpress
+        WORDPRESS_CONFIG_EXTRA: |
+          if (($$_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') { $$_SERVER['HTTPS'] = 'on'; }
+      volumes:
+        - site:/var/www/html
+      depends_on:
+        wordpress-db:
+          condition: service_healthy
+    wordpress-db:
+      image: mariadb:11.8.9
+      environment:
+        MARIADB_DATABASE: wordpress
+        MARIADB_USER: wordpress
+        MARIADB_PASSWORD: ${DB_PASSWORD}
+        MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      volumes:
+        - db:/var/lib/mysql
+      healthcheck:
+        test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+        interval: 5s
+        timeout: 5s
+        retries: 20
+        start_period: 30s
+  volumes:
+    site:
+    db:

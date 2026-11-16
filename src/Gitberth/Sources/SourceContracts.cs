@@ -67,6 +67,12 @@ public sealed record NewAppDraft
     /// before): a database is refused such a volume without it (NewContainerRequest.UseExistingData).
     /// </summary>
     public bool UseExistingData { get; init; }
+
+    /// <summary>
+    /// The container is named like the app's slug (postgres), not gb-&lt;slug&gt;: a Postgres server Gitberth sets up is
+    /// called what apps expect it to be. The slug is free as a container's name too (AppService.ChooseSlugAsync).
+    /// </summary>
+    public bool ContainerIsSlug { get; init; }
 }
 
 public sealed record CreatePlan(NewAppDraft Draft, string Slug, string Container, string? NameTaken, string DockerRun, bool NeedsPull, DiskSpace Disk,

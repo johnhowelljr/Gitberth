@@ -11,8 +11,8 @@ using MudBlazor;
 
 namespace Gitberth.Components.NewApp;
 
-/// <summary>Where a new app comes from, as the four source cards offer it.</summary>
-public enum NewAppSource { Git, Registry, Local, Hand }
+/// <summary>Where a new app comes from, as the five source cards offer it.</summary>
+public enum NewAppSource { Git, Registry, Local, Hand, Templates }
 
 /// <summary>The wizard's three steps: Source, Configure, Create.</summary>
 public enum NewAppStep { Source, Configure, Create }
@@ -413,7 +413,7 @@ public static class PopularImages
     ];
 }
 
-/// <summary>The four source cards' words and icons.</summary>
+/// <summary>The five source cards' words and icons.</summary>
 public static class NewAppSources
 {
     /// <summary>The Git source's card: only github.com repositories work for now, so it says so.</summary>
@@ -426,6 +426,8 @@ public static class NewAppSources
         NewAppSource.Registry => ("Registry image", "Pull any image from Docker Hub, GitHub or your own registry, and keep it up to date.",
             Icons.Material.Outlined.CloudDownload, ["Docker Hub", "ghcr.io"]),
         NewAppSource.Local => ("Local image", "Run an image that's already on this host, with no pull.", Icons.Material.Outlined.Layers, ["No pull"]),
-        _ => ("By hand", "Paste a docker run command or a Compose service, or fill in a blank form.", Icons.Material.Outlined.EditNote, ["docker run", "Compose"]),
+        NewAppSource.Templates => ("Templates", "Popular self-hosted apps, set up with their database, secrets and domain in one click.",
+            Icons.Material.Outlined.AutoAwesomeMosaic, ["One click", "Databases"]),
+        _ =>("By hand", "Paste a docker run command or a Compose file (one app with all its services), or fill in a blank form.", Icons.Material.Outlined.EditNote, ["docker run", "Compose"]),
     };
 }

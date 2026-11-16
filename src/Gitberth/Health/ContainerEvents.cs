@@ -12,8 +12,10 @@ namespace Gitberth.Health;
 /// <param name="Signal">For kill: the signal sent.</param>
 /// <param name="Deployment">For a container Gitberth started: the deploy that started it.</param>
 /// <param name="Trigger">What started that deploy, as <see cref="DeployTrigger"/> names it.</param>
+/// <param name="App">For a service of a Compose app Gitberth deploys: the app's slug.</param>
+/// <param name="Service">For a service of a Compose app Gitberth deploys: which service it is.</param>
 public sealed record ContainerEvent(DateTime Time, string Id, string Name, string Action,
-    int? ExitCode = null, int? Signal = null, int? Deployment = null, string? Trigger = null)
+    int? ExitCode = null, int? Signal = null, int? Deployment = null, string? Trigger = null, string? App = null, string? Service = null)
 {
     /// <summary>The actions the Health page marks. Docker sends many more (exec, attach, rename, destroy, …).</summary>
     public static bool Relevant(string action) =>

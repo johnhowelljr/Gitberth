@@ -186,7 +186,7 @@ class Repo:
         return self.branches().get(branch)
 
     def commit(self, files, branch="main", message=None, base=None, force=False, wait=True):
-        """Commits files ({path: text, or None to delete}) on the branch (made from base when it doesn't exist), as a push
+        """Commits files ({path: text, {"symlink": target} for a link, or None to delete}) on the branch (made from base when it doesn't exist), as a push
         would: GitHub's push delivery (and pull_request synchronize for its open pull requests) goes to every hook.
         With wait, it returns once those deliveries were answered. Returns {"sha", "before", "deliveries", ...}."""
         return self.s.api("POST", self._p("/commits"), {"branch": branch, "files": files, "message": message or f"Change on {branch}",
@@ -391,6 +391,15 @@ class Cloudflare:
     def set_team(self, name):
         """Zero Trust set up with this team name (name.cloudflareaccess.com); None: not set up."""
         return self.s.api("DELETE", "/cloudflare/team") if name is None else self.s.api("PUT", "/cloudflare/team", {"name": name})
+
+    def certificate_days(self, host, days):
+        """The edge's certificate for the host name is valid this many days from now on (None: the usual 90). A visitor's
+        HTTPS request on the stand-in's 443 (Gitberth's uptime checks) gets it in its TLS handshake."""
+        return self.s.api("PUT", "/cloudflare/certificate", {"host": host, "days": days})
+
+    def edge_calls(self, since=0, host=None):
+        """The HTTPS requests visitors made through the stand-in's edge (Gitberth's uptime checks), with how they went."""
+        return self.s.calls(since, host=host, kind="edge")
 
     def options(self, list_includes_policies=None):
         return self.s.api("PUT", "/cloudflare/options", {"list_includes_policies": list_includes_policies})

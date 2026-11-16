@@ -1,10 +1,12 @@
-# Paste a docker run command or a Compose service
+# Paste a docker run command or a Compose file
 
 Most self-hosted projects tell you how to run them with a `docker run` command or a `docker-compose.yml`. Paste that into
 Gitberth instead of running it in a shell: Gitberth reads it, shows you what it understood and what it left out, and
-creates the app only when you say so. You can also start from a blank form with nothing but an image.
+creates the app only when you say so. A whole Compose file with several services can be one app with all of them. You
+can also start from a blank form with nothing but an image.
 
-What you paste stays in the page while you work. Gitberth doesn't store it as text; it stores the app's settings.
+What you paste as a `docker run` or as one service stays in the page while you work: Gitberth stores the app's settings,
+not the text. A whole Compose file deployed as one app is kept, encrypted, since it's what the app is deployed from.
 
 ## Paste a docker run command
 
@@ -50,17 +52,34 @@ What you paste stays in the page while you work. Gitberth doesn't store it as te
        restart: unless-stopped
    ```
 
-3. If the file has more than one service, Gitberth says **N services: one app each. This one:** and lets you pick which
-   one to read. Each service becomes its own app, so create them one at a time. Create a database before the app that
-   uses it.
+3. If the file has more than one service, Gitberth offers two ways:
+   - **One app with all N services** (the first choice): see [Paste a whole Compose file](#paste-a-whole-compose-file).
+   - **One service as an app of its own**: pick the service under **This one:**. Each service becomes its own app, so
+     create them one at a time, a database before the app that uses it.
 
    ![New app by hand, with a pasted Compose service and what Gitberth read from it](../images/new-app-paste-compose.webp)
 
-4. Check **Gitberth read** and the groups under it, then click **Continue**, **Review and create** and **Create and start**,
-   as for `docker run`.
+4. For one service, check **Gitberth read** and the groups under it, then click **Continue**, **Review and create** and
+   **Create and start**, as for `docker run`.
 
-Values Compose would take from a project's `.env` file or your shell, like `${DB_PASSWORD}`, aren't there when you paste:
-Gitberth asks you to fill them in. A `${VAR:-default}` uses its default.
+Values Compose would take from a project's `.env` file or your shell, like `${DB_PASSWORD}`, aren't there when you paste
+one service: Gitberth asks you to fill them in. A `${VAR:-default}` uses its default.
+
+## Paste a whole Compose file
+
+With **One app with all N services**, the file is deployed as it is, with `docker compose`, as one
+[Compose app](compose-apps.md):
+
+1. Check the **Name**, the **Web service** (the one that publishes a web port, never a database; its container is the
+   app's, with its LAN address and domains) and its **Web port**.
+2. Fill in **Its variables**: every `${NAME}` the file uses. A **needed** one (`${NAME:?…}`) must have a value; one left
+   empty takes the file's default. They're the app's own variables from then on, on its **Environment** tab.
+3. Click **Create and deploy**. Gitberth keeps the file, pulls (and builds) its services, brings them up and opens the
+   deploy's log.
+
+Everything in the file stays as Compose reads it: `depends_on`, named volumes (as `gb-<app>_<volume>`), networks, health
+checks, `env_file`, secrets. Change the file later on the app's **Settings** tab, under **Compose**: **Save and deploy**
+says which services come and go, then deploys it.
 
 ## Start from a blank form
 
@@ -80,8 +99,9 @@ Whichever way you start, the app's first **Updates** choice is **New apps from a
 
 ## What Gitberth keeps and what it doesn't
 
-Every app Gitberth creates is on its shared network, `gitberth`, with a container named `gb-<name>`. A paste is read with
-that in mind.
+This is for a `docker run` or one service. Every such app is on Gitberth's shared network, `gitberth`, with a container
+named `gb-<name>`, and a paste is read with that in mind. (A whole Compose file deployed as one app keeps all of it: see
+[Compose apps](compose-apps.md).)
 
 | In the paste | What Gitberth does |
 |---|---|
@@ -96,8 +116,8 @@ that in mind.
 | `--restart` / `restart:` | Kept. Without one, the app gets **Unless stopped**, so it comes back after the host restarts. |
 | `--network` / `networks:` | The default bridge, or the project's default network, becomes Gitberth's shared network. A named network is joined; if the host doesn't have it, Configure offers **Create it** or **Remove**. `host` and `none` are kept. |
 | Health check, labels, logging, limits, devices, capabilities and the other run settings | Kept, and editable on Configure. Labels starting with `gitberth.` are refused. |
-| `build:` without `image:` | Refused: build code with [Deploy an app from GitHub](deploy-from-github.md). With `image:` too, Gitberth runs the image and builds nothing. |
-| `depends_on:`, `links:`, `--link` | Not carried over: create the other app first. On the shared network, apps reach each other by name. |
+| `build:` without `image:` | Refused: build code with [Deploy an app from GitHub](deploy-from-github.md), where a repo's Compose file builds its services. With `image:` too, Gitberth runs the image and builds nothing. |
+| `depends_on:`, `links:`, `--link` | Not carried over: create the other app first, or paste the whole file as one app. On the shared network, apps reach each other by name. |
 | `--rm` | Not carried over: Gitberth keeps its apps. |
 | `scale:`, `deploy: replicas:`, `profiles:`, `extends:`, `secrets:`, `configs:` | Not carried over: one container per app, and Swarm settings don't apply. |
 | Namespaces, runtimes, disk I/O limits, Windows-only options and the like | Not carried over, each with its reason. |
@@ -108,6 +128,7 @@ or the command with `docker`.
 
 ## Related
 
+- [Compose apps](compose-apps.md)
 - [Run an image from a registry](run-a-registry-image.md), for the Configure and review steps
 - [Manage apps](manage-apps.md)
 - [Networking](networking.md)
