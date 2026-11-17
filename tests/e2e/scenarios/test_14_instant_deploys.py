@@ -437,7 +437,7 @@ def test_turning_on_routes_only_the_hook_path_and_adds_the_webhook_to_each_repo(
             copy = kv(section, "Secret").get_by_role("button", name="Copy the webhook secret")
             copy.click()
             # It says so for a moment (1.4 s).
-            until(lambda: copy.get_attribute("title") == "Copied", 10, "the secret's copy button to say Copied", interval=0.1)
+            until(lambda: copy.get_attribute("data-tip-text") == "Copied", 10, "the secret's copy button to say Copied", interval=0.1)
             assert settings.evaluate("() => window.__gbCopied") == [url, secret]
 
             # ---- GitHub: Gitberth's webhook on each deployed repo, with the payload URL, Settings' secret and its three

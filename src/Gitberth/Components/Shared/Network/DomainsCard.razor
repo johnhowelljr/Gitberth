@@ -14,11 +14,11 @@
 <section class="gb-card @Class" aria-labelledby="gb-domains-title">
     <div class="gb-card-head">
         <div class="gb-card-title" id="gb-domains-title">
-            <SvgIcon Icon="@Icons.Material.Outlined.Public" />Domains
+            <SvgIcon Icon="@Icons.Material.Outlined.Public" />Domains<Tip Key="network.domains" />
             <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Through the Cloudflare tunnel</span>
         </div>
         <div class="gb-card-actions">
-            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="LoadAsync" Disabled="@(busy || AppId is null)">Check again</Btn>
+            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="LoadAsync" Disabled="@(busy || AppId is null)" Tip="network.domains.check-again">Check again</Btn>
         </div>
     </div>
     @if (AppId is not null && overview is null)
@@ -65,7 +65,7 @@
                                 <a href="@($"https://{d.Hostname}/")" target="_blank" rel="noopener">@d.Hostname</a>
                                 @if (several && d.Main)
                                 {
-                                    <span class="gb-tag gb-tag--accent">Main</span>
+                                    <span class="gb-tag gb-tag--accent" data-tip="network.domains.main">Main</span>
                                 }
                             </div>
                             <div class="gb-drow-sub">
@@ -78,38 +78,35 @@
                         </div>
                         @if (d.DownPage)
                         {
-                            <span class="gb-pill2 gb-tone-info" title="Visitors get Gitberth's down page instead of Cloudflare's error">
+                            <span class="gb-pill2 gb-tone-info" data-tip="network.domains.showing-down-page">
                                 <SvgIcon Icon="@Icons.Material.Outlined.WebAssetOff" />Down page
                             </span>
                         }
                         else
                         {
-                            <span class="gb-pill2 @(d.Working ? "gb-tone-good" : "gb-tone-warn")">
-                                @if (d.Working)
-                                {
-                                    <i class="gb-st-dot gb-st-dot--running"></i>
-                                }
-                                else
-                                {
-                                    <SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />
-                                }
-                                @(d.Working ? "Live" : "Not working")
-                            </span>
+                            @if (d.Working)
+                            {
+                                <span class="gb-pill2 gb-tone-good" data-tip="network.domains.live"><i class="gb-st-dot gb-st-dot--running"></i>Live</span>
+                            }
+                            else
+                            {
+                                <span class="gb-pill2 gb-tone-warn" data-tip="network.domains.not-working"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />Not working</span>
+                            }
                         }
                         <div class="gb-drow-acts d-acts">
                             @if (d.Fix == DomainFix.Sync)
                             {
-                                <Btn Size="BtnSize.Sm" OnClick="FixAsync" Disabled="busy">Fix<span class="gb-sr"> @d.Hostname</span></Btn>
+                                <Btn Size="BtnSize.Sm" OnClick="FixAsync" Disabled="busy" Tip="network.domains.fix">Fix<span class="gb-sr"> @d.Hostname</span></Btn>
                             }
                             else if (d.Fix == DomainFix.PointDnsHere)
                             {
-                                <Btn Size="BtnSize.Sm" OnClick="() => PointHereAsync(d.Hostname)" Disabled="busy">Point it here<span class="gb-sr">: @d.Hostname</span></Btn>
+                                <Btn Size="BtnSize.Sm" OnClick="() => PointHereAsync(d.Hostname)" Disabled="busy" Tip="network.domains.point-here">Point it here<span class="gb-sr">: @d.Hostname</span></Btn>
                             }
                             else if (d.Fix == DomainFix.ServeAllPaths)
                             {
-                                <Btn Size="BtnSize.Sm" OnClick="() => ServeAllPathsAsync(d.Hostname)" Disabled="busy">Serve every path<span class="gb-sr"> on @d.Hostname</span></Btn>
+                                <Btn Size="BtnSize.Sm" OnClick="() => ServeAllPathsAsync(d.Hostname)" Disabled="busy" Tip="network.domains.serve-all-paths">Serve every path<span class="gb-sr"> on @d.Hostname</span></Btn>
                             }
-                            <span class="gb-row" style="gap:6px" title="@ProtectTitle(d)">
+                            <span class="gb-row" style="gap:6px" data-tip="network.domains.protected" data-tip-detail="@ProtectTitle(d)">
                                 <button type="button" role="switch" aria-checked="@(d.Protected ? "true" : "false")" aria-label="@($"Protected: {d.Hostname}")"
                                         class="gb-switch @(d.Protected ? "on" : null)" disabled="@(busy || (!d.Protected && overview.ProtectionProblem is not null))"
                                         @onclick="() => ToggleProtectedAsync(d)"></button>
@@ -117,12 +114,12 @@
                             </span>
                             @if (several && !d.Main)
                             {
-                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeMainAsync(d.Hostname)" Disabled="busy">Make main<span class="gb-sr">: @d.Hostname</span></Btn>
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeMainAsync(d.Hostname)" Disabled="busy" Tip="network.domains.make-main">Make main<span class="gb-sr">: @d.Hostname</span></Btn>
                             }
                             <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.WebAssetOff" Href="@($"down-page/preview?host={Uri.EscapeDataString(d.Hostname)}")" Target="_blank"
-                                 Label="@($"Preview the down page of {d.Hostname}")" />
-                            <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.OpenInNew" Href="@($"https://{d.Hostname}/")" Target="_blank" Label="@($"Open {d.Hostname}")" />
-                            <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveAsync(d.Hostname)" Disabled="busy" Label="@($"Remove {d.Hostname}")" />
+                                 Label="@($"Preview the down page of {d.Hostname}")" Tip="network.domains.preview-down-page" />
+                            <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.OpenInNew" Href="@($"https://{d.Hostname}/")" Target="_blank" Label="@($"Open {d.Hostname}")" Title="Open in a new tab" />
+                            <Btn Kind="BtnKind.Ghost" IconOnly="true" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveAsync(d.Hostname)" Disabled="busy" Label="@($"Remove {d.Hostname}")" Tip="network.domains.remove" />
                         </div>
                     </div>
                 }
@@ -141,14 +138,14 @@
             {
                 @* The app's down page: on by default, saved on its own (outside the app's other settings). *@
                 <div class="gb-card-body gb-downset">
-                    <SwitchRow @key="@($"dp{downKey}")" Title="Down page" Value="downPage" ValueChanged="SetDownPageAsync" Disabled="savingDown"
+                    <SwitchRow @key="@($"dp{downKey}")" Title="Down page" Value="downPage" ValueChanged="SetDownPageAsync" Disabled="savingDown" Tip="network.domains.down-page"
                                Sub="@($"While {AppName} can't be served (stopped, its container down, a deploy replacing it, or its protection not applied yet), its domains show a plain \"temporarily unavailable\" page instead of Cloudflare's error. A protected domain's shows only its name.")" />
                     @if (downPage)
                     {
                         <div class="gb-downset-msg">
                             <input class="gb-input gb-input--sm" id="down-message" maxlength="280" placeholder="A message for visitors (optional), like: Back by 9:00 UTC."
                                    aria-label="Down page message" value="@downMessage" @oninput="e => downMessage = e.Value?.ToString()" disabled="@savingDown" />
-                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Secondary" OnClick="SaveMessageAsync" Disabled="@(savingDown || (downMessage ?? "").Trim() == (savedMessage ?? ""))">Save message</Btn>
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Secondary" OnClick="SaveMessageAsync" Disabled="@(savingDown || (downMessage ?? "").Trim() == (savedMessage ?? ""))" Tip="network.domains.down-message">Save message</Btn>
                         </div>
                     }
                 </div>
@@ -167,9 +164,16 @@
             <div class="gb-dadd">
                 <input class="gb-input gb-input--sm gb-input--mono" placeholder="app.example.com" aria-label="New domain" value="@newDomain"
                        @oninput="e => newDomain = e.Value?.ToString()" @onkeydown="OnKeyDown" disabled="@(busy || !CanAdd)" />
-                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="@(!CanAdd || string.IsNullOrWhiteSpace(newDomain))" Busy="busy">
-                    @(PublishFirst ? "Add domain and publish" : "Add domain")
-                </Btn>
+                @if (PublishFirst)
+                {
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="@(!CanAdd || string.IsNullOrWhiteSpace(newDomain))" Busy="busy"
+                         Tip="network.domains.add-publish">Add domain and publish</Btn>
+                }
+                else
+                {
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="@(!CanAdd || string.IsNullOrWhiteSpace(newDomain))" Busy="busy"
+                         Tip="network.domains.add">Add domain</Btn>
+                }
             </div>
             @if (web is null)
             {

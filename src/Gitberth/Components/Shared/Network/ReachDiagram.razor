@@ -9,7 +9,7 @@
     {
         <div class="gb-stage-head">
             <div style="min-width:0">
-                <h2 class="gb-stage-title">@Title</h2>
+                <h2 class="gb-stage-title">@Title<Tip Key="network.reach" /></h2>
                 @if (Sub is not null)
                 {
                     <div class="gb-stage-sub">@Sub</div>
@@ -63,7 +63,7 @@
                         {
                             var hp = Model.HostPort!;
                             <div class="gb-fn gb-fn--hp @ReachModel.ToneClass(hp.Tone) @(hp.Ghost ? "gb-fn--ghost" : null)" style="@style">
-                                <div class="gb-micro">Host port</div>
+                                <div class="gb-micro"><Tip Key="network.port.host-port">Host port</Tip></div>
                                 <div class="gb-fn-port">@(hp.Port?.ToString(CultureInfo.InvariantCulture) ?? "None yet")</div>
                                 <div class="gb-fn-s">@hp.Sub</div>
                             </div>
@@ -91,10 +91,10 @@
     @if (Legend)
     {
         <div class="gb-stage-foot">
-            <span class="gb-lg gb-ac-public"><SvgIcon Icon="@Icons.Material.Outlined.Public" />Internet, through the tunnel</span>
-            <span class="gb-lg gb-ac-lan"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />LAN</span>
-            <span class="gb-lg gb-ac-host"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Host only</span>
-            <span class="gb-lg gb-ac-internal"><SvgIcon Icon="@Icons.Material.Outlined.Hub" />Internal, by name</span>
+            <span class="gb-lg gb-ac-public" data-tip="badge.access.domain"><SvgIcon Icon="@Icons.Material.Outlined.Public" />Internet, through the tunnel</span>
+            <span class="gb-lg gb-ac-lan" data-tip="badge.access.lan"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />LAN</span>
+            <span class="gb-lg gb-ac-host" data-tip="badge.access.host-only"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Host only</span>
+            <span class="gb-lg gb-ac-internal" data-tip="badge.access.internal"><SvgIcon Icon="@Icons.Material.Outlined.Hub" />Internal, by name</span>
             <span class="gb-grow"></span>
             @if (FootNote is not null)
             {
@@ -125,11 +125,11 @@
     private RenderFragment Source(ReachSource s, string style) => @<text>
         @if (s.Href is not null)
         {
-            <a href="@s.Href" class="gb-fn gb-fn--src @ReachModel.ToneClass(s.Tone) @(s.Ghost ? "gb-fn--ghost" : null)" style="@style">@SourceInside(s)</a>
+            <a href="@s.Href" class="gb-fn gb-fn--src @ReachModel.ToneClass(s.Tone) @(s.Ghost ? "gb-fn--ghost" : null)" style="@style" data-tip="@s.Tip">@SourceInside(s)</a>
         }
         else
         {
-            <div class="gb-fn gb-fn--src @ReachModel.ToneClass(s.Tone) @(s.Ghost ? "gb-fn--ghost" : null)" style="@style">@SourceInside(s)</div>
+            <div class="gb-fn gb-fn--src @ReachModel.ToneClass(s.Tone) @(s.Ghost ? "gb-fn--ghost" : null)" style="@style" data-tip="@s.Tip">@SourceInside(s)</div>
         }
     </text>;
 
@@ -153,9 +153,24 @@
             {
                 <span class="gb-fl-lab gb-fl-lab--sans">
                     @lane.Label
-                    @if (lane.Action != ReachAction.None && OnAction.HasDelegate)
+                    @if (OnAction.HasDelegate)
                     {
-                        <Btn Size="BtnSize.Sm" OnClick="() => OnAction.InvokeAsync(lane.Action)" Disabled="Busy">@lane.ActionText</Btn>
+                        @* Each button by what it does: one tip each. *@
+                        @switch (lane.Action)
+                        {
+                            case ReachAction.PublishOnLan:
+                                <Btn Size="BtnSize.Sm" OnClick="() => OnAction.InvokeAsync(lane.Action)" Disabled="Busy" Tip="network.reach.publish-lan">@lane.ActionText</Btn>
+                                break;
+                            case ReachAction.JoinShared:
+                                <Btn Size="BtnSize.Sm" OnClick="() => OnAction.InvokeAsync(lane.Action)" Disabled="Busy" Tip="network.reach.join-shared">@lane.ActionText</Btn>
+                                break;
+                            case ReachAction.TurnOnLanAddress when lane.ActionText == ReachModel.SetUpLanText:
+                                <Btn Size="BtnSize.Sm" OnClick="() => OnAction.InvokeAsync(lane.Action)" Disabled="Busy" Tip="network.reach.setup-lan">@lane.ActionText</Btn>
+                                break;
+                            case ReachAction.TurnOnLanAddress:
+                                <Btn Size="BtnSize.Sm" OnClick="() => OnAction.InvokeAsync(lane.Action)" Disabled="Busy" Tip="network.reach.turn-on-lan">@lane.ActionText</Btn>
+                                break;
+                        }
                     }
                 </span>
             }
@@ -192,11 +207,11 @@
                             <b>@s.Port.ToString(CultureInfo.InvariantCulture)</b><span class="gb-t3">/@s.Protocol</span>
                             @if (s.Web)
                             {
-                                <span class="gb-tag gb-tag--accent">Web</span>
+                                <span class="gb-tag gb-tag--accent" data-tip="network.port.web">Web</span>
                             }
                             else if (s.Service is not null)
                             {
-                                <span class="gb-tag">@s.Service</span>
+                                <span class="gb-tag" data-tip="network.port.service">@s.Service</span>
                             }
                         </div>
                     }
@@ -212,7 +227,7 @@
                     @foreach (var f in c.Facts)
                     {
                         <dt>@f.Key</dt>
-                        <dd class="@(f.Mono ? "gb-mono" : null)" title="@f.Value">@f.Value</dd>
+                        <dd class="@(f.Mono ? "gb-mono" : null)" data-tip-text="@f.Value">@f.Value</dd>
                     }
                 </dl>
             }

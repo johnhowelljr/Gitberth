@@ -21,6 +21,9 @@ You don't need to back up images. A Git app's image is rebuilt from Git, and a r
 | `keys/` | The keys those secrets are encrypted with |
 | `logs/` | Each deploy's log and the Dockerfile it used |
 | `stats.db` | The Health page's last 6 hours of readings and events |
+| `uptime.db` | The uptime checks' history and incidents, for the Uptime cards and the status page |
+| `audit.db` | The [audit log](audit-log.md) |
+| `compose/` | Compose apps' releases, and the folders their services write to |
 | `work/` | Clones and build folders while a deploy runs. Emptied when Gitberth starts; no need to keep it. |
 
 [Configuration](../reference/configuration.md#the-data-volume) has the details.
@@ -30,7 +33,11 @@ You don't need to back up images. A Git app's image is rebuilt from Git, and a r
 
 ### Your apps' volumes
 
-List the volumes on the host with `docker volume ls`. A named volume of a Git app gets the app's name in front of it: a volume called `data` on the app `website` is `gb-website-data`. Apps from images keep the names you gave their volumes.
+List the volumes on the host with `docker volume ls`. A named volume of a Git app gets the app's name in front of it: a volume called `data` on the app `website` is `gb-website-data`. A Compose app's are `gb-<app>_<volume>`. Apps from images keep the names you gave their volumes.
+
+Apps' [databases](databases.md) live in their servers' volumes: a Postgres server's (like `gb-postgres-postgresql`) holds
+every app's database on it, and each app's own Redis keeps its data in `<container>_redis-data`. Back those up like any
+volume, or with the database's own dump tool (below).
 
 An app's **Settings › Volumes** section and the **Container** card on its **Overview** show which volumes and host folders it uses.
 

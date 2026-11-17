@@ -5,8 +5,31 @@ itself when the branch gets a new commit, and you can deploy by hand. This page 
 are skipped, how to read the deploy log, what Gitberth checks before a new version takes over, how failed builds are
 retried, and how to roll back to an earlier version.
 
-Deploys are for Git apps. An app that runs an image is updated, and rolled back, from its **Updates** card instead; see
-[Image updates](updates.md).
+Deploys are for Git apps and [Compose apps](compose-apps.md). An app that runs an image is updated, and rolled back, from
+its **Updates** card instead; see [Image updates](updates.md).
+
+## From a push to live
+
+```mermaid
+flowchart TD
+    push["You push to the<br/>app's branch"] -->|"checked every 30 s"| watcher["Gitberth sees<br/>the new commit"]
+    push -->|"instant deploys"| webhook["GitHub or GitLab calls<br/>Gitberth through the tunnel"]
+    webhook --> watcher
+    watcher --> queued["Queued: one deploy<br/>at a time per app"]
+    queued --> clone["Cloning the branch's<br/>newest commit"]
+    clone --> filters{"Only filtered<br/>files changed,<br/>or [skip ci]?"}
+    filters -->|"yes"| skipped["Skipped: the running<br/>version stays"]
+    filters -->|"no: status pending"| build["Building the image"]
+    build -->|"build fails"| failed["Failed: the running<br/>version stays"]
+    build --> start["Starting the<br/>new container"]
+    start --> checks{"Up 15 s, healthy,<br/>health URL<br/>answers?"}
+    checks -->|"no"| rolled["Rolled back: the<br/>old container runs"]
+    checks -->|"yes"| live["Succeeded: live,<br/>domains point at it"]
+```
+
+The commit gets a status on GitHub or GitLab as it goes: pending once it builds, then success (a skipped commit gets
+success too) or failure. See [Commit statuses](github-integration.md#commit-statuses). A failed deploy can also send a
+[notification](notifications.md). [How deploys work](../concepts/how-deploys-work.md) goes through each step in detail.
 
 ## When a deploy happens
 
@@ -16,13 +39,19 @@ Each deploy records what started it:
 |---|---|
 | **First deploy** | You created the app with **Create and deploy**. |
 | **New commit** | Gitberth saw a new commit on the app's branch. |
+| **Push on GitHub**, **Push on GitLab** | GitHub or GitLab told Gitberth about the push the moment it happened ([instant deploys](github-integration.md#instant-deploys)). |
 | **Manual** | You clicked **Deploy** on the app's page. |
 | **Settings change** | You applied settings that need a new container. This deploy reuses the current image and builds nothing. |
 | **Start** | You started a stopped app whose saved settings weren't live yet, one that was never deployed, or one whose container is gone. |
 | **Rollback** | You clicked **Roll back to this** on an earlier deploy. |
 | **Automatic retry** | Gitberth tried a commit again after its build failed. See [Retries](#retries). |
 | **Scheduled restart** | The app's [scheduled restart](scheduled-jobs-and-restarts.md#scheduled-restarts) came due. |
+| **Promoted** | You promoted one of the app's [previews](previews.md#promote-to-production): production builds its commit. |
 | **Deploy hook "Contentful"** | Something called one of the app's [deploy hooks](deploy-hooks.md), named in quotes. |
+
+When a person or an [API token](ai-agents.md) asked for the deploy, its page and the **Activity** tab say who, next to the
+trigger: **by admin**, or **by the token Claude Code**. A deploy Gitberth started on its own (a new commit, a schedule)
+names no one.
 
 ## Automatic deploys
 
@@ -41,7 +70,7 @@ many apps use it. When an app's branch has a commit it hasn't run or tried yet, 
   commit doesn't loop. See [Retries](#retries) for the exceptions.
 - **Some commits are skipped.** A commit that changes only files the app's build filters leave out, or whose message
   says `[skip ci]`, isn't deployed by itself. See [Skip commits that don't need a deploy](#skip-commits-that-dont-need-a-deploy).
-- If GitHub can't be reached, Gitberth tries that repository again 5 minutes later.
+- If GitHub or GitLab can't be reached, Gitberth tries that repository again 5 minutes later.
 
 ## Skip commits that don't need a deploy
 
@@ -93,10 +122,10 @@ isn't deployed by itself, in any case and anywhere in its subject or body. It ne
 
 ### What a skipped commit does
 
-- **Only new commits are skipped**, the ones the watcher or GitHub's webhook starts. **Deploy**, a first deploy, a
+- **Only new commits are skipped**, the ones the watcher or a webhook from GitHub or GitLab starts. **Deploy**, a first deploy, a
   retry, a promote, a rollback, a restart and a settings change always build or run.
 - **When Gitberth can't tell, it builds.** The log says why: no commit has run yet, the commit that runs is gone from
-  GitHub (after a force-push), or git can't compare the two. It builds too when there's no version to keep running,
+  the repository (after a force-push), or git can't compare the two. It builds too when there's no version to keep running,
   because the app was never deployed or its image was removed.
 - **The running version stays.** The app keeps its commit, image, container and domains. Nothing is pruned or routed,
   and no notification is sent.
@@ -105,7 +134,7 @@ isn't deployed by itself, in any case and anywhere in its subject or body. It ne
 - **The deploy says why.** Its page shows **Skipped: the running version stays** with the reason, such as **Only files
   the build filters leave out changed: README.md, docs/guide.md** or **The commit message says [skip ci]**, and its log
   says the same.
-- **GitHub gets a success.** The commit's status is **Skipped: nothing the app builds from changed** or **Skipped: the
+- **GitHub or GitLab gets a success.** The commit's status is **Skipped: nothing the app builds from changed** or **Skipped: the
   commit asked not to be deployed**, linking to the deploy's log, so branch protection that requires Gitberth's status
   still passes. See [Commit statuses](github-integration.md#commit-statuses).
 
@@ -148,7 +177,7 @@ The state is one of **Queued**, **Cloning**, **Building**, **Starting**, **Succe
 
 The log shows each step, in order:
 
-- How many variables came from the repo's GitHub settings, if any.
+- How many variables came from the repo's GitHub or GitLab variables, if any.
 - **Cloning** the repository and branch, then the **Commit** it got.
 - For a new commit with build filters, what the filters found: **The build filters let it through: src/app.ts changed
   since 3f9c2a1**, or **Skipped: …** and the end of the deploy.
@@ -197,10 +226,12 @@ A build cut short because Gitberth restarted is retried. A skipped commit isn't:
 
 ## The Activity tab
 
-The app's **Activity** tab lists what happened to it, newest first. **Show** filters it: **All**, **Deploys**, **Changes**,
-or **Starts and stops**.
+The app's **Activity** tab lists what happened to it, newest first. **Show** filters it: **All**, **Deploys** (for an app
+Gitberth deploys), **Changes**, or **Starts and stops**. Docker's own events (starts, stops, crashes) are kept for 7 hours;
+Gitberth's own entries stay. **All changes to … in the audit log**, at the bottom, opens the [audit log](audit-log.md)
+filtered to the app, over its whole life.
 
-![A Git app's Activity tab with two deploys, each with its commit, how long it took and a link to its log](../images/app-activity.webp)
+![A Git app's Activity tab: its deploys, each with its commit, how long it took, its log and Roll back to this, and its setting changes](../images/app-activity.webp)
 
 Each deploy shows its state, its commit, what started it, **without the build cache** when it was built that way, and how
 long it took, with:
@@ -213,7 +244,8 @@ The **Last deploy** at the top of the app's page is the last one that wasn't ski
 
 Gitberth keeps the images of the last 3 successful deploys, as the tab's footer says, so those are the ones you can roll
 back to. An older deploy has no **Roll back to this**: its image was cleaned up, and a deploy always builds the branch's
-newest commit, so Gitberth can't make it again.
+newest commit, so Gitberth can't make it again. A [Compose app](compose-apps.md) keeps the releases of its last 3
+successful deploys instead, its file and every service's image.
 
 ## Roll back to an earlier deploy
 
@@ -232,7 +264,7 @@ while you fix things, turn off **Deploy on push** in **Settings** › **Source**
 
 The dashboard's **Deploys** figure counts the deploys of the last 24 hours and names the last one. Its **Recent deploys**
 card lists the latest of every app: new apps, pushes, updates, rollbacks and changes that recreate a container. Click one
-to open it. A skipped commit is listed too, as `orb: deploy #12 skipped: …`, but it deployed nothing, so **Deploys**
+to open it. A skipped commit is listed too, as `website: deploy #12 skipped: …`, but it deployed nothing, so **Deploys**
 doesn't count it.
 
 ## Related

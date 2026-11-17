@@ -1,6 +1,18 @@
-@* One fact in the hero's strip: a caption over a value, with a quieter word after it. *@
-<div class="gb-hero-stat" title="@Title">
-    <div class="gb-hero-stat-k">@Label</div>
+@*
+    One fact in the hero's strip: a caption over a value, with a quieter word after it. With a Tip, the caption shows it
+    (Title becomes a line of it); without, Title is a short note of its own on hover.
+*@
+<div class="gb-hero-stat" data-tip-text="@(Tip is null ? Title : null)">
+    <div class="gb-hero-stat-k">
+        @if (Tip is not null)
+        {
+            <Tip Key="@Tip" Detail="@Title">@Label</Tip>
+        }
+        else
+        {
+            @Label
+        }
+    </div>
     <div class="gb-hero-stat-v">
         @ChildContent
         @if (Small is not null)
@@ -15,5 +27,8 @@
     [Parameter] public RenderFragment? ChildContent { get; set; }
     /// <summary>The quieter words after the value: "since 22:48", "no limit".</summary>
     [Parameter] public string? Small { get; set; }
+    /// <summary>A short note about the value ("100% is one core"): a line of the tip, or a note of its own without one.</summary>
     [Parameter] public string? Title { get; set; }
+    /// <summary>The caption's tip: its key in the catalog (Help/Tips). The caption's words become its trigger.</summary>
+    [Parameter] public string? Tip { get; set; }
 }

@@ -60,13 +60,13 @@
             else if (result is { Outcome: PortChangeOutcome.NeedsDecision } && original is null)
             {
                 <Btn OnClick="Close" Disabled="starting">Close</Btn>
-                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Undo" OnClick="StartOriginalAsync" Busy="starting">Start the original</Btn>
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Undo" OnClick="StartOriginalAsync" Busy="starting" Tip="app.change.start-original">Start the original</Btn>
             }
             else if (result is { Ok: false } || outcome is { Ok: false })
             {
                 @if (result?.LastOutput is not null)
                 {
-                    <Btn Icon="@Icons.Material.Outlined.Terminal" OnClick="() => showOutput = !showOutput" aria-expanded="@(showOutput ? "true" : "false")">
+                    <Btn Icon="@Icons.Material.Outlined.Terminal" OnClick="() => showOutput = !showOutput" aria-expanded="@(showOutput ? "true" : "false")" Tip="app.change.last-output">
                         @(showOutput ? "Hide its last output" : "Its last output")
                     </Btn>
                 }
@@ -175,7 +175,7 @@
         @if (ChangeRows.Count > 0)
         {
             <div class="gb-cdlg-sec">
-                <div class="gb-micro">What changes</div>
+                <div class="gb-micro"><Tip Key="app.change.what-changes">What changes</Tip></div>
                 <div class="gb-diff">
                     @foreach (var (label, before, after, how, items) in ChangeRows)
                     {
@@ -184,7 +184,7 @@
                                 @label
                                 @if (how is not null)
                                 {
-                                    <div><span class="gb-tag @(how == "no restart" ? "gb-tag--good" : null)" style="margin-top:4px">@how</span></div>
+                                    <div><span class="gb-tag @(how == "no restart" ? "gb-tag--good" : null)" style="margin-top:4px" data-tip="@HowTip(how)">@how</span></div>
                                 }
                             </div>
                             <div class="gb-diff-v">
@@ -223,7 +223,7 @@
         @if (Form == ChangeForm.Compose)
         {
             <div class="gb-cdlg-sec">
-                <div class="gb-micro">In its Compose file</div>
+                <div class="gb-micro"><Tip Key="app.change.compose">In its Compose file</Tip></div>
                 <CodeBlock Title="docker-compose.yml" Code="@Plan.ComposeSnippet" Icon="@Icons.Material.Outlined.Description" />
                 @if (Plan.ComposeCommand is { } command)
                 {
@@ -240,12 +240,12 @@
             @if (keeps.Count > 0)
             {
                 <div class="gb-cdlg-sec">
-                    <div class="gb-micro">What's kept</div>
+                    <div class="gb-micro"><Tip Key="app.change.kept">What's kept</Tip></div>
                     <div class="gb-keeps">
                         @foreach (var k in keeps)
                         {
                             var (label, value, mono) = ChangeText.KeepWithValue(k, change.Container, Plan.Edit.Loaded, Plan.Edit.LoadedOptions.SecretKeys);
-                            <span class="gb-keep" title="@(value is null ? label : $"{label}: {value}")">
+                            <span class="gb-keep" data-tip-text="@(value is null ? label : $"{label}: {value}")">
                                 <SvgIcon Icon="@Icons.Material.Outlined.Check" /><span>@label</span>
                                 @if (value is not null)
                                 {
@@ -264,7 +264,7 @@
         @if (Impact.Count > 0)
         {
             <div class="gb-cdlg-sec">
-                <div class="gb-micro">Impact</div>
+                <div class="gb-micro"><Tip Key="app.change.impact">Impact</Tip></div>
                 <div class="gb-impact">
                     @for (var i = 0; i < Impact.Count; i++)
                     {
@@ -496,6 +496,18 @@
     }
 
     private static string Lower(string s) => s.Length == 0 ? s : char.ToLowerInvariant(s[0]) + s[1..];
+
+    // The tip of a line's tag, by how it applies (given by name, Tip: "…", so the tips' test finds each key).
+    private static string? HowTip(string how) => how switch
+    {
+        "no restart" => Key(Tip: "app.change.how.no-restart"),
+        "Gitberth" => Key(Tip: "app.change.how.gitberth"),
+        "deploy" => Key(Tip: "app.change.how.deploy"),
+        "build" => Key(Tip: "app.change.how.build"),
+        _ => null,
+    };
+
+    private static string Key(string Tip) => Tip;
 
     public void Dispose()
     {

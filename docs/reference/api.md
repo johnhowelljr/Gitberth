@@ -19,12 +19,12 @@ refused with 403.
 | `GET /api/v1/openapi.json` | An OpenAPI 3.1 document of the tools, for agent frameworks and API clients that read one. |
 
 ```bash
-curl -s -X POST http://192.168.1.10:8080/api/v1/tools/deploy_app \
+curl -s -X POST http://192.168.50.10:8080/api/v1/tools/deploy_app \
   -H "Authorization: Bearer gbt_…" -H "Content-Type: application/json" \
-  -d '{"app": "shop", "wait": true}'
+  -d '{"app": "orders-api", "wait": true}'
 ```
 
-Name an app by its key from `list_apps` (`gb-shop`), its name (`shop`) or its number. Results are compact JSON with
+Name an app by its key from `list_apps` (`gb-orders-api`), its name (`orders-api`) or its number. Results are compact JSON with
 snake_case names; a secret variable comes back by name only, and no tool returns a token, a password, a connection
 string or a deploy hook's URL (except the new hook's, once, from `create_deploy_hook`).
 

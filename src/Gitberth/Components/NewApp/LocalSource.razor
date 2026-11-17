@@ -7,7 +7,7 @@
 <section class="gb-card" aria-labelledby="gb-local-title">
     <div class="gb-card-head">
         <div class="gb-card-title" id="gb-local-title">
-            <SvgIcon Icon="@Icons.Material.Outlined.Layers" />Local image
+            <SvgIcon Icon="@Icons.Material.Outlined.Layers" />Local image<Tip Key="newapp.local" />
             @if (images is not null)
             {
                 <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">@images.Count images · @NewAppText.Size(images.Sum(i => i.SizeBytes))</span>
@@ -77,9 +77,9 @@
     // All is every image, as the title counts them and as New app's Local image card does.
     private List<SegOption<string>> Filters =>
     [
-        new("unused", "Not in use", Count: images?.Count(i => i.Containers == 0 && !i.BuiltByGitberth)),
-        new("all", "All", Count: images?.Count),
-        new("gitberth", "Built by Gitberth", Count: images?.Count(i => i.BuiltByGitberth)),
+        new("unused", "Not in use", Count: images?.Count(i => i.Containers == 0 && !i.BuiltByGitberth), Tip: "newapp.local.unused"),
+        new("all", "All", Count: images?.Count, Tip: "newapp.local.all"),
+        new("gitberth", "Built by Gitberth", Count: images?.Count(i => i.BuiltByGitberth), Tip: "newapp.local.gitberth"),
     ];
 
     private List<LocalImage> Shown => (images ?? []).Where(i => filter switch

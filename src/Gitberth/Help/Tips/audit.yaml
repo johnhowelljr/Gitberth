@@ -1,0 +1,170 @@
+# Tips for the Audit log page (Components/Pages/AuditLog.razor). See Help/TipCatalog.cs for the rules.
+
+audit.page:
+  title: Audit log
+  text: >-
+    Every change to this Gitberth and its apps: what changed, who made it, from where and how it ended. Changes made to
+    Docker outside Gitberth are here too. Click an entry for its details.
+  more: guides/audit-log
+
+audit.export:
+  title: Export
+  text: >-
+    Downloads every entry the filters match, not only the ones on the page, as CSV or JSON Lines. **Settings › Audit
+    log** exports the whole log.
+  more: guides/audit-log#export
+
+audit.export.csv:
+  title: This view as CSV
+  text: >-
+    Every entry the filters match as a CSV file, one row each, for a spreadsheet. Times are in UTC.
+  more: guides/audit-log#export
+
+audit.export.json:
+  title: This view as JSON Lines
+  text: >-
+    Every entry the filters match as JSON Lines, one JSON object per line, for scripts and log tools.
+  more: guides/audit-log#export
+
+audit.verify:
+  title: Check the log's integrity
+  text: >-
+    Walks the whole chain of hashes and says whether the log is intact, or which entry was the first changed, removed
+    or cut off.
+  more: guides/audit-log#check-the-logs-integrity
+
+audit.kept-since:
+  title: Kept since
+  text: >-
+    The oldest entry the log still holds. Older ones were removed by the retention set in **Settings › Audit log**.
+  more: guides/audit-log#how-long-entries-are-kept
+
+audit.keeps:
+  title: Keeps
+  text: >-
+    How long entries are kept, from **Settings › Audit log**: older ones are removed once a day, and the rest still
+    check out.
+  default: 365 days
+  more: guides/audit-log#how-long-entries-are-kept
+
+audit.filter.who:
+  title: Who
+  text: >-
+    Only one actor's changes: admin, an API token or a deploy hook by its name, GitHub, GitLab, Gitberth's own jobs, or
+    **Outside Gitberth**.
+  more: guides/audit-log#who-made-it
+
+audit.filter.app:
+  title: App
+  text: >-
+    Only one app's changes, by its container's name, so an app's history stays after it's deleted.
+  more: guides/audit-log#find-a-change
+
+audit.filter.area:
+  title: Area
+  text: >-
+    Only one kind of change: apps, deploys, domains, settings, sign-ins, or changes made outside Gitberth.
+  more: guides/audit-log#find-a-change
+
+audit.filter.outcome:
+  title: Outcome
+  text: >-
+    Only changes that ended one way: done, failed, or refused.
+  more: guides/audit-log#find-a-change
+
+audit.outcome.done:
+  title: Done
+  text: >-
+    The change was made as asked.
+  more: guides/audit-log#whats-recorded
+
+audit.outcome.failed:
+  title: Failed
+  text: >-
+    The change was tried and didn't work: the entry's sentence says why.
+  more: guides/audit-log#whats-recorded
+
+audit.outcome.refused:
+  title: Refused
+  text: >-
+    Gitberth refused the request before changing anything: a sign-in with a wrong password, a token without the access
+    for it, or an action Gitberth won't take on that app.
+  more: guides/audit-log#whats-recorded
+
+audit.action:
+  title: Action
+  text: >-
+    The entry's kind as exports and the API name it, like `app.deploy.succeeded`. Search for it to find every entry of
+    that kind.
+  more: guides/audit-log#export
+
+audit.who:
+  title: Who made it
+  text: >-
+    The person, token, deploy hook, service or Gitberth job behind the change, and how it came in: the UI, an AI agent
+    (MCP), the API, a webhook. **Docker** means it was made outside Gitberth.
+  more: guides/audit-log#who-made-it
+
+audit.outside:
+  title: Outside Gitberth
+  text: >-
+    Docker reported this change: it was made with `docker` on the host, Compose or another tool, not through Gitberth.
+  more: guides/audit-log#changes-made-outside-gitberth
+
+audit.entry.through:
+  title: Through
+  text: >-
+    How the change came in: Gitberth's pages, an AI agent over MCP, the HTTP API, a webhook, a deploy hook, or one of
+    Gitberth's own jobs, like the repo watcher or a schedule.
+  more: guides/audit-log#an-entrys-details
+
+audit.entry.from:
+  title: From
+  text: >-
+    The address the request came from: the browser's, the agent's or the caller's.
+  more: guides/audit-log#an-entrys-details
+
+audit.entry.target:
+  title: Target
+  text: >-
+    What the change was made to, besides the app: a setting, a token, a domain, a network.
+  more: guides/audit-log#an-entrys-details
+
+audit.entry.follows:
+  title: Follows
+  text: >-
+    What this entry follows up, like a deploy (`deployment:12`).
+  more: guides/audit-log#an-entrys-details
+
+audit.entry.id:
+  title: Entry
+  text: >-
+    The entry's number in the log. The copy button copies a link that opens this entry.
+  more: guides/audit-log#an-entrys-details
+
+audit.changes:
+  title: What changed
+  text: >-
+    Each field the change touched, with its value before and after. Secret values never go in the log: a secret
+    variable or token shows by its name only.
+  more: guides/audit-log#an-entrys-details
+
+audit.tamper:
+  title: Tamper evidence
+  text: >-
+    Each entry's hash covers the entry before it and its own fields, so changing or deleting an entry breaks the chain
+    from there on.
+  more: guides/audit-log#check-the-logs-integrity
+
+audit.hash:
+  title: Hash
+  text: >-
+    SHA-256 of the previous entry's hash and this entry's fields. **Check the log's integrity** works it out again for
+    every entry.
+  more: guides/audit-log#check-the-logs-integrity
+
+audit.previous-hash:
+  title: Previous
+  text: >-
+    The hash of the entry before this one, which this entry's own hash covers: the link in the chain.
+  more: guides/audit-log#check-the-logs-integrity

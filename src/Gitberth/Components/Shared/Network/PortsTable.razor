@@ -12,12 +12,12 @@
     @if (Draft.Rows.Count > 0)
     {
         <div class="gb-prow gb-prow--head" role="row">
-            <span role="columnheader">Web</span>
-            <span role="columnheader">Container port</span>
-            <span role="columnheader">Protocol</span>
-            <span role="columnheader">Access</span>
-            <span role="columnheader">Host port</span>
-            <span role="columnheader">Address</span>
+            <span role="columnheader"><Tip Key="network.port.web">Web</Tip></span>
+            <span role="columnheader"><Tip Key="network.port.container-port">Container port</Tip></span>
+            <span role="columnheader"><Tip Key="network.port.protocol">Protocol</Tip></span>
+            <span role="columnheader"><Tip Key="network.port.access">Access</Tip></span>
+            <span role="columnheader"><Tip Key="network.port.host-port">Host port</Tip></span>
+            <span role="columnheader"><Tip Key="network.port.address">Address</Tip></span>
             <span role="columnheader"><span class="gb-sr">Remove</span></span>
         </div>
     }
@@ -30,29 +30,29 @@
         var state = !Draft.WasLoaded(row) ? "gb-prow--new" : !Draft.Unchanged(row) ? "gb-prow--changed" : null;
         <div class="gb-prow @(ReadOnly || !Marks ? null : state)" role="row" @key="row">
             <div class="p-web" role="cell">
-                <span class="gb-lbl">Web</span>
+                <span class="gb-lbl" data-tip="network.port.web">Web</span>
                 @if (row.CanBeWeb || row.IsWeb)
                 {
                     <button type="button" class="gb-webmark @(row.IsWeb ? "gb-webmark--on" : null)" role="switch" aria-checked="@(row.IsWeb ? "true" : "false")"
-                            aria-label="@($"Web port: {what}")" title="Web port: Open, domains, the health URL and scheduled jobs use it"
+                            aria-label="@($"Web port: {what}")" data-tip="network.port.web"
                             disabled="@(Disabled || !WebEditable)" @onclick="() => ToggleWebAsync(row)">
                         <SvgIcon Icon="@Icons.Material.Outlined.Language" />
                     </button>
                 }
             </div>
             <div class="p-port" role="cell">
-                <span class="gb-lbl">Container port</span>
+                <span class="gb-lbl" data-tip="network.port.container-port">Container port</span>
                 @if (text)
                 {
                     <span class="gb-pport">
                         <b>@row.ContainerPort</b><span>/@PortRules.ProtocolOf(row.Protocol)</span>
                         @if (row.IsWeb)
                         {
-                            <span class="gb-tag gb-tag--accent">Web</span>
+                            <span class="gb-tag gb-tag--accent" data-tip="network.port.web">Web</span>
                         }
                         else if (row.ContainerPort is int known && PortServices.Name(known, row.Protocol) is { } service)
                         {
-                            <span class="gb-pport-svc">@service</span>
+                            <span class="gb-pport-svc" data-tip="network.port.service">@service</span>
                         }
                     </span>
                 }
@@ -64,14 +64,14 @@
                                @onchange="e => SetContainerPortAsync(row, e)" />
                         @if (row.IsWeb)
                         {
-                            <span class="gb-tag gb-tag--accent" style="align-self:center">Web</span>
+                            <span class="gb-tag gb-tag--accent" style="align-self:center" data-tip="network.port.web">Web</span>
                         }
                     </div>
                 }
                 @Messages(at, PortField.ContainerPort)
             </div>
             <div class="p-proto" role="cell">
-                <span class="gb-lbl">Protocol</span>
+                <span class="gb-lbl" data-tip="network.port.protocol">Protocol</span>
                 @if (text)
                 {
                     <span class="gb-t2">@PortRules.ProtocolOf(row.Protocol).ToUpperInvariant()</span>
@@ -86,8 +86,13 @@
                 }
             </div>
             <div class="p-access" role="cell">
-                <span class="gb-lbl">Access</span>
-                @if (ReadOnly)
+                <span class="gb-lbl" data-tip="network.port.access">Access</span>
+                @if (ReadOnly && row.Access == PortAccess.Custom)
+                {
+                    @* One address of the host only: never the LAN badge's "every address". *@
+                    <AccessTag Kind="@KindOf(row.Access)" Text="@AccessName(row)" Tip="network.port.access.custom" />
+                }
+                else if (ReadOnly)
                 {
                     <AccessTag Kind="@KindOf(row.Access)" Text="@AccessName(row)" />
                 }
@@ -99,7 +104,7 @@
                 @Messages(at, PortField.Access)
             </div>
             <div class="p-host" role="cell">
-                <span class="gb-lbl">Host port</span>
+                <span class="gb-lbl" data-tip="network.port.host-port">Host port</span>
                 @if (row.Access == PortAccess.Internal)
                 {
                     <span class="gb-pdash">—</span>
@@ -119,16 +124,16 @@
                         {
                             @* Docker picks it again at every start: keep the one it has, or use the container's own. *@
                             <div class="gb-hpline gb-hpline--taken">
-                                <span>Random: changes at every start.</span>
+                                <span data-tip="network.note.random">Random: changes at every start.</span>
                                 @if (!ReadOnly && !Disabled)
                                 {
                                     @if (row.Picked is int picked)
                                     {
-                                        <button type="button" class="gb-linkbtn" @onclick="() => FixAsync(row, picked)">Keep @picked</button>
+                                        <button type="button" class="gb-linkbtn" data-tip="network.port.keep" @onclick="() => FixAsync(row, picked)">Keep @picked</button>
                                     }
                                     @if (row.ContainerPort is int own && own != row.Picked)
                                     {
-                                        <button type="button" class="gb-linkbtn" @onclick="() => FixAsync(row, own)">Use @own</button>
+                                        <button type="button" class="gb-linkbtn" data-tip="network.port.use-own" @onclick="() => FixAsync(row, own)">Use @own</button>
                                     }
                                 }
                             </div>
@@ -145,26 +150,33 @@
                 }
             </div>
             <div class="p-addr" role="cell">
-                <span class="gb-lbl">Address</span>
+                <span class="gb-lbl" data-tip="network.port.address">Address</span>
                 @if (ContainerPortAddress.Of(row, LanHost, Name, Network is not null, Database) is { } address)
                 {
                     <span class="gb-row gb-row--wrap" style="gap:8px;flex-wrap:wrap">
                         <AddressValue Text="@address.Text" Href="@address.Href" Copy="@address.Text" Live="@(Running || row.Access == PortAccess.Internal)" ShowCopy="true" />
                         @if (row.Access == PortAccess.HostOnly)
                         {
-                            <span class="gb-t3" style="font-size:12px">host only</span>
+                            <span class="gb-t3" style="font-size:12px" data-tip="badge.access.host-only">host only</span>
                         }
                     </span>
                 }
                 else
                 {
-                    <span class="gb-pdash" title="@(row.Access == PortAccess.Internal ? $"Not on a shared network. Join {Options.Network} in Networks below." : null)">—</span>
+                    @if (row.Access == PortAccess.Internal)
+                    {
+                        <span class="gb-pdash" data-tip="network.port.no-address">—</span>
+                    }
+                    else
+                    {
+                        <span class="gb-pdash">—</span>
+                    }
                 }
             </div>
             <div class="p-more" role="cell">
                 @if (row.Removable && !ReadOnly)
                 {
-                    <button type="button" class="gb-iconbtn" aria-label="@($"Remove {what}")" title="Remove" disabled="@Disabled" @onclick="() => RemoveAsync(row)">
+                    <button type="button" class="gb-iconbtn" aria-label="@($"Remove {what}")" data-tip-text="Remove" disabled="@Disabled" @onclick="() => RemoveAsync(row)">
                         <SvgIcon Icon="@Icons.Material.Outlined.Close" />
                     </button>
                 }
@@ -249,14 +261,16 @@
     {
         var options = new List<SegOption<PortAccess>>
         {
-            new(PortAccess.Internal, "Internal", Icons.Material.Outlined.Hub, Class: "gb-ac-internal", Title: InternalTitle(ByName, Network, Options.Network)),
+            new(PortAccess.Internal, "Internal", Icons.Material.Outlined.Hub, Class: "gb-ac-internal", Title: InternalTitle(ByName, Network, Options.Network),
+                Tip: "network.port.access.internal"),
             new(PortAccess.Lan, "LAN", Icons.Material.Outlined.Lan, Class: "gb-ac-lan",
-                Title: $"Every device on your network, at {AddressBook.HostPart(LanHost)}:<host port>{(LanIpv4Only ? ", over IPv4 only" : "")}."),
+                Title: $"Every device on your network, at {AddressBook.HostPart(LanHost)}:<host port>{(LanIpv4Only ? ", over IPv4 only" : "")}.", Tip: "network.port.access.lan"),
             new(PortAccess.HostOnly, "Host only", Icons.Material.Filled.Lock, Class: "gb-ac-host",
-                Title: "Only programs on the host itself (127.0.0.1), like the Cloudflare tunnel."),
+                Title: "Only programs on the host itself (127.0.0.1), like the Cloudflare tunnel.", Tip: "network.port.access.host-only"),
         };
         if (row.Access == PortAccess.Custom && row.HostIp is { Length: > 0 } ip)
-            options.Add(new(PortAccess.Custom, $"{ip} only", Icons.Material.Outlined.Lan, Class: "gb-ac-lan", Title: $"Only on {ip}, one of the host's addresses."));
+            options.Add(new(PortAccess.Custom, $"{ip} only", Icons.Material.Outlined.Lan, Class: "gb-ac-lan", Title: $"Only on {ip}, one of the host's addresses.",
+                Tip: "network.port.access.custom"));
         return options;
     }
 

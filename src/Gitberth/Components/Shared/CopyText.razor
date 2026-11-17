@@ -6,13 +6,9 @@
     <code class="gb-wrap">@Text</code>
     @if (Href is not null)
     {
-        <MudTooltip Text="Open">
-            <MudIconButton Href="@Href" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew" Size="Size.Small" aria-label="@($"Open {Label ?? Text}")" />
-        </MudTooltip>
+        <MudIconButton Href="@Href" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew" Size="Size.Small" aria-label="@($"Open {Label ?? Text}")" data-tip-text="Open" />
     }
-    <MudTooltip Text="Copy">
-        <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="@($"Copy {Label ?? Text}")" />
-    </MudTooltip>
+    <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="@($"Copy {Label ?? Text}")" data-tip-text="Copy" />
 </span>
 
 @code {

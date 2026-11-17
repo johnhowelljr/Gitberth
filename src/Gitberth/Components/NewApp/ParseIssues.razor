@@ -6,7 +6,7 @@
 {
     <div class="gb-issues">
         @Group(ParseSeverity.Error, view.Errors, "critical", Icons.Material.Outlined.ErrorOutline)
-        @Group(ParseSeverity.Dropped, view.Dropped, "warn", Icons.Material.Outlined.RemoveCircleOutline)
+        @Group(ParseSeverity.Dropped, view.Dropped, "warn", Icons.Material.Outlined.RemoveCircleOutline, Tip: "newapp.issues.dropped")
         @Group(ParseSeverity.Note, view.Notes, "info", Icons.Material.Outlined.Info)
     </div>
 }
@@ -18,11 +18,12 @@
 
     protected override void OnParametersSet() => view = ParseIssueView.Of(Issues);
 
-    private static RenderFragment Group(ParseSeverity severity, IReadOnlyList<ParseIssue> items, string tone, string icon) => @<text>
+    // A group of issues under its heading; Tip, when it has one, is the heading's tip in the catalog.
+    private static RenderFragment Group(ParseSeverity severity, IReadOnlyList<ParseIssue> items, string tone, string icon, string? Tip = null) => @<text>
         @if (items.Count > 0)
         {
             <div class="gb-issue-group gb-tone-@tone" role="@(severity == ParseSeverity.Error ? "alert" : null)">
-                <div class="gb-issue-group-t"><SvgIcon Icon="@icon" />@ParseIssueView.Heading(severity, items.Count)</div>
+                <div class="gb-issue-group-t"><SvgIcon Icon="@icon" /><span data-tip="@Tip">@ParseIssueView.Heading(severity, items.Count)</span></div>
                 <ul>
                     @foreach (var i in items)
                     {

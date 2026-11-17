@@ -15,8 +15,8 @@ else
             <div class="gb-edrow gb-edrow--env gb-edrow-head">
                 <span>Name</span>
                 <span>Value</span>
-                <span title="Masked in the UI and in logs, encrypted at rest">Secret</span>
-                <span title="Also passed to the image build. Front ends need this for VITE_*, NEXT_PUBLIC_*, REACT_APP_* and similar.">Build-time</span>
+                <span><Tip Key="app.env.secret">Secret</Tip></span>
+                <span><Tip Key="app.env.build-time">Build-time</Tip></span>
                 <span></span>
             </div>
             @foreach (var row in Rows)
@@ -31,7 +31,7 @@ else
                                   OnAdornmentClick="() => ToggleReveal(row)" />
                     <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.IsSecret" Size="Size.Small" Color="Color.Primary" /></div>
                     <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.BuildTime" Size="Size.Small" Color="Color.Primary" /></div>
-                    <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="gb-edrow-delete" OnClick="() => Rows.Remove(row)" aria-label="Remove" />
+                    <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="gb-edrow-delete" OnClick="() => Rows.Remove(row)" aria-label="Remove" data-tip-text="Remove" />
                 </div>
             }
         </div>
@@ -42,7 +42,7 @@ else
     }
     <div class="gb-actions-row">
         <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="() => Rows.Add(new EnvRow())">Add variable</MudButton>
-        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.ContentPaste" OnClick="StartBulk">Paste .env</MudButton>
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.ContentPaste" OnClick="StartBulk" data-tip="app.env.paste">Paste .env</MudButton>
     </div>
 }
 

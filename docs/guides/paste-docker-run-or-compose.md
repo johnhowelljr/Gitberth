@@ -116,7 +116,7 @@ named `gb-<name>`, and a paste is read with that in mind. (A whole Compose file 
 | `--restart` / `restart:` | Kept. Without one, the app gets **Unless stopped**, so it comes back after the host restarts. |
 | `--network` / `networks:` | The default bridge, or the project's default network, becomes Gitberth's shared network. A named network is joined; if the host doesn't have it, Configure offers **Create it** or **Remove**. `host` and `none` are kept. |
 | Health check, labels, logging, limits, devices, capabilities and the other run settings | Kept, and editable on Configure. Labels starting with `gitberth.` are refused. |
-| `build:` without `image:` | Refused: build code with [Deploy an app from GitHub](deploy-from-github.md), where a repo's Compose file builds its services. With `image:` too, Gitberth runs the image and builds nothing. |
+| `build:` without `image:` | Refused: build code with [Deploy an app from GitHub or GitLab](deploy-from-github.md), where a repo's Compose file builds its services. With `image:` too, Gitberth runs the image and builds nothing. |
 | `depends_on:`, `links:`, `--link` | Not carried over: create the other app first, or paste the whole file as one app. On the shared network, apps reach each other by name. |
 | `--rm` | Not carried over: Gitberth keeps its apps. |
 | `scale:`, `deploy: replicas:`, `profiles:`, `extends:`, `secrets:`, `configs:` | Not carried over: one container per app, and Swarm settings don't apply. |

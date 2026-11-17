@@ -1,9 +1,12 @@
-<span class="gb-pill gb-pill--@Tone @(Deployment.IsActive ? "gb-pill--pulse" : "")">
+@* A deploy's status as a pill (pulsing while it runs); its tip says what that status means (status.deploy.<status>). *@
+<span class="gb-pill gb-pill--@Tone @(Deployment.IsActive ? "gb-pill--pulse" : "")" data-tip="@(Tip ?? TipKeys.Deploy(Deployment.Status))">
     <span class="gb-pill-dot"></span>@Label
 </span>
 
 @code {
     [Parameter, EditorRequired] public Deployment Deployment { get; set; } = default!;
+    /// <summary>Another tip than the status's own (its key in the catalog).</summary>
+    [Parameter] public string? Tip { get; set; }
 
     private string Label => Deployment.Status switch
     {

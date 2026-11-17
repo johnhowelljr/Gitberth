@@ -1,24 +1,26 @@
-# Deploy an app from GitHub
+# Deploy an app from GitHub or GitLab
 
-Give Gitberth a GitHub repository and it works out how to build it, builds a Docker image, and runs it with your ports,
-environment variables and volumes. After that it deploys every new commit on the branch by itself. Use this for your own
-code: a static site, a Node.js or Python API, a Go, Rust or .NET service, or anything with a Dockerfile.
+Give Gitberth a GitHub repository or a GitLab project and it works out how to build it, builds a Docker image, and runs it
+with your ports, environment variables and volumes. After that it deploys every new commit on the branch by itself. Use
+this for your own code: a static site, a Node.js or Python API, a Go, Rust or .NET service, anything with a Dockerfile, or
+a repo with a Compose file.
 
 The examples deploy `github.com/you/website`, a static site.
 
 ## Before you start
 
-- The repository is on github.com. Other Git hosts aren't supported yet.
-- A private repository needs a GitHub token in **Settings** › **GitHub access**. See
-  [Connect GitHub](../getting-started/first-steps.md#connect-github). Without one, New app says **Public repositories only,
-  for now**.
+- The repository is on github.com, or on the GitLab set in **Settings** › **GitLab** (gitlab.com unless you changed it).
+  See [GitLab](gitlab-integration.md) for a GitLab of your own.
+- A private repository needs a token: a GitHub token in **Settings** › **GitHub access** (see
+  [Connect GitHub](../getting-started/first-steps.md#connect-github)), or a GitLab token in **Settings** › **GitLab**.
+  Without one, New app says **Public repositories only, for now** (or **Public projects only, for now** for GitLab).
 
 ## Pick the repository
 
 1. Click **New app** in the top bar.
-2. Click the **GitHub repository** card.
+2. Click the **Git repository** card.
 
-   ![New app, choosing where the app comes from: GitHub repository, Registry image, Local image or By hand](../images/new-app-sources.webp)
+   ![New app, choosing where the app comes from: Git repository, Registry image, Local image, By hand or Templates](../images/new-app-sources.webp)
 
 3. Paste the repository's URL into the field and click **Check**, or press **Enter**.
 
@@ -30,11 +32,17 @@ The examples deploy `github.com/you/website`, a static site.
    https://github.com/you/website.git
    git@github.com:you/website.git
    https://github.com/you/website/tree/main/site
+   https://gitlab.com/you/website
+   https://gitlab.com/you/team/website/-/tree/main/site
    ```
 
-   A `/tree/<branch>/<folder>` link fills in **Branch** and **Subfolder** for you.
+   A link to a branch and a folder (`/tree/<branch>/<folder>`, or GitLab's `/-/tree/<branch>/<folder>`) fills in
+   **Branch** and **Subfolder** for you. A GitLab project can sit in groups and subgroups.
 
    Gitberth reads the repository's branches, clones the default one and looks for everything in it that it can run.
+
+   ![New app from a GitLab project: the GitLab mark in the field, its branch, and how it will run](../images/new-app-gitlab.webp)
+
 
 4. If the repository holds more than one app, Gitberth says **This repo has N apps Gitberth can run. The most likely one is
    picked.** Click another card to pick a different one. See
@@ -51,6 +59,9 @@ first choice. Pick the **Compose file** when there are several, and the **Web se
 app's, with its ports, domains and health URL. The **Settings** card then has the web service's ports and the variables
 the file uses; restart policy, volumes and limits are the file's own. See [Compose apps](compose-apps.md).
 
+![New app from a repository with a compose.yaml of three services: With Compose picked, its web service, and the Settings card below](../images/new-app-git-compose.webp)
+
+
 ## Check how it will run
 
 Gitberth shows **How it will run:** and the kind of project it found, such as **Static website**, with:
@@ -61,7 +72,7 @@ Gitberth shows **How it will run:** and the kind of project it found, such as **
   listens on `localhost`;
 - the **Generated Dockerfile**, or **Gitberth builds with the repo's own Dockerfile** when the repo has one.
 
-![New app from GitHub: a folder's URL in the repository, its branch and subfolder, and the start of what Gitberth detected](../images/new-app-github.webp)
+![New app from a Git repository: a folder's URL in the repository, its branch and subfolder, and the start of what Gitberth detected](../images/new-app-github.webp)
 
 A .NET solution with several runnable projects also shows **Project to run**.
 
@@ -81,28 +92,30 @@ The **Settings** card below holds the app's settings. Everything here can change
    containers use to reach it and its container's name, like **Network name website · container gb-website**.
 2. **Health URL (optional)**: a path such as `/health`. A new version must answer it before it replaces the running one.
 3. **Restart**: what Docker does when the container stops: **Never**, **On failure**, **Unless stopped** (the default) or
-   **Always**.
+   **Always**. A Compose app has no **Restart** here: its services' restart policies are its file's.
 4. **Deploy on push**: on by default, so a new commit on the branch deploys by itself. Turn it off to deploy only when
    you click **Deploy**.
 5. **Ports**: the port Gitberth detected, published on the LAN at a free host port: the same number when it's free, else
    the next free one above it. Click **Add port** for more. See [Networking](networking.md).
 6. **Environment variables**: what Gitberth found in `.env.example` and in the code, with empty values for the ones it
-   can't guess. Fill in what the app needs, mark passwords **Secret**, and tick **Build-time** for values the build needs,
-   like `VITE_*` or `NEXT_PUBLIC_*`. An empty value means "not set". A variable the repo already keeps in GitHub shows
-   **Set in the repo's GitHub variables**. See [Environment variables](environment-variables.md).
-7. **Volumes**: storage that outlives the container. Type a name such as `data` for a Docker volume (it becomes
-   `gb-website-data`) or a path such as `/srv/website` for a folder on the host, and the **Path in the container**.
-   Without a volume, files the app writes inside its container are lost on every deploy.
+   can't guess. Fill in what the app needs, tick **Secret** for passwords, and tick **Build-time** for values the build
+   needs, like `VITE_*` or `NEXT_PUBLIC_*`. **Add variable** and **Paste .env** add more. An empty value means "not set". A variable the repo already keeps shows **Set in the
+   repo's GitHub variables** (or **Set in the project's GitLab CI/CD variables**). For a Compose app these are
+   **Variables (they fill the Compose file's ${…})**. See [Environment variables](environment-variables.md).
+7. **Volumes**: storage that outlives the container. Click **Add volume**, then type a name such as `data` for a Docker
+   volume (it becomes `gb-website-data`) or a path such as `/srv/website` for a folder on the host under **Volume name or
+   host folder**, and the **Path in the container**. Tick **Read-only** if the app only reads it. Without a volume, files
+   the app writes inside its container are lost on every deploy.
 8. **Resources**: the same fields as the app's **Settings** tab: **Memory limit** (in **MiB** or **GiB**, at least 6 MiB),
    **CPU limit** (of the host's CPUs), **Shared memory**, **CPU priority** and **Process limit**. Leave them empty for no
    limit. See [App settings](../reference/app-settings.md#resources).
 
-![The Settings card of a new GitHub app: name, restart policy, ports, environment variables and volumes](../images/new-app-github-settings.webp)
+![The Settings card of a new app from a Git repository: name, restart policy, ports, environment variables and volumes](../images/new-app-github-settings.webp)
 
 ## Create and deploy
 
 Click **Create and deploy**. Gitberth creates the app (its container will be `gb-website`), starts its first deploy and
-opens the app's page.
+opens the app's page. **Cancel** goes back to the Apps list without creating anything.
 
 While it builds, the app shows **Deploying**. To watch the build, open the **Activity** tab and click **Log** on the
 deploy, or click the deploy's number under **Last deploy** in the header. The log shows each step: cloning, detecting,
@@ -122,12 +135,16 @@ created yet** box, and creates nothing.
 ## What happens next
 
 - **New commits deploy by themselves.** Gitberth checks the branch every 30 seconds and deploys a new commit within about
-  that long. The interval is in **Settings** › **Deploys**. A commit whose message says `[skip ci]`, or that changes only
-  files the app's build filters leave out, is skipped.
+  that long, or at once with [instant deploys](github-integration.md#instant-deploys). The interval is in **Settings** ›
+  **Deploys**. A commit whose message says `[skip ci]`, or that changes only files the app's build filters leave out, is
+  skipped.
 - **The Dockerfile follows the repo.** Unless you customized it, Gitberth generates it again on every deploy, so a new
   Node.js or .NET version in the repo is picked up by itself.
 - **The container port follows the app.** When a deploy finds the app now listens on another port, Gitberth moves the
   container port to match and keeps the host port. A container port you set yourself stays.
+- **GitHub or GitLab hears how it went**, when the token allows it: a status on each commit, and a comment on each pull
+  or merge request that has a [preview](previews.md). See [GitHub integration](github-integration.md) and
+  [GitLab](gitlab-integration.md).
 
 ## Change it later
 
@@ -143,13 +160,16 @@ On the app's **Settings** tab, the **Source** section holds:
 
 A change of branch, folder or build is saved for the next build. The page then says **Saved, not live yet**; click
 **Rebuild and deploy** to build it now. See [App settings](../reference/app-settings.md#source). An app deployed with
-Compose has a **Compose** section too, with its Compose file and web service.
+Compose has a **Compose** section too, with its Compose file and web service. The **Previews**, **Deploy hooks** and
+**Databases** sections are there too: see [Preview deployments](previews.md), [Deploy hooks](deploy-hooks.md) and
+[Databases](databases.md).
 
 ## If Check fails
 
 Gitberth says what went wrong in a **Gitberth couldn't use it** box. The usual causes:
 
-- **Only github.com repositories are supported right now.**
+- **Gitberth deploys from github.com and from its GitLab, gitlab.com. For another GitLab, set its address in Settings ›
+  GitLab.** The URL is on another host.
 - **This repository has no branches yet. Push a commit first.**
 - The repository is private and no token is saved, or the token can't see it.
 - **The subfolder '…' doesn't exist on main.** Check the folder's name and the branch.
@@ -159,7 +179,6 @@ See [Troubleshooting](troubleshooting.md) for more.
 ## Related
 
 - [Compose apps](compose-apps.md)
+- [GitLab](gitlab-integration.md)
 - [How Gitberth builds each kind of project](../reference/build-detection.md)
-- [Environment variables](environment-variables.md)
 - [Deploys and rollbacks](deploys-and-rollbacks.md)
-- [Domains](domains.md)

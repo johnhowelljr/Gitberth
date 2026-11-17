@@ -1,8 +1,8 @@
 # Environment variables
 
-An app's environment variables live on its **Environment** tab. Every app has its own there. An app from GitHub also gets
-the variables kept with its repository in GitHub, and the ones Gitberth sets to tell it where it runs, the way Vercel does.
-This page covers all three: how to set them, how secrets are kept, and which value wins.
+An app's environment variables live on its **Environment** tab. Every app has its own there. An app from GitHub or GitLab
+also gets the variables kept with its repository, and the ones Gitberth sets to tell it where it runs, the way Vercel does.
+This page covers them all: how to set them, how secrets are kept, and which value wins.
 
 ## Where an app's variables come from
 
@@ -10,19 +10,25 @@ This page covers all three: how to set them, how secrets are kept, and which val
 |---|---|---|
 | The app's own variables | Every app | The **Environment** tab |
 | The image's own variables | Apps that run an image | Folded on the **Environment** tab; change one to make it the app's own |
-| The repo's variables in GitHub | Git apps | The **Stored in GitHub** card on the **Environment** tab, or GitHub |
+| The repo's variables in GitHub | Apps from GitHub | The **Stored in GitHub** card on the **Environment** tab, or GitHub |
 | A GitLab project's CI/CD variables, by environment scope | Apps from GitLab | The **Stored in GitLab** card on the **Environment** tab, or GitLab ([GitLab](gitlab-integration.md#cicd-variables)) |
 | Variables Gitberth sets, like Vercel | Git apps | Turned on or off in **Settings** › **Source** |
 | Connection strings of the app's [databases](databases.md) (`DATABASE_URL`, `REDIS_URL`) | Every app | **Settings** › **Databases** |
+| Where the app is reached: `APP_URL`, `APP_HOST`, `APP_SCHEME`, `APP_HTTPS` | Apps installed from a [template](templates.md) | Set from its main domain, or its LAN address without one |
 
-For a Git app, a value you set on the app wins over the same name in GitHub, and both win over Gitberth's Vercel-style
-variables. A database's connection string wins over them all: it's the one the database Gitberth made answers to.
+For a Git app, a value you set on the app wins over the same name in GitHub or GitLab, and both win over Gitberth's
+Vercel-style variables. A database's connection string wins over them all: it's the one the database Gitberth made
+answers to. A template's `APP_URL` and the rest lose to a variable of the same name on the tab.
+
+The tab shows the variables Gitberth sets on cards of their own, under the app's own: **Set by Gitberth from its
+databases**, **Set by Gitberth: where it's reached** (a template's app) and, for a Git app, **Stored in GitHub** (or
+**Stored in GitLab**) and **Set by Gitberth, like on Vercel**.
 
 ## Set an app's own variables
 
 1. Open the app and click the **Environment** tab.
 
-   ![An app's Environment tab, with its own variables and, folded under them, the ones that come from its image](../images/app-environment.webp)
+   ![An app's Environment tab with its own variables: a secret, one passed to the build too, and one only previews get](../images/app-environment.webp)
 
 2. Change a value in place, or click **Add variable** and type the name and value.
 
@@ -38,12 +44,27 @@ variables. A database's connection string wins over them all: it's the one the d
 
    **Undo every change here** drops all your edits on this tab.
 
-4. Apply the change with the bar at the bottom of the page. For an app that isn't from Git, the container is recreated
-   with the new variables, and the change dialog shows what happens first. For a Git app, a deploy without a build makes
-   them live. See [Change settings](manage-apps.md#change-settings).
+4. Apply the change with the bar at the bottom of the page. For an app that runs an image, the container is recreated
+   with the new variables, and the change dialog shows what happens first. For a Git app or a Compose app, a deploy
+   without a build makes them live. See [Change settings](manage-apps.md#change-settings).
 
 For a Git app, an empty value means "not set": a variable Gitberth suggested that you leave empty never overrides the
 app's own default. For any other app, an empty value is passed to the container as empty; remove the variable instead.
+
+### Variables from the app's databases
+
+A variable Gitberth sets from one of the app's [databases](databases.md) is listed on the **Set by Gitberth from its
+databases** card, marked **Secret**, with the database it comes from. For a Git app or a Compose app, each deploy sets it
+over a value of the same name on the tab, which then shows **Replaced by Gitberth**; a value for **Previews** only stays
+the previews'. For any other app, Gitberth keeps it in the container's environment, and its row shows **Set by Gitberth**
+and can't be edited here: **Settings** › **Databases** adds, copies and removes it.
+
+### Compose apps
+
+A [Compose app](compose-apps.md)'s variables are what its Compose file's `${…}` are filled with. Gitberth also writes them
+to the project's `.env`, so a service with `env_file: .env` takes them. A service gets a variable only when the file
+passes it on, under `environment:` or with `env_file:`. A database's variable comes in parts too, such as
+`DATABASE_URL_HOST`, for a file that wants them one by one; the card lists them.
 
 ### The image's variables
 
@@ -69,9 +90,10 @@ A Git app's variable is for **All deploys**, for **Production** only, or for **P
 the variable's row. One name can have a value for each, and a **Production** or **Previews** value wins over an **All
 deploys** one. See [Preview deployments](previews.md#environments).
 
-A variable that says where a database is (`DATABASE_URL`, a `postgres://…` value, and the like) has to have a **Previews**
-value before previews deploy: a preview never gets production's database by accident. See
-[Production's database](previews.md#productions-database).
+A preview never gets production's database by accident. Gitberth gives each preview a database of its own when it can
+(the app's own [databases](databases.md#previews), or a `postgres://` URL to a server on this host it can use). Any other
+variable that says where a database is (`DATABASE_URL`, a `mysql://…` value, and the like) needs a **Previews** value
+before previews deploy. See [Production's database](previews.md#productions-database).
 
 ## Build-time variables (Git apps)
 
@@ -129,8 +151,8 @@ An app from GitLab gets its project's CI/CD variables the same way, by their env
 
 For every Git app, Gitberth sets Vercel's system variables, at build time and when the app runs, so code written for
 Vercel finds what it expects. The **Set by Gitberth, like on Vercel** card on the **Environment** tab lists what it adds
-for the app. A variable with the same name that you set, in Gitberth or in GitHub, wins, even when you set it for run time
-only.
+for the app. A variable with the same name that you set, in Gitberth, GitHub or GitLab, wins, even when you set it for run
+time only.
 
 To turn them all off for an app, turn off **Vercel's variables** in **Settings** › **Source**.
 
@@ -138,7 +160,7 @@ To turn them all off for an app, turn off **Vercel's variables** in **Settings**
 |---|---|
 | `VERCEL_URL`, `VERCEL_BRANCH_URL`, `VERCEL_PROJECT_PRODUCTION_URL` | The app's main domain, as a bare host name such as `app.example.com`. Set only when Gitberth routes a domain to the app. |
 | `VERCEL_ENV`, `VERCEL_TARGET_ENV` | `production`, or `preview` when the app deploys another branch than the repo's default one, and in every [preview](previews.md#vercels-variables-in-a-preview). |
-| `VERCEL_GIT_PROVIDER`, `VERCEL_GIT_REPO_OWNER`, `VERCEL_GIT_REPO_SLUG`, `VERCEL_GIT_COMMIT_REF`, `VERCEL_GIT_COMMIT_SHA`, `VERCEL_GIT_COMMIT_MESSAGE`, `VERCEL_GIT_COMMIT_AUTHOR_NAME` | The deployed commit: `github`, the owner, the repository, the branch, the commit, its first line, and its author. |
+| `VERCEL_GIT_PROVIDER`, `VERCEL_GIT_REPO_OWNER`, `VERCEL_GIT_REPO_SLUG`, `VERCEL_GIT_COMMIT_REF`, `VERCEL_GIT_COMMIT_SHA`, `VERCEL_GIT_COMMIT_MESSAGE`, `VERCEL_GIT_COMMIT_AUTHOR_NAME` | The deployed commit: `github` (or `gitlab`), the owner (a GitLab project's namespace), the repository, the branch, the commit, its first line, and its author. |
 | `AUTH_URL`, `NEXTAUTH_URL` | For apps that use Auth.js (`next-auth` or an `@auth/` package): `https://` and the main domain. If you set either one yourself, Gitberth sets neither. |
 
 - **The main domain** is the shortest of the app's domains, as on Vercel. Choose another with **Make main** on the app's
@@ -160,7 +182,7 @@ To turn them all off for an app, turn off **Vercel's variables** in **Settings**
 
 ## Suggested variables for a new app
 
-When you [add an app from GitHub](deploy-from-github.md), Gitberth suggests the variables it finds:
+When you [add an app from GitHub or GitLab](deploy-from-github.md), Gitberth suggests the variables it finds:
 
 - in `.env.example`, `.env.sample`, `.env.template`, `.env.dist`, `example.env`, `sample.env` or `.env.defaults`;
 - in the code: `process.env.X` and `Bun.env.X` in Node.js and Bun; `os.environ`, `os.getenv`, django-environ,

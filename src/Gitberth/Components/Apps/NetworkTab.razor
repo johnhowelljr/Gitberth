@@ -28,7 +28,7 @@
             <Actions>
                 @if (Database && App.Details is not null)
                 {
-                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Link" OnClick="ConnectAsync">Connect</Btn>
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Link" OnClick="ConnectAsync" Tip="app.connect">Connect</Btn>
                 }
                 else if (App.Summary.Running && WebAddress is { } open)
                 {

@@ -12,7 +12,7 @@ Click **Health** in the sidebar. The page lists every container that runs on the
 - **1 hour** shows every reading. **6 hours** shows 30-second averages.
 - **Find a container** searches by name, title or image. **Busiest first** and **A to Z** set the order.
 - The twelve busiest show first. **Show the other …** lists the rest.
-- **Each row** shows the container's name (and its image), its state, a CPU sparkline with the latest reading, its memory, and what happened to it in the time shown, like `1 deploy · 2 restarts`.
+- **Each row** shows the container's name (and its image), its state, a CPU sparkline with the latest reading, its memory, and what happened to it in the time shown, like `1 deploy · 2 restarts`. An app that's [checked from outside](uptime-and-status-page.md) also shows how that stands, like **Uptime: up**.
 - **Stopped** collects the containers that stopped but have readings or events from the last 6 hours. Their state says whether they were stopped or crashed, like **Exited (1)**.
 
 ### Open a container's charts
@@ -112,6 +112,8 @@ The field shows for Git apps and for apps with a web port.
 - **Shows them.** The app's state reads **Healthy**, **Unhealthy** or **Starting** wherever it's shown. The **Container** card on the **Overview** shows the check's state and command, or **None.** with **Add one**.
 - **Counts unhealthy apps.** An unhealthy app is counted under **Needs attention** on the dashboard and the **Apps** list.
 - **Marks the charts** when a check starts failing and when it passes again.
+- **Tells you.** With **A health check fails** on in **Settings › Notifications**, a [notification](notifications.md) goes
+  out when the app turns unhealthy, and again once it passes.
 - **Waits for healthy before a new container takes over.** After a deploy, an update or a change that recreates the container, a container with a Docker health check has to report healthy, instead of only staying up for 15 seconds. A deploy waits up to 60 seconds after those 15 seconds. A change or an update waits for the check's grace period plus its interval times (retries + 1), plus 10 seconds.
 - **Checks the health URL.** After the container is up, Gitberth requests the health URL on the web port. Any answer below 400 passes; redirects aren't followed. A deploy tries every 2 seconds for up to 60 seconds.
 - **Rolls back when they fail.** If the new container reports unhealthy, never reports healthy in time, or the health URL doesn't answer, the old container keeps running (or comes back), and the deploy log or change dialog says which check failed.

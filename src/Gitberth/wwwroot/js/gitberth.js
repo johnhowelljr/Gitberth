@@ -97,7 +97,7 @@
     };
 
     // Ctrl K (or Cmd K) goes to the top bar's search from anywhere; / goes to the page's own search when it has one
-    // (the Apps list), else the top bar's, unless you're already typing somewhere.
+    // (the Apps list, the Help), else the top bar's, unless you're already typing somewhere.
     document.addEventListener('keydown', e => {
         const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
         if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
@@ -105,7 +105,7 @@
             window.gitberth.focusIn('gb-search-input');
         } else if (e.key === '/' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault();
-            window.gitberth.focusIn('gb-apps-search') || window.gitberth.focusIn('gb-search-input');
+            window.gitberth.focusIn('gb-apps-search') || window.gitberth.focusIn('gb-help-search') || window.gitberth.focusIn('gb-search-input');
         }
     });
 
@@ -382,6 +382,14 @@
         }
     });
 
-    // Put focus back on a control Blazor just moved (it re-creates the element, so the browser loses track of it).
-    window.gitberth.focusIn = id => document.getElementById(id)?.querySelector('input, button, a')?.focus();
+    // Put focus back on a control Blazor just moved (it re-creates the element, so the browser loses track of it): the
+    // element itself when it's a control (the top bar's search, for Ctrl K), else the first control inside it.
+    window.gitberth.focusIn = id => {
+        const el = document.getElementById(id);
+        const target = el?.matches('input, textarea, select, button, a') ? el : el?.querySelector('input, button, a');
+        if (!target) return false;
+        target.focus();
+        if (target === el && typeof target.select === 'function' && target.value) target.select();
+        return true;
+    };
 })();

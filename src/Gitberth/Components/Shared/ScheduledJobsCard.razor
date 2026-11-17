@@ -6,7 +6,7 @@
 @if (jobs is { Jobs.Count: > 0 })
 {
     @* One job per row, its path and schedule over when it runs next and last: it fits the Overview's side column. *@
-    <SectionCard Title="Scheduled jobs" Icon="@Icons.Material.Outlined.Schedule" Sub="from vercel.json, in UTC" Flush="true">
+    <SectionCard Title="Scheduled jobs" Icon="@Icons.Material.Outlined.Schedule" Sub="from vercel.json, in UTC" Flush="true" Tip="app.jobs">
         @if (jobs.Problem is not null)
         {
             <div style="padding:14px 18px 0"><div class="gb-ro-note"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" Size="sm" /><span>@jobs.Problem</span></div></div>
@@ -19,13 +19,13 @@
                     <span class="gb-mono" style="font-size:13px;overflow-wrap:anywhere">@job.Path</span>
                     <span class="gb-t3" style="font-size:12.5px"><span class="gb-mono">@job.Schedule</span>@(job.Description is null ? "" : $" · {job.Description}")</span>
                     <span class="gb-t3" style="font-size:12px">
-                        <span title="@Exact(job.NextRun)">@NextRun(job)</span> · <span title="@Exact(job.RunningSince ?? job.Last?.StartedAt)">@LastRun(job)</span>
+                        <span data-tip-text="@Exact(job.NextRun)">@NextRun(job)</span> · <span data-tip-text="@Exact(job.RunningSince ?? job.Last?.StartedAt)">@LastRun(job)</span>
                     </span>
                 </div>
                 <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
-                    <span class="@($"gb-pill gb-pill--{tone}{(job.RunningSince is null ? "" : " gb-pill--pulse")}")"><span class="gb-pill-dot"></span>@label</span>
+                    <span class="@($"gb-pill gb-pill--{tone}{(job.RunningSince is null ? "" : " gb-pill--pulse")}")" data-tip="app.jobs.last-run"><span class="gb-pill-dot"></span>@label</span>
                     <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => RunNowAsync(job)"
-                         Disabled="@(jobs.Problem is not null || job.RunningSince is not null || waiting.Contains((job.Path, job.Schedule)))">Run now</Btn>
+                         Disabled="@(jobs.Problem is not null || job.RunningSince is not null || waiting.Contains((job.Path, job.Schedule)))" Tip="app.jobs.run-now">Run now</Btn>
                 </div>
             </div>
         }

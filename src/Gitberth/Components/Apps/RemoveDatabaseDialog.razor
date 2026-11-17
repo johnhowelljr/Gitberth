@@ -11,7 +11,7 @@
     <DialogContent>
         <div class="gb-stack" style="gap:12px">
             <div class="gb-choices" role="radiogroup" aria-label="Its data" style="grid-template-columns:minmax(0,1fr)">
-                <button type="button" role="radio" aria-checked="@(deleteData ? "false" : "true")" class="gb-choice @(deleteData ? null : "on")" @onclick="() => deleteData = false">
+                <button type="button" role="radio" aria-checked="@(deleteData ? "false" : "true")" class="gb-choice @(deleteData ? null : "on")" data-tip="app.settings.databases.keep" @onclick="() => deleteData = false">
                     <span class="gb-radio @(deleteData ? null : "on")"></span>
                     <span>
                         <span class="gb-choice-title">Keep the data</span>
@@ -19,7 +19,7 @@
                     </span>
                 </button>
                 <button type="button" role="radio" aria-checked="@(deleteData ? "true" : "false")" class="gb-choice @(deleteData ? "on" : null)" disabled="@(!Database.Created)"
-                        title="@(Database.Created ? null : "Gitberth didn't make it, so it never deletes its data.")" @onclick="() => deleteData = true">
+                        data-tip="app.settings.databases.delete" data-tip-detail="@(Database.Created ? null : "Gitberth didn't make it, so it never deletes its data.")" @onclick="() => deleteData = true">
                     <span class="gb-radio @(deleteData ? "on" : null)"></span>
                     <span>
                         <span class="gb-choice-title">Delete the data</span>

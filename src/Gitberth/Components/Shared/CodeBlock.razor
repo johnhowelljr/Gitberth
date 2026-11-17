@@ -4,9 +4,7 @@
 <div class="gb-code">
     <div class="gb-code-bar">
         <span class="gb-code-title"><MudIcon Icon="@Icon" Size="Size.Small" />@Title</span>
-        <MudTooltip Text="Copy">
-            <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="Copy" />
-        </MudTooltip>
+        <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="Copy" data-tip-text="Copy" />
     </div>
     <pre>@Code</pre>
 </div>

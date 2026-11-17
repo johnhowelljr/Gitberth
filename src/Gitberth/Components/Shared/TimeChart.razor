@@ -9,7 +9,16 @@
 *@
 <div class="gb-chart">
     <div class="gb-chart-head">
-        <span class="gb-chart-title">@Title</span>
+        <span class="gb-chart-title">
+            @if (Tip is not null)
+            {
+                <Tip Key="@Tip">@Title</Tip>
+            }
+            else
+            {
+                @Title
+            }
+        </span>
         <span class="gb-chart-keys">
             @for (var k = 0; k < Series.Count; k++)
             {
@@ -61,6 +70,8 @@
 
 @code {
     [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>The title's tip: its key in the catalog (Help/Tips). The title's words become its trigger.</summary>
+    [Parameter] public string? Tip { get; set; }
     /// <summary>What the chart is about (a container name), for screen readers.</summary>
     [Parameter] public string? Subject { get; set; }
     [Parameter, EditorRequired] public IReadOnlyList<DateTime> Times { get; set; } = [];

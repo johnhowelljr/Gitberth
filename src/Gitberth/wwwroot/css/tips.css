@@ -1,0 +1,135 @@
+/* ==========================================================================
+   Tips (wwwroot/js/tips.js): the card that explains a label, and its triggers.
+   One card for the page, fixed, over everything (MudBlazor's menus and dialogs included); the design's tokens only.
+   ========================================================================== */
+
+/* ---------- Triggers ---------- */
+
+/* Words with a tip: a dotted underline, the help cursor; focusable. */
+.gb-tipped {
+    text-decoration: underline dotted color-mix(in srgb, currentColor 45%, transparent);
+    text-decoration-thickness: 1.5px;
+    text-underline-offset: 3px;
+    cursor: help;
+    border-radius: 3px;
+}
+
+.gb-tipped:hover { text-decoration-color: var(--gb-accent-text); }
+
+.gb-tipped:focus-visible { box-shadow: var(--gb-focus); outline: none; }
+
+/* A tip of its own after a label or a title: a small round info button. */
+.gb-tipicon {
+    display: inline-grid; place-items: center; flex: none;
+    width: 18px; height: 18px; margin: 0 0 0 4px; padding: 0;
+    border: 0; border-radius: 50%; background: transparent;
+    color: var(--gb-text-4); cursor: help; vertical-align: middle;
+    transition: color var(--gb-t-fast), background var(--gb-t-fast);
+}
+
+.gb-tipicon .gb-i { width: 15px; height: 15px; }
+
+.gb-tipicon:hover, .gb-tipicon[aria-describedby] { color: var(--gb-accent-text); background: var(--gb-accent-soft); }
+
+.gb-tipicon:focus-visible { box-shadow: var(--gb-focus); outline: none; }
+
+/* ---------- The card ---------- */
+
+.gb-tipcard {
+    --gb-tip-top: #181d28;
+    --gb-tip-bottom: #11151d;
+    --gb-tip-arrow: 50%;
+    position: fixed; left: 0; top: 0; z-index: 1700;
+    box-sizing: border-box; width: max-content; max-width: min(340px, calc(100vw - 16px));
+    padding: 12px 14px 12px 17px;
+    border: 1px solid var(--gb-line-3); border-radius: var(--gb-r-lg);
+    background: linear-gradient(180deg, var(--gb-tip-top), var(--gb-tip-bottom));
+    box-shadow: var(--gb-e2), 0 0 0 1px rgba(76, 141, 255, .06), 0 18px 48px -18px rgba(76, 141, 255, .35);
+    color: var(--gb-text-1); font: 400 12.5px/1.55 var(--gb-sans); letter-spacing: 0; text-align: left; white-space: normal;
+    text-transform: none;
+    opacity: 0; transform: translateY(4px) scale(.97);
+    transform-origin: var(--gb-tip-arrow) 100%;
+    transition: opacity 140ms var(--gb-ease), transform 160ms var(--gb-ease);
+    pointer-events: auto;
+}
+
+.gb-tipcard[data-side="bottom"] { transform: translateY(-4px) scale(.97); transform-origin: var(--gb-tip-arrow) 0; }
+
+.gb-tipcard.on { opacity: 1; transform: none; }
+
+.gb-tipcard[hidden] { display: none; }
+
+/* The accent edge: the brand's gradient down the left side. */
+.gb-tipcard::before {
+    content: ""; position: absolute; left: -1px; top: 12px; bottom: 12px; width: 3px; border-radius: 0 3px 3px 0;
+    background: var(--gb-brand); box-shadow: 0 0 12px rgba(76, 141, 255, .55);
+}
+
+.gb-tipcard-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+
+.gb-tipcard-icon {
+    display: grid; place-items: center; flex: none; width: 20px; height: 20px; border-radius: 6px;
+    color: #fff; background: var(--gb-brand); box-shadow: 0 2px 8px -2px rgba(76, 141, 255, .6);
+}
+
+.gb-tipcard-icon svg { width: 14px; height: 14px; fill: currentColor; }
+
+.gb-tipcard-title { font-weight: 650; font-size: 13px; letter-spacing: -.01em; color: var(--gb-text-1); }
+
+.gb-tipcard-text { color: var(--gb-text-2); }
+
+.gb-tipcard-text strong { color: var(--gb-text-1); font-weight: 600; }
+
+.gb-tipcard-text code { font-size: .9em; }
+
+.gb-tipcard-text a { color: var(--gb-accent-text); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: rgba(143, 182, 255, .45); }
+
+.gb-tipcard-facts {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 12px; margin: 9px 0 0;
+    padding: 8px 10px; border-radius: var(--gb-r-sm); background: rgba(0, 0, 0, .22); box-shadow: inset 0 0 0 1px var(--gb-line-1);
+}
+
+.gb-tipcard-facts dt { color: var(--gb-text-3); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; padding-top: 1px; }
+
+.gb-tipcard-facts dd { margin: 0; font: 500 12px/1.45 var(--gb-mono); color: var(--gb-text-1); overflow-wrap: anywhere; }
+
+.gb-tipcard-detail {
+    margin-top: 9px; padding: 6px 9px; border-radius: var(--gb-r-sm);
+    background: rgba(76, 141, 255, .07); box-shadow: inset 0 0 0 1px rgba(76, 141, 255, .16);
+    font: 500 11.5px/1.5 var(--gb-mono); color: var(--gb-text-2); overflow-wrap: anywhere;
+}
+
+.gb-tipcard-foot { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--gb-line-1); min-width: 0; }
+
+.gb-tipcard-more { flex: none; font-weight: 600; font-size: 12.5px; color: var(--gb-accent-text) !important; text-decoration: none !important; }
+
+.gb-tipcard-more:hover .gb-tipcard-go { margin-left: 3px; }
+
+.gb-tipcard-go { transition: margin var(--gb-t-fast) var(--gb-ease); }
+
+.gb-tipcard-more:focus-visible { box-shadow: var(--gb-focus); outline: none; }
+
+.gb-tipcard-page { min-width: 0; color: var(--gb-text-4); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The arrow: a square turned 45°, coloured as the card's edge it sits on. */
+.gb-tipcard-arrow {
+    position: absolute; left: var(--gb-tip-arrow); bottom: -6px; width: 11px; height: 11px; margin-left: -5.5px;
+    background: var(--gb-tip-bottom); border-right: 1px solid var(--gb-line-3); border-bottom: 1px solid var(--gb-line-3);
+    transform: rotate(45deg); border-bottom-right-radius: 2px;
+}
+
+.gb-tipcard[data-side="bottom"] .gb-tipcard-arrow {
+    bottom: auto; top: -6px; background: var(--gb-tip-top);
+    border: 0; border-left: 1px solid var(--gb-line-3); border-top: 1px solid var(--gb-line-3); border-radius: 2px 0 0 0;
+}
+
+/* A short note of its own (data-tip-text): the words alone, on the same card. */
+.gb-tipcard--plain { padding: 7px 11px 7px 14px; max-width: min(280px, calc(100vw - 16px)); }
+
+.gb-tipcard--plain .gb-tipcard-text { color: var(--gb-text-1); font-weight: 500; }
+
+.gb-tipcard--plain::before { top: 8px; bottom: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+    .gb-tipcard, .gb-tipcard[data-side="bottom"] { transform: none; transition: none; }
+}

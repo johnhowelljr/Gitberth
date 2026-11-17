@@ -18,7 +18,7 @@
     <div class="gb-sec-head">
         <span class="gb-sec-icon"><SvgIcon Icon="@GitberthIcons.GitLab" /></span>
         <div style="min-width:0">
-            <div class="gb-h3" id="gitlab-t">GitLab</div>
+            <div class="gb-h3"><span id="gitlab-t">GitLab</span><Tip Key="settings.gitlab" /></div>
             <p>Projects on gitlab.com or your own GitLab: private ones, their CI/CD variables, merge request previews, statuses and instant deploys.</p>
         </div>
     </div>
@@ -43,11 +43,11 @@
                     }
                     @if (status.ExpiresAt is { } expires)
                     {
-                        <span class="@(ExpiresSoon ? "gb-tag gb-tag--warn" : "gb-t3")">expires @expires.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)@(ExpiresSoon ? ": renew it soon" : "")</span>
+                        <span class="@(ExpiresSoon ? "gb-tag gb-tag--warn" : "gb-t3")"><Tip Key="settings.gitlab.expires">expires @expires.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)@(ExpiresSoon ? ": renew it soon" : "")</Tip></span>
                     }
                     @if (status.Scopes is { Count: > 0 } scopes)
                     {
-                        <span class="gb-t3">scopes <code>@string.Join(", ", scopes)</code></span>
+                        <span class="gb-t3"><Tip Key="settings.gitlab.scopes">scopes <code>@string.Join(", ", scopes)</code></Tip></span>
                     }
                 }
                 else
@@ -72,21 +72,21 @@
                 <Banner Tone="warn" Title="About the token">@checkWarning</Banner>
             }
             <div class="gb-fgrid">
-                <Field Label="GitLab address" For="gl-url" Help="gitlab.com, or your own GitLab's address (with the path it's served under, if any). GitLab apps follow it.">
+                <Field Label="GitLab address" For="gl-url" Tip="settings.gitlab.address" Help="gitlab.com, or your own GitLab's address (with the path it's served under, if any). GitLab apps follow it.">
                     <input id="gl-url" class="gb-input gb-input--mono" placeholder="https://gitlab.com" value="@urlInput" @oninput="e => urlInput = e.Value?.ToString()"
                            autocomplete="off" spellcheck="false" disabled="@busy" />
                 </Field>
-                <Field Label="@(status.TokenSaved ? "Replace the token" : "Token")" For="gl-token" Help="Kept encrypted, and never shown again once it's saved.">
+                <Field Label="@(status.TokenSaved ? "Replace the token" : "Token")" For="gl-token" Tip="settings.gitlab.token" Help="Kept encrypted, and never shown again once it's saved.">
                     <input id="gl-token" type="password" class="gb-input gb-input--mono" placeholder="glpat-…" value="@newToken" @oninput="e => newToken = e.Value?.ToString()"
                            autocomplete="new-password" disabled="@busy" />
                 </Field>
             </div>
             <div class="gb-row gb-row--wrap">
-                <Btn Kind="BtnKind.Primary" OnClick="SaveAsync" Busy="busy" Disabled="@(!CanSave)">@(string.IsNullOrWhiteSpace(newToken) ? "Save" : status.TokenSaved ? "Replace token" : "Save token")</Btn>
+                <Btn Kind="BtnKind.Primary" OnClick="SaveAsync" Busy="busy" Disabled="@(!CanSave)" Tip="settings.gitlab.save">@(string.IsNullOrWhiteSpace(newToken) ? "Save" : status.TokenSaved ? "Replace token" : "Save token")</Btn>
                 @if (status.TokenSaved)
                 {
-                    <Btn OnClick="CheckAsync" Disabled="busy" Icon="@Icons.Material.Outlined.VerifiedUser">Check the token</Btn>
-                    <Btn Kind="BtnKind.Danger" OnClick="RemoveAsync" Disabled="busy">Remove token</Btn>
+                    <Btn OnClick="CheckAsync" Disabled="busy" Icon="@Icons.Material.Outlined.VerifiedUser" Tip="settings.gitlab.check">Check the token</Btn>
+                    <Btn Kind="BtnKind.Danger" OnClick="RemoveAsync" Disabled="busy" Tip="settings.gitlab.remove-token">Remove token</Btn>
                 }
             </div>
             <p class="gb-help">
@@ -97,17 +97,17 @@
                 Its user needs the Maintainer role on a project for its variables and its hook, Developer for statuses. Gitberth never changes your code.
             </p>
 
-            <div class="gb-h3" style="margin-top:6px">What deploys tell GitLab</div>
+            <div class="gb-h3" style="margin-top:6px">What deploys tell GitLab<Tip Key="settings.gitlab.reports" /></div>
             @foreach (var problem in GitLabState.Problems)
             {
                 <Banner Tone="warn" Title="@ProblemTitle(problem)">@problem.Text</Banner>
             }
-            <SwitchRow @key="@($"glst{switchKey}")" Title="Commit statuses" Value="statusesOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitLabStatuses, v)" Disabled="busy"
+            <SwitchRow @key="@($"glst{switchKey}")" Title="Commit statuses" Value="statusesOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitLabStatuses, v)" Disabled="busy" Tip="settings.gitlab.statuses"
                        Sub="Each deploy marks its commit on GitLab: running while it builds, then success (with the app's address) or failed (with a link to the deploy log). Needs the api scope." />
-            <SwitchRow @key="@($"glcm{switchKey}")" Title="Comments on merge requests" Value="commentsOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitLabComments, v)" Disabled="busy"
+            <SwitchRow @key="@($"glcm{switchKey}")" Title="Comments on merge requests" Value="commentsOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitLabComments, v)" Disabled="busy" Tip="settings.gitlab.comments"
                        Sub="A preview of a merge request keeps one comment on it up to date: its state, address, commit and time. Needs the api scope." />
 
-            <div class="gb-h3" style="margin-top:6px">Instant deploys</div>
+            <div class="gb-h3" style="margin-top:6px">Instant deploys<Tip Key="settings.gitlab.instant-deploys" /></div>
             @if (hookHost is null)
             {
                 <p class="gb-help">
@@ -119,9 +119,9 @@
             else
             {
                 <dl class="gb-kv">
-                    <dt>URL</dt>
+                    <dt><Tip Key="settings.gitlab.hook-url">URL</Tip></dt>
                     <dd><CopyText Text="@DomainService.GitLabWebhookUrl(hookHost)" Label="the GitLab hook's URL" /></dd>
-                    <dt>Secret token</dt>
+                    <dt><Tip Key="settings.gitlab.secret-token">Secret token</Tip></dt>
                     <dd>
                         @if (hookSecret is not null)
                         {
@@ -136,7 +136,7 @@
                             <span class="gb-t3">Made with the first project hook.</span>
                         }
                     </dd>
-                    <dt>Trigger</dt>
+                    <dt><Tip Key="settings.gitlab.trigger">Trigger</Tip></dt>
                     <dd><code>@string.Join(", ", GitLabApi.HookEvents)</code></dd>
                 </dl>
                 <p class="gb-help">

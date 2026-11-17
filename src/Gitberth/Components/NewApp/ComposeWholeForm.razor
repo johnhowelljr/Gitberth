@@ -8,20 +8,20 @@
 *@
 <div class="gb-stack" style="gap:14px">
     <div class="gb-fgrid">
-        <Field Label="Name" For="gb-whole-name" Help="@NameHelp" Error="@(nameTried ? AppService.NameProblem(name) : null)">
+        <Field Label="Name" For="gb-whole-name" Tip="newapp.name" Help="@NameHelp" Error="@(nameTried ? AppService.NameProblem(name) : null)">
             <input id="gb-whole-name" class="gb-input" value="@name" @oninput="NameTypedAsync" />
         </Field>
-        <Field Label="Web port" For="gb-whole-port" Help="The web service's container port: the app's domains and LAN address go to it. Empty for an app without one.">
+        <Field Label="Web port" For="gb-whole-port" Tip="newapp.compose.web-port" Help="The web service's container port: the app's domains and LAN address go to it. Empty for an app without one.">
             <input id="gb-whole-port" class="gb-input gb-input--mono" type="number" min="1" max="65535" value="@port" @oninput="e => port = int.TryParse(e.Value?.ToString(), out var p) && p is > 0 and < 65536 ? p : null" />
         </Field>
     </div>
-    <Field Label="Web service" Help="Its container is the app's: its domains, LAN port, health URL and logs. The others stay inside the app.">
+    <Field Label="Web service" Tip="newapp.web-service" Help="Its container is the app's: its domains, LAN port, health URL and logs. The others stay inside the app.">
         <Seg T="string" Options="@(Info.Services.Select(s => new SegOption<string>(s.Name, s.Name)).ToList())" Value="web" ValueChanged="PickWeb" Label="Web service" />
     </Field>
     @if (Info.Variables.Count > 0)
     {
         <div>
-            <div class="gb-label" style="margin-bottom:8px"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />Its variables</div>
+            <div class="gb-label" style="margin-bottom:8px"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" /><Tip Key="newapp.compose.variables">Its variables</Tip></div>
             <div class="gb-envtbl" role="table" aria-label="The Compose file's variables">
                 @foreach (var v in Info.Variables)
                 {
@@ -45,7 +45,7 @@
     }
     <div class="gb-row gb-row--wrap" style="justify-content:flex-end;gap:10px">
         <span class="gb-help" style="margin-right:auto">Creates the Compose project gb-@Slug with @Info.Services.Count services, then pulls, builds and starts them.</span>
-        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="@(creating || Problems.Count > 0 && tried)">Create and deploy</Btn>
+        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="@(creating || Problems.Count > 0 && tried)" Tip="newapp.compose.create">Create and deploy</Btn>
     </div>
 </div>
 

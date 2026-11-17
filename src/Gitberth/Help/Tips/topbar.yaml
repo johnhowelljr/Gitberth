@@ -1,0 +1,35 @@
+# Tips for the top bar (Components/Layout/MainLayout.razor, TopSearch.razor, DockerStatus.razor). See Help/TipCatalog.cs.
+
+topbar.search:
+  title: Search
+  text: >-
+    Finds apps by name, image, port or address as you type, then the help's pages and headings. **Enter** opens the
+    highlighted one. Press **Ctrl K** on any page to come here.
+  example: postgres, 5432 or ghcr.io
+
+topbar.docker:
+  title: Docker Engine
+  text: >-
+    The Docker Engine on this host, which Gitberth drives through its socket, and its version. **Docker offline**
+    means Gitberth can't reach it, so no app can be started or changed. It's checked every 30 seconds.
+  more: guides/troubleshooting#docker
+
+topbar.new-app:
+  title: New app
+  text: >-
+    Adds an app from a GitHub repository or GitLab project, a registry image, an image already on this host, a
+    template, or a `docker run` command or Compose file you paste.
+  more: getting-started/first-steps#next-steps
+
+topbar.help:
+  title: Help
+  text: >-
+    Help for the page you're on, every help topic, and a search of them. The help is built into Gitberth, so it works
+    without internet.
+
+topbar.account:
+  title: Account
+  text: >-
+    You're signed in as admin, Gitberth's one account. Its menu opens **Settings**, where the password is changed, or
+    signs this browser out.
+  more: concepts/security#sign-in-and-the-lockout

@@ -8,31 +8,31 @@
     branches and pull requests get a preview, how many run, when they go, forks, and their domains' protection. Turning
     previews off asks first, since it removes them.
 *@
-<SettingsSection Id="sec-previews" Title="Previews" Icon="@Icons.Material.Outlined.Preview" Changed="Dirty"
+<SettingsSection Id="sec-previews" Title="Previews" Icon="@Icons.Material.Outlined.Preview" Changed="Dirty" Tip="app.settings.previews"
                  Description="Pull requests and branches as apps of their own, with their own address, to try before they reach production.">
-    <Field Label="Previews" Changed="@(mode != loaded.Mode)">
+    <Field Label="Previews" Tip="app.settings.previews.mode" Changed="@(mode != loaded.Mode)">
         <Seg T="PreviewMode" Options="ModeOptions" Value="mode" ValueChanged="v => mode = v" Label="Previews" />
     </Field>
     <p class="gb-help" style="margin-top:-4px">@ModeHelp</p>
     @if (mode != PreviewMode.Off)
     {
         <div class="gb-fgrid">
-            <Field Label="At most running" For="set-preview-limit" Changed="@(limit != loaded.Limit)" Was="@loaded.Limit.ToString(CultureInfo.InvariantCulture)"
+            <Field Label="At most running" For="set-preview-limit" Tip="app.settings.previews.limit" Changed="@(limit != loaded.Limit)" Was="@loaded.Limit.ToString(CultureInfo.InvariantCulture)"
                    OnUndo="() => limit = loaded.Limit" Help="More wait, and start when one is removed." Error="@(limit is < 1 or > 20 ? "Between 1 and 20." : null)">
                 <input id="set-preview-limit" type="number" min="1" max="20" class="gb-input" @bind="limit" @bind:event="oninput" />
             </Field>
-            <Field Label="Remove after (days without a new commit)" For="set-preview-days" Changed="@(days != loaded.ExpiryDays)" Was="@loaded.ExpiryDays.ToString(CultureInfo.InvariantCulture)"
+            <Field Label="Remove after (days without a new commit)" For="set-preview-days" Tip="app.settings.previews.expiry" Changed="@(days != loaded.ExpiryDays)" Was="@loaded.ExpiryDays.ToString(CultureInfo.InvariantCulture)"
                    OnUndo="() => days = loaded.ExpiryDays" Help="A closed or merged pull request, or a deleted branch, takes its preview at once." Error="@(days is < 1 or > 365 ? "Between 1 and 365." : null)">
                 <input id="set-preview-days" type="number" min="1" max="365" class="gb-input" @bind="days" @bind:event="oninput" />
             </Field>
         </div>
         <div class="gb-fgrid">
-            <SwitchRow Title="Also pull requests from forks" Value="forks" ValueChanged="v => forks = v" Changed="@(forks != loaded.Forks)"
+            <SwitchRow Title="Also pull requests from forks" Value="forks" ValueChanged="v => forks = v" Changed="@(forks != loaded.Forks)" Tip="app.settings.previews.forks"
                        Sub="Off: only pull requests from branches of this repo get a preview." />
-            <SwitchRow Title="Protect previews' domains" Value="protect" ValueChanged="v => protect = v" Changed="@(protect != loaded.Protect)"
+            <SwitchRow Title="Protect previews' domains" Value="protect" ValueChanged="v => protect = v" Changed="@(protect != loaded.Protect)" Tip="app.settings.previews.protect"
                        Sub="Visitors sign in through Cloudflare Access before they see a preview. Access is set up in Settings › Domains." />
         </div>
-        <Field Label="Each preview's database" Changed="@(databases != loaded.Databases)">
+        <Field Label="Each preview's database" Tip="app.settings.previews.database" Changed="@(databases != loaded.Databases)">
             <Seg T="PreviewDatabaseMode" Options="DatabaseOptions" Value="databases" ValueChanged="SetDatabasesAsync" Label="Each preview's database" Class="gb-seg--wrap" />
         </Field>
         <p class="gb-help" style="margin-top:-4px">@DatabasesHelp</p>
@@ -69,7 +69,7 @@
         {
             <Btn Kind="BtnKind.Ghost" OnClick="Undo" Disabled="busy">Undo</Btn>
         }
-        <Btn Kind="BtnKind.Primary" OnClick="SaveAsync" Busy="busy" Disabled="@(!Dirty || Wanted.Problem is not null)">Save previews</Btn>
+        <Btn Kind="BtnKind.Primary" OnClick="SaveAsync" Busy="busy" Disabled="@(!Dirty || Wanted.Problem is not null)" Tip="app.settings.previews.save">Save previews</Btn>
     </div>
 </SettingsSection>
 
@@ -87,16 +87,16 @@
 
     private static readonly IReadOnlyList<SegOption<PreviewMode>> ModeOptions =
     [
-        new(PreviewMode.Off, "Off"),
-        new(PreviewMode.PullRequests, "Pull requests"),
-        new(PreviewMode.PullRequestsAndBranches, "Pull requests and branches"),
+        new(PreviewMode.Off, "Off", Tip: "app.settings.previews.off"),
+        new(PreviewMode.PullRequests, "Pull requests", Tip: "app.settings.previews.prs"),
+        new(PreviewMode.PullRequestsAndBranches, "Pull requests and branches", Tip: "app.settings.previews.branches"),
     ];
 
     private static readonly IReadOnlyList<SegOption<PreviewDatabaseMode>> DatabaseOptions =
     [
-        new(PreviewDatabaseMode.Off, "None of its own"),
-        new(PreviewDatabaseMode.Empty, "An empty one"),
-        new(PreviewDatabaseMode.CopyOfProduction, "A copy of production's"),
+        new(PreviewDatabaseMode.Off, "None of its own", Tip: "app.settings.previews.database.none"),
+        new(PreviewDatabaseMode.Empty, "An empty one", Tip: "app.settings.previews.database.empty"),
+        new(PreviewDatabaseMode.CopyOfProduction, "A copy of production's", Tip: "app.settings.previews.database.copy"),
     ];
 
     private PreviewSettings Wanted => new(mode, limit, days, forks, protect, databases);

@@ -42,11 +42,12 @@ It does every step below for you, checking each one, and ends with Gitberth's ad
 password it made up:
 
 ```text
-Gitberth 1.0.0 is running.
+Gitberth 1.3.1 is running.
 
   Open      http://192.168.50.10:8080
   Sign in   admin
   Password  kX4pQ7vRt2LmN9sWb3Ye
+            (change it in Settings once you're in; it's in /opt/gitberth/.env until then)
 ```
 
 What the installer does:

@@ -1,0 +1,52 @@
+@implements IDisposable
+@inject NavigationManager Nav
+@inject HelpDocs Help
+
+@*
+    The top bar's Help button (?): help for the page you're on (when docs/help.yaml's routes have some), every topic, a
+    search of them, and three pages people look for most. Each item has a tip of its own (Help/Tips/help.yaml).
+*@
+<MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="Help" Class="gb-helpmenu">
+    <ActivatorContent>
+        <button type="button" class="gb-iconbtn gb-topbar-help" aria-label="Help" aria-haspopup="menu" data-tip="topbar.help" @onclick="context.ToggleAsync">
+            <SvgIcon Icon="@Icons.Material.Outlined.HelpOutline" />
+        </button>
+    </ActivatorContent>
+    <ChildContent>
+        @if (here is not null)
+        {
+            <MudMenuItem Icon="@Icons.Material.Outlined.LiveHelp" Href="@here.Href" data-tip="help.menu.this-page">Help for this page</MudMenuItem>
+        }
+        <MudMenuItem Icon="@Icons.Material.Outlined.MenuBook" Href="help" data-tip="help.menu.topics">Help topics</MudMenuItem>
+        <MudMenuItem Icon="@Icons.Material.Outlined.Search" Href="help?focus=search" data-tip="help.menu.search">Search help</MudMenuItem>
+        <MudDivider />
+        <MudMenuItem Icon="@Icons.Material.Outlined.Flag" Href="@HelpDocs.PageHref(GettingStarted)" data-tip="help.menu.getting-started">Getting started</MudMenuItem>
+        <MudMenuItem Icon="@Icons.Material.Outlined.Build" Href="@HelpDocs.PageHref(Troubleshooting)" data-tip="help.menu.troubleshooting">Troubleshooting</MudMenuItem>
+        <MudMenuItem Icon="@Icons.Material.Outlined.QuestionAnswer" Href="@HelpDocs.PageHref(Faq)" data-tip="help.menu.faq">FAQ</MudMenuItem>
+    </ChildContent>
+</MudMenu>
+
+@code {
+    /// <summary>The pages the menu's last three items open (the unit tests hold the docs to having them).</summary>
+    public const string GettingStarted = "getting-started/first-steps";
+    public const string Troubleshooting = "guides/troubleshooting";
+    public const string Faq = "faq";
+
+    private HelpLink? here;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        here = Help.ForPath(Nav.ToBaseRelativePath(Nav.Uri));
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        var next = Help.ForPath(Nav.ToBaseRelativePath(e.Location));
+        if (next == here) return;
+        here = next;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+}

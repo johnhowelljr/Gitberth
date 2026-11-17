@@ -5,7 +5,7 @@
 
 @* A container's scheduled restart, on the Health page: what it is now, and a click to change it. *@
 <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Outlined.RestartAlt" OnClick="EditAsync" Class="gb-restart-btn"
-           aria-label="@($"Scheduled restart of {Title}: {Label}. Change it")">@Label</MudButton>
+           aria-label="@($"Scheduled restart of {Title}: {Label}. Change it")" data-tip="app.settings.scheduled-restart">@Label</MudButton>
 
 @code {
     [Parameter, EditorRequired] public string Container { get; set; } = "";

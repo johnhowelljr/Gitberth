@@ -1,0 +1,1172 @@
+# Tips for the Settings page (Components/Pages/SettingsPage.razor, and the sections it holds: Shared/GitLabSection,
+# NotificationsSection, UptimeSection, DatabaseServersSection, ApiTokensSection, AuditLogSection, BuildCacheRow).
+# The section keys (settings.github, ...) are used by the section's title and by its link in the list on the left.
+# See Help/TipCatalog.cs for the rules.
+
+settings.page:
+  title: Settings
+  text: >-
+    Settings for Gitberth as a whole, not for one app: an app's own settings are on its page. Each section saves on
+    its own, and every change is recorded in the audit log. The list on the left jumps to a section.
+  more: reference/gitberth-settings
+
+# ---- GitHub access ----
+
+settings.github:
+  title: GitHub access
+  text: >-
+    The GitHub token Gitberth clones private repositories with, and reads and saves the repo variables apps keep their
+    environment in. Public repositories need none. Commit statuses, pull request comments and webhooks use it too.
+  more: reference/gitberth-settings#github-access
+
+settings.github.token:
+  title: GitHub token
+  text: >-
+    A personal access token. A fine-grained one needs **Contents: Read-only** and **Variables: Read and write** on the
+    repos you deploy, plus the permissions under **GitHub integration**; a classic one, **repo** and
+    **admin:repo_hook**. It's kept encrypted and never shown again.
+  example: github_pat_...
+  more: guides/github-integration#the-tokens-permissions
+
+settings.github.save-token:
+  title: Save the token
+  text: >-
+    Asks GitHub who the token belongs to, then saves it encrypted; a token GitHub refuses isn't saved. Gitberth then
+    looks at every repo again at once, and tries again whatever GitHub refused the last token.
+  more: reference/gitberth-settings#github-access
+
+settings.github.remove-token:
+  title: Remove the token
+  text: >-
+    Forgets the GitHub token. Private repositories can't be cloned, and GitHub hears nothing from Gitberth, until you
+    save another; apps already running keep running.
+  more: reference/gitberth-settings#github-access
+
+settings.github.expires:
+  title: Token expiry
+  text: >-
+    The day GitHub stops taking this token. In its last 14 days it's highlighted with **renew it soon**: make a new
+    token on GitHub and save it here before then, or private repos stop deploying.
+  more: reference/gitberth-settings#github-access
+
+# ---- GitHub integration ----
+
+settings.github-integration:
+  title: GitHub integration
+  text: >-
+    What deploys tell GitHub (a status on each commit, a comment on each pull request's preview), and instant deploys:
+    GitHub telling Gitberth about a push the moment it happens. All of it uses the token above.
+  more: guides/github-integration
+
+settings.github-integration.statuses:
+  title: Commit statuses
+  text: >-
+    Each deploy that builds a commit marks it on GitHub: pending while it builds, then live with the app's address, or
+    failed with a link to the deploy log. The status is named `Gitberth: <app>`. Needs **Commit statuses: Read and
+    write** on the token.
+  default: "On"
+  more: guides/github-integration#commit-statuses
+
+settings.github-integration.comments:
+  title: Comments on pull requests
+  text: >-
+    A preview of a pull request keeps one comment on it up to date: its state, address, commit and time. Turn it off
+    and previews stop commenting. Needs **Pull requests: Read and write** on the token.
+  default: "On"
+  more: guides/github-integration#comments-on-pull-requests
+
+settings.github-integration.instant-deploys:
+  title: Instant deploys
+  text: >-
+    GitHub and GitLab send a webhook on every push, through your Cloudflare Tunnel, and Gitberth looks at that repo at
+    once instead of at its next check. The regular checks keep running, so a delivery that's lost misses nothing.
+    It needs domains turned on.
+  more: guides/github-integration#instant-deploys
+
+settings.github-integration.hook-host:
+  title: Host name for GitHub's webhooks
+  text: >-
+    A host name on your domain that nothing else uses. Only `/hooks/github`, `/hooks/gitlab` and `/hooks/deploy/...` on
+    it reach Gitberth, never behind Cloudflare Access; every other address there answers 404. GitLab's project hooks
+    and deploy hooks share it.
+  example: hooks.example.com
+  more: guides/github-integration#instant-deploys
+
+settings.github-integration.turn-on:
+  title: Turn on instant deploys
+  text: >-
+    Routes the host name through your tunnel to Gitberth, adds its DNS record and makes the webhook's secret. Gitberth
+    then adds its webhook to every repo it deploys, when the token has **Webhooks: Read and write**.
+  more: guides/github-integration#instant-deploys
+
+settings.github-integration.move-host:
+  title: Move to another host name
+  text: >-
+    Moves instant deploys to the name typed: it's routed and gets its DNS record, the old name's route and record go,
+    and the webhooks Gitberth added on your repos follow.
+  more: guides/github-integration#instant-deploys
+
+settings.github-integration.turn-off:
+  title: Turn off instant deploys
+  text: >-
+    Asks first, then takes the host name's route and the DNS record Gitberth added out of Cloudflare. Gitberth goes back
+    to checking for new commits on its interval. The webhooks on your repos stay; remove them on GitHub if you like.
+  more: guides/github-integration#instant-deploys
+
+settings.github-integration.payload-url:
+  title: Payload URL
+  text: >-
+    Where GitHub sends its webhook deliveries. Gitberth adds the webhook to your repos itself; without **Webhooks: Read
+    and write** on the token, add it by hand in the repo's **Settings › Webhooks** with these values.
+  example: https://hooks.example.com/hooks/github
+  more: guides/github-integration#instant-deploys
+
+settings.github-integration.content-type:
+  title: Content type
+  text: >-
+    The format GitHub must send deliveries in. Choose `application/json` when you add the webhook by hand.
+  more: guides/github-integration#instant-deploys
+
+settings.github-integration.secret:
+  title: Webhook secret
+  text: >-
+    GitHub signs each delivery with it, and Gitberth refuses one whose signature is wrong or missing. Paste it in the
+    webhook's **Secret** when you add it by hand; **Show** reveals it.
+  more: guides/github-integration#how-deliveries-are-checked
+
+settings.github-integration.events:
+  title: Events
+  text: >-
+    What the webhook is sent for: a push, a pull request, a deleted branch. Choose "Let me select individual events"
+    and tick these when you add it by hand.
+  more: guides/github-integration#instant-deploys
+
+# ---- GitLab ----
+
+settings.gitlab:
+  title: GitLab
+  text: >-
+    Projects on gitlab.com or your own GitLab: the token for private projects and their CI/CD variables, what deploys
+    report on GitLab, and instant deploys through GitLab's project hooks.
+  more: guides/gitlab-integration
+
+settings.gitlab.address:
+  title: GitLab address
+  text: >-
+    gitlab.com, or your own GitLab's address with the path it's served under, if it has one. Every GitLab app follows
+    it: apps keep only their project's path, never the address.
+  default: https://gitlab.com
+  example: https://gitlab.example.com
+  more: guides/gitlab-integration#set-it-up
+
+settings.gitlab.token:
+  title: GitLab token
+  text: >-
+    A personal, project or group access token. With **api** Gitberth does everything; with only **read_api** and
+    **read_repository** it deploys, previews and reads CI/CD variables, but reports nothing. It's kept encrypted and
+    never shown again.
+  default: "None: public projects only"
+  example: glpat-...
+  more: guides/gitlab-integration#the-tokens-scopes
+
+settings.gitlab.save:
+  title: Save the address and token
+  text: >-
+    Saves the address and, when one is typed, the token, once GitLab takes it: Gitberth asks who the token belongs to
+    and which scopes it has. A token GitLab refuses isn't saved. Every GitLab project is looked at again.
+  more: guides/gitlab-integration#set-it-up
+
+settings.gitlab.check:
+  title: Check the token
+  text: >-
+    Asks GitLab again who the token belongs to, its scopes and when it expires. Use it after you change the token's
+    scopes or its user's role on GitLab.
+  more: guides/gitlab-integration#the-tokens-scopes
+
+settings.gitlab.remove-token:
+  title: Remove token
+  text: >-
+    Asks first, then forgets the token: private projects can't be cloned, their CI/CD variables can't be read, and
+    GitLab hears nothing from Gitberth until you save another. Project hooks Gitberth added stay on GitLab.
+  more: guides/gitlab-integration#set-it-up
+
+settings.gitlab.expires:
+  title: Token expiry
+  text: >-
+    The day GitLab stops taking this token. In its last 14 days it's highlighted with **renew it soon**: make a new
+    token on GitLab and save it here before then.
+  more: guides/gitlab-integration#the-tokens-scopes
+
+settings.gitlab.scopes:
+  title: Scopes
+  text: >-
+    What GitLab says this token may do. **api** covers everything Gitberth does; when one it uses is missing, a banner
+    names it and what for.
+  more: guides/gitlab-integration#the-tokens-scopes
+
+settings.gitlab.reports:
+  title: What deploys tell GitLab
+  text: >-
+    What Gitberth reports on GitLab as it deploys: a status on each commit it builds, and a comment on each merge
+    request that has a preview. Both need the token's **api** scope.
+  more: guides/gitlab-integration#commit-statuses
+
+settings.gitlab.statuses:
+  title: Commit statuses
+  text: >-
+    Each deploy that builds a commit marks it on GitLab: running while it builds, then success with the app's address,
+    failed with a link to the deploy log, or canceled. Needs the **api** scope, and at least the Developer role on the
+    project.
+  default: "On"
+  more: guides/gitlab-integration#commit-statuses
+
+settings.gitlab.comments:
+  title: Comments on merge requests
+  text: >-
+    A preview of a merge request keeps one comment on it up to date: its state, address, commit and time. Turn it off
+    and previews stop commenting. Needs the **api** scope.
+  default: "On"
+  more: guides/gitlab-integration#comments-on-merge-requests
+
+settings.gitlab.instant-deploys:
+  title: Instant deploys
+  text: >-
+    GitLab tells Gitberth about a push or a merge request the moment it happens, through the host name for webhooks set
+    under **GitHub integration › Instant deploys**, which GitLab shares. Without one, Gitberth checks for new commits on
+    its interval.
+  more: guides/gitlab-integration#instant-deploys
+
+settings.gitlab.hook-url:
+  title: Hook URL
+  text: >-
+    Where GitLab's project hook sends pushes and merge requests. Gitberth adds the hook to each project itself with the
+    **api** scope and the Maintainer role; without them, add it in the project's **Settings › Webhooks**.
+  example: https://hooks.example.com/hooks/gitlab
+  more: guides/gitlab-integration#instant-deploys
+
+settings.gitlab.secret-token:
+  title: Secret token
+  text: >-
+    GitLab sends it with each delivery, and Gitberth refuses one without it. It's Gitberth's own for GitLab, never
+    GitHub's webhook secret. Paste it in the hook's **Secret token** when you add the hook by hand.
+  more: guides/gitlab-integration#instant-deploys
+
+settings.gitlab.trigger:
+  title: Trigger
+  text: >-
+    The events the project hook is sent for. Tick **Push events** and **Merge request events** when you add it by hand.
+  more: guides/gitlab-integration#instant-deploys
+
+# ---- Notifications ----
+
+settings.notifications:
+  title: Notifications
+  text: >-
+    Messages about failed deploys, crashes, failing health checks, apps that go down and certificates about to expire,
+    sent to every destination you add: email, Discord, Slack, ntfy or a webhook. Nothing is sent until you add one.
+  more: guides/notifications
+
+settings.notifications.add:
+  title: Add a destination
+  text: >-
+    Opens a dialog for one place messages go: an email address, a Discord or Slack channel's webhook, an ntfy topic, or
+    a webhook of your own. **Add and send a test** saves it, encrypted, and sends a test there. Up to 10.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.test:
+  title: Send a test
+  text: >-
+    Sends a test message to this destination now, whatever the switches below say. The line under its name says how it
+    went, with the reason when it failed.
+  more: guides/notifications#when-a-message-doesnt-arrive
+
+settings.notifications.edit:
+  title: Edit
+  text: >-
+    Opens the destination in the same dialog. A secret field (a webhook URL, a token, a password) left empty keeps the
+    saved one: saved secrets are never shown again.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.remove:
+  title: Remove
+  text: >-
+    Asks first, then stops sending there and forgets the destination's URL, token or password.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.events:
+  title: Tell me when
+  text: >-
+    Which events send a message, to every destination. An app left out on its own **Settings** tab (**General ›
+    Notifications**) sends none; the line under the switches counts those.
+  more: guides/notifications#what-youre-told-about
+
+settings.notifications.deploy-failed:
+  title: A deploy fails
+  text: >-
+    A build that fails, a new version that doesn't pass its checks (the previous version keeps running), or a
+    scheduled restart that didn't work.
+  default: "On"
+  more: guides/notifications#what-youre-told-about
+
+settings.notifications.deploy-succeeded:
+  title: A deploy succeeds
+  text: >-
+    Deploys that build a commit: a push, **Deploy**, a promote or a rollback. Restarts, starts and settings changes
+    send nothing.
+  default: "Off"
+  more: guides/notifications#what-youre-told-about
+
+settings.notifications.crashed:
+  title: An app crashes
+  text: >-
+    Any container whose process exits with an error or runs out of memory. A crash loop sends one message, then a
+    count every 30 minutes, not one per crash.
+  default: "On"
+  more: guides/notifications#a-crash-loop
+
+settings.notifications.unhealthy:
+  title: A health check fails
+  text: >-
+    Docker marks an app unhealthy, and a second message says when it passes again. Only apps with a health check are
+    ever marked.
+  default: "On"
+  more: guides/notifications#what-youre-told-about
+
+settings.notifications.down:
+  title: An app goes down
+  text: >-
+    Its uptime check fails twice in a row: its domain or LAN address doesn't answer, answers with a server error, or
+    has a certificate problem. Another message says when it's back up.
+  default: "On"
+  more: guides/uptime-and-status-page#when-an-app-goes-down
+
+settings.notifications.certificate:
+  title: A certificate is about to expire
+  text: >-
+    A domain's certificate expires within 14 days, and again within 3. Cloudflare renews its own certificates well
+    before that, so this rarely sends anything.
+  default: "On"
+  more: guides/notifications#what-youre-told-about
+
+settings.notifications.previews:
+  title: Previews too
+  text: >-
+    Deploys of previews send messages too, as the switches above say. Off, only production apps' deploys do.
+  default: "Off"
+  more: guides/notifications#what-youre-told-about
+
+# ---- Notifications: the dialog that adds or edits a destination (Shared/DestinationDialog.razor) ----
+
+settings.notifications.destination.kind:
+  title: Send to
+  text: >-
+    What kind of place the messages go to: an email address, a Discord or Slack channel, an ntfy topic, or a webhook
+    of your own. It's chosen once: for another kind, add another destination and remove this one.
+  default: Discord
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.kind.email:
+  title: Email
+  text: >-
+    Mail through a mail server you have an account on, to one address or several. Gitberth signs in to it as a mail
+    app would, usually on port 587 with STARTTLS.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.kind.discord:
+  title: Discord
+  text: >-
+    A message in a Discord channel, through the channel's webhook: an embed with a colored edge, red for a failure and
+    green when something's fine again. It never pings anyone.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.kind.slack:
+  title: Slack
+  text: >-
+    A message in a Slack channel, through an incoming webhook: a Slack app of yours with **Incoming Webhooks** turned
+    on, and its webhook for the channel.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.kind.ntfy:
+  title: ntfy
+  text: >-
+    A push notification on your phone or computer through ntfy, on ntfy.sh or your own server. Failures and warnings
+    come at high priority, and tapping one opens its link in Gitberth.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.kind.webhook:
+  title: Webhook
+  text: >-
+    A JSON POST to any URL, for Home Assistant, n8n or a script of your own, with the event, how bad it is, its title
+    and text, the link, the app, and the deploy and commit when there are some.
+  more: guides/notifications#what-a-webhook-gets
+
+settings.notifications.destination.name:
+  title: Name
+  text: >-
+    What the list of destinations calls it, so you can tell two apart. Left empty, it goes by its kind, like
+    **Discord**. At most 60 characters.
+  example: Phone
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.mail-server:
+  title: Mail server
+  text: >-
+    The SMTP server Gitberth sends the mail through: your mail provider's, or one of your own. Give its name only,
+    without `https://` or a port.
+  example: smtp.example.com
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.port:
+  title: Port
+  text: >-
+    The port the mail server takes mail on. Big providers have 587 with **STARTTLS**; port 465, where TLS starts
+    before anything else, isn't something Gitberth's mail client speaks.
+  default: "587"
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.security:
+  title: Security
+  text: >-
+    Whether the connection to the mail server is encrypted. **STARTTLS** turns encryption on before Gitberth signs in;
+    **None** sends everything as it is.
+  default: STARTTLS
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.security.starttls:
+  title: STARTTLS
+  text: >-
+    The connection is encrypted before Gitberth signs in and sends, and the server's certificate has to be valid.
+    Every big mail provider has it on port 587.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.security.none:
+  title: None
+  text: >-
+    No encryption: the user name, the password and the mail cross the network as they are. Only for a mail server on
+    your own network that has no TLS.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.user:
+  title: User name
+  text: >-
+    What Gitberth signs in to the mail server as, often your mail address. Leave it and the password empty for a
+    server that takes mail without signing in.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.password:
+  title: Password
+  text: >-
+    The password for the user name; with a provider that has two-step sign-in, an app password made there. It's saved
+    encrypted and never shown again: left empty, the saved one stays.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.from:
+  title: From
+  text: >-
+    The address the mail comes from. Most mail servers send only as an address of the account Gitberth signs in with,
+    so use one of yours.
+  example: gitberth@example.com
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.to:
+  title: To
+  text: >-
+    Who gets the mail: one address, or several separated by commas, up to 20.
+  example: you@example.com
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.url.discord:
+  title: Webhook URL
+  text: >-
+    The channel's webhook, from Discord: the channel's settings › **Integrations** › **Webhooks** › **New Webhook** ›
+    **Copy Webhook URL**. It's the key to the channel, so Gitberth saves it encrypted and never shows it again.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.url.slack:
+  title: Webhook URL
+  text: >-
+    The channel's incoming webhook, from a Slack app of yours with **Incoming Webhooks** turned on. It's the key to
+    the channel, so Gitberth saves it encrypted and never shows it again.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.url.ntfy:
+  title: Topic URL
+  text: >-
+    The ntfy server and the topic to post to, on ntfy.sh or your own server (plain `http://` is fine on your LAN).
+    Anyone who knows the topic can read it, so pick a name nobody can guess.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.url.webhook:
+  title: URL
+  text: >-
+    Where Gitberth POSTs each message, as one JSON object with an `X-Gitberth-Event` header. Leave sign-ins out of
+    the URL: put a token in **Bearer token**.
+  more: guides/notifications#what-a-webhook-gets
+
+settings.notifications.destination.token.ntfy:
+  title: Access token
+  text: >-
+    For a topic that needs signing in: an access token from your ntfy server, starting `tk_`. Leave it empty for an
+    open topic.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.token.webhook:
+  title: Bearer token
+  text: >-
+    Sent with every message as `Authorization: Bearer` and the token, so the receiving end can tell the call is
+    Gitberth's. Optional; saved encrypted and never shown again.
+  more: guides/notifications#what-a-webhook-gets
+
+settings.notifications.destination.add:
+  title: Add and send a test
+  text: >-
+    Saves the destination, encrypted, and sends a test message there at once. Whether the test went shows in a
+    message at the bottom right, and on the destination's row.
+  more: guides/notifications#add-a-destination
+
+settings.notifications.destination.save:
+  title: Save
+  text: >-
+    Saves your changes; a secret field left empty keeps the saved value. No test is sent: **Send a test** on its row
+    sends one.
+  more: guides/notifications#add-a-destination
+
+# ---- Registries ----
+
+settings.registries:
+  title: Registries
+  text: >-
+    Sign-ins for private images: Gitberth uses them to pull an image, to check it for updates, and in **New app** to
+    read its ports and volumes. Public images need none. One sign-in per registry.
+  more: reference/gitberth-settings#registries
+
+settings.registries.registry:
+  title: Registry
+  text: >-
+    The registry's address: `ghcr.io`, `docker.io`, or one on your LAN with its port. Docker Hub's other names count
+    as `docker.io`.
+  example: registry.lan:5000
+  more: guides/run-a-registry-image#before-you-start
+
+settings.registries.username:
+  title: Username
+  text: >-
+    The user name Gitberth signs in to the registry with, together with the password or token next to it.
+  more: guides/run-a-registry-image#before-you-start
+
+settings.registries.password:
+  title: Password or token
+  text: >-
+    Kept encrypted and never shown again once it's saved. For GitHub's registry, use a token that can read packages.
+  more: guides/run-a-registry-image#before-you-start
+
+settings.registries.save:
+  title: Verify and save
+  text: >-
+    Signs in once through Docker to check it works, then saves it encrypted. A registry that has a sign-in already
+    gets this one in its place, once it's verified. When the registry refuses, nothing is saved and a banner says why.
+  more: reference/gitberth-settings#registries
+
+settings.registries.state:
+  title: Sign-in state
+  text: >-
+    When Gitberth last signed in with it. **needs its password again** means Gitberth can't read the saved password
+    any more (its keys were lost): type the registry, user name and password below, then **Verify and save**.
+  more: reference/gitberth-settings#registries
+
+settings.registries.remove:
+  title: Remove the sign-in
+  text: >-
+    Asks first. Apps on this registry's private images can't be pulled or checked for updates until you add a sign-in
+    again; nothing that runs changes.
+  more: reference/gitberth-settings#registries
+
+# ---- Updates ----
+
+settings.updates:
+  title: Updates
+  text: >-
+    How often Gitberth looks for newer images, the hours in which apps set to update on their own may do it, and the
+    choice a new app starts with. Git apps don't use these: they deploy from their branch.
+  more: guides/updates
+
+settings.updates.check-every:
+  title: Check for updates every
+  text: >-
+    How many hours apart Gitberth asks a registry about each image, from 1 to 168: one request per image, however many
+    apps use it. Apps set to **When I ask** aren't checked.
+  default: 6 hours
+  more: guides/updates#how-checks-work
+
+settings.updates.window:
+  title: Automatic updates run between
+  text: >-
+    The hours in which apps set to **Automatically** update; the window can run past midnight. The times are in
+    Gitberth's own time zone, its `TZ`, named under the field. A database never updates on its own.
+  default: 03:00 and 05:00
+  more: guides/updates#automatic-updates
+
+settings.updates.new-apps:
+  title: New apps from an image
+  text: >-
+    The **Updates** choice a new app starts with, from a registry, a local image, a pasted `docker run` or Compose
+    service, or the blank form. An image pinned by digest gets **When I ask**, a database gets **Tell me** rather than
+    **Automatically**, and each app's own choice is in its **Settings › Image**.
+  default: Tell me
+  more: guides/updates#update-choices
+
+settings.updates.policy.off:
+  title: When I ask
+  text: >-
+    A new app's image is checked only when you ask, with **Check now** on its page, and no badge shows for it.
+  more: guides/updates#update-choices
+
+settings.updates.policy.notify:
+  title: Tell me
+  text: >-
+    A badge shows on the app when its registry has a newer image, and you update it with one click.
+  more: guides/updates#update-choices
+
+settings.updates.policy.auto:
+  title: Automatically
+  text: >-
+    The app pulls the newer image and is recreated on it within the window above, and rolls back if the new version
+    fails. Databases, Gitberth itself and Compose containers only tell you.
+  more: guides/updates#automatic-updates
+
+# ---- Domains (Cloudflare) ----
+
+settings.domains:
+  title: Domains (Cloudflare)
+  text: >-
+    Optional: apps on their own domains, like app.example.com, through the Cloudflare Tunnel on this host. Gitberth
+    makes the tunnel's routes and the DNS records for you, and can ask visitors to sign in first.
+  more: guides/domains
+
+settings.domains.enabled:
+  title: Manage app domains through Cloudflare
+  text: >-
+    Off, Gitberth doesn't contact Cloudflare or read your tunnel's settings, and your tunnel and DNS stay as you set
+    them. On, with a token saved, Gitberth routes every app's domains at once; you add domains on an app's Network tab.
+  default: "Off"
+  more: guides/domains#turn-on-domains
+
+settings.domains.tunnel:
+  title: Tunnel
+  text: >-
+    The Cloudflare Tunnel domains go through: the one the cloudflared container on this host runs, by the start of its
+    ID. When Gitberth can't find or use one, this line says why.
+  more: guides/domains#before-you-start
+
+settings.domains.token:
+  title: Cloudflare API token
+  text: >-
+    A custom API token Gitberth makes tunnel routes and DNS records with, and protects domains with through Cloudflare
+    Access. The line under the field lists the permissions it needs. It's kept encrypted and never shown again.
+  more: guides/domains#turn-on-domains
+
+settings.domains.save-token:
+  title: Save the token
+  text: >-
+    Finds the cloudflared container on this host, checks the token against its tunnel, saves it encrypted, and routes
+    every app's domains. Routes you already made in Cloudflare that go to an app become its domains.
+  more: guides/domains#turn-on-domains
+
+settings.domains.remove-token:
+  title: Remove the token
+  text: >-
+    Forgets the Cloudflare token. Routes and DNS records already in Cloudflare stay as they are, and Gitberth changes
+    nothing there until you save another.
+  more: guides/domains#turn-domains-off
+
+settings.domains.protection:
+  title: Protection
+  text: >-
+    A protected domain asks visitors to sign in through Cloudflare Access before they reach the app: Cloudflare emails
+    a one-time code, and only the addresses below get in. **Ready** means Access is set up on your account; protect a
+    domain with its switch on the app's Network tab.
+  more: guides/domains#protect-a-domain
+
+settings.domains.emails:
+  title: Who may sign in
+  text: >-
+    The email addresses that may sign in to protected domains, one per line. An empty list is refused while a domain is
+    protected.
+  default: Nobody
+  example: you@example.com
+  more: guides/domains#set-up-protection-once
+
+settings.domains.emails-save:
+  title: Save who may sign in
+  text: >-
+    Saves the addresses and updates every protected domain's Access application, so exactly these people can sign in.
+  more: guides/domains#set-up-protection-once
+
+settings.domains.check-again:
+  title: Check again
+  text: >-
+    Asks Cloudflare again whether protection is ready, after you change something in Zero Trust or the token's
+    permissions.
+  more: guides/domains#set-up-protection-once
+
+# ---- Uptime and status page ----
+
+settings.uptime:
+  title: Uptime and status page
+  text: >-
+    How often Gitberth checks each app the way a visitor reaches it (its main domain, or its address on the LAN), and an
+    optional public page showing how they're doing.
+  more: guides/uptime-and-status-page
+
+settings.uptime.interval:
+  title: Check each app every
+  text: >-
+    How many seconds apart each app is checked, from 30 to 900. Two failed checks in a row make an app down:
+    notifications say so, and again when it's back.
+  default: 60 seconds
+  more: guides/uptime-and-status-page#whats-checked
+
+settings.uptime.status-page:
+  title: Status page
+  text: >-
+    A public page with each listed app's state, 90 days of uptime and the last incidents, at `/status` on your LAN
+    without signing in. It never shows an address, a container's name or an error's text. Off, `/status` answers 404.
+  default: "Off"
+  more: guides/uptime-and-status-page#the-status-page
+
+settings.uptime.title:
+  title: Title
+  text: >-
+    The heading at the top of the status page and its browser tab, up to 60 characters.
+  default: Status
+  more: guides/uptime-and-status-page#the-status-page
+
+settings.uptime.description:
+  title: Description
+  text: >-
+    A sentence under the status page's title, up to 280 characters. Leave it empty for none.
+  example: Our home lab's apps
+  more: guides/uptime-and-status-page#the-status-page
+
+settings.uptime.apps:
+  title: Apps it lists
+  text: >-
+    **Every app with uptime checks** lists them all, apps added later too. **Only the apps I pick** lists the ones you
+    tick, starting from those listed now; the rest stay off the page.
+  default: Every app with uptime checks
+  more: guides/uptime-and-status-page#the-status-page
+
+settings.uptime.response-times:
+  title: Show response times
+  text: >-
+    Adds each app's average response time over the last 24 hours to the status page.
+  default: "Off"
+  more: guides/uptime-and-status-page#the-status-page
+
+settings.uptime.host:
+  title: Host name on the internet
+  text: >-
+    Needs domains: a host name nothing else uses. The tunnel sends the whole host to the status page, with its DNS
+    record like any domain, and nothing else of Gitberth's answers there. Emptied, its route and DNS record go.
+  example: status.example.com
+  more: guides/uptime-and-status-page#on-the-internet
+
+settings.uptime.save:
+  title: Save status page
+  text: >-
+    Saves the status page's settings: on or off, its title, description, apps, response times and host name. The line
+    beside it links the page on your LAN, and on the internet when it has a host name.
+  more: guides/uptime-and-status-page#the-status-page
+
+# ---- Network ----
+
+settings.network:
+  title: Network
+  text: >-
+    How Gitberth writes this host's address in every LAN address and connection string it shows, and the Docker network
+    every app shares.
+  more: guides/networking
+
+settings.network.lan-address:
+  title: LAN address of this host
+  text: >-
+    The address every LAN address and connection string Gitberth shows uses: an IP, or a name your devices resolve.
+    Empty, Gitberth uses `GITBERTH_PUBLIC_HOST`, else the address it detects (shown under the field). It changes what
+    Gitberth shows, never where an app listens.
+  example: 192.168.50.10
+  more: guides/networking#the-lan-address-of-this-host
+
+settings.network.use-detected:
+  title: Use it
+  text: >-
+    Saves the address Gitberth detects now as this host's LAN address, so every address it shows works again. Nothing
+    about the apps themselves changes.
+  more: guides/networking#the-lan-address-of-this-host
+
+settings.network.shared:
+  title: Shared network
+  text: >-
+    The Docker network every app joins: containers on it reach each other by name, like `postgres:5432`, without
+    publishing a port on the host. Its driver, subnet and members are shown beside it.
+  default: gitberth
+  more: guides/networking#reach-other-containers-by-name
+
+# ---- Own LAN addresses ----
+
+settings.own-lan:
+  title: Own LAN addresses
+  text: >-
+    Lets a container have an address of its own on your LAN, besides its ports on the host's address: it answers there
+    on every port it listens on, like a device of its own. Addresses come from a block you keep out of your router's
+    DHCP range.
+  default: "Off"
+  more: guides/networking#give-a-container-its-own-lan-address
+
+settings.own-lan.block:
+  title: Block
+  text: >-
+    The addresses Gitberth gives containers: a /24 to a /30, or a range of 4 to 256 addresses, in this host's network.
+    Keep it out of your router's DHCP range, or a device may get the same address.
+  example: 192.168.50.224/28
+  more: guides/networking#before-you-start
+
+settings.own-lan.suggest:
+  title: Suggest a block
+  text: >-
+    Fills in the highest /28 of this host's network where no device answers. Check it's outside your router's DHCP
+    range before you turn it on.
+  more: guides/networking#turn-on-own-lan-addresses
+
+settings.own-lan.test:
+  title: Test
+  text: >-
+    A helper container tries every address of the block and the router, and lists what it found. Nothing is kept or
+    changed.
+  more: guides/networking#turn-on-own-lan-addresses
+
+settings.own-lan.turn-on:
+  title: Turn on
+  text: >-
+    Makes the Docker network `gitberth-lan` on the host's network interface and tests the block from it. It stays only
+    when the test passes; then you give a container an address on its Network tab.
+  more: guides/networking#turn-on-own-lan-addresses
+
+settings.own-lan.containers:
+  title: Containers
+  text: >-
+    The containers that have an address of their own now, each with that address. Click one to open its app.
+  more: guides/networking#give-an-app-an-address
+
+settings.own-lan.turn-off:
+  title: Turn off
+  text: >-
+    Lists the containers that would lose their address and asks first. Each of them loses it, so devices using those
+    addresses lose them, and `gitberth-lan` is removed.
+  more: guides/networking#give-a-container-its-own-lan-address
+
+# ---- Deploys ----
+
+settings.deploys:
+  title: Deploys
+  text: >-
+    How often Gitberth looks for new commits on every Git app's branch, and Docker's build cache, which keeps builds
+    quick.
+  more: reference/gitberth-settings#deploys
+
+settings.deploys.interval:
+  title: Check for new commits every
+  text: >-
+    How many seconds apart Gitberth asks each repository for new commits (one `git ls-remote` per repo), from 10 to
+    3600. Saving checks at once. Each app's **Deploy on push** switch still decides whether a new commit deploys.
+  default: 30 seconds
+  more: guides/deploys-and-rollbacks#automatic-deploys
+
+settings.deploys.build-cache:
+  title: Build cache
+  text: >-
+    The room Docker's build cache takes on this host. It keeps each step of every app's builds, so a step whose files
+    didn't change isn't run again.
+  more: reference/gitberth-settings#deploys
+
+settings.deploys.clear-cache:
+  title: Clear build cache
+  text: >-
+    Asks first, then deletes all of Docker's build cache and says how much it freed. Nothing that runs changes, but
+    each app's next build runs every step again, so it takes longer. Refused while a build runs.
+  more: reference/gitberth-settings#deploys
+
+# ---- Databases ----
+
+settings.databases:
+  title: Databases
+  text: >-
+    The Postgres servers apps' databases go on. An app adds a database and a role of its own, or a Redis, on its
+    **Settings** tab under **Databases**.
+  more: guides/databases#postgres-servers
+
+settings.databases.usable:
+  title: Gitberth uses it
+  text: >-
+    Gitberth can make databases on this server: it's running, it's on Gitberth's network, and Gitberth can sign in to
+    it as its superuser.
+  more: guides/databases#postgres-servers
+
+settings.databases.not-usable:
+  title: Not usable
+  text: >-
+    Gitberth can't make databases here: the server isn't running, it isn't on Gitberth's network, or Gitberth can't
+    sign in to it as its superuser. The line under it says which.
+  more: guides/troubleshooting#databases
+
+settings.databases.default:
+  title: Default
+  text: >-
+    New databases go on this server, unless an app picks another when it adds one.
+  more: guides/databases#postgres-servers
+
+settings.databases.make-default:
+  title: Make it the default
+  text: >-
+    New databases go on this server from now on. Databases already made stay where they are.
+  more: guides/databases#postgres-servers
+
+settings.databases.image:
+  title: Image
+  text: >-
+    The Postgres image this server runs, and so its version.
+  example: postgres:18
+  more: guides/databases#postgres-servers
+
+settings.databases.reach:
+  title: Apps reach it as
+  text: >-
+    The name and port apps reach this server at on Gitberth's shared network: what their connection strings use. It
+    says nothing about the LAN; a server Gitberth sets up isn't published there.
+  example: postgres:5432
+  more: guides/databases#postgres-servers
+
+settings.databases.user:
+  title: Gitberth signs in as
+  text: >-
+    The superuser Gitberth signs in as, inside the server's container, to make each app's database and role.
+  more: guides/databases#postgres-servers
+
+settings.databases.create:
+  title: Create a Postgres server
+  text: >-
+    Pulls `postgres:18` and sets it up as an app: its data on a volume of its own, a generated superuser password kept
+    as a secret variable, reached by name on Gitberth's network and published nowhere. It becomes the default unless
+    one was chosen.
+  more: guides/databases#create-a-postgres-server
+
+# ---- Admin password ----
+
+settings.password:
+  title: Admin password
+  text: >-
+    The password you sign in to Gitberth with, as admin, its one account. Changing it signs every other browser out.
+  more: concepts/security#sign-in-and-the-lockout
+
+settings.password.current:
+  title: Current password
+  text: >-
+    The password you sign in with now. Gitberth checks it before it changes anything.
+  more: concepts/security#sign-in-and-the-lockout
+
+settings.password.new:
+  title: New password
+  text: >-
+    The password you'll sign in with from now on: at least 10 characters.
+  more: concepts/security#sign-in-and-the-lockout
+
+settings.password.again:
+  title: New password again
+  text: >-
+    The new password once more, so a typo can't lock you out. It must match the one beside it.
+  more: concepts/security#sign-in-and-the-lockout
+
+settings.password.change:
+  title: Change password
+  text: >-
+    Saves the new password. Every other browser that's signed in goes to the sign-in page, on its next request or
+    within a minute; this one stays signed in.
+  more: concepts/security#sign-in-and-the-lockout
+
+# ---- AI agents and API ----
+
+settings.agents:
+  title: AI agents and API
+  text: >-
+    Tokens that let AI agents (over MCP) and scripts (the HTTP API) see and run your apps without signing in. Everything
+    a token does is in the audit log under its name.
+  more: guides/ai-agents
+
+settings.agents.access.read:
+  title: Read
+  text: >-
+    Sees everything: apps, logs, deploys, domains, uptime, the audit log. Changes nothing.
+  more: guides/ai-agents#access-levels
+
+settings.agents.access.operate:
+  title: Operate
+  text: >-
+    Read, plus deploy, restart, start, stop, roll back, cancel, promote, updates, cron jobs and previews on or off. It
+    can't create or delete apps or change their settings.
+  more: guides/ai-agents#access-levels
+
+settings.agents.access.admin:
+  title: Admin
+  text: >-
+    Full control of this host, like signing in: it can create apps whose containers reach the whole host. Treat it like
+    the admin password.
+  more: guides/ai-agents#access-levels
+
+settings.agents.prefix:
+  title: The token's first characters
+  text: >-
+    `gbt_` and the token's next 8 characters, so you can tell tokens apart. Gitberth keeps only these and the token's
+    SHA-256, never the token itself.
+  more: concepts/security#api-tokens
+
+settings.agents.last-used:
+  title: Last used
+  text: >-
+    When a request last came with this token, and from which address. **Never** means nothing has used it yet.
+  more: guides/ai-agents#make-a-token
+
+settings.agents.revoke:
+  title: Revoke
+  text: >-
+    Asks first, then ends the token at once: every request with it is refused from then on. It stays in the list,
+    marked **Revoked**, and can't be brought back.
+  more: guides/ai-agents#make-a-token
+
+settings.agents.name:
+  title: Name
+  text: >-
+    What will use the token: the audit log names it for everything it does. Up to 50 characters, and no two tokens in
+    use share one.
+  example: Claude Code
+  more: guides/ai-agents#make-a-token
+
+settings.agents.expiry:
+  title: Expires
+  text: >-
+    When the token stops working by itself: in 30 days, 90 days, a year, or never. Its expiry is recorded in the audit
+    log.
+  default: 90 days
+  more: guides/ai-agents#make-a-token
+
+settings.agents.access:
+  title: Access
+  text: >-
+    What the token may do: **Read** sees and changes nothing, **Operate** also deploys, restarts and rolls back,
+    **Admin** is full control, like signing in. Give each agent the least it needs.
+  default: Read
+  more: guides/ai-agents#access-levels
+
+settings.agents.create:
+  title: Create token
+  text: >-
+    Makes the token and shows it once, with a copy button and the setup for each kind of client. Gitberth keeps only
+    its hash, so copy it before you leave the page.
+  more: guides/ai-agents#make-a-token
+
+settings.agents.mcp:
+  title: MCP server
+  text: >-
+    The address AI agents connect to over MCP, with one of these tokens. It answers on your network only, never through
+    the tunnel.
+  more: guides/ai-agents#connect-a-client
+
+settings.agents.api:
+  title: HTTP API
+  text: >-
+    The address scripts call with one of these tokens, on your network only. Its OpenAPI description is at
+    `/api/v1/openapi.json`.
+  more: reference/api#calling-a-tool
+
+# ---- Audit log ----
+
+settings.audit:
+  title: Audit log
+  text: >-
+    Every change to this Gitberth and its apps, who made it and how it ended, kept in a file of its own. Each entry's
+    hash covers the one before it, so a changed or missing entry shows.
+  more: guides/audit-log
+
+settings.audit.retention:
+  title: Keep entries for
+  text: >-
+    How many days entries are kept, from 30 to 3650. Older ones are removed once a day, and the rest still check out.
+  default: 365 days
+  more: guides/audit-log#how-long-entries-are-kept
+
+settings.audit.outside:
+  title: Record changes made outside Gitberth
+  text: >-
+    Containers, images, networks and volumes changed with `docker` on the host, Compose or another tool, each recorded
+    as Docker's. Gitberth's own changes are recorded either way. It takes effect when you click **Save**.
+  default: "On"
+  more: guides/audit-log#changes-made-outside-gitberth
+
+settings.audit.file:
+  title: File
+  text: >-
+    Where the log is kept, inside Gitberth's data folder: a file of its own, apart from Gitberth's database.
+  more: guides/audit-log#where-its-kept
+
+settings.audit.export-csv:
+  title: Export everything (CSV)
+  text: >-
+    Downloads every entry in the log as a CSV file, for a spreadsheet. The Audit log page exports what a search finds
+    instead.
+  more: guides/audit-log#export
+
+settings.audit.export-json:
+  title: JSON Lines
+  text: >-
+    Downloads every entry in the log as JSON Lines, one JSON object per line, for scripts and log tools.
+  more: guides/audit-log#export
+
+settings.audit.verify:
+  title: Check its integrity
+  text: >-
+    Walks the chain of hashes, entry by entry, and says whether the log is intact or which entry was changed.
+  more: guides/audit-log#check-the-logs-integrity
+
+# ---- System ----
+
+settings.system:
+  title: System
+  text: >-
+    What this Gitberth installation runs and talks to. Nothing here can be changed on this page.
+  more: reference/gitberth-settings#system
+
+settings.system.docker:
+  title: Docker engine
+  text: >-
+    The Docker Engine's version on this host, and the docker CLI's inside Gitberth. **Not reachable** says why Gitberth
+    can't talk to it.
+  more: guides/troubleshooting#docker
+
+settings.system.git:
+  title: git
+  text: >-
+    The version of git Gitberth clones and fetches repositories with, inside its container. **Not found** means Git
+    apps can't deploy.
+  more: reference/gitberth-settings#system
+
+settings.system.data:
+  title: Data folder
+  text: >-
+    Where Gitberth keeps its database, keys, logs and build folders, inside its container: the volume to back up.
+  example: /data
+  more: guides/backups-and-restore#whats-in-gitberths-volume
+
+settings.system.version:
+  title: Version
+  text: >-
+    The Gitberth that runs, and the commit a published image was built from.
+  example: 1.3.1 (3f9c2ab)
+  more: guides/updating-gitberth#see-which-image-you-run

@@ -7,22 +7,40 @@ too. Open it from **Audit log** in the sidebar.
 
 The log is a file of its own, `audit.db` in Gitberth's data volume. It needs no database server and nothing more to run.
 
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 24}}}%%
+flowchart TD
+    you["You, on<br/>Gitberth's<br/>pages"] --> gb["Gitberth makes the change"]
+    agent["An AI agent<br/>or a script,<br/>with its token"] --> gb
+    hook["A deploy hook,<br/>GitHub or<br/>GitLab"] --> gb
+    jobs["Gitberth's own<br/>jobs: the<br/>watcher, schedules,<br/>updates"] --> gb
+    gb --> entry["An entry: who, through<br/>what, from where, what<br/>changed, how it ended"]
+    gb --> docker["Docker"]
+    other["docker on the host,<br/>Compose, another tool"] --> docker
+    docker --> events["Docker's events"]
+    events --> mine{"A change Gitberth<br/>said it would make?"}
+    mine -->|"yes"| known["Already recorded<br/>as Gitberth's"]
+    mine -->|"no, and outside<br/>changes are recorded"| outside["An entry: Docker,<br/>outside Gitberth"]
+    entry --> log["audit.db: each entry<br/>hashed with the one before"]
+    outside --> log
+```
+
 ## What's recorded
 
 | Area | What it records |
 |---|---|
 | **Sign-ins** | Each sign-in that worked, failed (a wrong password, an unknown user name) or was refused after too many failed attempts, with the browser's address; signing out; changing the admin password. |
-| **Apps** | A new app and where it came from; a settings change, with each field before and after; ports, and the ports noted for a container; variables added, changed or removed, and the repo's variables saved to or deleted from GitHub on an app's **Environment** tab; start, stop and restart; a rename; removal; deploy hooks made and deleted; networks joined and left; an own LAN address; previews and update settings; a scheduled job run by hand; **Keep the new one** or **Put the original back** after a change that needed your decision; [databases](databases.md) added and removed (with their data kept or deleted), and each preview's own made and dropped, by name only. |
+| **Apps** | A new app and where it came from (a template too); a settings change, with each field before and after; ports, and the ports noted for a container; variables added, changed or removed, and the repo's variables saved to or deleted from GitHub or GitLab on an app's **Environment** tab; start, stop and restart; a rename; removal; deploy hooks made and deleted; networks joined and left; an own LAN address; previews and update settings; a scheduled job run by hand; **Keep the new one** or **Put the original back** after a change that needed your decision; [databases](databases.md) added and removed (with their data kept or deleted), and each preview's own made and dropped, by name only. |
 | **Deploys** | Each deploy when it's queued, when it starts, and how it ended: succeeded, failed, rolled back, cancelled (a queued one too, when stopping or deleting the app cancels it) or skipped. Image updates found, applied, failed and rolled back. |
 | **Domains** | An app's domains added, removed, made its main one, protected or not; what Gitberth changed in Cloudflare for them (DNS records, Access applications, the tunnel's routes); turning domains on or off. |
-| **Settings** | Every section of the Settings page: GitHub access and integration, notification destinations, registries, updates, the network, own LAN addresses, deploys, clearing the build cache, the default Postgres server and setting one up (**Databases**), and the audit log's own settings. |
+| **Settings** | Every section of the Settings page: GitHub access and integration, GitLab, notification destinations, registries, updates, uptime checks and the status page, the network, own LAN addresses, deploys, clearing the build cache, the default Postgres server and setting one up (**Databases**), API tokens made, revoked and expired (by name and access, never the token), and the audit log's own settings. |
 | **Outside Gitberth** | Docker changes Gitberth didn't make: see [below](#changes-made-outside-gitberth). |
 
 An entry has:
 
-- **When**, to the millisecond, kept in UTC and shown in your browser's time.
+- **When**, to the millisecond, kept in UTC and shown in Gitberth's time zone.
 - **Who**, **Through** and **From**: the actor, how the change came in, and the address it came from.
-- **What**: one sentence, such as **Changed web's settings: memory limit and health URL.**, and the action's name, such as
+- **What**: one sentence, such as **Changed website's settings: memory limit and health URL.**, and the action's name, such as
   `app.settings.changed`.
 - **Outcome**: done, **Failed** or **Refused**. A change that didn't work is recorded too, with the reason.
 - The **App** it's about, its **Target** (a domain, a variable's name, a token's name), and **What changed**: each field,
@@ -34,8 +52,9 @@ An entry has:
 | Who | For |
 |---|---|
 | **admin**, through the UI, from the browser's address | Everything done on Gitberth's pages, and the deploys they start, even though a deploy runs on its own time. |
+| **An API token**, by its name, through MCP or the API, from the caller's address | What an [AI agent or a script](ai-agents.md) does with that token, and the calls it was refused. |
 | **A deploy hook**, by its name, from the caller's address | The deploys and updates a [deploy hook](deploy-hooks.md) call starts. |
-| **GitHub**, through a webhook | The deploys a push starts when [instant deploys](github-integration.md#instant-deploys) are on. |
+| **GitHub** or **GitLab**, through a webhook | The deploys a push starts when [instant deploys](github-integration.md#instant-deploys) are on. |
 | **Gitberth**, through one of its jobs: the repo watcher, a schedule, startup, the update checks, the health checks, a sync | What Gitberth does by itself: a new commit deployed, a scheduled restart, an automatic update, apps created again when it starts, domains and webhooks kept in step. |
 | **Docker**, outside Gitberth | A change to Docker that Gitberth didn't make. |
 
@@ -52,7 +71,7 @@ whose container it was:
 - networks created or removed, and containers connected to them or disconnected
 - named volumes created or removed
 
-One command is one entry: `docker stop gb-web` is **Stopped outside Gitberth: gb-web.**, not its kill, die and stop
+One command is one entry: `docker stop gb-website` is **Stopped outside Gitberth: gb-website.**, not its kill, die and stop
 events. What isn't a change is left out: Docker's own restart of a container that crashed (its restart policy; the crash
 is on the [Health page](health-and-monitoring.md)), the networks a container joins as it starts and leaves as it stops,
 and Gitberth's own container and helpers. Changes made while Gitberth wasn't running aren't known.
@@ -71,22 +90,46 @@ To leave changes made outside Gitberth out, turn off **Record changes made outsi
 
 The page lists entries newest first, grouped by day, 100 at a time; **Load more** shows older ones.
 
+![The Audit log page with a settings change by admin open: when, who, through what, from where, and what changed](../images/audit-log.webp)
+
 | Filter | What it does |
 |---|---|
 | **Search** | Words in what changed, who made it, the app, a domain or the action's name. |
 | **24 h**, **7 days**, **30 days**, **All** | How far back. **7 days** unless you change it. |
-| **Who** | One actor: admin, a deploy hook, GitHub, Gitberth, or **Outside Gitberth**. |
+| **Who** | One actor: admin, an API token, a deploy hook, GitHub, GitLab, Gitberth, or **Outside Gitberth**; **Anyone** clears it. |
 | **App** | One app, by its container's name, so its history stays after it's deleted. |
 | **Area** | **Apps**, **Deploys**, **Domains**, **Settings**, **Sign-ins** or **Outside Gitberth**. |
 | **Outcome** | **Done**, **Failed** or **Refused**. |
 
-The filters are part of the page's address, so a view can be bookmarked or sent: `/audit?range=all&app=gb-web` is
-everything that ever happened to `gb-web`. Each app's **Activity** tab links to it: **All changes to web in the audit
+The filters are part of the page's address, so a view can be bookmarked or sent: `/audit?range=all&app=gb-website` is
+everything that ever happened to `gb-website`. Each app's **Activity** tab links to it: **All changes to website in the audit
 log**. While the page is open, new entries wait above the list (**2 new entries: show**), so it never moves under you.
 
-Click an entry for everything about it: when, who, through what and from where, the app (with **All its changes**), the
-target, the deploy and its log, **What changed** as a table of fields before and after, and its hashes. The copy button
-by its number copies a link that opens it, like `/audit?range=all&entry=1234`.
+Click an entry for everything about it: see [An entry's details](#an-entrys-details).
+
+## An entry's details
+
+Clicking an entry opens its details beside the list. The panel starts with the action's name and the entry's sentence,
+then how it ended (**Done**, **Failed** or **Refused**), its area, and **Outside Gitberth** for a change Gitberth didn't
+make. **Close**, a click outside the panel, or Esc puts it away.
+
+| Line | What it shows |
+|---|---|
+| **When** | The day and time in Gitberth's time zone, and the exact time in UTC, like `2026-11-14T09:30:12.345Z`. |
+| **Who** | The actor by name, and what it is: **Person**, **API token**, **Deploy hook**, **GitHub**, **GitLab**, **Docker**, **Cloudflare** or **Gitberth**. |
+| **Through** | How the change came in: **the UI**, **an AI agent (MCP)**, **the API**, **a webhook** or **a deploy hook**; one of Gitberth's own jobs (**the repo watcher**, **a schedule**, **startup**, **the update checks**, **the health checks**, **a sync**); or **Docker's events**, for a change made outside Gitberth. |
+| **From** | The address the request came from, when there is one: the browser's, the agent's or the caller's. |
+| **App** | The app it's about, a link to its page, with the container's own name when the app goes by another, and **All its changes**: the log filtered to that app. |
+| **Target** | What the change was made to besides the app: a domain, a variable's name, a token's name, a network. |
+| **Deploy** | For an entry about a deploy, **Deploy #12 and its log**, a link to the deploy's page. When the entry knows only the deploy's number, **Follows** shows it instead, like `deployment:12`. |
+| **Entry** | Its number in the log. The copy button by it copies a link that opens this entry, like `/audit?range=all&entry=1234`. |
+
+**What changed** lists each field the change touched, with its value **Before** and **After** (`—` for none). Secret
+values never go in the log: a secret variable or a token shows by its name only (see [Secrets stay out](#secrets-stay-out)).
+
+**Tamper evidence** shows the entry's **Hash**, with a copy button, and the **Previous** entry's. The hash is SHA-256 of
+the previous entry's hash and this entry's fields, which **Check the log's integrity** works out again for every entry
+(see [Check the log's integrity](#check-the-logs-integrity)).
 
 ## Export
 
@@ -129,7 +172,7 @@ few minutes after Gitberth starts, entries older than that are removed, and the 
 ## Secrets stay out
 
 Secret values never go in the log. A secret variable shows by its name and scope only (**Added the secret variable
-API_TOKEN to web (all deploys).**), a token or password only that it was saved, replaced or removed, and a deploy hook's
+API_TOKEN to website (all deploys).**), a token or password only that it was saved, replaced or removed, and a deploy hook's
 URL not at all. A sign-in with an unknown user name doesn't record the name typed: it's often a password typed in the
 wrong box. A plain variable's value is kept, cut short after 100 characters.
 

@@ -1,9 +1,15 @@
-@* A settings section: a card with an icon tile, its title, one line on what it's for, a "Changed" tag while it has unsaved changes, and its fields. *@
+@* A settings section: a card with an icon tile, its title (with an info button when it has a Tip), one line on what it's for, a "Changed" tag while it has unsaved changes, and its fields. *@
 <section class="gb-card gb-sec @(Danger ? "gb-sec--danger" : null) @Class" id="@Id" aria-labelledby="@($"{Id}-title")">
     <div class="gb-sec-head">
         <span class="gb-sec-icon"><SvgIcon Icon="@Icon" /></span>
         <div class="gb-grow">
-            <h2 class="gb-h3" id="@($"{Id}-title")">@Title</h2>
+            <h2 class="gb-h3" id="@($"{Id}-title")">
+                @Title
+                @if (Tip is not null)
+                {
+                    <Tip Key="@Tip" />
+                }
+            </h2>
             @if (Description is not null)
             {
                 <p>@Description</p>
@@ -25,6 +31,8 @@
     [Parameter] public string? Description { get; set; }
     [Parameter] public bool Changed { get; set; }
     [Parameter] public bool Danger { get; set; }
+    /// <summary>The title's tip: its key in the catalog (Help/Tips), shown by an info button after the title.</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public string? Class { get; set; }

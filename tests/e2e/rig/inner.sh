@@ -22,6 +22,8 @@ STANDIN=gbe2e-standin
 STANDIN_IP=10.89.0.2
 GITBERTH_IP=10.89.0.3
 PUBLIC_HOST=${E2E_PUBLIC_HOST:-192.168.70.10}
+# The name Gitberth's image runs under: gitberth:e2e, or another tag of it (the docs' screenshots use gitberth:local).
+IMAGE=${E2E_GITBERTH_IMAGE:-gitberth:e2e}
 ENV_FILE=/e2e/gitberth.env
 
 say() { echo "[rig] $*"; }
@@ -58,8 +60,14 @@ wait_http() {
   return 1
 }
 
+# E2E_HIDE_RIG=1 (the docs' screenshots, shots/run.sh): the rig's own network and containers carry Gitberth's helper
+# label, so Gitberth leaves them out of its pages (Apps, Health, Network) and its audit log, as it does its own
+# short-lived helpers; it finds the fake cloudflared all the same. Otherwise they carry a label of the rig's that nothing
+# reads, and Gitberth shows them as it always has.
+if [ "${E2E_HIDE_RIG:-}" = 1 ]; then RIG_LABEL=gitberth.helper=rig; else RIG_LABEL=gbe2e.hidden=no; fi
+
 network() {
-  docker network inspect "$NET" >/dev/null 2>&1 || docker network create --subnet "$SUBNET" "$NET" >/dev/null
+  docker network inspect "$NET" >/dev/null 2>&1 || docker network create --subnet "$SUBNET" --label "$RIG_LABEL" "$NET" >/dev/null
   for v in gbe2e-state gbe2e-trust; do docker volume inspect "$v" >/dev/null 2>&1 || docker volume create "$v" >/dev/null; done
 }
 
@@ -69,7 +77,7 @@ up_standin() {
     docker rm -f "$STANDIN" >/dev/null 2>&1 || true
     docker run -d --name "$STANDIN" --hostname "$STANDIN" --network "$NET" --ip "$STANDIN_IP" --restart unless-stopped \
       -v gbe2e-state:/state -v gbe2e-trust:/trust -e E2E_GITBERTH_URL=http://gitberth:8080 \
-      --label gbe2e.part=standin gbe2e-standin:latest >/dev/null
+      --label gbe2e.part=standin --label "$RIG_LABEL" gbe2e-standin:latest >/dev/null
     say "stand-ins started"
   fi
   wait_http "http://$STANDIN_IP:8099/__control/health" 60 || { docker logs --tail 60 "$STANDIN"; die "the stand-ins didn't answer"; }
@@ -77,8 +85,9 @@ up_standin() {
 
 write_env() {
   pw=$(docker exec "$STANDIN" cat /state/admin-password)
+  [ "$IMAGE" = gitberth:e2e ] || docker tag gitberth:e2e "$IMAGE"
   (umask 077 && cat >"$ENV_FILE" <<EOF
-GITBERTH_IMAGE=gitberth:e2e
+GITBERTH_IMAGE=$IMAGE
 GITBERTH_ADMIN_PASSWORD=$pw
 GITBERTH_PUBLIC_HOST=$PUBLIC_HOST
 GITBERTH_PORT=8080
@@ -133,7 +142,7 @@ up_cloudflared() {
     docker rm -f cloudflare-tunnel >/dev/null 2>&1 || true
     standin_home
     docker run -d --name cloudflare-tunnel --network host --restart unless-stopped -e STANDIN="http://$STANDIN_IP:8099" \
-      -e E2E_NETWORK=host --label gbe2e.part=cloudflared gbe2e-cloudflared:fake tunnel run --token "$token" >/dev/null
+      -e E2E_NETWORK=host --label gbe2e.part=cloudflared --label "$RIG_LABEL" gbe2e-cloudflared:fake tunnel run --token "$token" >/dev/null
     say "fake cloudflared started"
   fi
   # It's running the tunnel once the stand-in has heard from it. One that runs a newer version than the stand-in now has
@@ -162,7 +171,12 @@ up() {
 remove_apps() {
   ids=$(docker ps -aq --filter label=gitberth.managed=true)
   [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
-  ids=$(docker ps -aq --filter label=gitberth.helper)
+  if [ "$RIG_LABEL" = gitberth.helper=rig ]; then
+    # Gitberth's own helpers; the rig's stand-ins and cloudflared carry the label too (E2E_HIDE_RIG), and stay.
+    ids=$(docker ps -a --filter label=gitberth.helper --format '{{.ID}} {{.Label "gbe2e.part"}}' | awk '$2 == "" { print $1 }')
+  else
+    ids=$(docker ps -aq --filter label=gitberth.helper)
+  fi
   [ -z "$ids" ] || docker rm -f $ids >/dev/null 2>&1 || true
   images=$(docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^gitberth/' || true)
   [ -z "$images" ] || docker rmi -f $images >/dev/null 2>&1 || true
@@ -199,7 +213,7 @@ runner() {
   for h in github.com www.github.com api.github.com codeload.github.com uploads.github.com raw.githubusercontent.com \
            objects.githubusercontent.com api.cloudflare.com gitlab.e2e.test gitlab.com; do hosts="$hosts --add-host $h:$STANDIN_IP"; done
   # shellcheck disable=SC2086
-  docker run --rm --name gbe2e-runner --network "$NET" --shm-size 1g $hosts \
+  docker run --rm --name gbe2e-runner --network "$NET" --shm-size 1g --label "$RIG_LABEL" $hosts \
     -v gbe2e-trust:/trust:ro -e SSL_CERT_FILE=/trust/gitberth-bundle.pem \
     -v /var/run/docker.sock:/var/run/docker.sock -v "$E2E":/e2e:ro -v gitberth_gitberth-data:/gbdata -v "$OUT":/out \
     -e E2E_GITBERTH_URL=http://gitberth:8080 -e E2E_STANDIN_URL="http://$STANDIN:8099" -e E2E_ADMIN_PASSWORD="$pw" \

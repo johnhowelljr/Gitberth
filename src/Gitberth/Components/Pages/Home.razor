@@ -14,14 +14,23 @@
 
 <PageTitle>Dashboard · Gitberth</PageTitle>
 
-<PageHead Title="Dashboard" Lead="@($"Everything on {HostName}, at a glance. Every app is in Apps.")">
+<PageHead Title="Dashboard" Tip="dashboard.title" Lead="@($"Everything on {HostName}, at a glance. Every app is in Apps.")">
     <Actions>
         @if (checkedAt is { } at)
         {
             @* Says plainly when the figures stop being current, rather than leaving an old page looking live. *@
-            <span class="gb-pill2 @(refreshError is null ? "gb-tone-good" : "gb-tone-warn")" title="@(refreshError ?? "Read every 5 seconds")">
-                <i class="gb-st-dot @(refreshError is null ? "gb-st-dot--running" : null)"></i>@(refreshError is null ? "Live" : "Not updating") · @at.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)
-            </span>
+            @if (refreshError is null)
+            {
+                <span class="gb-pill2 gb-tone-good" data-tip="dashboard.live">
+                    <i class="gb-st-dot gb-st-dot--running"></i>Live · @at.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)
+                </span>
+            }
+            else
+            {
+                <span class="gb-pill2 gb-tone-warn" data-tip="dashboard.not-updating" data-tip-detail="@refreshError">
+                    <i class="gb-st-dot"></i>Not updating · @at.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture)
+                </span>
+            }
         }
         <Btn Href="apps" Icon="@Icons.Material.Outlined.GridView">All apps</Btn>
     </Actions>
@@ -29,26 +38,26 @@
 
 @if (list.DockerError is { } dockerError)
 {
-    <Banner Tone="critical" Title="Docker can't be read">@dockerError.TrimEnd('.'). Is /var/run/docker.sock mounted into the Gitberth container?</Banner>
+    <Banner Tone="critical" Title="Docker can't be read" Tip="apps.docker-error">@dockerError.TrimEnd('.'). Is /var/run/docker.sock mounted into the Gitberth container?</Banner>
 }
 
 <div class="gb-hoststrip gb-kpis2" role="group" aria-label="Key figures">
-    <a class="gb-hs" href="apps">
+    <a class="gb-hs" href="apps" data-tip="dashboard.kpi.apps">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.GridView" />Apps</span>
         <span class="gb-hs-v">@(loaded ? Running : "–") <small>running of @list.Apps.Count</small></span>
         <Waffle States="@list.Apps.Select(a => a.State)" Sorted="true" Small="true" />
     </a>
-    <a class="gb-hs" href="apps?show=attention">
+    <a class="gb-hs" href="apps?show=attention" data-tip="dashboard.kpi.attention">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />Needs attention</span>
         <span class="gb-hs-v" style="@(Trouble.Count > 0 ? "color:#ffc49a" : null)">@(loaded ? Trouble.Count : "–") <small>@(Trouble.Count == 1 ? "app" : "apps")</small></span>
         <span class="gb-hs-sub">@(Trouble.Count == 0 ? "All clear" : AppFacts.Names(Trouble.Select(a => a.Title).ToList(), 2))</span>
     </a>
     <div class="gb-hs">
-        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.RocketLaunch" />Deploys</span>
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.RocketLaunch" /><Tip Key="dashboard.kpi.deploys">Deploys</Tip></span>
         <span class="gb-hs-v">@(loaded ? Deploys24h.ToString(CultureInfo.InvariantCulture) : "–") <small>in 24 hours</small></span>
         <span class="gb-hs-sub">@(LastDeploy is { } last ? $"Last: {last.App}, {Format.Ago(last.Item.At)}" : "None yet")</span>
     </div>
-    <a class="gb-hs" href="apps?show=updates">
+    <a class="gb-hs" href="apps?show=updates" data-tip="dashboard.kpi.updates">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Updates</span>
         <span class="gb-hs-v">@(loaded ? Updates.Count : "–") <small>available</small></span>
         <span class="gb-hs-sub">@(Updates.Count == 0 ? "Everything's on its latest image" : AppFacts.Names(Updates.Select(a => a.Title).ToList(), 2))</span>
@@ -59,7 +68,7 @@
     <div>
         @if (Trouble.Count > 0)
         {
-            <SectionCard Title="Needs attention" Icon="@Icons.Material.Outlined.WarningAmber" Flush="true">
+            <SectionCard Title="Needs attention" Icon="@Icons.Material.Outlined.WarningAmber" Flush="true" Tip="dashboard.attention">
                 <Actions><a class="gb-card-link" href="apps?show=attention">In Apps<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
                 <ChildContent>
                     <div class="gb-alist" style="border:0;box-shadow:none;background:transparent">
@@ -72,7 +81,7 @@
             </SectionCard>
         }
 
-        <SectionCard Title="Pinned" Icon="@Icons.Material.Outlined.PushPin" Flush="true" Sub="@(Pinned.Count > 0 ? $"{Pinned.Count} {(Pinned.Count == 1 ? "app" : "apps")}" : null)">
+        <SectionCard Title="Pinned" Icon="@Icons.Material.Outlined.PushPin" Flush="true" Tip="dashboard.pinned" Sub="@(Pinned.Count > 0 ? $"{Pinned.Count} {(Pinned.Count == 1 ? "app" : "apps")}" : null)">
             <Actions><a class="gb-card-link" href="apps">All @list.Apps.Count apps<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
             <ChildContent>
                 @if (!loaded)
@@ -83,7 +92,7 @@
                 {
                     <EmptyState Icon="@Icons.Material.Outlined.PushPin" Title="Nothing pinned yet">
                         <ChildContent>Pin the apps you open most from their Settings: they show here and in the menu.</ChildContent>
-                        <Actions><Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add">New app</Btn></Actions>
+                        <Actions><Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add" Tip="topbar.new-app">New app</Btn></Actions>
                     </EmptyState>
                 }
                 else
@@ -100,22 +109,22 @@
     </div>
 
     <div>
-        <SectionCard Title="This host" Icon="@Icons.Material.Outlined.Dns" Sub="@(Stats.Current.Host is { } h ? $"{h.Cpus} CPUs · {AppFacts.Bytes(h.MemoryBytes)}" : null)">
+        <SectionCard Title="This host" Icon="@Icons.Material.Outlined.Dns" Tip="dashboard.host" Sub="@(Stats.Current.Host is { } h ? $"{h.Cpus} CPUs · {AppFacts.Bytes(h.MemoryBytes)}" : null)">
             <Actions><a class="gb-card-link" href="health">Health<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
             <ChildContent>
                 <div class="gb-stack" style="gap:14px">
                     <div>
-                        <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k">CPU</span><span class="gb-num" style="font-weight:600">@AppFacts.Percent(HostCpu) <span class="gb-t3" style="font-weight:400">of the host</span></span></div>
+                        <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k"><Tip Key="dashboard.host.cpu">CPU</Tip></span><span class="gb-num" style="font-weight:600">@AppFacts.Percent(HostCpu) <span class="gb-t3" style="font-weight:400">of the host</span></span></div>
                         <Sparkline Values="CpuHistory" Width="300" Height="30" Stretch="true" />
                     </div>
                     <div>
-                        <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k">Memory the apps use</span><span class="gb-num" style="font-weight:600">@AppFacts.Bytes(AppsMemory)</span></div>
+                        <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k"><Tip Key="dashboard.host.memory">Memory the apps use</Tip></span><span class="gb-num" style="font-weight:600">@AppFacts.Bytes(AppsMemory)</span></div>
                         <Meter Fraction="@(Stats.Current.Host is { MemoryBytes: > 0 } host ? AppsMemory / host.MemoryBytes : null)" Large="true" />
                     </div>
                     @if (disk is { TotalBytes: > 0 } d)
                     {
                         <div>
-                            <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k">Disk</span><span class="gb-num" style="font-weight:600">@((d.FreeBytes / 1e9).ToString("0", CultureInfo.InvariantCulture)) GB free</span></div>
+                            <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k"><Tip Key="dashboard.host.disk">Disk</Tip></span><span class="gb-num" style="font-weight:600">@((d.FreeBytes / 1e9).ToString("0", CultureInfo.InvariantCulture)) GB free</span></div>
                             <Meter Fraction="@((double)(d.TotalBytes - d.FreeBytes) / d.TotalBytes)" Large="true" />
                         </div>
                     }
@@ -123,7 +132,7 @@
             </ChildContent>
         </SectionCard>
 
-        <SectionCard Title="Recent deploys" Icon="@Icons.Material.Outlined.RocketLaunch" Sub="Every app">
+        <SectionCard Title="Recent deploys" Icon="@Icons.Material.Outlined.RocketLaunch" Sub="Every app" Tip="dashboard.recent-deploys">
             <ChildContent>
                 @if (Deploys.Count == 0)
                 {

@@ -67,6 +67,9 @@ factor = 0.75
 # estimated for production timings (no run with them): 8 deploys' 15 s stay-up checks, and a merge found by the
 # 5-minute list of merge requests.
 "33" = { file = "test_33_gitlab.py", minutes = 10, test_minutes = 4.09 }
+# The built-in Help and the tips: measured on the first rig (2026-11-16, its 4 tests in 20 s). It deploys no app and
+# waits on nothing the timings change, so production's minutes are the same.
+"34" = { file = "test_34_help.py", minutes = 0.33, test_minutes = 0.33 }
 
 [aliases]
 # The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside
@@ -84,7 +87,7 @@ factor = 0.75
 "@wide" = ["@smoke", "00", "01", "06", "12", "19", "20", "22", "23", "24", "25"]
 # Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
 "@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
-           "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33"]
+           "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34"]
 "@release" = ["@full", "31"]  # and every template: + 16-30 min
 "@none" = []
 # Single tests the rules name.
@@ -163,10 +166,16 @@ weight = { nextcloud = 3, stirling-pdf = 3, paperless-ngx = 2, jellyfin = 2, gho
 
 # ===== A. Nothing to run in the rig (the unit suite still runs) =====
 [[rule]]
-globs = ["docs/**", "README.md", "PLAN.md", "CONTRIBUTING.md", "LICENSE.md", ".gitleaks.toml", ".github/**",
+globs = ["README.md", "PLAN.md", "CONTRIBUTING.md", "LICENSE.md", ".gitleaks.toml", ".github/**",
          ".gitignore", ".env.example", "tests/e2e/README.md", "tests/e2e/impact.py", "tests/e2e/impact.toml",
-         "tests/e2e/impact_test.py"]
+         "tests/e2e/impact_test.py", "tests/e2e/shots/**"]  # shots/: the docs' screenshots, taken on demand only
 groups = ["@none"]
+
+# The docs are built into Gitberth's image (its Help, /help): pages, pictures, flow charts and help.yaml. The unit tests
+# check their links, headings and manifest; the scenario shows them drawn and loaded.
+[[rule]]
+globs = ["docs/**"]
+groups = ["34"]
 
 [[rule]]
 globs = ["tests/Gitberth.Tests/**", "tests/Gitberth.UiTests/**", "tests/samples/**", "dotnet-tools.json",
@@ -230,6 +239,7 @@ globs = ["tests/e2e/standins/**", "tests/e2e/rig/**", "tests/e2e/run.sh"]
 groups = ["00", "@smoke"]
 refine = [
     { match = '[Gg]it[Ll]ab', groups = ["00", "@smoke", "33"] },  # GitLab's names (certs.py, compose.e2e.yml, inner.sh)
+    { match = 'docs', groups = ["@smoke", "34"] },               # the docs copied in for the image's Help
 ]
 
 [[rule]]
@@ -254,6 +264,7 @@ globs = ["Dockerfile", ".dockerignore", "docker-compose.yml", "docker-compose.bu
 groups = ["@wide"]
 refine = [
     { match = 'docker|compose|buildx|cli', groups = ["@wide", "28", "30"] },  # the docker and compose CLIs in the image
+    { match = 'COPY docs', groups = ["@smoke", "34"] },                      # the docs the build embeds for the Help
 ]
 
 [[rule]]
@@ -278,6 +289,7 @@ refine = [
     { match = 'Domain|Cloudflare|Tunnel|RemovalRetry', groups = ["16", "17", "25"] },
     { match = 'Cookie|Authentication|Authorization|Antiforgery|logout|renew|Login|StampRevalidator|AdminAuth', groups = ["20", "@t24-audit"] },
     { match = 'PortChanger|ContainerService|ContainerUpdater|HostHelpers|IContainerEngine|NetworkKeeper|HostPortMap', groups = ["24", "27"] },
+    { match = 'Help|TipCatalog', groups = ["34"] },  # the Help's docs, tips and endpoints, and their start-up checks
 ]
 
 [[rule]]
@@ -909,9 +921,16 @@ globs = ["src/Gitberth/Components/Apps/NetworkTab.razor", "src/Gitberth/Componen
 groups = ["17", "18", "20", "25"]              # the Network tab renders in every domain scenario; ReachDiagram is in New app too
 
 [[rule]]
+globs = ["src/Gitberth/Components/Layout/TopSearch.razor"]
+groups = ["01", "20", "34"]                    # apps by name, image, port or address; then the help's pages and headings
+refine = [
+    { match = '[Gg]it[Ll]ab|RepoFullName', groups = ["20", "@t33-new"] },
+]
+
+[[rule]]
 globs = ["src/Gitberth/Components/Pages/Apps.razor", "src/Gitberth/Components/Apps/AppRow.razor",
          "src/Gitberth/Components/Apps/AppListView.cs", "src/Gitberth/Components/Pages/Home.razor",
-         "src/Gitberth/Components/Layout/TopSearch.razor", "src/Gitberth/Components/Apps/HostStrip.razor"]
+         "src/Gitberth/Components/Apps/HostStrip.razor"]
 groups = ["01", "20"]
 refine = [
     { match = 'Running|[Mm]ember|Compose', groups = ["01", "@t28-repo"] },
@@ -928,6 +947,9 @@ groups = ["20", "22", "@t02-opened", "@t12-failed", "@t12-cancel"]
 globs = ["src/Gitberth/Components/Shared/CopyButton.razor", "src/Gitberth/Components/Shared/CopyText.razor",
          "src/Gitberth/wwwroot/js/gitberth.js"]
 groups = ["20", "23", "27"]                    # gitberth.js also removes the splash every scenario waits for
+refine = [
+    { match = 'focusIn', groups = ["01", "20", "34"] },   # the top bar's search (Ctrl K) and the help's
+]
 
 [[rule]]
 globs = ["src/Gitberth/Components/Shared/TimeChart.razor", "src/Gitberth/Components/Shared/Sparkline.razor",
@@ -935,6 +957,33 @@ globs = ["src/Gitberth/Components/Shared/TimeChart.razor", "src/Gitberth/Compone
          "src/Gitberth/Components/Shared/Meter.razor", "src/Gitberth/Components/Shared/Waffle.razor",
          "src/Gitberth/Components/Shared/HeroStat.razor"]
 groups = ["20", "26"]
+refine = [
+    { match = 'Tip', groups = ["20", "34"] },      # HeroStat's tip
+]
+
+# --- the built-in Help and the tips (scenario 34)
+[[rule]]
+globs = ["src/Gitberth/Help/**", "src/Gitberth/Components/Pages/Help*.razor", "src/Gitberth/Components/Shared/Help*.razor",
+         "src/Gitberth/Components/Shared/Tip.razor", "src/Gitberth/Components/Shared/TipKeys.cs",
+         "src/Gitberth/Components/Shared/PageHelpLink.razor", "src/Gitberth/Components/Layout/HelpMenu.razor",
+         "src/Gitberth/wwwroot/js/tips.js", "src/Gitberth/wwwroot/js/help.js", "src/Gitberth/wwwroot/css/tips.css",
+         "src/Gitberth/wwwroot/css/help.css", "src/Gitberth/wwwroot/lib/mermaid/**"]
+groups = ["34"]
+
+# The shared components that carry tips (a Tip parameter, or their own by state or kind): on every page.
+[[rule]]
+globs = ["src/Gitberth/Components/App.razor", "src/Gitberth/Components/_Imports.razor",
+         "src/Gitberth/Components/Layout/DockerStatus.razor",
+         "src/Gitberth/Components/Shared/Field.razor", "src/Gitberth/Components/Shared/SwitchRow.razor",
+         "src/Gitberth/Components/Shared/Section.razor", "src/Gitberth/Components/Shared/SectionCard.razor",
+         "src/Gitberth/Components/Shared/SettingsSection.razor", "src/Gitberth/Components/Shared/PageHead.razor",
+         "src/Gitberth/Components/Shared/PageHeader.razor", "src/Gitberth/Components/Shared/Btn.razor",
+         "src/Gitberth/Components/Shared/TabBar.razor", "src/Gitberth/Components/Shared/TabItem.cs",
+         "src/Gitberth/Components/Shared/Seg.razor", "src/Gitberth/Components/Shared/SegOption.cs",
+         "src/Gitberth/Components/Shared/StatusLabel.razor", "src/Gitberth/Components/Shared/StatusDot.razor",
+         "src/Gitberth/Components/Shared/AccessTag.razor", "src/Gitberth/Components/Shared/SourceBadge.razor",
+         "src/Gitberth/Components/Shared/WatchBadge.razor", "src/Gitberth/Components/Shared/DeployPill.razor"]
+groups = ["01", "20", "34"]
 
 [[rule]]
 globs = ["src/Gitberth/Components/Pages/Health.razor", "src/Gitberth/Components/Pages/NetworkPage.razor",
@@ -944,9 +993,12 @@ groups = ["@smoke"]                            # no scenario opens these (Gitber
 notes = ["No scenario opens this page or section: also run Gitberth.UiTests against the dev instance (GITBERTH_UI_URL and GITBERTH_UI_PASSWORD)."]
 
 [[rule]]
-globs = ["src/Gitberth/Components/Pages/Login.razor", "src/Gitberth/Components/Shared/RedirectToLogin.razor",
-         "src/Gitberth/Components/Layout/NavMenu.razor", "src/Gitberth/Components/Layout/MainLayout.razor"]
+globs = ["src/Gitberth/Components/Pages/Login.razor", "src/Gitberth/Components/Shared/RedirectToLogin.razor"]
 groups = ["20"]
+
+[[rule]]
+globs = ["src/Gitberth/Components/Layout/NavMenu.razor", "src/Gitberth/Components/Layout/MainLayout.razor"]
+groups = ["20", "34"]                          # the sidebar and the top bar: their tips, Help and the Help menu
 
 
 # ===== E. Folders (new files and anything not named above) =====

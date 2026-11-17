@@ -4,6 +4,18 @@ Any container on the host can be reached straight from a PC on your LAN, at the 
 
 ## Who reaches a port: Access
 
+```mermaid
+flowchart LR
+    pc["A PC on<br/>your LAN"] -->|"192.168.50.10:5432"| lan["A port with<br/>Access LAN"]
+    pc -->|"its own address,<br/>any port"| own["The app's own<br/>LAN address"]
+    hostprog["Programs on<br/>the host, like<br/>the tunnel"] -->|"127.0.0.1:5432"| hostonly["A port with<br/>Access Host only"]
+    others["Containers<br/>on the same<br/>network"] -->|"postgres:5432,<br/>by name"| byname["Any port,<br/>Internal ones too"]
+    lan --> app["The app's<br/>container"]
+    own --> app
+    hostonly --> app
+    byname --> app
+```
+
 Every port a container listens on has an **Access** setting, on the app's **Network** tab:
 
 | Access | Published on | Who reaches it | Example address |
@@ -47,12 +59,12 @@ Do this for a database or tool whose port is **Internal** and that you want to r
 4. Click **Review and apply**.
    The change dialog lists what changes, what's kept, and the impact: how long the app is offline (about 5 seconds for a database, 3 for anything else) and who notices.
 
-   ![The dialog before publishing postgres's port 5432 on the LAN: what changes, what's kept, and the impact on adminer, which uses it](../images/publish-port-dialog.webp)
+   ![The dialog before publishing the Postgres server's port 5432 on the LAN: what changes, what's kept, and the impact on the apps that use it](../images/publish-port-dialog.webp)
 
 5. Click **Recreate postgres**.
    The dialog shows each step as it runs. You can close it: the change carries on, and the **Ports** card shows how it went. When it's done, the port's address shows in the **Address** column, for example `192.168.50.10:5432`, with a copy button.
 
-![An app's Network tab with its ports](../images/app-network.webp)
+![An app's Network tab, with how it's reached from the internet, your LAN and the gitberth network](../images/app-network.webp)
 
 For a database Gitberth recognizes (Postgres, MySQL and MariaDB, MongoDB, Redis, RabbitMQ), **Connect** on the app's page gives the host, port, user, password, database and URL, from the LAN or from other containers. If the database isn't published, its **LAN** tab offers **Publish on LAN**.
 
@@ -76,7 +88,7 @@ A stopped container is recreated stopped. [How deploys and changes work](../conc
 
 Their **Ports** card says why in one line. They include Gitberth itself, a deploy's temporary containers, Gitberth's helper containers, containers that Swarm or Kubernetes run, ones started with `--rm`, and one another container depends on (it uses `--network container:…` with it, or `--link`s to it). A paused container has to be unpaused first, and one that keeps restarting has to be stopped first. Changing ports needs Docker 25 or later.
 
-A container on the host's network has no ports to change: it listens on the host's addresses directly. You can note the ports it listens on with **Note a port**, so their addresses are listed. Nothing restarts.
+A container on the host's network has no ports to change: it listens on the host's addresses directly. You can note the ports it listens on with **Note a port**, so their addresses are listed. Nothing restarts. See [Host network mode](#host-network-mode).
 
 ## Change a host port, or take a port off the LAN
 
@@ -144,6 +156,27 @@ Every app Gitberth creates is on the Docker network `gitberth`, where other cont
 
 Docker's default `bridge` network gives no names: containers on it reach each other only by IP address, which changes when one is recreated.
 
+## Host network mode
+
+A container can use the host's own network instead of Docker's networks: Docker's `--network host`, which cloudflared
+often runs with. It then has no ports of its own to publish and no name on a Docker network. Its program listens straight
+on the host's addresses, on whatever ports it opens, as a program installed on the host would.
+
+- **A new app**: in **Configure**, under **Network**, choose **The host's** for **Network mode**. Ports can't be
+  published then: when the source had some, **On the host's network it has no ports of its own** offers **Take the ports
+  out**. The review says **The host's own:** reached at `192.168.50.10`, not by name.
+- **An app you have**: **Network mode** is in its **Settings › Advanced** (**Its networks**, **The host's** or **None**),
+  and changing it recreates the container. A Git app always runs on its networks.
+- **Reaching it**: devices on your LAN and other containers use the host's address and the port its program listens on,
+  like `192.168.50.10:53`, never a name. It can't have an own LAN address, and `net.*` sysctls can't be set on it.
+- **Its Network tab**: the diagram draws **Your LAN** to the host's address, on any port it opens, and the **Ports** card
+  says **Host network: no Docker ports**. Docker can't tell which ports such a container listens on, so you can note them
+  there: type the port, pick **TCP** or **UDP**, and click **Note a port**. Gitberth only notes it: it's listed with its
+  address on the host and a copy button, and nothing restarts. The cross by it takes it away.
+- **Elsewhere**: the **Network** page shows the ports it listens on as held by **A program on the host**, as the **Host
+  ports** card's foot says. On the **Health** page it has no network chart: **Uses the host's network, so Docker can't
+  count its traffic separately.**
+
 ## See who holds a host port
 
 The **Network** page lists every host port in use and who holds it: apps, containers, Gitberth, tunnel routes, SSH, Docker's API and programs on the host. It reads them again every 15 seconds.
@@ -151,9 +184,26 @@ The **Network** page lists every host port in use and who holds it: apps, contai
 1. Click **Network** in the sidebar.
    The top shows the host's LAN address, how many host ports are in use (on the LAN and host only), Docker's networks and the Docker version.
 2. Filter the **Host ports** list with **All**, **Containers** or **The host**.
-   Each line shows the **Host port**, **Held by**, **Access**, **Goes to** (the container port) and notes such as **Stopped**, **Random**, **Saved, not live** or the domains that reach it. A run of ports held by containers with the same name prefix folds into one line.
+   Each line shows the **Host port**, **Held by**, **Access**, **Goes to** (the container port) and notes such as **Stopped**, **Random**, **Saved, not live** or the domains that reach it (see [Port notes](#port-notes)). A run of ports held by containers with the same name prefix folds into one line.
 
 ![The Network page](../images/network-page.webp)
+
+### Port notes
+
+The **Notes** column says what's worth knowing about a port:
+
+| Note | What it means |
+|---|---|
+| **Stopped** | The container that holds it is stopped. It takes the port again when it starts, so Gitberth counts the port as taken and never offers it to another app. A folded line says how many of its containers are stopped, like **2 stopped**. |
+| **Restarting** | The container is restarting: Docker lets go of the port until it's up again. |
+| **Random** | Docker picked the host port (`-P`, or a binding with no host port), so it changes at every start, and the address with it. To fix it, set the host port on the app's **Network** tab: **Keep …** keeps the one it has now. |
+| **Saved, not live** | A port saved for an app whose container doesn't have it yet: the app takes it when the change is applied, or with its next deploy. Nothing answers on it yet. |
+| **Deploying** | A deploy's temporary container holds it for a moment, while Gitberth checks the new version. It goes when the deploy is done. |
+| **1 domain**, **3 domains** | The app's domains reach it here, through the Cloudflare Tunnel. |
+
+A port the tunnel sends a domain to has a line of its own when its app's container doesn't hold it: **Held by** shows the
+domain, with **The tunnel sends this domain here**, or **a domain** with **The tunnel sends a domain here** when all
+Gitberth knows is that a route of the tunnel goes there.
 
 ### Check a port
 
@@ -163,7 +213,24 @@ Type a port in **Check a port**, like `5433` or `53/udp`. The answer says whethe
 
 Answers look like `5433/tcp is free.`, `5432/tcp is used by postgres, port 5432.`, `22/tcp is SSH on the host.` or `8080/tcp is Gitberth.`. A free port in the host's random range says so, because any program may take it for a moment.
 
-Below the ports, **Networks** lists Docker's networks with their driver, subnet and the containers on each. Open one to see each container's names there and its IP address.
+### The Networks list
+
+Below the ports, **Networks** lists Docker's networks: the shared one first, then those of Gitberth's own Compose project,
+the rest, and Docker's own last. The strip at the top counts them, and how many containers are on `gitberth`.
+
+| Column | What it shows |
+|---|---|
+| **Network** | Its name, with a tag: **Shared network** for `gitberth`, where every app is; **Own LAN addresses** for `gitberth-lan`; **Internal: no way out** for one Docker made internal; **Docker's own** for `bridge`, `host`, `none` and Swarm's. The line under it says what Gitberth knows it as, like **Every app is on it: containers here reach each other by name.** or **Docker Compose (db)** for a network Compose made for the project `db`. |
+| **Driver** | How Docker connects it: `bridge` (a private network on this host), `ipvlan` or `macvlan` (on your LAN), `host` or `null`. |
+| **Subnet** | The addresses Docker gives containers on it, or **no subnet**. |
+| **On it** | How many containers are on it, stopped ones too. |
+
+Click a network to see who's on it (`host` and `none` have nothing to show). Each container links to its page, with the
+**Names here** other containers on that network reach it by (its own name and any extra name it joined with) and its
+**IP address** there, or **When it starts** for a stopped one. An IP address changes when the container is recreated, so
+connect by name; on `gitberth-lan`, the address is its own LAN address and stays. The default `bridge` gives no names, and
+the list says so. A deploy's temporary container is tagged **Deploy of …**, and a stopped one **Stopped**. The first 12
+show; **Show all …** lists the rest.
 
 ## Related
 

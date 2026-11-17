@@ -8,18 +8,18 @@
 
 <PageTitle>Audit log · Gitberth</PageTitle>
 
-<PageHead Title="Audit log" Lead="Every change to this Gitberth and its apps: who made it, from where, and how it ended. Docker changes made outside Gitberth are here too.">
+<PageHead Title="Audit log" Tip="audit.page" Lead="Every change to this Gitberth and its apps: who made it, from where, and how it ended. Docker changes made outside Gitberth are here too.">
     <Actions>
         <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="Export">
             <ActivatorContent>
-                <Btn Icon="@Icons.Material.Outlined.Download" EndIcon="@Icons.Material.Outlined.ExpandMore" OnClick="context.ToggleAsync">Export</Btn>
+                <Btn Icon="@Icons.Material.Outlined.Download" EndIcon="@Icons.Material.Outlined.ExpandMore" OnClick="context.ToggleAsync" Tip="audit.export">Export</Btn>
             </ActivatorContent>
             <ChildContent>
-                <MudMenuItem Icon="@Icons.Material.Outlined.TableChart" Href="@AuditEndpoints.ExportUrl(filter, AuditExportFormat.Csv)">This view as CSV</MudMenuItem>
-                <MudMenuItem Icon="@Icons.Material.Outlined.DataObject" Href="@AuditEndpoints.ExportUrl(filter, AuditExportFormat.JsonLines)">This view as JSON Lines</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.TableChart" Href="@AuditEndpoints.ExportUrl(filter, AuditExportFormat.Csv)" data-tip="audit.export.csv">This view as CSV</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.DataObject" Href="@AuditEndpoints.ExportUrl(filter, AuditExportFormat.JsonLines)" data-tip="audit.export.json">This view as JSON Lines</MudMenuItem>
             </ChildContent>
         </MudMenu>
-        <Btn Icon="@Icons.Material.Outlined.VerifiedUser" OnClick="VerifyAsync" Busy="verifying">Check the log's integrity</Btn>
+        <Btn Icon="@Icons.Material.Outlined.VerifiedUser" OnClick="VerifyAsync" Busy="verifying" Tip="audit.verify">Check the log's integrity</Btn>
     </Actions>
     <ChildContent>
         <div class="gb-hero-meta audit-meta">
@@ -29,9 +29,9 @@
             }
             @if (summary is { Oldest: { } oldest })
             {
-                <span title="@Format.Local(oldest)"><SvgIcon Icon="@Icons.Material.Outlined.History" />Kept since @oldest.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
+                <span data-tip="audit.kept-since" data-tip-detail="@Format.Local(oldest)"><SvgIcon Icon="@Icons.Material.Outlined.History" />Kept since @oldest.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
             }
-            <span><SvgIcon Icon="@Icons.Material.Outlined.Schedule" />Keeps @AuditSettings.Days(AuditOptions.RetentionDays)</span>
+            <span data-tip="audit.keeps"><SvgIcon Icon="@Icons.Material.Outlined.Schedule" />Keeps @AuditSettings.Days(AuditOptions.RetentionDays)</span>
         </div>
     </ChildContent>
 </PageHead>
@@ -59,7 +59,7 @@
     <div class="gb-toolbar-scroll audit-filters">
         <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by who" MaxHeight="420">
             <ActivatorContent>
-                <button type="button" class="gb-filterbtn @(filter.Who is null ? null : "on")" @onclick="context.ToggleAsync">
+                <button type="button" class="gb-filterbtn @(filter.Who is null ? null : "on")" data-tip="audit.filter.who" @onclick="context.ToggleAsync">
                     <SvgIcon Icon="@Icons.Material.Outlined.Person" />Who@(WhoWords is { } who ? $": {who}" : "")
                 </button>
             </ActivatorContent>
@@ -77,7 +77,7 @@
         </MudMenu>
         <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by app" MaxHeight="420">
             <ActivatorContent>
-                <button type="button" class="gb-filterbtn @(filter.App is null ? null : "on")" @onclick="context.ToggleAsync">
+                <button type="button" class="gb-filterbtn @(filter.App is null ? null : "on")" data-tip="audit.filter.app" @onclick="context.ToggleAsync">
                     <SvgIcon Icon="@Icons.Material.Outlined.GridView" />App@(filter.App is { } app ? $": {AppTitle(app)}" : "")
                 </button>
             </ActivatorContent>
@@ -94,7 +94,7 @@
         </MudMenu>
         <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by area">
             <ActivatorContent>
-                <button type="button" class="gb-filterbtn @(filter.Area is null ? null : "on")" @onclick="context.ToggleAsync">
+                <button type="button" class="gb-filterbtn @(filter.Area is null ? null : "on")" data-tip="audit.filter.area" @onclick="context.ToggleAsync">
                     <SvgIcon Icon="@Icons.Material.Outlined.Category" />Area@(filter.Area is { } area ? $": {AuditAreas.Label(area)}" : "")
                 </button>
             </ActivatorContent>
@@ -111,7 +111,7 @@
         </MudMenu>
         <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by outcome">
             <ActivatorContent>
-                <button type="button" class="gb-filterbtn @(filter.Outcome is null ? null : "on")" @onclick="context.ToggleAsync">
+                <button type="button" class="gb-filterbtn @(filter.Outcome is null ? null : "on")" data-tip="audit.filter.outcome" @onclick="context.ToggleAsync">
                     <SvgIcon Icon="@Icons.Material.Outlined.Rule" />Outcome@(filter.Outcome is { } outcome ? $": {OutcomeName(outcome)}" : "")
                 </button>
             </ActivatorContent>
@@ -120,7 +120,7 @@
                 <MudDivider />
                 @foreach (var outcome in Enum.GetValues<AuditOutcome>())
                 {
-                    <MudMenuItem OnClick="() => ApplyAsync(filter with { Outcome = outcome })" Icon="@(filter.Outcome == outcome ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)">@OutcomeName(outcome)</MudMenuItem>
+                    <MudMenuItem OnClick="() => ApplyAsync(filter with { Outcome = outcome })" Icon="@(filter.Outcome == outcome ? Icons.Material.Outlined.RadioButtonChecked : Icons.Material.Outlined.RadioButtonUnchecked)" data-tip="@OutcomeTip(outcome)">@OutcomeName(outcome)</MudMenuItem>
                 }
             </ChildContent>
         </MudMenu>
@@ -188,7 +188,7 @@ else
                         <span class="audit-chips">
                             @if (AuditLook.OutcomeWords(e.Outcome) is { } outcome)
                             {
-                                <span class="gb-tag @(e.Outcome == AuditOutcome.Failed ? "gb-tag--critical" : "gb-tag--warn")">@outcome</span>
+                                <span class="gb-tag @(e.Outcome == AuditOutcome.Failed ? "gb-tag--critical" : "gb-tag--warn")" data-tip="@OutcomeTip(e.Outcome)">@outcome</span>
                             }
                             @if (e.AppName is { } app)
                             {
@@ -202,10 +202,10 @@ else
                             {
                                 <span class="gb-tag gb-tag--outline">@target</span>
                             }
-                            <span class="audit-action gb-mono">@e.Action</span>
+                            <span class="audit-action gb-mono" data-tip="audit.action">@e.Action</span>
                         </span>
                     </span>
-                    <span class="audit-who">
+                    <span class="audit-who" data-tip="audit.who">
                         <span class="audit-who-icon">
                             @if (e.Actor.Kind == AuditActorKind.Gitberth)
                             {
@@ -221,7 +221,7 @@ else
                             <span class="audit-who-sub">@AuditLook.ActorSub(e.Actor)</span>
                         </span>
                     </span>
-                    <span class="audit-time" title="@Format.Local(e.At)">@e.At.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
+                    <span class="audit-time" data-tip-text="@Format.Local(e.At)">@e.At.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)</span>
                 </button>
             }
         }
@@ -245,28 +245,28 @@ else
                 <div class="audit-panel-kicker gb-mono">@s.Action</div>
                 <div class="audit-panel-title" id="audit-panel-t">@s.Summary</div>
             </div>
-            <button type="button" class="gb-iconbtn" aria-label="Close" title="Close" @onclick="() => selected = null"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+            <button type="button" class="gb-iconbtn" aria-label="Close" data-tip-text="Close" @onclick="() => selected = null"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
         </div>
         <div class="audit-panel-body">
             <div class="gb-row gb-row--wrap" style="gap:6px">
                 @if (AuditLook.OutcomeWords(s.Outcome) is { } outcome)
                 {
-                    <span class="gb-pill2 @(s.Outcome == AuditOutcome.Failed ? "gb-tone-critical" : "gb-tone-warn")"><SvgIcon Icon="@Icons.Material.Outlined.ErrorOutline" />@outcome</span>
+                    <span class="gb-pill2 @(s.Outcome == AuditOutcome.Failed ? "gb-tone-critical" : "gb-tone-warn")" data-tip="@OutcomeTip(s.Outcome)"><SvgIcon Icon="@Icons.Material.Outlined.ErrorOutline" />@outcome</span>
                 }
                 else
                 {
-                    <span class="gb-pill2 gb-tone-good"><SvgIcon Icon="@Icons.Material.Outlined.CheckCircle" />Done</span>
+                    <span class="gb-pill2 gb-tone-good" data-tip="@OutcomeTip(s.Outcome)"><SvgIcon Icon="@Icons.Material.Outlined.CheckCircle" />Done</span>
                 }
                 <span class="gb-tag">@AuditAreas.Label(AuditLook.AreaOf(s))</span>
                 @if (s.Outside)
                 {
-                    <span class="gb-tag gb-tag--serious">Outside Gitberth</span>
+                    <span class="gb-tag gb-tag--serious" data-tip="audit.outside">Outside Gitberth</span>
                 }
             </div>
             <dl class="gb-kv audit-kv">
                 <dt>When</dt>
                 <dd>@s.At.ToLocalTime().ToString("ddd d MMM yyyy, HH:mm:ss", CultureInfo.InvariantCulture) <span class="gb-t3 gb-mono">@AuditExport.Time(s.At)</span></dd>
-                <dt>Who</dt>
+                <dt><Tip Key="audit.who">Who</Tip></dt>
                 <dd>
                     <span class="gb-row" style="gap:6px">
                         @if (s.Actor.Kind == AuditActorKind.Gitberth)
@@ -281,11 +281,11 @@ else
                     </span>
                     <span class="gb-t3">@AuditLook.KindWords(s.Actor.Kind)</span>
                 </dd>
-                <dt>Through</dt>
+                <dt><Tip Key="audit.entry.through">Through</Tip></dt>
                 <dd>@AuditLook.ViaWords(s.Actor.Via)</dd>
                 @if (s.Actor.Ip is { } ip)
                 {
-                    <dt>From</dt>
+                    <dt><Tip Key="audit.entry.from">From</Tip></dt>
                     <dd><span class="gb-mono">@ip</span></dd>
                 }
                 @if (s.AppName is not null || s.Container is not null)
@@ -309,7 +309,7 @@ else
                 }
                 @if (s.Target is { } target)
                 {
-                    <dt>Target</dt>
+                    <dt><Tip Key="audit.entry.target">Target</Tip></dt>
                     <dd>@target</dd>
                 }
                 @if (s.DeploymentId is int deployment && s.AppId is int appId)
@@ -319,15 +319,15 @@ else
                 }
                 else if (s.Correlation is { } correlation)
                 {
-                    <dt>Follows</dt>
+                    <dt><Tip Key="audit.entry.follows">Follows</Tip></dt>
                     <dd class="gb-mono">@correlation</dd>
                 }
-                <dt>Entry</dt>
+                <dt><Tip Key="audit.entry.id">Entry</Tip></dt>
                 <dd><span class="gb-mono">#@s.Id</span><CopyButton Value="@Nav.ToAbsoluteUri($"audit?range=all&entry={s.Id}").ToString()" Label="a link to this entry" /></dd>
             </dl>
             @if (s.Changes.Count > 0)
             {
-                <div class="gb-h3" style="font-size:13.5px">What changed</div>
+                <div class="gb-h3" style="font-size:13.5px">What changed<Tip Key="audit.changes" /></div>
                 <div class="audit-changes" role="table" aria-label="What changed">
                     <div class="audit-changes-head" role="row"><span role="columnheader">Field</span><span role="columnheader">Before</span><span role="columnheader">After</span></div>
                     @foreach (var c in s.Changes)
@@ -341,11 +341,11 @@ else
                 </div>
                 <p class="gb-help">Secret values never go in the log: a secret variable or token shows by its name only.</p>
             }
-            <div class="gb-h3" style="font-size:13.5px">Tamper evidence</div>
+            <div class="gb-h3" style="font-size:13.5px">Tamper evidence<Tip Key="audit.tamper" /></div>
             <dl class="gb-kv audit-kv audit-hashes">
-                <dt>Hash</dt>
+                <dt><Tip Key="audit.hash">Hash</Tip></dt>
                 <dd><code class="audit-hash">@s.Hash</code><CopyButton Value="@s.Hash" Label="the entry's hash" /></dd>
-                <dt>Previous</dt>
+                <dt><Tip Key="audit.previous-hash">Previous</Tip></dt>
                 <dd><code class="audit-hash">@s.PrevHash</code></dd>
             </dl>
             <p class="gb-help">SHA-256 of the previous entry's hash and this entry's fields. Check the log's integrity to walk the whole chain.</p>
@@ -393,6 +393,16 @@ else
     private string? WhoWords => AuditFilter.SplitWho(filter.Who) is ({ } kind, { } name) ? kind == AuditActorKind.Docker ? "Outside Gitberth" : name : null;
 
     private string AppTitle(string container) => apps.FirstOrDefault(a => a.Container == container)?.Name ?? container;
+
+    // Each outcome's tip, for the Outcome filter, a row's tag and an entry's pill.
+    private static readonly (AuditOutcome Outcome, string Tip)[] OutcomeTips =
+    [
+        (AuditOutcome.Succeeded, Tip: "audit.outcome.done"),
+        (AuditOutcome.Failed, Tip: "audit.outcome.failed"),
+        (AuditOutcome.Denied, Tip: "audit.outcome.refused"),
+    ];
+
+    private static string? OutcomeTip(AuditOutcome outcome) => OutcomeTips.FirstOrDefault(t => t.Outcome == outcome).Tip;
 
     private static string OutcomeName(AuditOutcome outcome) => outcome switch
     {

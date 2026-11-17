@@ -28,7 +28,7 @@ else
 {
     <PageTitle>Deploy #@dep.Id · @(appName ?? "App") · Gitberth</PageTitle>
 
-    <PageHead Title="@($"Deploy #{dep.Id}")">
+    <PageHead Title="@($"Deploy #{dep.Id}")" Tip="deploy.title">
         <Crumbs>
             <a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
             <a href="@AppHref">@(appName ?? "App")</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
@@ -38,38 +38,38 @@ else
         <ChildContent>
             <div class="gb-hero-meta">
                 <DeployPill Deployment="dep" />
-                <span class="gb-tag">@Format.Trigger(dep)</span>
+                <span class="gb-tag" data-tip="deploy.trigger">@Format.Trigger(dep)</span>
                 @if (Format.RequestedBy(dep) is { } by)
                 {
-                    <span class="gb-t3" title="Who asked for this deploy">@by</span>
+                    <span class="gb-t3" data-tip="deploy.requested-by">@by</span>
                 }
                 @if (dep.NoCache)
                 {
-                    <span class="gb-tag" title="Every step ran again, and the base images were pulled">Without the build cache</span>
+                    <span class="gb-tag" data-tip="deploy.no-cache">Without the build cache</span>
                 }
                 @if (dep.CommitSha is not null)
                 {
-                    <span><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@dep.ShortSha</span><span class="gb-ellipsis" style="max-width:420px">@dep.CommitMessage@(dep.CommitAuthor is null ? "" : $" · {dep.CommitAuthor}")</span></span>
+                    <span data-tip="deploy.commit" data-tip-detail="@dep.CommitMessage"><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@dep.ShortSha</span><span class="gb-ellipsis" style="max-width:420px">@dep.CommitMessage@(dep.CommitAuthor is null ? "" : $" · {dep.CommitAuthor}")</span></span>
                 }
-                <span title="@Format.Local(dep.QueuedAt)"><SvgIcon Icon="@Icons.Material.Outlined.Schedule" />@Format.Ago(dep.QueuedAt)</span>
+                <span data-tip="deploy.queued" data-tip-detail="@Format.Local(dep.QueuedAt)"><SvgIcon Icon="@Icons.Material.Outlined.Schedule" />@Format.Ago(dep.QueuedAt)</span>
                 @if (dep.StartedAt is not null)
                 {
-                    <span><SvgIcon Icon="@Icons.Material.Outlined.Timer" />@Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
+                    <span data-tip="deploy.duration"><SvgIcon Icon="@Icons.Material.Outlined.Timer" />@Format.Duration(dep.StartedAt, dep.FinishedAt)</span>
                 }
                 @if (dep.ImageTag is not null)
                 {
-                    <span><SvgIcon Icon="@Icons.Material.Outlined.Layers" /><span class="gb-mono">@dep.ImageTag</span></span>
+                    <span data-tip="deploy.image"><SvgIcon Icon="@Icons.Material.Outlined.Layers" /><span class="gb-mono">@dep.ImageTag</span></span>
                 }
             </div>
         </ChildContent>
         <Actions>
             @if (dep.IsActive)
             {
-                <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Cancel" OnClick="Cancel">Cancel</Btn>
+                <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.Cancel" OnClick="Cancel" Tip="deploy.cancel">Cancel</Btn>
             }
             else if (dep.Status == DeployStatus.Succeeded && AddressBook.Primary(reached) is { } primary)
             {
-                <Btn Kind="BtnKind.Primary" Href="@primary" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew">Open</Btn>
+                <Btn Kind="BtnKind.Primary" Href="@primary" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew" Tip="app.open">Open</Btn>
             }
             <Btn Href="@AppHref" Icon="@Icons.Material.Outlined.ArrowBack">Back to the app</Btn>
         </Actions>
@@ -77,21 +77,28 @@ else
 
     @if (dep.Status == DeployStatus.Skipped)
     {
-        <Banner Tone="info" Icon="@Icons.Material.Outlined.SkipNext" Title="Skipped: the running version stays">
+        <Banner Tone="info" Icon="@Icons.Material.Outlined.SkipNext" Title="Skipped: the running version stays" Tip="deploy.skipped">
             @SkipLine(dep) Nothing was built. Deploy by hand to build it anyway.
         </Banner>
     }
     @if (dep.Error is not null && !dep.IsActive)
     {
-        <Banner Tone="@(dep.Status == DeployStatus.RolledBack ? "warn" : "critical")" Title="@(dep.Status == DeployStatus.RolledBack ? "Rolled back: the old version kept running" : "The deploy failed")">@dep.Error</Banner>
+        @if (dep.Status == DeployStatus.RolledBack)
+        {
+            <Banner Tone="warn" Title="Rolled back: the old version kept running" Tip="deploy.rolled-back">@dep.Error</Banner>
+        }
+        else
+        {
+            <Banner Tone="critical" Title="The deploy failed" Tip="deploy.failed">@dep.Error</Banner>
+        }
     }
     @if (dep.Status == DeployStatus.Succeeded && LiveAt() is { Count: > 0 } live)
     {
-        <Banner Tone="good" Icon="@Icons.Material.Outlined.CheckCircle" Title="Live">
+        <Banner Tone="good" Icon="@Icons.Material.Outlined.CheckCircle" Title="Live" Tip="deploy.live">
             <span class="gb-row" style="flex-wrap:wrap;gap:6px 18px;margin-top:4px">
                 @foreach (var a in live)
                 {
-                    <AddressValue Key="@(a.Kind == AddressKind.Domain ? "Domain" : "LAN")" Text="@AppFacts.Shown(a.Text)" Href="@a.Href" Copy="@a.Copy" ShowCopy="@(a.Kind != AddressKind.Domain)" />
+                    <AddressValue Key="@(a.Kind == AddressKind.Domain ? "Domain" : "LAN")" KeyTip="@TipKeys.Access(a.Kind)" Text="@AppFacts.Shown(a.Text)" Href="@a.Href" Copy="@a.Copy" ShowCopy="@(a.Kind != AddressKind.Domain)" />
                 }
             </span>
         </Banner>
@@ -99,7 +106,7 @@ else
     @if (dep.Status == DeployStatus.Succeeded && dep.Trigger == DeployTrigger.Created && template is { Notes.Count: > 0 } installed)
     {
         @* An app installed from a template: what to do first, once its first deploy is up. *@
-        <Banner Tone="info" Icon="@Icons.Material.Outlined.Flag" Title="@($"First steps with {appName ?? installed.Name}")" Class="gb-tpl-first-steps">
+        <Banner Tone="info" Icon="@Icons.Material.Outlined.Flag" Title="@($"First steps with {appName ?? installed.Name}")" Class="gb-tpl-first-steps" Tip="deploy.first-steps">
             <ul class="gb-tpl-notes">
                 @foreach (var note in installed.Notes)
                 {

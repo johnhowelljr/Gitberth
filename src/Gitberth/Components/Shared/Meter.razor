@@ -1,5 +1,5 @@
 @* A 4 px bar: memory against its limit, or a dashed track when there's no limit (the fill is then its share of the host). *@
-<span class="gb-meter @(Large ? "gb-meter--lg" : null) @(Limited ? null : "gb-meter--nolimit") @ToneClass @Class" title="@Title" role="img" aria-label="@Title">
+<span class="gb-meter @(Large ? "gb-meter--lg" : null) @(Limited ? null : "gb-meter--nolimit") @ToneClass @Class" data-tip-text="@Title" role="img" aria-label="@Title">
     @if (Fraction is double f)
     {
         <i style="width:@((Math.Clamp(f, 0, 1) * 100).ToString("0.#", CultureInfo.InvariantCulture))%"></i>

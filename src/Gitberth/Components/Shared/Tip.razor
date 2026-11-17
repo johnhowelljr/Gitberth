@@ -1,0 +1,31 @@
+@inject TipCatalog Catalog
+@*
+    A tip from the catalog (Help/Tips/<area>.yaml), shown as a card on hover, keyboard focus or tap (wwwroot/js/tips.js).
+    With content, the content is the trigger: <Tip Key="nav.apps">Apps</Tip> underlines it with dots. Without, it's a
+    small info button after a label or title: <Tip Key="nav.apps" />. Detail adds a live line to the card (an engine's
+    version, an error). Inside a link or a button, give Focusable="false": the link or button is what takes the focus.
+*@
+@if (ChildContent is null)
+{
+    <button type="button" class="gb-tipicon @Class" data-tip="@Key" data-tip-detail="@Detail" aria-label="@($"About {Title}")">
+        <svg class="gb-i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M11 7h2v2h-2zm0 4h2v6h-2zm1-9C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z" /></svg>
+    </button>
+}
+else
+{
+    <span class="gb-tipped @Class" data-tip="@Key" data-tip-detail="@Detail" tabindex="@(Focusable ? "0" : null)">@ChildContent</span>
+}
+
+@code {
+    /// <summary>The tip's key in the catalog: settings.gitlab.address.</summary>
+    [Parameter, EditorRequired] public string Key { get; set; } = "";
+    /// <summary>The words the tip is about; none for the info button.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>A line of live facts for the card, under its text.</summary>
+    [Parameter] public string? Detail { get; set; }
+    /// <summary>False inside a link or a button, which takes the focus itself.</summary>
+    [Parameter] public bool Focusable { get; set; } = true;
+    [Parameter] public string? Class { get; set; }
+
+    private string Title => Catalog.Find(Key)?.Title ?? Key;
+}

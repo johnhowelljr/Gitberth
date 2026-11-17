@@ -13,22 +13,22 @@
 
 <PageTitle>Apps · Gitberth</PageTitle>
 
-<PageHead Title="Apps" Lead="Every container on this host is an app here, whoever started it. Open one to change anything about it.">
+<PageHead Title="Apps" Tip="apps.title" Lead="Every container on this host is an app here, whoever started it. Open one to change anything about it.">
     <Actions>
-        <Btn Href="apps/new?from=paste" Icon="@Icons.Material.Outlined.ContentPaste">Paste docker run</Btn>
+        <Btn Href="apps/new?from=paste" Icon="@Icons.Material.Outlined.ContentPaste" Tip="apps.paste">Paste docker run</Btn>
     </Actions>
 </PageHead>
 
 @if (list.DockerError is { } dockerError)
 {
-    <Banner Tone="critical" Title="Docker can't be read">@dockerError.TrimEnd('.'). The list shows what Gitberth knows without it.</Banner>
+    <Banner Tone="critical" Title="Docker can't be read" Tip="apps.docker-error">@dockerError.TrimEnd('.'). The list shows what Gitberth knows without it.</Banner>
 }
 
 <HostStrip Apps="list.Apps" Snapshot="Stats.Current" Disk="disk" />
 
 @if (Trouble.Count > 0 && !troubleDismissed)
 {
-    <Banner Tone="serious" Title="@($"{Trouble.Count} {(Trouble.Count == 1 ? "app is" : "apps are")} in trouble")" OnDismiss="() => troubleDismissed = true">
+    <Banner Tone="serious" Title="@($"{Trouble.Count} {(Trouble.Count == 1 ? "app is" : "apps are")} in trouble")" Tip="apps.trouble" OnDismiss="() => troubleDismissed = true">
         <ChildContent>@TroubleLine</ChildContent>
         <Aside>
             <span class="gb-attn-logos">
@@ -48,13 +48,13 @@
     <label class="gb-input">
         <SvgIcon Icon="@Icons.Material.Outlined.Search" />
         <input id="gb-apps-search" type="search" placeholder="Search names, images, ports, addresses"value="@query" @oninput="OnSearch" aria-label="Search apps" autocomplete="off" />
-        <span class="gb-kbd">/</span>
+        <span class="gb-kbd" data-tip-text="Press / to search">/</span>
     </label>
     <div class="gb-toolbar-scroll">
         <Seg T="StatusFilter" Options="FilterOptions" Value="filter" ValueChanged="SetFilter" Label="Show" />
         <MudMenu AnchorOrigin="Origin.BottomLeft" TransformOrigin="Origin.TopLeft" AriaLabel="Filter by source">
             <ActivatorContent>
-                <button type="button" class="gb-filterbtn @(sources.Count > 0 ? "on" : null)" @onclick="context.ToggleAsync">
+                <button type="button" class="gb-filterbtn @(sources.Count > 0 ? "on" : null)" data-tip="apps.source-filter" @onclick="context.ToggleAsync">
                     <SvgIcon Icon="@Icons.Material.Outlined.FilterList" />Source@(sources.Count > 0 ? $": {string.Join(", ", sources.Select(SourceBadge.WordOf))}" : "")
                 </button>
             </ActivatorContent>
@@ -63,7 +63,8 @@
                 {
                     var on = sources.Contains(source);
                     var count = list.Apps.Count(a => a.Source == source);
-                    <MudMenuItem Icon="@(on ? Icons.Material.Outlined.CheckBox : Icons.Material.Outlined.CheckBoxOutlineBlank)" OnClick="() => ToggleSource(source)" AutoClose="false" Disabled="@(count == 0 && !on)">
+                    <MudMenuItem Icon="@(on ? Icons.Material.Outlined.CheckBox : Icons.Material.Outlined.CheckBoxOutlineBlank)" OnClick="() => ToggleSource(source)" AutoClose="false" Disabled="@(count == 0 && !on)"
+                                 data-tip="@TipKeys.Source(source)">
                         @SourceBadge.WordOf(source) <span class="gb-t3">@count</span>
                     </MudMenuItem>
                 }
@@ -76,7 +77,7 @@
         </MudMenu>
     </div>
     <div class="gb-toolbar-right">
-        <label class="gb-t3" for="gb-sortby" style="font-size:12.5px;white-space:nowrap">Sort by</label>
+        <label class="gb-t3" for="gb-sortby" style="font-size:12.5px;white-space:nowrap"><Tip Key="apps.sort">Sort by</Tip></label>
         <select id="gb-sortby" class="gb-input gb-input--sm" style="width:auto" value="@(sortBy?.ToString() ?? "")" @onchange="OnSortPicked">
             <option value="">Pinned, then name</option>
             @foreach (var by in Enum.GetValues<SortBy>())
@@ -87,12 +88,12 @@
         @if (sortBy is { } current)
         {
             <button type="button" class="gb-sortdir" @onclick="ReverseSort"
-                    title="@(descending ? "Highest or Z first: show the other way" : "Lowest or A first: show the other way")"
+                    data-tip-text="@(descending ? "Highest or Z first: show the other way" : "Lowest or A first: show the other way")"
                     aria-label="@($"{AppSorting.WordOf(current)}, {(descending ? "descending" : "ascending")}: reverse")">
                 <SvgIcon Icon="@(descending ? Icons.Material.Outlined.ArrowDownward : Icons.Material.Outlined.ArrowUpward)" />
             </button>
         }
-        <label class="gb-t3" for="gb-groupby" style="font-size:12.5px;white-space:nowrap">Group by</label>
+        <label class="gb-t3" for="gb-groupby" style="font-size:12.5px;white-space:nowrap"><Tip Key="apps.group">Group by</Tip></label>
         <select id="gb-groupby" class="gb-input gb-input--sm" style="width:auto" @bind="groupBy">
             <option value="@GroupBy.Prefix">Name</option>
             <option value="@GroupBy.Source">Source</option>
@@ -115,7 +116,7 @@ else if (list.Apps.Count == 0)
     <div class="gb-card">
         <EmptyState Icon="@Icons.Material.Outlined.GridView" Title="No apps yet">
             <ChildContent>Every container on this host shows here. Start one from a GitHub repository, a registry image or a docker run command.</ChildContent>
-            <Actions><Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add">New app</Btn></Actions>
+            <Actions><Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add" Tip="topbar.new-app">New app</Btn></Actions>
         </EmptyState>
     </div>
 }
@@ -128,7 +129,7 @@ else if (Shown.Count == 0)
                 <Btn OnClick="ClearFilters">Show every app</Btn>
                 @if (query.Trim().Length > 0 && !query.Trim().Contains(' '))
                 {
-                    <Btn Kind="BtnKind.Primary" Href="@($"apps/new?image={Uri.EscapeDataString(query.Trim())}")" Icon="@Icons.Material.Outlined.Add">New app from @query.Trim()</Btn>
+                    <Btn Kind="BtnKind.Primary" Href="@($"apps/new?image={Uri.EscapeDataString(query.Trim())}")" Icon="@Icons.Material.Outlined.Add" Tip="apps.new-from-search">New app from @query.Trim()</Btn>
                 }
             </Actions>
         </EmptyState>
@@ -138,12 +139,12 @@ else
 {
     <div class="gb-alist" role="table" aria-label="Apps">
         <div class="gb-arow gb-arow-head" role="row">
-            <span role="columnheader" style="padding-left:44px" aria-sort="@AriaSort(SortBy.Name)">@SortHead(SortBy.Name, "App")</span>
-            <span role="columnheader" aria-sort="@AriaSort(SortBy.Status)">@SortHead(SortBy.Status, "Status")</span>
-            <span role="columnheader" aria-sort="@AriaSort(SortBy.Address)">@SortHead(SortBy.Address, "Address")</span>
-            <span role="columnheader" class="gb-c-ports">Ports</span>
-            <span role="columnheader" class="gb-c-res" aria-sort="@(AriaSort(SortBy.Cpu) ?? AriaSort(SortBy.Memory))">@SortHead(SortBy.Cpu, "CPU") · @SortHead(SortBy.Memory, "Memory")</span>
-            <span role="columnheader" class="gb-c-src" aria-sort="@AriaSort(SortBy.Source)">@SortHead(SortBy.Source, "Source")</span>
+            <span role="columnheader" style="padding-left:44px" aria-sort="@AriaSort(SortBy.Name)">@SortHead(SortBy.Name, "App", Tip: "apps.column.app")</span>
+            <span role="columnheader" aria-sort="@AriaSort(SortBy.Status)">@SortHead(SortBy.Status, "Status", Tip: "apps.column.status")</span>
+            <span role="columnheader" aria-sort="@AriaSort(SortBy.Address)">@SortHead(SortBy.Address, "Address", Tip: "apps.column.address")</span>
+            <span role="columnheader" class="gb-c-ports"><Tip Key="apps.column.ports">Ports</Tip></span>
+            <span role="columnheader" class="gb-c-res" aria-sort="@(AriaSort(SortBy.Cpu) ?? AriaSort(SortBy.Memory))">@SortHead(SortBy.Cpu, "CPU", Tip: "apps.column.cpu") · @SortHead(SortBy.Memory, "Memory", Tip: "apps.column.memory")</span>
+            <span role="columnheader" class="gb-c-src" aria-sort="@AriaSort(SortBy.Source)">@SortHead(SortBy.Source, "Source", Tip: "apps.column.source")</span>
             <span></span>
         </div>
         @foreach (var group in Groups)
@@ -152,7 +153,8 @@ else
             @if (Groups.Count > 1 || group.Tag is not null)
             {
                 <div class="gb-grp" role="row">
-                    <button type="button" class="gb-grp-chev @(closed ? "closed" : null)" aria-expanded="@(closed ? "false" : "true")" aria-label="@($"{(closed ? "Open" : "Fold")} {group.Title}")" @onclick="() => Toggle(group.Id)">
+                    <button type="button" class="gb-grp-chev @(closed ? "closed" : null)" aria-expanded="@(closed ? "false" : "true")" aria-label="@($"{(closed ? "Open" : "Fold")} {group.Title}")"
+                            data-tip-text="@(closed ? "Open" : "Fold")" @onclick="() => Toggle(group.Id)">
                         <SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" />
                     </button>
                     <span class="gb-grp-icon"><SvgIcon Icon="@group.Icon" /></span>
@@ -161,7 +163,7 @@ else
                             @group.Title
                             @if (group.Tag is not null)
                             {
-                                <span class="gb-tag gb-tag--outline">@group.Tag</span>
+                                <span class="gb-tag gb-tag--outline" data-tip="apps.group.prefix">@group.Tag</span>
                             }
                         </div>
                         <div class="gb-grp-meta">
@@ -192,7 +194,7 @@ else
                         }
                         @if (group.Tag is not null && group.Startable.Count() is var startable and > 1)
                         {
-                            <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => StartAllAsync(group)" Busy="@(bulk == group.Id)">Start @startable stopped</Btn>
+                            <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => StartAllAsync(group)" Busy="@(bulk == group.Id)" Tip="apps.group.start-stopped">Start @startable stopped</Btn>
                         }
                     </div>
                 </div>
@@ -206,7 +208,8 @@ else
                         var stackKey = group.Id + "/" + stack.Id;
                         var stackClosed = this.closed.Contains(stackKey);
                         <div class="gb-sub-grp" role="row">
-                            <button type="button" class="gb-grp-chev @(stackClosed ? "closed" : null)" aria-expanded="@(stackClosed ? "false" : "true")" aria-label="@($"{(stackClosed ? "Open" : "Fold")} {stack.Title}")" @onclick="() => Toggle(stackKey)">
+                            <button type="button" class="gb-grp-chev @(stackClosed ? "closed" : null)" aria-expanded="@(stackClosed ? "false" : "true")" aria-label="@($"{(stackClosed ? "Open" : "Fold")} {stack.Title}")"
+                                    data-tip-text="@(stackClosed ? "Open" : "Fold")" @onclick="() => Toggle(stackKey)">
                                 <SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" />
                             </button>
                             @if (stack.Slug is not null)
@@ -329,8 +332,9 @@ else
 
     private string? AriaSort(SortBy by) => sortBy == by ? descending ? "descending" : "ascending" : null;
 
-    private RenderFragment SortHead(SortBy by, string label) =>
-        @<button type="button" class="gb-sorth @(sortBy == by ? "on" : null)" @onclick="() => SortOn(by)" title="@($"Sort by {AppSorting.WordOf(by)}")">
+    // A column's heading: a button that sorts by it, with the column's tip (named Tip: at each call, so the tips' test finds it).
+    private RenderFragment SortHead(SortBy by, string label, string Tip) =>
+        @<button type="button" class="gb-sorth @(sortBy == by ? "on" : null)" @onclick="() => SortOn(by)" data-tip="@Tip">
             @label<SvgIcon Icon="@(sortBy != by ? Icons.Material.Outlined.UnfoldMore : descending ? Icons.Material.Outlined.ArrowDownward : Icons.Material.Outlined.ArrowUpward)" />
         </button>;
 
@@ -338,12 +342,12 @@ else
 
     private IReadOnlyList<SegOption<StatusFilter>> FilterOptions =>
     [
-        new(StatusFilter.All, "All", Count: list.Apps.Count),
-        new(StatusFilter.Running, "Running", Count: list.Apps.Count(a => a.Running)),
-        new(StatusFilter.Stopped, "Stopped", Count: list.Apps.Count(a => !a.Running)),
-        .. Trouble.Count > 0 ? [new SegOption<StatusFilter>(StatusFilter.Attention, "Needs attention", Count: Trouble.Count)] : Array.Empty<SegOption<StatusFilter>>(),
+        new(StatusFilter.All, "All", Count: list.Apps.Count, Tip: "apps.show.all"),
+        new(StatusFilter.Running, "Running", Count: list.Apps.Count(a => a.Running), Tip: "apps.show.running"),
+        new(StatusFilter.Stopped, "Stopped", Count: list.Apps.Count(a => !a.Running), Tip: "apps.show.stopped"),
+        .. Trouble.Count > 0 ? [new SegOption<StatusFilter>(StatusFilter.Attention, "Needs attention", Count: Trouble.Count, Tip: "apps.show.attention")] : Array.Empty<SegOption<StatusFilter>>(),
         .. list.Apps.Any(a => a.Update is { Available: true })
-            ? [new SegOption<StatusFilter>(StatusFilter.Updates, "Updates", Count: list.Apps.Count(a => a.Update is { Available: true }))]
+            ? [new SegOption<StatusFilter>(StatusFilter.Updates, "Updates", Count: list.Apps.Count(a => a.Update is { Available: true }), Tip: "apps.show.updates")]
             : Array.Empty<SegOption<StatusFilter>>(),
     ];
 

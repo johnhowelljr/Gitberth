@@ -10,14 +10,14 @@ Gitberth and deployed when you change it.
 
 | Where the file comes from | What it is in Gitberth |
 |---|---|
-| A [GitHub repo](deploy-from-github.md) with a `compose.yaml`, `compose.yml`, `docker-compose.yaml` or `docker-compose.yml` in the app's folder | A Git app deployed with Compose. New commits deploy by themselves, and [previews](previews.md), [build filters](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy), the [GitHub integration](github-integration.md) and [deploy hooks](deploy-hooks.md) work as for any Git app. |
+| A [GitHub repo or GitLab project](deploy-from-github.md) with a `compose.yaml`, `compose.yml`, `docker-compose.yaml` or `docker-compose.yml` in the app's folder | A Git app deployed with Compose. New commits deploy by themselves, and [previews](previews.md), [build filters](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy), the [GitHub integration](github-integration.md) (or [GitLab's](gitlab-integration.md)) and [deploy hooks](deploy-hooks.md) work as for any Git app. |
 | A whole Compose file [you paste](paste-docker-run-or-compose.md#paste-a-whole-compose-file) | An inline Compose app: Gitberth keeps the file (encrypted) and deploys it. Change it on the app's **Settings** tab. |
 
 Gitberth runs `docker compose` itself (its image has the Compose plugin), so the host needs nothing more than Docker.
 
 ## Deploy a repo with Compose
 
-1. Click **New app**, then **GitHub repository**, paste the repo's URL and click **Check**.
+1. Click **New app**, then **Git repository**, paste the repo's URL and click **Check**.
 2. When the folder has a Compose file, Gitberth says **This repo has a compose.yaml with N services** and offers:
    - **With Compose**: all its services as one app. This is the first choice when the file has several services, or when
      there's nothing else in the folder to build.
@@ -34,9 +34,22 @@ The first deploy builds each service that has a `build:` section and pulls the o
 
 ## What a deploy does
 
+```mermaid
+flowchart TD
+    start["A push, Deploy, a hook,<br/>or a saved file"] --> release["Release folder: the repo at<br/>its commit, or the kept file"]
+    release --> env["Variables written to<br/>the project's .env"]
+    env --> config["docker compose config,<br/>then made Gitberth's"]
+    config --> build["Services with build: are<br/>built, the others pulled"]
+    build --> up["docker compose up --wait,<br/>for the services that changed"]
+    up --> checks{"Every service up<br/>15 s, web service<br/>answers its<br/>health URL?"}
+    checks -->|"yes"| done["Succeeded: the web<br/>service has the app's<br/>ports and domains"]
+    checks -->|"no"| back["Rolled back: the<br/>release before<br/>runs again"]
+    checks -->|"no, on a<br/>first deploy"| down["Taken down;<br/>its volumes stay"]
+```
+
 1. **Fetches the release.** The repo at its commit (or the file Gitberth keeps) becomes a release folder,
    `/data/compose/<app>/<commit>/`, in Gitberth's data volume. The last three releases are kept, and the one that runs.
-2. **Fills in the variables.** The app's variables (with their scopes, the repo's GitHub variables and
+2. **Fills in the variables.** The app's variables (with their scopes, the repo's GitHub or GitLab variables and
    [Vercel's](environment-variables.md#variables-gitberth-sets-like-vercel)) are written to the project's `.env`, after the
    repo's own `.env`, so `${NAME}` and `env_file: .env` both work. A service gets a variable only where the file passes it
    on (`DATABASE_URL: ${DATABASE_URL}`). The connection string of each of the app's [databases](databases.md) is there
@@ -56,7 +69,7 @@ The first deploy builds each service that has a `build:` section and pulls the o
      connects to its database server (`postgres`) or another app as it starts finds it by name.
    - `up` waits 3 minutes for the services to run and be healthy, or longer when a service's health check gives it a
      longer start (`healthcheck: start_period: 10m`, for an app that installs itself on its first start), at most 20.
-   - The health URL is asked as `localhost`: a Compose container's name (`gb-shop_web`) has a `_` in it, which apps
+   - The health URL is asked as `localhost`: a Compose container's name (`gb-website_web`) has a `_` in it, which apps
      such as Django's and Nextcloud refuse as a host name.
 6. **Rolls back when it fails.** The release that ran before comes back, as it was, with its images: the deploy ends
    **Rolled back** and the log shows the failing service's last output. A first deploy that fails is taken down instead
@@ -92,6 +105,8 @@ Gitberth runs every `docker compose` from a folder of its own, never from a rele
 
 ## Use the app
 
+![A Compose app's Services card: web, worker and redis, each with its state, image, container, ports, CPU and memory](../images/app-compose-services.webp)
+
 | On the app's page | What it does for a Compose app |
 |---|---|
 | The Apps list | One row, with how many of its services run: **Running 3/3**, or **Degraded 2/3** while one is down. |
@@ -104,7 +119,7 @@ Gitberth runs every `docker compose` from a folder of its own, never from a rele
 | **Network** | The web service's ports and the app's domains. |
 | **Settings › Compose** | The Compose file (a Git app's path in the repo, or an inline app's whole file), the web service, and **Put every service on Gitberth's network**. **Save and deploy** says what changes, then deploys. |
 
-A crash of another service is told as the app's, by the service's name ("shop's worker service crashed"), and follows
+A crash of another service is told as the app's, by the service's name ("website's worker service crashed"), and follows
 the app's notifications switch.
 
 Only the web service is on Gitberth's shared network, as `<app>`; the others reach each other on the project's own. Turn
@@ -120,7 +135,7 @@ Compose app every such variable `V` also comes in parts, in the project's `.env`
 
 | Part | Postgres | Redis |
 |---|---|---|
-| `V_HOST` | The server's name on Gitberth's network (`postgres`) | The Redis's (`shop-redis`) |
+| `V_HOST` | The server's name on Gitberth's network (`postgres`) | The Redis's (`website-redis`) |
 | `V_PORT` | `5432` | `6379` |
 | `V_NAME` | The database | |
 | `V_USER` | The role | |
@@ -173,7 +188,7 @@ and a preview never takes what it pulled.
 ## Related
 
 - [App templates](templates.md): popular self-hosted apps, installed as Compose apps in one click
-- [Deploy from GitHub](deploy-from-github.md)
+- [Deploy from GitHub or GitLab](deploy-from-github.md)
 - [Paste a docker run command or a Compose file](paste-docker-run-or-compose.md)
 - [Deploys and rollbacks](deploys-and-rollbacks.md)
 - [Preview deployments](previews.md)

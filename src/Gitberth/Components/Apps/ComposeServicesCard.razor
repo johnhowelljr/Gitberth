@@ -7,7 +7,7 @@
     a restart. The web service is the app's own container, so its addresses, domains and charts are the app's; the others
     are inside the app, reached by their service names on its own network.
 *@
-<SectionCard Title="Services" Icon="@Icons.Material.Outlined.AccountTree" Sub="@Sub" Flush="true">
+<SectionCard Title="Services" Icon="@Icons.Material.Outlined.AccountTree" Sub="@Sub" Flush="true" Tip="app.compose.services">
     <Actions>
         <a class="gb-card-link" href="@($"{View.Summary.Href}/logs")">Logs<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
     </Actions>
@@ -33,15 +33,15 @@
                             <span class="gb-svcrow-name">@m.Service</span>
                             @if (m.Web)
                             {
-                                <span class="gb-tag gb-tag--accent" title="Its domains, LAN port, health URL and uptime are the app's">Web</span>
+                                <span class="gb-tag gb-tag--accent" data-tip="app.compose.web">Web</span>
                             }
-                            <span class="@($"gb-pill gb-pill--{tone}")"><span class="gb-pill-dot"></span>@label</span>
+                            <span class="@($"gb-pill gb-pill--{tone}")" data-tip="@StateTip(m)" data-tip-detail="@m.Status"><span class="gb-pill-dot"></span>@label</span>
                         </span>
-                        <span class="gb-t3 gb-mono gb-svcrow-image" title="@m.Image">@m.Image</span>
+                        <span class="gb-t3 gb-mono gb-svcrow-image" data-tip-text="@m.Image">@m.Image</span>
                         <span class="gb-t3 gb-svcrow-facts">
                             @if (m.Container is { } container)
                             {
-                                <span class="gb-mono" title="Its container">@container</span>
+                                <span class="gb-mono" data-tip-text="Its container">@container</span>
                             }
                             @if (Ports(m) is { Length: > 0 } ports)
                             {
@@ -61,7 +61,7 @@
                         <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Article" Href="@($"{View.Summary.Href}/logs?service={Uri.EscapeDataString(m.Service)}")"
                              Disabled="@(m.Container is null)">Log</Btn>
                         <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.RestartAlt" OnClick="() => RestartAsync(m)" Busy="@(restarting == m.Service)"
-                             Disabled="@(m.Container is null || restarting is not null || View.Summary.State == AppState.Deploying)">Restart</Btn>
+                             Disabled="@(m.Container is null || restarting is not null || View.Summary.State == AppState.Deploying)" Tip="app.compose.restart">Restart</Btn>
                     </div>
                 </div>
             }
@@ -144,6 +144,21 @@
         "exited" => ("secondary", "Stopped"),
         "created" => ("secondary", "Not started"),
         _ => ("secondary", m.State),
+    };
+
+    // A service's state pill shows the tip of the app state it reads as (status.running…), as Pill words it. "No container"
+    // has none: the app's Missing tip speaks of a whole app.
+    private static string? StateTip(Gitberth.Compose.ComposeMember m) => m.State switch
+    {
+        "running" when m.Status.Contains("(unhealthy)", StringComparison.Ordinal) => TipKeys.State(AppState.Unhealthy),
+        "running" when m.Status.Contains("(health: starting)", StringComparison.Ordinal) => TipKeys.State(AppState.Starting),
+        "running" when m.Status.Contains("(healthy)", StringComparison.Ordinal) => TipKeys.State(AppState.Healthy),
+        "running" => TipKeys.State(AppState.Running),
+        "restarting" => TipKeys.State(AppState.Restarting),
+        "exited" when ContainerService.ExitCode(m.Status) is { } code and not (0 or 137 or 143) => TipKeys.State(AppState.Crashed),
+        "exited" => TipKeys.State(AppState.Stopped),
+        "created" => TipKeys.State(AppState.Created),
+        _ => null,
     };
 
     public void Dispose() => timer?.Dispose();

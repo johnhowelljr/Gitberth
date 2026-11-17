@@ -1,0 +1,102 @@
+# Tips for a deploy's page (Components/Pages/DeploymentView.razor, Shared/DeploymentLog.razor). See Help/TipCatalog.cs.
+
+deploy.title:
+  title: Deploy
+  text: >-
+    One deploy of the app: what started it, the commit it built, how long it took, and its build and deploy log, which
+    follows it live while it runs.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+deploy.trigger:
+  title: What started it
+  text: >-
+    A new commit Gitberth found, a push GitHub or GitLab told it about, a deploy by hand, a settings change, a rollback,
+    a retry after a failed build, a promoted preview, a deploy hook, a scheduled restart, a start, or the app's first
+    deploy.
+  more: guides/deploys-and-rollbacks#when-a-deploy-happens
+
+deploy.requested-by:
+  title: Who asked for it
+  text: >-
+    Who started this deploy: you, an API token that an AI agent or a script uses, or a deploy hook. The audit log has
+    every change with who made it.
+  more: guides/audit-log#who-made-it
+
+deploy.no-cache:
+  title: Without the build cache
+  text: >-
+    Every step of the build ran again and the base images were pulled anew, instead of reusing Docker's build cache.
+  more: guides/deploys-and-rollbacks#without-the-build-cache
+
+deploy.commit:
+  title: Commit
+  text: >-
+    The commit this deploy built: its short ID, its message and its author.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+deploy.queued:
+  title: Queued
+  text: >-
+    When the deploy was asked for. It may wait its turn: an app deploys one change at a time, and Gitberth builds one
+    image at a time.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+deploy.duration:
+  title: Took
+  text: >-
+    How long it ran from its start to its end, or so far while it runs.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+deploy.image:
+  title: Image
+  text: >-
+    The image this deploy built, by name and tag. The app runs it once the deploy succeeds, and rolling back to this
+    deploy runs it again while it's kept.
+  more: guides/deploys-and-rollbacks#roll-back-to-an-earlier-deploy
+
+deploy.cancel:
+  title: Cancel
+  text: >-
+    Stops the deploy where it is. The running container isn't touched.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+deploy.skipped:
+  title: Skipped
+  text: >-
+    Gitberth saw this commit, but its build filters or its message said not to deploy it: nothing was built, and the
+    running version stays. **Deploy** on the app's page builds it anyway.
+  more: guides/deploys-and-rollbacks#what-a-skipped-commit-does
+
+deploy.failed:
+  title: The deploy failed
+  text: >-
+    The build or the new container failed, for the reason shown; the log below has the details. A failed build never
+    touches the version that runs.
+  more: guides/troubleshooting#github-and-deploys
+
+deploy.rolled-back:
+  title: Rolled back
+  text: >-
+    The new version built, but didn't pass its checks: stay up for 15 seconds, and answer its health URL when it has
+    one. The previous container came back and runs; the log ends with the new one's last output.
+  more: guides/deploys-and-rollbacks#what-gitberth-checks-before-the-new-version-takes-over
+
+deploy.live:
+  title: Live
+  text: >-
+    Where the new version answers now: its main domain, and its ports on the LAN.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+deploy.first-steps:
+  title: First steps
+  text: >-
+    What to do first with an app installed from a template, from the template's own notes, once its first deploy is
+    up.
+  more: guides/templates#after-its-installed
+
+deploy.log:
+  title: Build and deploy log
+  text: >-
+    Everything the deploy did, line by line as it happens: the clone, what was detected, the build, the start of the
+    new container and its checks. Secret values are masked.
+  more: guides/deploys-and-rollbacks#the-deploy-page

@@ -68,7 +68,7 @@ else
                          Detail="@(app.Running ? null : StoppedFor)" />
             @if (app.System)
             {
-                <span class="gb-tag gb-tag--outline">System</span>
+                <span class="gb-tag gb-tag--outline" data-tip="apps.row.system">System</span>
             }
         </Status>
         <SourceLine>@HeroMeta(app)</SourceLine>
@@ -103,7 +103,7 @@ else
             {
                 @* A Compose app's services each have their own log: the web service's first. *@
                 <div class="gb-row gb-row--wrap" style="margin-bottom:12px;gap:10px">
-                    <span class="gb-t3" style="font-size:13px">Service</span>
+                    <span class="gb-t3" style="font-size:13px"><Tip Key="app.logs.service">Service</Tip></span>
                     <Seg T="string" Options="@(services.Select(s => new SegOption<string>(s, s == view.Row?.WebService ? $"{s} (web)" : s)).ToList())"
                          Value="LogService" ValueChanged="ShowServiceLog" Label="Service" />
                 </div>
@@ -199,13 +199,13 @@ else
 
     private IReadOnlyList<TabItem> TabItems =>
     [
-        new("overview", "Overview", Icons.Material.Outlined.GridView, BaseHref),
-        .. IsPreview ? [] : new TabItem[] { new("environment", "Environment", Icons.Material.Outlined.Key, $"{BaseHref}/environment", EnvChanges, Short: "Env") },
-        new("network", "Network", Icons.Material.Outlined.Lan, $"{BaseHref}/network"),
-        .. HasPreviews ? new TabItem[] { new("previews", "Previews", Icons.Material.Outlined.Preview, $"{BaseHref}/previews") } : [],
-        .. IsPreview ? [] : new TabItem[] { new("settings", "Settings", Icons.Material.Outlined.Tune, $"{BaseHref}/settings", SettingsChanges) },
-        new("logs", "Logs", Icons.Material.Outlined.Article, $"{BaseHref}/logs"),
-        new("activity", "Activity", Icons.Material.Outlined.History, $"{BaseHref}/activity"),
+        new("overview", "Overview", Icons.Material.Outlined.GridView, BaseHref, Tip: "app.tab.overview"),
+        .. IsPreview ? [] : new TabItem[] { new("environment", "Environment", Icons.Material.Outlined.Key, $"{BaseHref}/environment", EnvChanges, Short: "Env", Tip: "app.tab.environment") },
+        new("network", "Network", Icons.Material.Outlined.Lan, $"{BaseHref}/network", Tip: "app.tab.network"),
+        .. HasPreviews ? new TabItem[] { new("previews", "Previews", Icons.Material.Outlined.Preview, $"{BaseHref}/previews", Tip: "app.tab.previews") } : [],
+        .. IsPreview ? [] : new TabItem[] { new("settings", "Settings", Icons.Material.Outlined.Tune, $"{BaseHref}/settings", SettingsChanges, Tip: "app.tab.settings") },
+        new("logs", "Logs", Icons.Material.Outlined.Article, $"{BaseHref}/logs", Tip: "app.tab.logs"),
+        new("activity", "Activity", Icons.Material.Outlined.History, $"{BaseHref}/activity", Tip: "app.tab.activity"),
     ];
 
     private ContainerHealth? Health => view is null ? null : Stats.Current.Containers.FirstOrDefault(c => c.Name == view.Summary.Container);
@@ -380,14 +380,14 @@ else
         @if (app.Source == AppSource.Git && view?.Row is { } r)
         {
             <span class="gb-mono">@r.RepoFullName</span>
-            <span><SvgIcon Icon="@Icons.Material.Outlined.CallSplit" />@r.Branch</span>
+            <span data-tip="app.hero.branch"><SvgIcon Icon="@Icons.Material.Outlined.CallSplit" />@r.Branch</span>
             @if (r.Subdirectory is { } sub)
             {
-                <span><SvgIcon Icon="@Icons.Material.Outlined.Folder" /><span class="gb-mono">@sub/</span></span>
+                <span data-tip="app.hero.subfolder"><SvgIcon Icon="@Icons.Material.Outlined.Folder" /><span class="gb-mono">@sub/</span></span>
             }
             @if (r.CurrentCommit is { Length: >= 7 } sha)
             {
-                <span title="@LastCommitMessage"><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@sha[..7]</span>
+                <span data-tip="app.hero.commit" data-tip-detail="@LastCommitMessage"><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@sha[..7]</span>
                     @if (LastCommitMessage is { } message)
                     {
                         <span class="gb-ellipsis" style="max-width:340px">@message</span>
@@ -396,15 +396,15 @@ else
             }
             @if (r.ComposeFile is { } composeFile)
             {
-                <span class="gb-tag gb-tag--outline" title="Deployed with Compose: its services are one app"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @composeFile</span>
+                <span class="gb-tag gb-tag--outline" data-tip="app.hero.compose"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @composeFile</span>
             }
         }
         else if (view?.Row is { Source: AppSource.Compose } inline)
         {
-            <span><SvgIcon Icon="@Icons.Material.Outlined.Description" />A Compose file Gitberth keeps</span>
+            <span data-tip="app.hero.compose-inline"><SvgIcon Icon="@Icons.Material.Outlined.Description" />A Compose file Gitberth keeps</span>
             @if (inline.TemplateId is { } template)
             {
-                <a class="gb-tag gb-tag--outline" href="@($"apps/new?template={Uri.EscapeDataString(template)}")" title="Installed from this template: its page has its notes and links">
+                <a class="gb-tag gb-tag--outline" href="@($"apps/new?template={Uri.EscapeDataString(template)}")" data-tip="app.hero.template">
                     <SvgIcon Icon="@Icons.Material.Outlined.AutoAwesomeMosaic" />Template: @(Gitberth.Templates.TemplateCatalog.Bundled.Find(template)?.Name ?? template)
                 </a>
             }
@@ -415,20 +415,27 @@ else
         }
         else
         {
-            <span class="gb-mono gb-ellipsis" style="max-width:420px" title="@(app.TagMoved ? AppOverviewTab.TagMovedNote(app.Image) : app.Image)">@app.Image</span>
-            <span>@OriginText(app)</span>
+            @if (app.TagMoved)
+            {
+                <span class="gb-mono gb-ellipsis" style="max-width:420px" data-tip="app.overview.tag-moved" data-tip-detail="@app.Image">@app.Image</span>
+            }
+            else
+            {
+                <span class="gb-mono gb-ellipsis" style="max-width:420px" data-tip="app.hero.image" data-tip-detail="@app.Image">@app.Image</span>
+            }
+            <span data-tip="app.hero.origin">@OriginText(app)</span>
             @if (view?.Details is { } d && d.ImageId.Length > 0)
             {
-                <span title="@d.ImageId"><SvgIcon Icon="@Icons.Material.Outlined.Layers" /><span class="gb-mono">@ShortId(d.ImageId)</span></span>
+                <span data-tip="app.hero.image-id" data-tip-detail="@d.ImageId"><SvgIcon Icon="@Icons.Material.Outlined.Layers" /><span class="gb-mono">@ShortId(d.ImageId)</span></span>
             }
         }
         @if (app.Title != app.Container)
         {
-            <span title="The container's name"><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" /><span class="gb-mono">@app.Container</span></span>
+            <span data-tip="app.hero.container"><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" /><span class="gb-mono">@app.Container</span></span>
         }
         @if (view?.Row?.IsCompose != true && view?.Details?.Labels.GetValueOrDefault("com.docker.compose.project") is { } project)
         {
-            <span class="gb-tag gb-tag--outline"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @project</span>
+            <span class="gb-tag gb-tag--outline" data-tip="app.hero.compose-project"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @project</span>
         }
     </text>;
 
@@ -465,36 +472,36 @@ else
                     <AddressValue Text="@AppFacts.Shown(main.Text)" Href="@main.Href" Big="true" Live="main.Live" />
                     @if (domains.Count > 1)
                     {
-                        <span class="gb-tag gb-tag--outline">+@(domains.Count - 1) @(domains.Count == 2 ? "domain" : "domains")</span>
+                        <span class="gb-tag gb-tag--outline" data-tip-text="Every domain is on the Network tab">+@(domains.Count - 1) @(domains.Count == 2 ? "domain" : "domains")</span>
                     }
                 </span>
             }
             @if (lan is not null)
             {
-                <span><AddressValue Key="LAN" Text="@AppFacts.Shown(lan.Text)" Href="@lan.Href" Copy="@lan.Copy" ShowCopy="true" Big="@(domains.Count == 0)" Live="lan.Live" /></span>
+                <span><AddressValue Key="LAN" KeyTip="@TipKeys.Access(AddressKind.Lan)" Text="@AppFacts.Shown(lan.Text)" Href="@lan.Href" Copy="@lan.Copy" ShowCopy="true" Big="@(domains.Count == 0)" Live="lan.Live" /></span>
             }
             else if (view?.Addresses?.HostNetwork == true)
             {
-                <span><span class="gb-addrv-k">Network</span><span class="gb-t2" style="font-size:13px">the host's own, on any port it opens</span></span>
+                <span><span class="gb-addrv-k" data-tip="app.hero.host-network">Network</span><span class="gb-t2" style="font-size:13px">the host's own, on any port it opens</span></span>
             }
             else if (app.Chips.Count > 0 && host is null && app.Role != ContainerRole.Self)
             {
                 <span>
-                    <span class="gb-addrv-k">LAN</span><span class="gb-t3" style="font-size:13px">Not published</span>
+                    <span class="gb-addrv-k">LAN</span><span class="gb-t3" style="font-size:13px" data-tip="app.hero.not-published">Not published</span>
                     <Btn Size="BtnSize.Sm" Href="@($"{BaseHref}/network")" Icon="@Icons.Material.Outlined.Lan">Publish on LAN</Btn>
                 </span>
             }
             @if (own is not null)
             {
-                <span><AddressValue Key="Own" Text="@AppFacts.Shown(own.Text)" Href="@own.Href" Copy="@own.Copy" Live="own.Live" /></span>
+                <span><AddressValue Key="Own" KeyTip="@TipKeys.Access(AddressKind.OwnLan)" Text="@AppFacts.Shown(own.Text)" Href="@own.Href" Copy="@own.Copy" Live="own.Live" /></span>
             }
             @if (host is not null)
             {
-                <span><AddressValue Key="Host" Text="@host.Text" Copy="@host.Copy" Live="host.Live" /></span>
+                <span><AddressValue Key="Host" KeyTip="@TipKeys.Access(AddressKind.HostOnly)" Text="@host.Text" Copy="@host.Copy" Live="host.Live" /></span>
             }
             @if (inside is not null)
             {
-                <span><AddressValue Key="Internal" Text="@AppFacts.Shown(inside.Text)" Copy="@inside.Copy" Live="inside.Live" /></span>
+                <span><AddressValue Key="Internal" KeyTip="@TipKeys.Access(AddressKind.Internal)" Text="@AppFacts.Shown(inside.Text)" Copy="@inside.Copy" Live="inside.Live" /></span>
             }
         </text>;
     }
@@ -502,11 +509,11 @@ else
     private RenderFragment HeroActions(AppSummary app) => @<text>
         @if (PrimaryHref is { } open && app.Running)
         {
-            <Btn Kind="BtnKind.Primary" Href="@open" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew">Open</Btn>
+            <Btn Kind="BtnKind.Primary" Href="@open" Target="_blank" Icon="@Icons.Material.Outlined.OpenInNew" Tip="app.open">Open</Btn>
         }
         else if (IsDatabase && app.Running)
         {
-            <Btn Kind="BtnKind.Primary" OnClick="ConnectAsync" Icon="@Icons.Material.Outlined.Link">Connect</Btn>
+            <Btn Kind="BtnKind.Primary" OnClick="ConnectAsync" Icon="@Icons.Material.Outlined.Link" Tip="app.connect">Connect</Btn>
         }
         else
         {
@@ -514,61 +521,61 @@ else
         }
         @if (Deployed)
         {
-            <Btn Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="DeployAsync" Busy="busy" Disabled="@(app.State == AppState.Deploying)">Deploy</Btn>
+            <Btn Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="DeployAsync" Busy="busy" Disabled="@(app.State == AppState.Deploying)" Tip="app.deploy">Deploy</Btn>
         }
         else if (update?.Available ?? app.Update?.Available == true)
         {
-            <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="UpdateAsync" Busy="busy">Update</Btn>
+            <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="UpdateAsync" Busy="busy" Tip="app.update">Update</Btn>
         }
         else if (app.Origin is ImageOrigin.Registry or ImageOrigin.Local && app.Role != ContainerRole.Self && !BuiltHere(app))
         {
-            <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()" Busy="@(busy || checking)">Check for update</Btn>
+            <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()" Busy="@(busy || checking)" Tip="app.check-update">Check for update</Btn>
         }
         @if (app.Running)
         {
-            <Btn IconOnly="true" Icon="@Icons.Material.Outlined.RestartAlt" Label="@($"Restart {app.Title}")" Title="Restart" OnClick="() => RunAsync(ContainerAction.Restart)" Disabled="busy" />
+            <Btn IconOnly="true" Icon="@Icons.Material.Outlined.RestartAlt" Label="@($"Restart {app.Title}")" Tip="apps.action.restart" OnClick="() => RunAsync(ContainerAction.Restart)" Disabled="busy" />
             @if (app.Role != ContainerRole.Self)
             {
-                <Btn IconOnly="true" Icon="@Icons.Material.Outlined.Stop" Label="@($"Stop {app.Title}")" Title="Stop" OnClick="() => RunAsync(ContainerAction.Stop)" Disabled="busy" />
+                <Btn IconOnly="true" Icon="@Icons.Material.Outlined.Stop" Label="@($"Stop {app.Title}")" Tip="apps.action.stop" OnClick="() => RunAsync(ContainerAction.Stop)" Disabled="busy" />
             }
         }
         else if (app.State is not (AppState.Deploying or AppState.Changing or AppState.NeedsDecision) && app.State != AppState.Renamed)
         {
-            <Btn IconOnly="true" Icon="@Icons.Material.Outlined.PlayArrow" Label="@($"Start {app.Title}")" Title="Start" OnClick="() => RunAsync(ContainerAction.Start)" Disabled="busy" Class="gb-btn--good" />
+            <Btn IconOnly="true" Icon="@Icons.Material.Outlined.PlayArrow" Label="@($"Start {app.Title}")" Tip="apps.action.start" OnClick="() => RunAsync(ContainerAction.Start)" Disabled="busy" Class="gb-btn--good" />
         }
         <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="More actions">
             <ActivatorContent>
-                <button type="button" class="gb-btn gb-btn--icon" aria-label="More actions" title="More" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
+                <button type="button" class="gb-btn gb-btn--icon" aria-label="More actions" data-tip-text="More" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
             </ActivatorContent>
             <ChildContent>
                 @if (Deployed)
                 {
                     @* For a build the cache got wrong, or a base image that moved: every step runs again. *@
-                    <MudMenuItem Icon="@Icons.Material.Outlined.LayersClear" OnClick="DeployWithoutCacheAsync" Disabled="@(busy || app.State == AppState.Deploying)">Deploy without the build cache</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.LayersClear" OnClick="DeployWithoutCacheAsync" Disabled="@(busy || app.State == AppState.Deploying)" data-tip="app.menu.deploy-no-cache">Deploy without the build cache</MudMenuItem>
                 }
-                <MudMenuItem Icon="@(app.Pinned ? Icons.Material.Outlined.PushPin : Icons.Material.Outlined.PushPin)" OnClick="TogglePinAsync">@(app.Pinned ? "Unpin from the menu" : "Pin to the menu")</MudMenuItem>
+                <MudMenuItem Icon="@(app.Pinned ? Icons.Material.Outlined.PushPin : Icons.Material.Outlined.PushPin)" OnClick="TogglePinAsync" data-tip="app.menu.pin">@(app.Pinned ? "Unpin from the menu" : "Pin to the menu")</MudMenuItem>
                 @if (!IsPreview)
                 {
-                    <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Href="@($"{BaseHref}/settings#sec-general")">Rename…</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Href="@($"{BaseHref}/settings#sec-general")" data-tip="app.menu.rename">Rename…</MudMenuItem>
                 }
                 @if (app.Source != AppSource.Git && !Deployed && app.Role != ContainerRole.Self)
                 {
-                    <MudMenuItem Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()">@(BuiltHere(app) ? "Check for a newer build" : "Check for update")</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.CloudDownload" OnClick="() => CheckUpdateAsync()" data-tip="app.check-update">@(BuiltHere(app) ? "Check for a newer build" : "Check for update")</MudMenuItem>
                     @if (update?.Previous is { } previous)
                     {
-                        <MudMenuItem Icon="@Icons.Material.Outlined.Undo" OnClick="RollBackAsync" Disabled="busy">Roll back to @previous</MudMenuItem>
+                        <MudMenuItem Icon="@Icons.Material.Outlined.Undo" OnClick="RollBackAsync" Disabled="busy" data-tip="app.menu.rollback">Roll back to @previous</MudMenuItem>
                     }
                 }
                 <MudMenuItem Icon="@Icons.Material.Outlined.MonitorHeart" Href="@($"health#hc-title-{app.Container}")">On the Health page</MudMenuItem>
                 @if (CanForget)
                 {
                     <MudDivider />
-                    <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="ForgetAsync">Forget…</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="ForgetAsync" data-tip="app.menu.forget">Forget…</MudMenuItem>
                 }
                 else if (app.Role != ContainerRole.Self)
                 {
                     <MudDivider />
-                    <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="RemoveAsync">Remove…</MudMenuItem>
+                    <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="RemoveAsync" data-tip="app.menu.remove">Remove…</MudMenuItem>
                 }
             </ChildContent>
         </MudMenu>
@@ -582,34 +589,34 @@ else
         // A skipped commit changed nothing that runs: the last deploy is the last one that did something.
         var lastDeploy = view?.Git?.Deployments.FirstOrDefault(d => d.Status != DeployStatus.Skipped);
         return @<text>
-            <HeroStat Label="Uptime" Small="@(app.Running && d?.StartedAt is { } s ? $"since {AppFacts.When(s)}" : null)">
+            <HeroStat Label="Uptime" Tip="app.stat.uptime" Small="@(app.Running && d?.StartedAt is { } s ? $"since {AppFacts.When(s)}" : null)">
                 @(app.Running && (d?.StartedAt ?? app.StartedAt) is { } started ? AppStatus.Long(DateTime.UtcNow - started)[4..] : "Not running")
             </HeroStat>
-            <HeroStat Label="CPU" Title="100% is one core">
+            <HeroStat Label="CPU" Tip="app.stat.cpu" Title="100% is one core">
                 <Sparkline Values="cpu" Width="64" Height="16" />
                 @(app.CpuPercent is double c ? AppFacts.Percent(c) : "–")
             </HeroStat>
-            <HeroStat Label="Memory" Small="@(d is { MemoryLimit: > 0 } ? $"of {AppFacts.Bytes(d.MemoryLimit)}" : "no limit")">
+            <HeroStat Label="Memory" Tip="app.stat.memory" Small="@(d is { MemoryLimit: > 0 } ? $"of {AppFacts.Bytes(d.MemoryLimit)}" : "no limit")">
                 @(app.MemoryBytes is ulong m ? AppFacts.Bytes(m) : "–")
             </HeroStat>
             @if (lastDeploy is not null)
             {
-                <HeroStat Label="Last deploy" Small="@($"{Format.Ago(lastDeploy.QueuedAt)} · {Format.TriggerInLine(lastDeploy)}")">
+                <HeroStat Label="Last deploy" Tip="app.stat.last-deploy" Small="@($"{Format.Ago(lastDeploy.QueuedAt)} · {Format.TriggerInLine(lastDeploy)}")">
                     <a href="@($"apps/{lastDeploy.AppId}/deployments/{lastDeploy.Id}")" style="color:inherit">#@lastDeploy.Id</a>
                 </HeroStat>
             }
             else
             {
-                <HeroStat Label="Restart policy">@AppFacts.RestartWords(d?.RestartPolicy ?? settings?.Container.Restart.Name)</HeroStat>
+                <HeroStat Label="Restart policy" Tip="app.stat.restart-policy">@AppFacts.RestartWords(d?.RestartPolicy ?? settings?.Container.Restart.Name)</HeroStat>
             }
-            <HeroStat Label="Scheduled restart" Small="@(schedule is null ? null : "counted from its start")">@(schedule is { } every ? $"Every {Every(every)}" : "Off")</HeroStat>
+            <HeroStat Label="Scheduled restart" Tip="app.stat.scheduled-restart" Small="@(schedule is null ? null : "counted from its start")">@(schedule is { } every ? $"Every {Every(every)}" : "Off")</HeroStat>
             @if (d?.Health is { } health)
             {
-                <HeroStat Label="Health check" Small="@HealthCommand">@(char.ToUpperInvariant(health[0]) + health[1..])</HeroStat>
+                <HeroStat Label="Health check" Tip="app.stat.health-check" Small="@HealthCommand">@(char.ToUpperInvariant(health[0]) + health[1..])</HeroStat>
             }
             else
             {
-                <HeroStat Label="Restarts" Small="by Docker">@(d?.RestartCount.ToString(CultureInfo.InvariantCulture) ?? "–")</HeroStat>
+                <HeroStat Label="Restarts" Tip="app.stat.restarts" Small="by Docker">@(d?.RestartCount.ToString(CultureInfo.InvariantCulture) ?? "–")</HeroStat>
             }
         </text>;
     }
@@ -631,7 +638,7 @@ else
     private RenderFragment Banners(AppSummary app) => @<text>
         @if (previewOf is { } of)
         {
-            <Banner Tone="accent" Icon="@Icons.Material.Outlined.Preview" Title="@($"Preview of {of.ParentName} for {(of.Info.Kind == PreviewKind.PullRequest ? of.Label : $"the branch {of.Label}")}")">
+            <Banner Tone="accent" Icon="@Icons.Material.Outlined.Preview" Tip="app.banner.preview" Title="@($"Preview of {of.ParentName} for {(of.Info.Kind == PreviewKind.PullRequest ? of.Label : $"the branch {of.Label}")}")">
                 <ChildContent>
                     Its settings come from <a href="@($"apps/{Uri.EscapeDataString(of.ParentKey)}/settings")">@of.ParentName</a>, and so do its variables for previews.
                     @if (of.LeftOut.Count > 0)
@@ -647,13 +654,14 @@ else
         }
         @if (ChangeBanner.Of(view?.LatestChange) is { } change)
         {
-            <Banner Tone="@(change.Warning ? "serious" : "info")" Title="@(change.Decide ? "A change is waiting for you" : "About the last change")">
+            <Banner Tone="@(change.Warning ? "serious" : "info")" Title="@(change.Decide ? "A change is waiting for you" : "About the last change")"
+                    Tip="@(change.Decide ? TipKey(Tip: "app.banner.change") : TipKey(Tip: "app.banner.last-change"))">
                 <ChildContent>@change.Text</ChildContent>
                 <Actions>
                     @if (change.Decide)
                     {
-                        <Btn Size="BtnSize.Sm" OnClick="KeepNewAsync" Disabled="busy">Keep the new one</Btn>
-                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" OnClick="PutBackAsync" Disabled="busy">Put the original back</Btn>
+                        <Btn Size="BtnSize.Sm" OnClick="KeepNewAsync" Disabled="busy" Tip="app.change.keep-new">Keep the new one</Btn>
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" OnClick="PutBackAsync" Disabled="busy" Tip="app.change.put-back">Put the original back</Btn>
                     }
                     else
                     {
@@ -664,20 +672,20 @@ else
         }
         @if (view?.Row is { Deployed: true } row && (row.ConfigChangePending || row.RebuildPending) && app.State != AppState.Deploying)
         {
-            <Banner Tone="info" Icon="@Icons.Material.Outlined.Sync" Title="Saved, not live yet">
+            <Banner Tone="info" Icon="@Icons.Material.Outlined.Sync" Title="Saved, not live yet" Tip="app.banner.pending">
                 <ChildContent>@(row.RebuildPending ? "Some saved changes only take effect after a new build." : $"{app.Title} still runs with its old settings.")</ChildContent>
                 <Actions>
                     @if (!row.RebuildPending)
                     {
-                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" OnClick="ApplyPendingAsync" Disabled="busy">Apply now</Btn>
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" OnClick="ApplyPendingAsync" Disabled="busy" Tip="app.pending.apply-now">Apply now</Btn>
                     }
-                    <Btn Size="BtnSize.Sm" OnClick="DeployAsync" Disabled="busy">Rebuild and deploy</Btn>
+                    <Btn Size="BtnSize.Sm" OnClick="DeployAsync" Disabled="busy" Tip="app.pending.rebuild">Rebuild and deploy</Btn>
                 </Actions>
             </Banner>
         }
         @if (app.State == AppState.Renamed && app.RenamedTo is { } other)
         {
-            <Banner Tone="warn" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Title="Renamed outside Gitberth">
+            <Banner Tone="warn" Icon="@Icons.Material.Outlined.DriveFileRenameOutline" Title="Renamed outside Gitberth" Tip="app.banner.renamed">
                 <ChildContent>
                     Its container runs as <a href="@($"apps/{Uri.EscapeDataString(other)}")" class="gb-mono">@other</a> now, so Gitberth won't create
                     @app.Container again next to it. That container is an app of its own; forget this record, or rename it back to @app.Container.
@@ -686,7 +694,7 @@ else
                     <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Href="@($"apps/{Uri.EscapeDataString(other)}")" Icon="@Icons.Material.Outlined.ArrowForward">Open @other</Btn>
                     @if (CanForget)
                     {
-                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Delete" OnClick="ForgetAsync" Disabled="busy">Forget…</Btn>
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Delete" OnClick="ForgetAsync" Disabled="busy" Tip="app.menu.forget">Forget…</Btn>
                     }
                 </Actions>
             </Banner>
@@ -695,7 +703,8 @@ else
         {
             var missing = app.State == AppState.Missing;
             var git = app.Source == AppSource.Git || Deployed;
-            <Banner Tone="@(missing ? "critical" : "info")" Title="@(missing ? "Its container is gone" : git ? "Not deployed yet" : "Not created yet")">
+            <Banner Tone="@(missing ? "critical" : "info")" Title="@(missing ? "Its container is gone" : git ? "Not deployed yet" : "Not created yet")"
+                    Tip="@(missing ? TipKey(Tip: "app.banner.gone") : git ? TipKey(Tip: "app.banner.not-deployed") : TipKey(Tip: "app.banner.not-created"))">
                 <ChildContent>@MissingLine(app, lastImage?.There == true, view?.Row?.Branch)</ChildContent>
                 <Actions>
                     @if (git || app.Source != AppSource.Existing)
@@ -709,16 +718,19 @@ else
                     }
                     @if (CanForget)
                     {
-                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Delete" OnClick="ForgetAsync" Disabled="busy">Forget…</Btn>
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Delete" OnClick="ForgetAsync" Disabled="busy" Tip="app.menu.forget">Forget…</Btn>
                     }
                 </Actions>
             </Banner>
         }
         else if (whyNotStart is { } why && !app.Running)
         {
-            <Banner Tone="info" Title="Waiting for a change to settle">@why</Banner>
+            <Banner Tone="info" Title="Waiting for a change to settle" Tip="app.banner.settling">@why</Banner>
         }
     </text>;
+
+    // A tip's key, given by name (Tip: "app.banner.gone") so the tips' test finds it where the key is chosen at run time.
+    private static string TipKey(string Tip) => Tip;
 
     // A record with no container of its own (gone, never made, or renamed outside Gitberth) can be forgotten. A Git app is
     // deleted instead, with its builds.
@@ -836,7 +848,7 @@ else
     private RenderFragment ApplySection() => @<text>
         @if (plan?.ComposeSnippet is { } yaml && Dirty)
         {
-            <SectionCard Title="Change it in Compose" Icon="@Icons.Material.Outlined.AccountTree" Class="gb-mt" Sub="Compose created this container, so the change goes in its file">
+            <SectionCard Title="Change it in Compose" Icon="@Icons.Material.Outlined.AccountTree" Class="gb-mt" Tip="app.compose-change" Sub="Compose created this container, so the change goes in its file">
                 <p class="gb-help" style="margin-bottom:12px">Gitberth doesn't recreate a Compose service behind Compose's back. Put this in the service's section, then run the command on the host.</p>
                 <CodeBlock Title="docker-compose.yml" Code="@yaml" Icon="@Icons.Material.Outlined.Description" />
                 @if (plan.ComposeCommand is { } command)
@@ -853,15 +865,16 @@ else
             <ApplyBar Title="@($"{Changes} unsaved {(Changes == 1 ? "change" : "changes")}")" Warn="warn" Busy="busy"
                       Sub="@(warn ? $"{view?.Summary.Title} changed since you started editing. Discard to load it as it is now." : problems.FirstOrDefault() ?? options?.NameProblem ?? plan?.Blocked ?? plan?.Problems.FirstOrDefault()?.Message ?? plan?.Consequence ?? (planning ? "Working out what applying does…" : ""))"
                       ApplyDisabled="@(problems.Count > 0 || options?.NameProblem is not null || plan?.ComposeSnippet is not null || plan?.Blocked is not null || plan?.Problems.Count > 0)"
-                      OnDiscard="Discard" OnApply="ReviewAsync" ApplyText="@(plan?.NeedsConfirm == true ? "Review and apply" : "Apply")">
+                      OnDiscard="Discard" OnApply="ReviewAsync" ApplyText="@(plan?.NeedsConfirm == true ? "Review and apply" : "Apply")"
+                      Tip="app.apply.bar" ApplyTip="@TipKey(Tip: "app.apply.apply")">
                 <Extra>
                     @if (plan?.Blocked is { } blocked && blocked.Contains("isn't on this host", StringComparison.Ordinal) && draft is not null)
                     {
-                        <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="PullAsync" Busy="@(pull is not null)">@(pull is { } p ? PullWords(p) : "Pull it")</Btn>
+                        <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="PullAsync" Busy="@(pull is not null)" Tip="app.apply.pull">@(pull is { } p ? PullWords(p) : "Pull it")</Btn>
                     }
                     @if (view?.Summary.Source == AppSource.Git && settings?.Access.ViaDeploy == true && plan is { Change: null, Blocked: null } && plan.Lines.Any(l => l.How is ApplyKind.Deploy or ApplyKind.Rebuild))
                     {
-                        <Btn Kind="BtnKind.Ghost" OnClick="() => ApplyAsync(ApplyTiming.NextDeploy)" Disabled="busy">Save for next deploy</Btn>
+                        <Btn Kind="BtnKind.Ghost" OnClick="() => ApplyAsync(ApplyTiming.NextDeploy)" Disabled="busy" Tip="app.apply.save-later">Save for next deploy</Btn>
                     }
                 </Extra>
             </ApplyBar>

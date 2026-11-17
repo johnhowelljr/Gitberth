@@ -91,6 +91,8 @@ Gitberth's own container isn't recreated from its page: its **Network** tab show
 | `logs/deploy-<number>.log` | Each deploy's log. `logs/deploy-<number>.Dockerfile` is the Dockerfile it built with. They go when the app is deleted. |
 | `stats.db` | The Health page's readings and Docker's events for the last few hours, so the charts carry on after a restart. Nothing in it is needed to run. |
 | `uptime.db` | The [uptime checks'](../guides/uptime-and-status-page.md) history: every check for 7 days, an hourly summary and the incidents for 400 days, and what each domain's certificate said. The status page and the Uptime cards read it. |
+| `audit.db` | The [audit log](../guides/audit-log.md): every change, who made it and how it ended, each entry hashed with the one before it. While Gitberth runs, `audit.db-wal` and `audit.db-shm` sit next to it. |
+| `compose/<app>/` | A [Compose app](../guides/compose-apps.md)'s releases (the file each deploy ran, and its `.env`), the last three and the one that runs, and the folders its services write to. Only Gitberth can open them: they hold the app's variables. |
 | `work/` | Clones and build folders while a deploy runs. Emptied when Gitberth starts. |
 
 Gitberth upgrades its database when a new version starts. See [Back up and restore](../guides/backups-and-restore.md) for what to copy.
@@ -101,7 +103,10 @@ Gitberth upgrades its database when a new version starts. See [Back up and resto
 |---|---|---|
 | Network | `gitberth` (or `GITBERTH_NETWORK`) | The shared network every app is on, where containers reach apps by name. Gitberth's own container joins it at start. |
 | Network | `gitberth-lan` | Only while own LAN addresses are on: an ipvlan network on the host's interface. |
-| Container | `gb-<app>` | A Git app's container, like `gb-website`. |
+| Container | `gb-<app>` | A Git app's container, like `gb-website`, and any other app Gitberth creates. A [preview](../guides/previews.md)'s is `gb-<app>-pr-<n>` or `gb-<app>-<branch>`. |
+| Container | `gb-<app>_<service>` | A [Compose app](../guides/compose-apps.md)'s services, in the Compose project `gb-<app>`. |
+| Container | `<app's container>_redis` | An app's own Redis, like `gb-website_redis`, with its data in the volume `gb-website_redis-data`. See [Databases](../guides/databases.md). |
+| Container | `postgres` | A Postgres server set up from **Settings › Databases** (or `postgres-2` when that name is taken). |
 | Container | `gb-<app>_next`, `gb-<app>_prev` | A deploy's temporary containers: the new version starting next to the old one, and the old one moved aside. Gitberth removes them when the deploy is done. |
 | Container | `<name>_new_<id>`, `<name>_old_<id>` | The new and old container while Gitberth recreates a container for a change or an update. |
 | Container | Labelled `gitberth.helper` | Short-lived helpers that read the host's network and test LAN addresses. They run Gitberth's own image, read-only, with no capabilities and 32 MiB of memory. |
@@ -119,6 +124,8 @@ Gitberth labels the containers and images it makes. Don't remove these labels: G
 | `gitberth.source` | Containers | How the app came to Gitberth: `registry`, `local`, `manual`, or `git`. |
 | `gitberth.deployment`, `gitberth.trigger` | Containers | The deploy that started it, and what started that deploy. The Health page's marks come from these. |
 | `gitberth.bridge` | Containers | A deploy's temporary container. |
+| `gitberth.service` | Containers | A Compose app's service. |
+| `gitberth.database` | Containers | An app's own database, such as its Redis. |
 | `gitberth.helper` | Containers, networks | A helper, or a network a test made for a moment. |
 | `gitberth.commit` | Images | The commit a Git app's image was built from. |
 | `gitberth.port`, `gitberth.crons` and other `gitberth.*` labels | Images | What a build found out: the web port, the scheduled jobs from `vercel.json`, and what Vercel's variables need. A rollback to that image uses them. |

@@ -1,7 +1,8 @@
 # How Gitberth builds each kind of project
 
-When you add an app from GitHub, Gitberth looks at the repository (or the app's folder in it) and works out how to build
-and run it. This page lists what it detects, what it runs, and on which container port. Use it to check why Gitberth
+When you add an app from GitHub or GitLab, Gitberth looks at the repository (or the app's folder in it) and works out
+how to build and run it. A folder with a Compose file can be deployed with Compose instead (see
+[Compose apps](../guides/compose-apps.md)). This page lists what it detects, what it runs, and on which container port. Use it to check why Gitberth
 picked what it did, or what to change in your repository so it picks something else.
 
 ## Summary
@@ -61,7 +62,7 @@ Gitberth with **Customize the Dockerfile**.
   expect.
 - Variants such as `Dockerfile.prod` are offered as separate apps when you add the repository.
 - Your Dockerfile gets the app's build-time variables as build arguments, for the `ARG`s it declares. A variable from the
-  repo's GitHub settings doesn't override an `ARG` declared before the first `FROM`. See
+  repo's GitHub or GitLab variables doesn't override an `ARG` declared before the first `FROM`. See
   [Environment variables](../guides/environment-variables.md#build-time-variables-git-apps).
 
 ## .NET
@@ -345,7 +346,7 @@ the same. A container port you set yourself is left alone.
 
 ## Related
 
-- [Deploy an app from GitHub](../guides/deploy-from-github.md)
+- [Deploy an app from GitHub or GitLab](../guides/deploy-from-github.md)
 - [Environment variables](../guides/environment-variables.md)
 - [Deploys and rollbacks](../guides/deploys-and-rollbacks.md)
 - [Troubleshooting](../guides/troubleshooting.md)

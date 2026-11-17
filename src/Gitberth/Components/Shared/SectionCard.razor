@@ -1,4 +1,4 @@
-@* A card: a head with an icon, a title, a quiet line and actions on the right; a body; an optional foot. *@
+@* A card: a head with an icon, a title (with an info button when it has a Tip), a quiet line and actions on the right; a body; an optional foot. *@
 <section class="gb-card @(Flush ? "gb-card--flush" : null) @Class" id="@Id" aria-labelledby="@(Id is null ? null : Id + "-title")">
     @if (Title is not null || Head is not null)
     {
@@ -9,6 +9,10 @@
                     <SvgIcon Icon="@Icon" />
                 }
                 @Title
+                @if (Tip is not null)
+                {
+                    <Tip Key="@Tip" />
+                }
                 @if (Sub is not null)
                 {
                     <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">@Sub</span>
@@ -41,6 +45,8 @@
     [Parameter] public RenderFragment? Foot { get; set; }
     /// <summary>No padding around the body: for rows that run edge to edge.</summary>
     [Parameter] public bool Flush { get; set; }
+    /// <summary>The title's tip: its key in the catalog (Help/Tips), shown by an info button after the title.</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public string? Id { get; set; }
     [Parameter] public string? Class { get; set; }
 }

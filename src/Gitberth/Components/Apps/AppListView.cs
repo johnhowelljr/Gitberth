@@ -264,13 +264,22 @@ public static class AppFacts
         return local.ToString(local.Date == DateTime.Now.Date ? "HH:mm" : "d MMM HH:mm", CultureInfo.InvariantCulture);
     }
 
-    /// <summary>The restart policies as every form offers them (Settings, Configure, New app's GitHub form), in this order.</summary>
+    /// <summary>The restart policies as every form offers them (Settings, Configure, New app's GitHub form), in this order, each with its tip.</summary>
     public static readonly IReadOnlyList<SegOption<string>> RestartOptions =
-        [new("no", "Never"), new("on-failure", "On failure"), new("unless-stopped", "Unless stopped"), new("always", "Always")];
+    [
+        new("no", "Never", Tip: "app.settings.restart.no"),
+        new("on-failure", "On failure", Tip: "app.settings.restart.on-failure"),
+        new("unless-stopped", "Unless stopped", Tip: "app.settings.restart.unless-stopped"),
+        new("always", "Always", Tip: "app.settings.restart.always"),
+    ];
 
-    /// <summary>The health check's choices as every form offers them: the image's own, a command of its own, or none.</summary>
+    /// <summary>The health check's choices as every form offers them: the image's own, a command of its own, or none, each with its tip.</summary>
     public static readonly IReadOnlyList<SegOption<HealthMode>> HealthOptions =
-        [new(HealthMode.Image, "Image default"), new(HealthMode.Custom, "Command"), new(HealthMode.Disabled, "None")];
+    [
+        new(HealthMode.Image, "Image default", Tip: "app.settings.health.image"),
+        new(HealthMode.Custom, "Command", Tip: "app.settings.health.custom"),
+        new(HealthMode.Disabled, "None", Tip: "app.settings.health.none"),
+    ];
 
     /// <summary>Docker's restart policy in words: Always, Unless stopped, On failure, Never.</summary>
     public static string RestartWords(string? policy) => policy switch

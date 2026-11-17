@@ -13,7 +13,7 @@
     <div class="gb-sec-head">
         <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.SmartToy" /></span>
         <div style="min-width:0">
-            <div class="gb-h3" id="agents-t">AI agents and API</div>
+            <div class="gb-h3"><span id="agents-t">AI agents and API</span><Tip Key="settings.agents" /></div>
             <p>
                 Let AI agents (Claude Code, VS Code, Cursor, Claude Desktop, any MCP client) and scripts see and run your apps with a token of their own:
                 list them, read logs, deploy, restart, roll back, change settings. Everything a token does is in the audit log under its name.
@@ -62,7 +62,7 @@
                     <div class="gb-db gb-token @(t.ActiveAt(now) ? null : "gb-token--off")" role="listitem" @key="t.Id">
                         <div class="gb-db-head">
                             <strong>@t.Name</strong>
-                            <span class="gb-tag @AccessTone(t.Access)" title="@ApiTokens.AccessHelp(t.Access)">@ApiTokens.AccessText(t.Access)</span>
+                            <span class="gb-tag @AccessTone(t.Access)" data-tip="@AccessTip(t.Access)">@ApiTokens.AccessText(t.Access)</span>
                             @if (t.RevokedAt is not null)
                             {
                                 <span class="gb-tag gb-tag--critical">Revoked</span>
@@ -71,23 +71,23 @@
                             {
                                 <span class="gb-tag gb-tag--warn">Expired</span>
                             }
-                            <span class="gb-mono gb-t3">@t.Shown</span>
+                            <span class="gb-mono gb-t3" data-tip="settings.agents.prefix">@t.Shown</span>
                             <span class="gb-db-actions">
                                 @if (t.RevokedAt is null)
                                 {
                                     <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Block" OnClick="() => RevokeAsync(t)" Disabled="busy"
-                                         Label="@($"Revoke the token {t.Name}")">Revoke</Btn>
+                                         Label="@($"Revoke the token {t.Name}")" Tip="settings.agents.revoke">Revoke</Btn>
                                 }
                             </span>
                         </div>
                         <dl class="gb-kv gb-token-facts">
                             <dt>Created</dt>
-                            <dd title="@Format.Local(t.CreatedAt)">@Format.Ago(t.CreatedAt)</dd>
-                            <dt>Last used</dt>
+                            <dd data-tip-text="@Format.Local(t.CreatedAt)">@Format.Ago(t.CreatedAt)</dd>
+                            <dt data-tip="settings.agents.last-used">Last used</dt>
                             <dd>
                                 @if (t.LastUsedAt is { } used)
                                 {
-                                    <span title="@Format.Local(used)">@Format.Ago(used)</span>
+                                    <span data-tip-text="@Format.Local(used)">@Format.Ago(used)</span>
                                     @if (t.LastUsedIp is { } ip)
                                     {
                                         <span class="gb-t3">from <span class="gb-mono">@ip</span></span>
@@ -103,7 +103,7 @@
                             @if (t.RevokedAt is { } revoked)
                             {
                                 <dt>Revoked</dt>
-                                <dd title="@Format.Local(revoked)">@Format.Ago(revoked)</dd>
+                                <dd data-tip-text="@Format.Local(revoked)">@Format.Ago(revoked)</dd>
                             }
                         </dl>
                     </div>
@@ -114,26 +114,26 @@
         <div class="gb-agent-new">
             <div class="gb-agent-new-title">Create a token</div>
             <div class="gb-fgrid">
-                <Field Label="Name" For="token-name" Error="@problem" Help="What will use it, like Claude Code or Nightly report. The audit log names it.">
+                <Field Label="Name" For="token-name" Tip="settings.agents.name" Error="@problem" Help="What will use it, like Claude Code or Nightly report. The audit log names it.">
                     <input id="token-name" class="gb-input" maxlength="@ApiTokens.MaxName" placeholder="Claude Code" value="@name" autocomplete="off"
                            @oninput="e => { name = e.Value?.ToString() ?? string.Empty; problem = null; }" />
                 </Field>
-                <Field Label="Expires" Help="A token that expires stops working by itself.">
+                <Field Label="Expires" Tip="settings.agents.expiry" Help="A token that expires stops working by itself.">
                     <Seg T="int" Options="ExpiryOptions" Value="expiry" ValueChanged="v => expiry = v" Label="Expires" />
                 </Field>
             </div>
-            <Field Label="Access" Help="@ApiTokens.AccessHelp(access)">
+            <Field Label="Access" Tip="settings.agents.access" Help="@ApiTokens.AccessHelp(access)">
                 <Seg T="ApiAccess" Options="AccessOptions" Value="access" ValueChanged="v => access = v" Label="Access" />
             </Field>
             <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
-                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="CreateAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(name)">Create token</Btn>
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="CreateAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(name)" Tip="settings.agents.create">Create token</Btn>
             </div>
         </div>
 
         <dl class="gb-kv">
-            <dt>MCP server</dt>
+            <dt><Tip Key="settings.agents.mcp">MCP server</Tip></dt>
             <dd><CopyText Text="@AgentSetup.McpUrl(Root)" Label="the MCP server's address" /></dd>
-            <dt>HTTP API</dt>
+            <dt><Tip Key="settings.agents.api">HTTP API</Tip></dt>
             <dd><CopyText Text="@AgentSetup.ApiUrl(Root)" Label="the HTTP API's address" /><span class="gb-t3">OpenAPI at /api/v1/openapi.json</span></dd>
         </dl>
         <p class="gb-help" style="margin:0">
@@ -165,10 +165,13 @@
 
     private static readonly IReadOnlyList<SegOption<ApiAccess>> AccessOptions =
     [
-        new(ApiAccess.Read, "Read", Icons.Material.Outlined.Visibility),
-        new(ApiAccess.Operate, "Operate", Icons.Material.Outlined.PlayCircleOutline),
-        new(ApiAccess.Admin, "Admin", Icons.Material.Outlined.AdminPanelSettings),
+        new(ApiAccess.Read, "Read", Icons.Material.Outlined.Visibility, Tip: "settings.agents.access.read"),
+        new(ApiAccess.Operate, "Operate", Icons.Material.Outlined.PlayCircleOutline, Tip: "settings.agents.access.operate"),
+        new(ApiAccess.Admin, "Admin", Icons.Material.Outlined.AdminPanelSettings, Tip: "settings.agents.access.admin"),
     ];
+
+    // An access level's tip, as its choice above has it: the list's tags show it too.
+    private static string? AccessTip(ApiAccess a) => AccessOptions.FirstOrDefault(o => o.Value == a)?.Tip;
 
     private static readonly IReadOnlyList<SegOption<int>> ExpiryOptions =
     [

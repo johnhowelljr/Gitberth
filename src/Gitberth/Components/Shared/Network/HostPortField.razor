@@ -17,7 +17,7 @@
         }
         @if (suggestion is int free && free != Value && !Disabled)
         {
-            <button type="button" class="gb-linkbtn" @onclick="() => SetAsync(free)">Use @free</button>
+            <button type="button" class="gb-linkbtn" data-tip="network.port.use-free" @onclick="() => SetAsync(free)">Use @free</button>
         }
     </div>
 </div>

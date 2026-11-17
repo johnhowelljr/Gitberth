@@ -2,7 +2,7 @@
 @inject LiveLogHub Hub
 @inject GitberthOptions Options
 
-<LogView Lines="lines" Title="Build and deploy log" Height="@Height" EmptyText="Waiting for output…" />
+<LogView Lines="lines" Title="Build and deploy log" Height="@Height" EmptyText="Waiting for output…" Tip="deploy.log" />
 
 @code {
     [Parameter, EditorRequired] public int DeploymentId { get; set; }

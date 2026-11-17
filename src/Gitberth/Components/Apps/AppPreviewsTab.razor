@@ -32,7 +32,7 @@ else
     {
         <Banner Tone="warn" Title="@(parent.FromGitLab ? "Merge requests couldn't be read" : "Pull requests couldn't be read")">@problem</Banner>
     }
-    <SectionCard Title="Previews" Icon="@Icons.Material.Outlined.Preview" Flush="true" Sub="@Summary(parent)"
+    <SectionCard Title="Previews" Icon="@Icons.Material.Outlined.Preview" Flush="true" Sub="@Summary(parent)" Tip="app.previews"
                  Class="@(Previews.PullsProblem(parent.Owner, parent.Repo) is null ? null : "gb-mt")">
         <Actions>
             <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Tune" Href="@($"{View.Summary.Href}/settings#sec-previews")">Settings</Btn>
@@ -64,21 +64,21 @@ else
                                     <a href="@p.Url" target="_blank" rel="noopener" class="gb-mono">@p.Label</a>
                                     @if (p.Title is { Length: > 0 } title)
                                     {
-                                        <span class="gb-ellipsis gb-t2" style="font-weight:400" title="@title">@title</span>
+                                        <span class="gb-ellipsis gb-t2" style="font-weight:400" data-tip-text="@title">@title</span>
                                     }
                                     @if (p.FromFork)
                                     {
-                                        <span class="gb-tag gb-tag--warn" title="Its code comes from someone else's copy of the repo">Fork</span>
+                                        <span class="gb-tag gb-tag--warn" data-tip="app.previews.fork" data-tip-detail="Its code comes from someone else's copy of the repo">Fork</span>
                                     }
                                 </div>
                                 <div class="gb-drow-sub">
                                     @if (p.Commit is { } commit)
                                     {
-                                        <span class="gb-mono" title="@p.CommitMessage">@commit</span>
+                                        <span class="gb-mono" data-tip-text="@p.CommitMessage">@commit</span>
                                         <span> · </span>
                                     }
-                                    <span title="@p.LastActivityAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)">last commit @Format.Ago(p.LastActivityAt)</span>
-                                    <span> · @Expiry(p)</span>
+                                    <span data-tip-text="@p.LastActivityAt.ToLocalTime().ToString("g", CultureInfo.CurrentCulture)">last commit @Format.Ago(p.LastActivityAt)</span>
+                                    <span> · <span data-tip="app.previews.expiry">@Expiry(p)</span></span>
                                 </div>
                                 <div class="gb-drow-sub gb-row" style="gap:12px;flex-wrap:wrap">
                                     @if (p.Domain is { } domain)
@@ -87,12 +87,12 @@ else
                                     }
                                     @if (p.LanUrl is { } lan)
                                     {
-                                        <a href="@lan" target="_blank" rel="noopener" class="gb-mono" title="On the LAN">@lan.Replace("http://", "", StringComparison.Ordinal)</a>
+                                        <a href="@lan" target="_blank" rel="noopener" class="gb-mono" data-tip-text="On the LAN">@lan.Replace("http://", "", StringComparison.Ordinal)</a>
                                     }
                                     <a href="@($"apps/{Uri.EscapeDataString(p.Key)}")" class="gb-t3">Its page</a>
                                 </div>
                             </div>
-                            <span class="gb-pill2 @Tone(p.State)" title="@p.StateText">
+                            <span class="gb-pill2 @Tone(p.State)" data-tip="@StateTip(p.State)" data-tip-detail="@p.StateText">
                                 @if (p.State == PreviewState.Building)
                                 {
                                     <i class="gb-st-dot gb-st-dot--busy"></i>
@@ -122,16 +122,16 @@ else
                                 }
                                 <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="@($"More for {p.Label}")">
                                     <ActivatorContent>
-                                        <button type="button" class="gb-btn gb-btn--icon gb-btn--ghost" aria-label="@($"More for {p.Label}")" title="More" @onclick="context.ToggleAsync">
+                                        <button type="button" class="gb-btn gb-btn--icon gb-btn--ghost" aria-label="@($"More for {p.Label}")" data-tip-text="More" @onclick="context.ToggleAsync">
                                             <SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" />
                                         </button>
                                     </ActivatorContent>
                                     <ChildContent>
-                                        <MudMenuItem Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="() => RedeployAsync(p)" Disabled="@(busy || p.State == PreviewState.Building)">Redeploy</MudMenuItem>
-                                        <MudMenuItem Icon="@Icons.Material.Outlined.LayersClear" OnClick="() => RedeployAsync(p, noCache: true)" Disabled="@(busy || p.State == PreviewState.Building)">Redeploy without the build cache</MudMenuItem>
-                                        <MudMenuItem Icon="@Icons.Material.Outlined.Upgrade" OnClick="() => PromoteAsync(p)" Disabled="@(busy || !p.CanPromote)">Promote to production…</MudMenuItem>
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="() => RedeployAsync(p)" Disabled="@(busy || p.State == PreviewState.Building)" data-tip="app.previews.redeploy">Redeploy</MudMenuItem>
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.LayersClear" OnClick="() => RedeployAsync(p, noCache: true)" Disabled="@(busy || p.State == PreviewState.Building)" data-tip="app.menu.deploy-no-cache">Redeploy without the build cache</MudMenuItem>
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.Upgrade" OnClick="() => PromoteAsync(p)" Disabled="@(busy || !p.CanPromote)" data-tip="app.previews.promote">Promote to production…</MudMenuItem>
                                         <MudDivider />
-                                        <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="() => RemoveAsync(p)" Disabled="busy">Remove…</MudMenuItem>
+                                        <MudMenuItem Icon="@Icons.Material.Outlined.Delete" IconColor="Color.Error" OnClick="() => RemoveAsync(p)" Disabled="busy" data-tip="app.previews.remove">Remove…</MudMenuItem>
                                     </ChildContent>
                                 </MudMenu>
                             </div>
@@ -199,6 +199,18 @@ else
         var running = rows?.Count(r => r.State is PreviewState.Ready or PreviewState.Building) ?? 0;
         return $"{mode} · {running} of {parent.PreviewLimit} running";
     }
+
+    // The state pill's tip, given by name (Tip: "…") so the tips' test finds each key.
+    private static string StateTip(PreviewState state) => state switch
+    {
+        PreviewState.Building => Key(Tip: "app.previews.state.building"),
+        PreviewState.Ready => Key(Tip: "app.previews.state.ready"),
+        PreviewState.Failed => Key(Tip: "app.previews.state.failed"),
+        PreviewState.Waiting => Key(Tip: "app.previews.state.waiting"),
+        _ => Key(Tip: "app.previews.state.stopped"),
+    };
+
+    private static string Key(string Tip) => Tip;
 
     private static string Tone(PreviewState state) => state switch
     {

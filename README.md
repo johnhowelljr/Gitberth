@@ -57,7 +57,7 @@ The image, `ghcr.io/johnhowelljr/gitberth`, is ready-made for Intel/AMD and ARM 
 Start with [the documentation's index](docs/README.md), or go straight to:
 
 - [Install Gitberth](docs/getting-started/install.md) and [first steps](docs/getting-started/first-steps.md)
-- Add an app: [from GitHub](docs/guides/deploy-from-github.md), [a registry image](docs/guides/run-a-registry-image.md), [a local image](docs/guides/use-a-local-image.md), [a pasted docker run or Compose service](docs/guides/paste-docker-run-or-compose.md)
+- Add an app: [from GitHub or GitLab](docs/guides/deploy-from-github.md), [a registry image](docs/guides/run-a-registry-image.md), [a local image](docs/guides/use-a-local-image.md), [a pasted docker run or Compose file](docs/guides/paste-docker-run-or-compose.md), [a template](docs/guides/templates.md)
 - [Troubleshooting](docs/guides/troubleshooting.md) and the [FAQ](docs/faq.md)
 
 ## Development

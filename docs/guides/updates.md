@@ -2,6 +2,26 @@
 
 Apps that run an image, rather than being built from Git, can be checked for a newer image and updated from their page, or updated by Gitberth on its own at night. This page covers how checks work, the update choices, updating an app, what happens when an update fails, and how to roll an update back. A Git app updates when it deploys a new commit instead (see [Deploys and rollbacks](deploys-and-rollbacks.md)).
 
+```mermaid
+flowchart TD
+    policy{"The app's Updates choice"} -->|"When I ask"| ask["Checked only when you click Check for update"]
+    policy -->|"Tell me or Automatically"| check["Every 6 h, the registry is asked about its tag"]
+    ask --> newer{"A newer image?"}
+    check --> newer
+    newer -->|"no"| same["Up to date"]
+    newer -->|"yes"| how{"Automatically?"}
+    how -->|"no"| badge["Update available: you click Update"]
+    how -->|"yes"| window["Updated in the nightly window"]
+    badge --> pull["The image is pulled, the container recreated on it"]
+    window --> pull
+    pull --> checks{"Does it pass its checks?"}
+    checks -->|"yes"| done["Updated: the old image is kept for Roll back"]
+    checks -->|"no"| back["Put back as it was"]
+    done -->|"Roll back"| previous["Recreated on the image it ran before"]
+```
+
+A [deploy hook](deploy-hooks.md) can also start an update, for CI that just pushed a new image to the tag.
+
 ## What counts as newer
 
 - **An image from a registry:** a newer image under the tag the app follows, for example a new `traefik/whoami:latest` on Docker Hub. Gitberth compares digests, so a rebuilt tag counts even when its name doesn't change.

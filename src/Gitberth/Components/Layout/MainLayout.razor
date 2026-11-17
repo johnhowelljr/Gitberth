@@ -28,12 +28,13 @@
             <TopSearch />
             <div class="gb-topbar-right">
                 <DockerStatus />
-                <Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add" Label="New app">
+                <Btn Kind="BtnKind.Primary" Href="apps/new" Icon="@Icons.Material.Outlined.Add" Label="New app" Tip="topbar.new-app">
                     <span class="gb-lbl-long">New app</span><span class="gb-lbl-short">New</span>
                 </Btn>
+                <HelpMenu />
                 <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" AriaLabel="Account">
                     <ActivatorContent>
-                        <button type="button" class="gb-avatar" title="admin" aria-label="Account" @onclick="context.ToggleAsync">A</button>
+                        <button type="button" class="gb-avatar" aria-label="Account" aria-haspopup="menu" data-tip="topbar.account" @onclick="context.ToggleAsync">A</button>
                     </ActivatorContent>
                     <ChildContent>
                         <div class="gb-menu-header">

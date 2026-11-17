@@ -11,7 +11,7 @@
     <div class="gb-sec-head">
         <span class="gb-sec-icon"><SvgIcon Icon="@GitberthIcons.Database" /></span>
         <div style="min-width:0">
-            <div class="gb-h3" id="databases-t">Databases</div>
+            <div class="gb-h3"><span id="databases-t">Databases</span><Tip Key="settings.databases" /></div>
             <p>The Postgres servers apps' databases go on. Each app adds its own on its Settings tab › Databases: a database and a role of its own, or a Redis.</p>
         </div>
     </div>
@@ -33,26 +33,33 @@
                 {
                     <div class="gb-db" role="listitem" @key="s.Container">
                         <div class="gb-db-head">
-                            <span class="gb-tag @(s.Usable ? "gb-tag--good" : null)">@(s.Usable ? "Gitberth uses it" : "Not usable")</span>
+                            @if (s.Usable)
+                            {
+                                <span class="gb-tag gb-tag--good" data-tip="settings.databases.usable">Gitberth uses it</span>
+                            }
+                            else
+                            {
+                                <span class="gb-tag" data-tip="settings.databases.not-usable">Not usable</span>
+                            }
                             <a href="@($"apps/{Uri.EscapeDataString(s.Container)}")"><strong>@s.Container</strong></a>
                             <span class="gb-t3">Postgres @s.VersionText</span>
                             @if (s.Container == defaultServer)
                             {
-                                <span class="gb-tag gb-tag--accent">Default</span>
+                                <span class="gb-tag gb-tag--accent" data-tip="settings.databases.default">Default</span>
                             }
                             <span class="gb-db-actions">
                                 @if (s.Usable && s.Container != defaultServer)
                                 {
-                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeDefaultAsync(s)" Disabled="busy">Make it the default</Btn>
+                                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => MakeDefaultAsync(s)" Disabled="busy" Tip="settings.databases.make-default">Make it the default</Btn>
                                 }
                             </span>
                         </div>
                         <dl class="gb-kv">
-                            <dt>Image</dt>
+                            <dt><Tip Key="settings.databases.image">Image</Tip></dt>
                             <dd class="gb-mono">@s.Image</dd>
-                            <dt>Apps reach it as</dt>
+                            <dt><Tip Key="settings.databases.reach">Apps reach it as</Tip></dt>
                             <dd>@(s.Alias is { } alias ? (MarkupString)$"<span class=\"gb-mono\">{System.Net.WebUtility.HtmlEncode(alias)}:5432</span> on {System.Net.WebUtility.HtmlEncode(Network)}" : (MarkupString)"Not on Gitberth's network")</dd>
-                            <dt>Gitberth signs in as</dt>
+                            <dt><Tip Key="settings.databases.user">Gitberth signs in as</Tip></dt>
                             <dd class="gb-mono">@s.User</dd>
                         </dl>
                         @if (s.Problem is { } problem)
@@ -73,7 +80,7 @@
         }
         <div class="gb-row gb-row--wrap">
             <Btn Kind="@(servers is { Count: 0 } ? BtnKind.Primary : BtnKind.Secondary)" Icon="@Icons.Material.Outlined.Add" OnClick="Create"
-                 Busy="@(creation is { Completion.IsCompleted: false })" Disabled="busy">Create a Postgres server</Btn>
+                 Busy="@(creation is { Completion.IsCompleted: false })" Disabled="busy" Tip="settings.databases.create">Create a Postgres server</Btn>
         </div>
         <p class="gb-help" style="margin:0">
             A server Gitberth sets up is an app like any other (Apps › postgres): @DatabaseServers.ServerImage, its data on a volume of its own, a generated

@@ -10,13 +10,13 @@
 *@
 <div class="gb-stack">
     <section class="gb-card gb-sec" id="cfg-basics">
-        @Head(Icons.Material.Outlined.Tune, "Basics", Form.OnNetworks ? $"Name it; containers on {Shared} will use this name to reach it." : "Name it. Gitberth calls it by this name.")
+        @Head(Icons.Material.Outlined.Tune, "Basics", Form.OnNetworks ? $"Name it; containers on {Shared} will use this name to reach it." : "Name it. Gitberth calls it by this name.", Tip: "newapp.cfg.basics")
         <div class="gb-sec-body">
             <div class="gb-fgrid">
-                <Field Label="Name" For="cfg-name" Error="@NameProblem">
+                <Field Label="Name" For="cfg-name" Tip="newapp.name" Error="@NameProblem">
                     <input id="cfg-name" class="gb-input" value="@Form.Name" @oninput="NameTyped" spellcheck="false" autocomplete="off" />
                 </Field>
-                <Field Label="Network name" Help="@(NameTaken is { } taken ? $"{taken.TrimEnd('.')}. Its container is gb-{Slug}." : $"Its container is gb-{Slug}.")">
+                <Field Label="Network name" Tip="newapp.cfg.network-name" Help="@(NameTaken is { } taken ? $"{taken.TrimEnd('.')}. Its container is gb-{Slug}." : $"Its container is gb-{Slug}.")">
                     <span class="gb-input gb-input--mono gb-input--ro">@Slug</span>
                 </Field>
             </div>
@@ -31,11 +31,11 @@
                 <span class="gb-grow"></span>
                 @if (Form.OnHost)
                 {
-                    <span class="gb-tag gb-tag--good"><SvgIcon Icon="@Icons.Material.Outlined.Check" />Already on this host</span>
+                    <span class="gb-tag gb-tag--good" data-tip="newapp.on-host"><SvgIcon Icon="@Icons.Material.Outlined.Check" />Already on this host</span>
                 }
                 else
                 {
-                    <span class="gb-tag"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Pulled when it's created</span>
+                    <span class="gb-tag" data-tip="newapp.cfg.pulled"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Pulled when it's created</span>
                 }
             </div>
             @if (Form.Issues.Count > 0)
@@ -46,7 +46,7 @@
     </section>
 
     <section class="gb-card gb-sec" id="cfg-ports">
-        @Head(Icons.Material.Outlined.SettingsEthernet, "Ports", PortsSub)
+        @Head(Icons.Material.Outlined.SettingsEthernet, "Ports", PortsSub, Tip: "newapp.cfg.ports")
         @if (!Form.OnNetworks)
         {
             <div class="gb-sec-body">
@@ -74,15 +74,15 @@
                 {
                     <p class="gb-help">No ports. That's normal for a worker; add the port its program listens on to give it an address.</p>
                 }
-                <div><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddPortAsync">Add port</Btn></div>
+                <div><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddPortAsync" Tip="newapp.cfg.add-port">Add port</Btn></div>
             </div>
         }
     </section>
 
     <section class="gb-card gb-sec" id="cfg-networks">
-        @Head(Icons.Material.Outlined.Hub, "Network", Form.OnNetworks ? "Where other containers can find it by name." : "How it's connected.")
+        @Head(Icons.Material.Outlined.Hub, "Network", Form.OnNetworks ? "Where other containers can find it by name." : "How it's connected.", Tip: "newapp.cfg.network")
         <div class="gb-sec-body">
-            <Field Label="Network mode" Help="@ModeHelp">
+            <Field Label="Network mode" Tip="newapp.cfg.network-mode" Help="@ModeHelp">
                 <Seg T="string" Options="ModeOptions" Value="Form.NetworkMode" ValueChanged="SetModeAsync" Label="Network mode" />
             </Field>
             @if (Form.OnNetworks)
@@ -91,7 +91,7 @@
                     <div class="gb-netpick-row on">
                         <span class="gb-check on" aria-hidden="true"></span>
                         <div style="min-width:0">
-                            <div class="gb-row gb-row--wrap" style="gap:8px"><span class="gb-mono" style="font-weight:600">@Shared</span><span class="gb-tag gb-tag--outline">Shared network</span></div>
+                            <div class="gb-row gb-row--wrap" style="gap:8px"><span class="gb-mono" style="font-weight:600">@Shared</span><span class="gb-tag gb-tag--outline" data-tip="network.tag.shared">Shared network</span></div>
                             <div class="gb-help">@SharedWho reach it as <span class="gb-mono">@(Form.Ports.Rows.FirstOrDefault()?.ContainerPort is int p ? $"{Slug}:{p}" : Slug)</span>.</div>
                         </div>
                     </div>
@@ -105,7 +105,7 @@
                                 <div class="gb-help">@(Form.Pasted ? "The paste joins it" : "It's asked for"), but this host has no network called @name. Create it as a plain bridge network, or take it out.</div>
                             </div>
                             <div class="gb-netpick-acts">
-                                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" Busy="making" Disabled="@(Creating is not null && !making)" OnClick="() => OnCreateNetwork.InvokeAsync(name)">Create it</Btn>
+                                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" Busy="making" Disabled="@(Creating is not null && !making)" OnClick="() => OnCreateNetwork.InvokeAsync(name)" Tip="newapp.cfg.create-network">Create it</Btn>
                                 <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Close" Disabled="making" OnClick="() => RemoveNetworkAsync(name)">Remove</Btn>
                             </div>
                         </div>
@@ -123,7 +123,7 @@
                         </button>
                     }
                 </div>
-                <Field Label="Own LAN address (optional)" For="cfg-lan" Help="Its own IP on your LAN, as well as its ports on the host. Leave it empty for none; an automatic one can be given on its Network tab later.">
+                <Field Label="Own LAN address (optional)" For="cfg-lan" Tip="newapp.cfg.lan-address" Help="Its own IP on your LAN, as well as its ports on the host. Leave it empty for none; an automatic one can be given on its Network tab later.">
                     <input id="cfg-lan" class="gb-input gb-input--mono" placeholder="none" value="@Form.LanAddress" @onchange="e => SetAsync(() => Form.LanAddress = e.Value?.ToString())" />
                 </Field>
             }
@@ -138,7 +138,7 @@
     </section>
 
     <section class="gb-card gb-sec" id="cfg-storage">
-        @Head(Icons.Material.Outlined.Storage, "Storage", Form.Mounts.Any(m => m.FromImage) ? "The image keeps data in these folders. A named volume keeps it across updates." : "Volumes keep data across updates; a host folder shares files with the host.")
+        @Head(Icons.Material.Outlined.Storage, "Storage", Form.Mounts.Any(m => m.FromImage) ? "The image keeps data in these folders. A named volume keeps it across updates." : "Volumes keep data across updates; a host folder shares files with the host.", Tip: "newapp.cfg.storage")
         <div class="gb-sec-body">
             @if (Form.Mounts.Count > 0)
             {
@@ -154,8 +154,8 @@
                             <input class="gb-input gb-input--sm gb-input--mono" aria-label="Volume or host folder" placeholder="@(m.Kind == MountKind.Bind ? "/srv/data" : m.Kind == MountKind.Tmpfs ? "in memory" : $"gb-{Slug}-data")"
                                    value="@m.Source" disabled="@(m.Kind == MountKind.Tmpfs)" @onchange="e => SetAsync(() => m.Source = e.Value?.ToString() ?? string.Empty)" />
                             <input class="gb-input gb-input--sm gb-input--mono" aria-label="Path inside" placeholder="/data" value="@m.Target" @onchange="e => SetAsync(() => m.Target = e.Value?.ToString() ?? string.Empty)" />
-                            <label class="gb-check-wrap"><input type="checkbox" checked="@m.ReadOnly" @onchange="e => SetAsync(() => m.ReadOnly = e.Value is true)" />Read-only</label>
-                            <button type="button" class="gb-iconbtn" aria-label="Remove" @onclick="() => SetAsync(() => Form.Mounts.Remove(m))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                            <label class="gb-check-wrap" data-tip="newapp.cfg.read-only"><input type="checkbox" checked="@m.ReadOnly" @onchange="e => SetAsync(() => m.ReadOnly = e.Value is true)" />Read-only</label>
+                            <button type="button" class="gb-iconbtn" aria-label="Remove" data-tip-text="Remove" @onclick="() => SetAsync(() => Form.Mounts.Remove(m))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
                         </div>
                         @if (m.FromImage)
                         {
@@ -165,14 +165,14 @@
                 </div>
             }
             <div class="gb-row gb-row--wrap">
-                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="@(() => SetAsync(() => Form.Mounts.Add(new NewMountRow { Source = $"gb-{Slug}-data" })))">Add volume</Btn>
-                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Folder" OnClick="@(() => SetAsync(() => Form.Mounts.Add(new NewMountRow { Kind = MountKind.Bind })))">Host folder</Btn>
+                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="@(() => SetAsync(() => Form.Mounts.Add(new NewMountRow { Source = $"gb-{Slug}-data" })))" Tip="newapp.cfg.add-volume">Add volume</Btn>
+                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Folder" OnClick="@(() => SetAsync(() => Form.Mounts.Add(new NewMountRow { Kind = MountKind.Bind })))" Tip="newapp.cfg.add-folder">Host folder</Btn>
             </div>
         </div>
     </section>
 
     <section class="gb-card gb-sec" id="cfg-env">
-        @Head(Icons.Material.Outlined.Key, "Environment", Form.OwnEnv.Any() ? "Its own variables. Secret ones are masked wherever they're shown." : "None of its own. Add what its documentation asks for.")
+        @Head(Icons.Material.Outlined.Key, "Environment", Form.OwnEnv.Any() ? "Its own variables. Secret ones are masked wherever they're shown." : "None of its own. Add what its documentation asks for.", Tip: "newapp.cfg.env")
         <div class="gb-sec-body">
             @if (Form.Env.Any(e => e.Edited))
             {
@@ -187,7 +187,7 @@
                 <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="@(() => SetAsync(() => Form.Env.Add(new NewEnvRow())))">Add variable</Btn>
                 @if (Form.Env.Count(e => !e.Edited) is int fromImage && fromImage > 0)
                 {
-                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" EndIcon="@(showImageEnv ? Icons.Material.Outlined.ExpandLess : Icons.Material.Outlined.ExpandMore)" OnClick="() => showImageEnv = !showImageEnv">
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" EndIcon="@(showImageEnv ? Icons.Material.Outlined.ExpandLess : Icons.Material.Outlined.ExpandMore)" OnClick="() => showImageEnv = !showImageEnv" Tip="newapp.cfg.image-env">
                         From the image (@fromImage)
                     </Btn>
                 }
@@ -206,19 +206,19 @@
     </section>
 
     <section class="gb-card gb-sec" id="cfg-command">
-        @Head(Icons.Material.Outlined.Terminal, "Command", "Empty fields use the image's own.")
+        @Head(Icons.Material.Outlined.Terminal, "Command", "Empty fields use the image's own.", Tip: "newapp.cfg.command")
         <div class="gb-sec-body">
             <div class="gb-fgrid">
-                <Field Label="Command" For="cfg-cmd" Tag="@(string.IsNullOrEmpty(Form.Command) ? "image" : null)">
+                <Field Label="Command" For="cfg-cmd" Tip="newapp.cfg.command" Tag="@(string.IsNullOrEmpty(Form.Command) ? "image" : null)">
                     <input id="cfg-cmd" class="gb-input gb-input--mono" placeholder="@Join(Form.Facts?.Command)" value="@Form.Command" @onchange="e => SetAsync(() => Form.Command = e.Value?.ToString())" />
                 </Field>
-                <Field Label="Entrypoint" For="cfg-entry" Tag="@(string.IsNullOrEmpty(Form.Entrypoint) ? "image" : null)">
+                <Field Label="Entrypoint" For="cfg-entry" Tip="newapp.cfg.entrypoint" Tag="@(string.IsNullOrEmpty(Form.Entrypoint) ? "image" : null)">
                     <input id="cfg-entry" class="gb-input gb-input--mono" placeholder="@Join(Form.Facts?.Entrypoint)" value="@Form.Entrypoint" @onchange="e => SetAsync(() => Form.Entrypoint = e.Value?.ToString())" />
                 </Field>
-                <Field Label="Working directory" For="cfg-wd" Tag="@(string.IsNullOrEmpty(Form.WorkingDir) ? "image" : null)">
+                <Field Label="Working directory" For="cfg-wd" Tip="newapp.cfg.workdir" Tag="@(string.IsNullOrEmpty(Form.WorkingDir) ? "image" : null)">
                     <input id="cfg-wd" class="gb-input gb-input--mono" placeholder="@(Form.Facts?.WorkingDir ?? "/")" value="@Form.WorkingDir" @onchange="e => SetAsync(() => Form.WorkingDir = e.Value?.ToString())" />
                 </Field>
-                <Field Label="User" For="cfg-user" Tag="@(string.IsNullOrEmpty(Form.User) ? "image" : null)">
+                <Field Label="User" For="cfg-user" Tip="newapp.cfg.user" Tag="@(string.IsNullOrEmpty(Form.User) ? "image" : null)">
                     <input id="cfg-user" class="gb-input gb-input--mono" placeholder="@(Form.Facts?.User is { Length: > 0 } u ? u : "root")" value="@Form.User" @onchange="e => SetAsync(() => Form.User = e.Value?.ToString())" />
                 </Field>
             </div>
@@ -226,9 +226,9 @@
     </section>
 
     <section class="gb-card gb-sec" id="cfg-run">
-        @Head(Icons.Material.Outlined.RestartAlt, "Restart & resources", "What Docker does when it stops, and the limits that stop one app from starving the others.")
+        @Head(Icons.Material.Outlined.RestartAlt, "Restart & resources", "What Docker does when it stops, and the limits that stop one app from starving the others.", Tip: "newapp.cfg.run")
         <div class="gb-sec-body">
-            <Field Label="Restart">
+            <Field Label="Restart" Tip="newapp.restart">
                 <Seg T="string" Options="RestartOptions" Value="Form.Restart" ValueChanged="v => SetAsync(() => Form.Restart = v)" Label="Restart policy" />
             </Field>
             <ResourceFields Draft="Form.More" Create="true" HostCpus="HostCpus" Changed="ChangedAsync" />
@@ -236,16 +236,16 @@
     </section>
 
     <section class="gb-card gb-sec" id="cfg-health">
-        @Head(Icons.Material.Outlined.HealthAndSafety, "Health check", HealthSub)
+        @Head(Icons.Material.Outlined.HealthAndSafety, "Health check", HealthSub, Tip: "newapp.cfg.health")
         <div class="gb-sec-body">
             <Seg T="HealthMode" Options="HealthOptions" Value="Form.Health" ValueChanged="v => SetAsync(() => Form.Health = v)" Label="Health check" />
             @if (Form.Health == HealthMode.Custom)
             {
                 <div class="gb-fgrid">
-                    <Field Label="Command" For="cfg-hc" Help="Run in its shell; exit code 0 means healthy.">
+                    <Field Label="Command" For="cfg-hc" Tip="newapp.cfg.health-command" Help="Run in its shell; exit code 0 means healthy.">
                         <input id="cfg-hc" class="gb-input gb-input--mono" placeholder="curl -fs http://localhost:3000/health" value="@Form.HealthCommand" @onchange="e => SetAsync(() => Form.HealthCommand = e.Value?.ToString() ?? string.Empty)" />
                     </Field>
-                    <Field Label="Every" For="cfg-hi">
+                    <Field Label="Every" For="cfg-hi" Tip="newapp.cfg.health-every">
                         <label class="gb-input"><input id="cfg-hi" type="number" min="1" placeholder="30" value="@Form.HealthIntervalSeconds" @onchange="e => SetAsync(() => Form.HealthIntervalSeconds = int.TryParse(e.Value?.ToString(), out var s) ? s : null)" /><span class="gb-input-suffix">seconds</span></label>
                     </Field>
                 </div>
@@ -262,7 +262,7 @@
     @if (Form.Unfielded() is { Count: > 0 } rest)
     {
         <section class="gb-card gb-sec" id="cfg-more">
-            @Head(Icons.Material.Outlined.MoreHoriz, "Everything else", "As the source gave it: these have no field here. Each can change after it's created.")
+            @Head(Icons.Material.Outlined.MoreHoriz, "Everything else", "As the source gave it: these have no field here. Each can change after it's created.", Tip: "newapp.cfg.more")
             <div class="gb-sec-body">
                 <dl class="gb-everything">
                     @foreach (var (k, v) in rest)
@@ -343,12 +343,12 @@
         {
             var options = new List<SegOption<string>>
             {
-                new("", "Its networks", Icons.Material.Outlined.Hub),
-                new("host", "The host's", Icons.Material.Outlined.Dns),
-                new("none", "None", Icons.Material.Outlined.Block),
+                new("", "Its networks", Icons.Material.Outlined.Hub, Tip: "newapp.cfg.mode.networks"),
+                new("host", "The host's", Icons.Material.Outlined.Dns, Tip: "newapp.cfg.mode.host"),
+                new("none", "None", Icons.Material.Outlined.Block, Tip: "newapp.cfg.mode.none"),
             };
             if (Form.NetworkMode.StartsWith("container:", StringComparison.Ordinal))
-                options.Add(new(Form.NetworkMode, $"{Form.NetworkMode["container:".Length..]}'s", Icons.Material.Outlined.CallSplit));
+                options.Add(new(Form.NetworkMode, $"{Form.NetworkMode["container:".Length..]}'s", Icons.Material.Outlined.CallSplit, Tip: "newapp.cfg.mode.container"));
             return options;
         }
     }
@@ -388,10 +388,11 @@
 
     private static IReadOnlyList<SegOption<HealthMode>> HealthOptions => AppFacts.HealthOptions;
 
-    private RenderFragment Head(string icon, string title, string sub) => @<div class="gb-sec-head">
+    // A section's head; Tip is its tip's key in the catalog, shown by an info button after the title.
+    private RenderFragment Head(string icon, string title, string sub, string Tip) => @<div class="gb-sec-head">
         <span class="gb-sec-icon"><SvgIcon Icon="@icon" /></span>
         <div style="min-width:0">
-            <div class="gb-h3">@title</div>
+            <div class="gb-h3">@title<Tip Key="@Tip" /></div>
             <p>@sub</p>
         </div>
     </div>;
@@ -400,8 +401,8 @@
         <input class="gb-input gb-input--sm gb-input--mono" aria-label="Name" placeholder="NAME" value="@e.Key" @onchange="v => SetAsync(() => e.Key = v.Value?.ToString() ?? string.Empty)" />
         <input class="gb-input gb-input--sm gb-input--mono gb-envv" aria-label="@($"Value of {e.Key}")" placeholder="value" type="@(e.Secret ? "password" : "text")" value="@e.Value"
                @onchange="v => SetAsync(() => e.Value = v.Value?.ToString() ?? string.Empty)" />
-        <label class="gb-check-wrap" title="Masked wherever it's shown"><input type="checkbox" checked="@e.Secret" @onchange="v => SetAsync(() => e.Secret = v.Value is true)" />Secret</label>
-        <button type="button" class="gb-iconbtn" aria-label="@($"Remove {e.Key}")" @onclick="() => SetAsync(() => Form.Env.Remove(e))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+        <label class="gb-check-wrap" data-tip="newapp.cfg.secret"><input type="checkbox" checked="@e.Secret" @onchange="v => SetAsync(() => e.Secret = v.Value is true)" />Secret</label>
+        <button type="button" class="gb-iconbtn" aria-label="@($"Remove {e.Key}")" data-tip-text="Remove" @onclick="() => SetAsync(() => Form.Env.Remove(e))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
     </div>;
 
     private async Task NameTyped(ChangeEventArgs e)

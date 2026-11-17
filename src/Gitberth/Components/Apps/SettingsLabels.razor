@@ -3,7 +3,7 @@
     label is a row; Gitberth's and Compose's own are read-only; the image's own are listed under it. In create mode every
     value is new, so nothing is marked changed and a row taken out goes at once.
 *@
-<SettingsSection Id="@Id" Title="Labels" Icon="@Icons.Material.Outlined.Label" Changed="@(!Create && Draft.ChangedFields().Contains(SettingField.Labels))"
+<SettingsSection Id="@Id" Title="Labels" Icon="@Icons.Material.Outlined.Label" Changed="@(!Create && Draft.ChangedFields().Contains(SettingField.Labels))" Tip="app.settings.labels"
                  Description="@(Create ? "Notes on the container that other tools read. Gitberth adds its own gitberth. labels when it creates it." : "Notes on the container that other tools read. Labels starting with gitberth. are Gitberth's own.")">
     @if (!Rows.Any())
     {
@@ -36,7 +36,7 @@
                         }
                         @if (l.ReadOnly)
                         {
-                            <span class="gb-tag" title="Gitberth's or Compose's own"><SvgIcon Icon="@Icons.Material.Filled.Lock" />@(l.Key.StartsWith("gitberth.", StringComparison.Ordinal) ? "Gitberth" : "Compose")</span>
+                            <span class="gb-tag" data-tip="app.settings.labels.locked"><SvgIcon Icon="@Icons.Material.Filled.Lock" />@(l.Key.StartsWith("gitberth.", StringComparison.Ordinal) ? "Gitberth" : "Compose")</span>
                         }
                     </span>
                     <span class="gb-envval" role="cell">
@@ -45,11 +45,11 @@
                     <span class="gb-envrow-actions" role="cell">
                         @if (!Create && l.Changed && !l.IsNew)
                         {
-                            <button type="button" class="gb-iconbtn" title="Undo" aria-label="Undo" @onclick="() => Set(() => { l.Key = l.Original!.Value.Key; l.Value = l.Original.Value.Value; l.Removed = false; })"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
+                            <button type="button" class="gb-iconbtn" data-tip-text="Undo" aria-label="Undo" @onclick="() => Set(() => { l.Key = l.Original!.Value.Key; l.Value = l.Original.Value.Value; l.Removed = false; })"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
                         }
                         @if (!ro)
                         {
-                            <button type="button" class="gb-iconbtn" title="Remove" aria-label="@($"Remove {l.Key}")" @onclick="() => Set(() => Draft.RemoveLabel(l))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                            <button type="button" class="gb-iconbtn" data-tip-text="Remove" aria-label="@($"Remove {l.Key}")" @onclick="() => Set(() => Draft.RemoveLabel(l))"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
                         }
                     </span>
                 </div>

@@ -6,7 +6,7 @@
 *@
 @if (rows is { Count: > 0 })
 {
-    <SectionCard Title="Databases" Icon="@GitberthIcons.Database" Flush="true">
+    <SectionCard Title="Databases" Icon="@GitberthIcons.Database" Flush="true" Tip="app.overview.databases">
         <Actions>
             @if (!Preview)
             {
@@ -17,7 +17,14 @@
             @foreach (var d in rows)
             {
                 <div class="gb-feed-row" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                    <span class="gb-tag @(d.Kind == DatabaseKind.Redis ? "gb-tag--warn" : "gb-tag--accent")">@d.KindText</span>
+                    @if (d.Kind == DatabaseKind.Redis)
+                    {
+                        <span class="gb-tag gb-tag--warn" data-tip="app.settings.databases.redis">@d.KindText</span>
+                    }
+                    else
+                    {
+                        <span class="gb-tag gb-tag--accent" data-tip="app.settings.databases.postgres">@d.KindText</span>
+                    }
                     <span class="gb-mono" style="font-weight:600;font-size:13px;overflow-wrap:anywhere">@d.Name</span>
                     <span class="gb-t3" style="font-size:12.5px">@(d.Kind == DatabaseKind.Redis ? "its own" : $"on {d.Server}")@(d.SizeBytes is long size ? $" · {AppFacts.Bytes(size)}" : "")</span>
                     <span class="gb-t3 gb-mono" style="margin-left:auto;font-size:12px">@d.Variable</span>

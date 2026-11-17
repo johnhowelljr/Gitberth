@@ -1,8 +1,13 @@
-@* A state's dot alone, for the menu's pinned apps and the host card: the word is in its title and for screen readers. *@
-<span class="gb-st @look.Modifier @Class" title="@look.Word"><i class="gb-st-dot"></i><span class="gb-sr">@look.Word</span></span>
+@*
+    A state's dot alone, for the menu's pinned apps and the host card: the word is in its tip and for screen readers.
+    Tip="" gives it none, so the tip of what it sits in shows instead (the host card's).
+*@
+<span class="gb-st @look.Modifier @Class" data-tip="@(Tip is null ? TipKeys.State(State) : Tip.Length > 0 ? Tip : null)"><i class="gb-st-dot"></i><span class="gb-sr">@look.Word</span></span>
 
 @code {
     [Parameter, EditorRequired] public AppState State { get; set; }
+    /// <summary>Another tip than the state's own (its key in the catalog); empty for none.</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public string? Class { get; set; }
 
     private StatusLook look = AppStatus.Of(AppState.Unknown);

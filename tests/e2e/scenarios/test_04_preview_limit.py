@@ -187,7 +187,7 @@ class TestAtMostTwoRunning:
         waiting = "Waiting: 2 previews run already"
         until(lambda: text_of(pill) == waiting, 30, f"{label}'s row to say it waits", seen=lambda: text_of(pill))
         assert "gb-tone-warn" in pill.get_attribute("class"), pill.get_attribute("class")
-        assert pill.get_attribute("title") == waiting
+        assert pill.get_attribute("data-tip-detail") == waiting
         # Nothing runs, and it has no deploy: nothing to open, no log.
         assert row.get_by_role("link", name=f"Open {label}").count() == 0, "a waiting preview offers Open"
         assert row.get_by_role("link", name=f"Log of {label}").count() == 0, "a waiting preview offers a log"

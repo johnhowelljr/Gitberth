@@ -1,11 +1,14 @@
-@* Where an app comes from: an icon and a word, grey on purpose (a fact, not a state), the same chip for every source. *@
+@*
+    Where an app comes from: an icon and a word, grey on purpose (a fact, not a state), the same chip for every source.
+    Its tip says what that source means (badge.source.<source>); Title adds a line to it.
+*@
 @if (Href is not null)
 {
-    <a class="gb-src @(Large ? "gb-src--lg" : null) @Class" href="@Href" target="_blank" rel="noopener" title="@Title"><SvgIcon Icon="@Icon" />@WordOf(Source)</a>
+    <a class="gb-src @(Large ? "gb-src--lg" : null) @Class" href="@Href" target="_blank" rel="noopener" data-tip="@(Tip ?? TipKeys.Source(Source))" data-tip-detail="@Title"><SvgIcon Icon="@Icon" />@WordOf(Source)</a>
 }
 else
 {
-    <span class="gb-src @(Large ? "gb-src--lg" : null) @Class" title="@Title"><SvgIcon Icon="@Icon" />@WordOf(Source)</span>
+    <span class="gb-src @(Large ? "gb-src--lg" : null) @Class" data-tip="@(Tip ?? TipKeys.Source(Source))" data-tip-detail="@Title"><SvgIcon Icon="@Icon" />@WordOf(Source)</span>
 }
 
 @code {
@@ -13,7 +16,10 @@ else
     /// <summary>Where it leads: a Git app's repository.</summary>
     [Parameter] public string? Href { get; set; }
     [Parameter] public bool Large { get; set; }
+    /// <summary>A line of facts for its tip.</summary>
     [Parameter] public string? Title { get; set; }
+    /// <summary>Another tip than the source's own (its key in the catalog).</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public string? Class { get; set; }
     /// <summary>A Git app from a GitLab project: GitLab's mark instead of GitHub's.</summary>
     [Parameter] public bool GitLab { get; set; }

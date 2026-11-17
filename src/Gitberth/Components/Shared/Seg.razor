@@ -1,11 +1,15 @@
 @typeparam T
-@* A segmented control: a radio group of a few choices on an inset track; the chosen one is raised (or tinted in its Access colour). *@
+@*
+    A segmented control: a radio group of a few choices on an inset track; the chosen one is raised (or tinted in its
+    Access colour). A choice with a Tip shows it on hover and focus.
+*@
 <div class="gb-seg @Class" role="radiogroup" aria-label="@Label">
     @foreach (var option in Options)
     {
         var on = EqualityComparer<T>.Default.Equals(option.Value, Value);
         <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="gb-seg-btn @(on ? "on" : null) @option.Class"
-                disabled="@(Disabled || option.Disabled)" title="@option.Title" @onclick="() => PickAsync(option.Value)">
+                disabled="@(Disabled || option.Disabled)" data-tip="@option.Tip" data-tip-text="@(option.Tip is null ? option.Title : null)"
+                data-tip-detail="@(option.Tip is not null ? option.Title : null)" @onclick="() => PickAsync(option.Value)">
             @if (option.Icon is not null)
             {
                 <SvgIcon Icon="@option.Icon" />

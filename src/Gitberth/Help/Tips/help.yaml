@@ -1,0 +1,38 @@
+# Tips for the ways into the built-in Help: the top bar's Help menu (Components/Layout/HelpMenu.razor) and the "?" by a
+# page's title (Components/Shared/PageHelpLink.razor). See Help/TipCatalog.cs.
+
+help.menu.this-page:
+  title: Help for this page
+  text: >-
+    Opens the help that covers the page you're on, at the heading about it when there's one.
+
+help.menu.topics:
+  title: Help topics
+  text: >-
+    The front page of the help: every topic, section by section, with a search box at the top.
+
+help.menu.search:
+  title: Search help
+  text: >-
+    Opens the help with the cursor in its search. It finds page titles first, then headings, then text, and every word
+    you type must be there.
+
+help.menu.getting-started:
+  title: Getting started
+  text: >-
+    A short tour of Gitberth: what's on each page, connecting GitHub, and adding your first app.
+
+help.menu.troubleshooting:
+  title: Troubleshooting
+  text: >-
+    What a message means and what to do about it, from signing in and Docker to deploys, domains and networking.
+
+help.menu.faq:
+  title: FAQ
+  text: >-
+    Short answers to common questions, each with a link to the page that has the details.
+
+help.page-link:
+  title: Help for this page
+  text: >-
+    Opens the help that covers this page of Gitberth. The top bar's **?** menu has it too, with every other topic.

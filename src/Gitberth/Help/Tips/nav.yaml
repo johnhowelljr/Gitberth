@@ -1,0 +1,76 @@
+# Tips for the sidebar (Components/Layout/NavMenu.razor). See Help/TipCatalog.cs for the rules.
+
+nav.host:
+  title: This host
+  text: >-
+    The machine every app runs on: its name, and the LAN address every app's address uses. The dot is green while
+    Gitberth can read Docker. Click it for the Health page.
+  more: guides/networking#the-lan-address-of-this-host
+
+nav.dashboard:
+  title: Dashboard
+  text: >-
+    The whole host at a glance: how many apps run, the ones that need attention, recent deploys, updates waiting, and
+    the host's CPU, memory and disk, read every 5 seconds.
+  more: getting-started/first-steps#the-dashboard
+
+nav.apps:
+  title: Apps
+  text: >-
+    Every container on this host, whoever started it: the ones Gitberth built or started and the ones started some
+    other way. Each is an app you can open, start, stop and change.
+  more: guides/manage-apps#the-apps-list
+
+nav.apps.running:
+  title: Apps running
+  text: >-
+    How many apps are running right now. Crashed, stopped and missing ones aren't counted; the Apps list shows them
+    all.
+  more: guides/manage-apps#the-apps-list
+
+nav.network:
+  title: Network
+  text: >-
+    Every port held on this host and who holds it, a check of whether a port is free, and the Docker networks
+    containers find each other on.
+  more: guides/networking#see-who-holds-a-host-port
+
+nav.health:
+  title: Health
+  text: >-
+    CPU, memory and network traffic of every container on this host, read every 5 seconds and kept for 6 hours, with
+    starts, stops, crashes and deploys marked.
+  more: guides/health-and-monitoring#the-health-page
+
+nav.audit:
+  title: Audit log
+  text: >-
+    Every change to Gitberth and its apps: what changed, who made it, from where and how it ended. Changes made to
+    Docker outside Gitberth are recorded too.
+  more: guides/audit-log
+
+nav.pinned:
+  title: Pinned apps
+  text: >-
+    The apps you pinned, with their state, one click away. Pin or unpin an app in its **Settings**; the first 12 show
+    here.
+  more: guides/manage-apps#rename-and-pin
+
+nav.settings:
+  title: Settings
+  text: >-
+    Gitberth's own settings: GitHub, GitLab and registry access, notifications, domains, the network, updates, deploys,
+    databases, API tokens and your password.
+  more: reference/gitberth-settings
+
+nav.help:
+  title: Help
+  text: >-
+    Gitberth's documentation, built in: every topic, a search, flow charts and screenshots. It works without internet.
+
+nav.version:
+  title: Versions
+  text: >-
+    The version of Gitberth that runs, and of the Docker Engine on this host. **Settings › System** has more about this
+    installation, such as its data folder.
+  more: guides/updating-gitberth

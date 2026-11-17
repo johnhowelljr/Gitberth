@@ -1,0 +1,188 @@
+# Tips for the states the status labels and dots show (Components/Shared/StatusLabel.razor, StatusDot.razor: an app's,
+# status.<state>) and the deploy pill (DeployPill.razor: a deploy's, status.deploy.<status>). The keys come from
+# Components/Shared/TipKeys.cs; each state has its tip. See Help/TipCatalog.cs.
+
+# ---- An app's state ----
+
+status.running:
+  title: Running
+  text: >-
+    Its container runs. It has no health check, so this says it's up, not that it answers. A Compose app counts its
+    services, like **Running 3/3**.
+  more: guides/health-and-monitoring#health-checks
+
+status.healthy:
+  title: Healthy
+  text: >-
+    Its container runs and its health check passes: a command Docker runs inside it every so often. A Compose app
+    counts its services, like **Healthy 3/3**.
+  more: guides/health-and-monitoring#health-checks
+
+status.starting:
+  title: Starting
+  text: >-
+    Its container runs, but its health check hasn't passed yet. It turns **Healthy** once the check passes, or
+    **Unhealthy** if it keeps failing.
+  more: guides/health-and-monitoring#health-checks
+
+status.unhealthy:
+  title: Unhealthy
+  text: >-
+    Its container runs, but its health check fails, so the app may not answer as it should. Its **Logs** tab usually
+    says why.
+  more: guides/health-and-monitoring#what-gitberth-does-with-them
+
+status.restarting:
+  title: Restarting
+  text: >-
+    Docker is starting its container again after it stopped, as its restart policy says. If it keeps restarting, it
+    crashes as it starts: its **Logs** tab shows why.
+  more: reference/app-settings#restart
+
+status.paused:
+  title: Paused
+  text: >-
+    Its processes are frozen with `docker pause`: it keeps its memory but does nothing until `docker unpause`.
+    Gitberth doesn't pause apps, so this was done outside it.
+
+status.stopped:
+  title: Stopped
+  text: >-
+    Its container isn't running: it was stopped, or it ended on its own without an error. **Start** runs it again.
+  more: guides/manage-apps#start-stop-and-restart
+
+status.created:
+  title: Not started
+  text: >-
+    Docker made its container, but it has never been started. **Start** runs it.
+  more: guides/manage-apps#start-stop-and-restart
+
+status.crashed:
+  title: Exited with an error
+  text: >-
+    Its container stopped by itself with an error code, shown in brackets, like **Exited (1)**; a stop exits 0, 137 or
+    143 instead. Its **Logs** tab shows its last output, which usually says why.
+  more: guides/troubleshooting
+
+status.dead:
+  title: Dead
+  text: >-
+    Docker marked its container dead: stopping or removing it failed part way, often over a busy file or device. A
+    dead container can't run again; it can only be removed.
+
+status.deploying:
+  title: Deploying
+  text: >-
+    A deploy of this Git app is queued or under way. The version that runs now keeps running while the new one builds;
+    the app's **Activity** tab links to the deploy's live log.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+status.changing:
+  title: Changing
+  text: >-
+    Gitberth is applying a change to this app: new settings, an update, or creating it. Its usual state comes back when
+    the change is done.
+  more: guides/manage-apps#change-settings
+
+status.needs-decision:
+  title: Needs a decision
+  text: >-
+    A change to this app couldn't finish by itself and waits for you. The banner on its page offers **Keep the new
+    one** or **Put the original back**.
+  more: guides/manage-apps#the-change-dialog
+
+status.missing:
+  title: Container missing
+  text: >-
+    Gitberth has this app's settings, but its container is gone, removed outside Gitberth for instance. The banner on
+    its page offers to make it again from them, or to forget the app.
+  more: guides/manage-apps#banners
+
+status.not-created:
+  title: Not created
+  text: >-
+    Gitberth has this app's settings, but nothing in Docker yet: its first start failed, or hasn't happened. **Start**
+    on its page creates it, and a Git app is deployed.
+  more: guides/manage-apps#banners
+
+status.unknown:
+  title: Unknown
+  text: >-
+    Gitberth can't tell what state it's in, most often because Docker can't be read just now. It looks again by
+    itself.
+  more: guides/troubleshooting#docker
+
+status.renamed:
+  title: Renamed
+  text: >-
+    Its container was renamed outside Gitberth and runs under its new name, as an app of its own. Rename it back, or
+    forget this record: the banner on its page has both.
+  more: guides/manage-apps#banners
+
+status.degraded:
+  title: Degraded
+  text: >-
+    A Compose app whose web service runs while some of its other services don't: **Degraded 2/3** counts the ones
+    running. Its **Overview** lists each service with its state.
+  more: guides/compose-apps
+
+# ---- A deploy's status ----
+
+status.deploy.queued:
+  title: Queued
+  text: >-
+    Waiting to start. An app deploys one change at a time, and Gitberth builds one image at a time across all apps.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+status.deploy.cloning:
+  title: Cloning
+  text: >-
+    Fetching the newest commit of the app's branch from its repository.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+status.deploy.building:
+  title: Building
+  text: >-
+    Building the image with Docker. The app keeps running its current version meanwhile, and a failed build never
+    touches it.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+status.deploy.starting:
+  title: Starting
+  text: >-
+    Starting the new container and checking it: it must stay up for 15 seconds, and answer its health URL if it has
+    one, before it takes over.
+  more: guides/deploys-and-rollbacks#what-gitberth-checks-before-the-new-version-takes-over
+
+status.deploy.succeeded:
+  title: Succeeded
+  text: >-
+    The new version passed its checks and runs now. The deploy's page says where it answers.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+status.deploy.failed:
+  title: Failed
+  text: >-
+    The deploy ended with an error, which its page names; its log has the details. A build that fails never touches
+    the version that runs.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+status.deploy.rolled-back:
+  title: Rolled back
+  text: >-
+    The new version built, but didn't pass its checks, so Gitberth put the previous container back and it still runs.
+    The log ends with the new one's last output.
+  more: guides/deploys-and-rollbacks#what-gitberth-checks-before-the-new-version-takes-over
+
+status.deploy.cancelled:
+  title: Cancelled
+  text: >-
+    Stopped with **Cancel** before it finished. The running container wasn't touched.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+status.deploy.skipped:
+  title: Skipped
+  text: >-
+    A new commit that changed only files the build filters leave out, or whose message asks not to deploy, like
+    `[skip ci]`. Nothing was built, and the running version stays.
+  more: guides/deploys-and-rollbacks#skip-commits-that-dont-need-a-deploy

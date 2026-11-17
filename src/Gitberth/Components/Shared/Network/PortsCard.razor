@@ -8,16 +8,16 @@
 <section class="gb-card" aria-labelledby="gb-ports-title">
     <div class="gb-card-head">
         <div class="gb-card-title" id="gb-ports-title">
-            <SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Ports
+            <SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Ports<Tip Key="network.ports-card" />
             @if (Draft.ImageExposed.Count > 0)
             {
-                <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Exposed by the image: <span class="gb-mono">@string.Join(", ", Draft.ImageExposed)</span></span>
+                <span class="gb-card-sub" style="font-weight:400;letter-spacing:0"><Tip Key="network.ports-card.exposed">Exposed by the image</Tip>: <span class="gb-mono">@string.Join(", ", Draft.ImageExposed)</span></span>
             }
         </div>
         @if (CanAdd)
         {
             <div class="gb-card-actions">
-                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="@(Saving || Applying)">Add port</Btn>
+                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="@(Saving || Applying)" Tip="network.ports-card.add">Add port</Btn>
             </div>
         }
     </div>
@@ -71,7 +71,7 @@
                 <Actions>
                     @if (CanAdd)
                     {
-                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync">Add a port</Btn>
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Tip="network.ports-card.add">Add a port</Btn>
                     }
                 </Actions>
             </EmptyState>
@@ -135,7 +135,7 @@
                 @* Recreated while it was stopped: the original is kept until the new one's first start passes its checks. *@
                 <Banner Tone="info" Title="Recreated while stopped" Icon="@Icons.Material.Outlined.HourglassEmpty">
                     <ChildContent>@waiting.Error</ChildContent>
-                    <Actions><Btn Size="BtnSize.Sm" OnClick="() => OnPutBack.InvokeAsync()" Disabled="@(Saving || Busy is not null)">Put the original back</Btn></Actions>
+                    <Actions><Btn Size="BtnSize.Sm" OnClick="() => OnPutBack.InvokeAsync()" Disabled="@(Saving || Busy is not null)" Tip="network.ports-card.put-back">Put the original back</Btn></Actions>
                 </Banner>
             }
             @if (Mode == PortsMode.Compose && Draft.NeedsRecreate && Compose is { } compose)
@@ -165,7 +165,7 @@
         <Extra>
             @if (IsGit && Draft.NeedsRecreate && Deployed && Running && !Stale)
             {
-                <Btn Kind="BtnKind.Secondary" OnClick="() => OnSaveLater.InvokeAsync()" Disabled="Saving">Save for next deploy</Btn>
+                <Btn Kind="BtnKind.Secondary" OnClick="() => OnSaveLater.InvokeAsync()" Disabled="Saving" Tip="network.ports-card.save-later">Save for next deploy</Btn>
             }
         </Extra>
     </ApplyBar>
@@ -272,7 +272,7 @@
                     <span class="gb-notechip">
                         @address <span class="gb-t3">@key</span>
                         <CopyButton Value="@address" Label="@address" />
-                        <button type="button" class="gb-iconbtn" style="width:24px;height:24px" aria-label="@($"Remove {key}")" disabled="@Saving"
+                        <button type="button" class="gb-iconbtn" style="width:24px;height:24px" aria-label="@($"Remove {key}")" data-tip-text="Remove" disabled="@Saving"
                                 @onclick="() => SaveNotesAsync(Notes.Where(o => o != n))"><SvgIcon Icon="@Icons.Material.Outlined.Close" Size="xs" /></button>
                     </span>
                 }

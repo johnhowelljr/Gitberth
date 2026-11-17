@@ -4,16 +4,14 @@
 <LogView Lines="lines" Title="@ContainerName" EmptyText="No output from the container yet.">
     <Toolbar>
         <MudMenu Label="@($"Last {tail} lines")" Size="Size.Small" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowDropDown"
-                 Dense="true" Class="ml-2">
+                 Dense="true" Class="ml-2" data-tip="app.logs.tail">
             @foreach (var option in TailOptions)
             {
                 <MudMenuItem OnClick="() => SetTailAsync(option)">Last @option lines</MudMenuItem>
             }
         </MudMenu>
-        <MudTooltip Text="Reconnect">
-            <MudIconButton Icon="@Icons.Material.Outlined.Refresh" Size="Size.Small" OnClick="RestartAsync" aria-label="Reconnect" />
-        </MudTooltip>
-        <span class="gb-terminal-status @(streaming ? "gb-terminal-status--live" : "")">@status</span>
+        <MudIconButton Icon="@Icons.Material.Outlined.Refresh" Size="Size.Small" OnClick="RestartAsync" aria-label="Reconnect" data-tip-text="Reconnect" />
+        <span class="gb-terminal-status @(streaming ? "gb-terminal-status--live" : "")" data-tip="app.logs.live">@status</span>
     </Toolbar>
 </LogView>
 

@@ -263,7 +263,7 @@ class TestOpenedPullRequest:
         assert row.locator(".gb-tag", has_text="Fork").count() == 0, "a pull request from the repo's own branch is tagged as a fork"
         sub = text_of(row.locator(".gb-drow-sub").first)
         assert commit[:7] in sub and "last commit" in sub and "removed in 7 days without a new commit" in sub, sub
-        lan_link = row.locator("a[title='On the LAN']")
+        lan_link = row.locator("a[data-tip-text='On the LAN']")
         assert (lan_link.get_attribute("href"), text_of(lan_link)) == (lan, lan.split("://", 1)[1])
         # Open goes to its LAN address (it has no domain); Log to its newest deploy; Its page to its own page.
         assert row.get_by_role("link", name=f"Open {label}").get_attribute("href") == lan

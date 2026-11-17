@@ -1,0 +1,108 @@
+@page "/help"
+@inject HelpDocs Help
+
+@*
+    The Help's front page: a search of every page (titles first, then headings, then text; every word must be there),
+    and under it docs/README.md, the docs' own index. help?q=… opens with a search; help?focus=search puts the cursor
+    in the box (the Help menu's Search help).
+*@
+<PageTitle>Help · Gitberth</PageTitle>
+
+<div class="gb-helpindex">
+    <PageHead Title="Help" Lead="Gitberth's documentation, built in, so it works without internet. Search it, or start from a topic below." />
+
+    <div class="gb-helpsearch" role="search">
+        <label class="gb-cmdk gb-helpsearch-box">
+            <SvgIcon Icon="@Icons.Material.Outlined.Search" />
+            <input id="gb-help-search" type="search" placeholder="Search the help: pages, headings and text" autocomplete="off" spellcheck="false"
+                   aria-label="Search help" aria-controls="gb-help-results" value="@query" @oninput="OnInput" @ref="box" />
+        </label>
+    </div>
+
+    @if (query.Trim().Length > 0)
+    {
+        <section class="gb-help-results" id="gb-help-results" aria-label="Search results">
+            <div class="gb-help-count" role="status">@Count</div>
+            @foreach (var hit in hits)
+            {
+                <a class="gb-help-hit" href="@hit.Href">
+                    <span class="gb-help-hit-t">@hit.Title</span>
+                    <span class="gb-help-hit-p">
+                        @if (hit.Passage is { Anchor: not null })
+                        {
+                            @hit.Doc.Title
+                        }
+                        else if (Help.SectionOf(hit.Doc) is { } section)
+                        {
+                            @section
+                        }
+                    </span>
+                    @if (hit.Snippet.Parts.Count > 0)
+                    {
+                        <span class="gb-help-hit-s">
+                            @foreach (var (text, marked) in hit.Snippet.Parts)
+                            {
+                                if (marked)
+                                {
+                                    <mark>@text</mark>
+                                }
+                                else
+                                {
+                                    @text
+                                }
+                            }
+                        </span>
+                    }
+                </a>
+            }
+        </section>
+    }
+    else
+    {
+        <div class="gb-doc gb-doc--index">@((MarkupString)Help.Index.Html)</div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] public string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "focus")] public string? Focus { get; set; }
+
+    private string query = "";
+    private IReadOnlyList<HelpHit> hits = [];
+    private bool focusPending;
+    private ElementReference box;
+
+    private string Count => hits.Count switch
+    {
+        0 => $"Nothing in the help has every word of “{query.Trim()}”.",
+        1 => "1 result",
+        _ => $"{hits.Count} results",
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (Q is not null && Q != query)
+        {
+            query = Q;
+            hits = Help.Search(query);
+        }
+        if (Focus == "search") focusPending = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!focusPending) return;
+        focusPending = false;
+        // After a navigation the router puts the focus on the page's h1 (FocusOnNavigate): the box takes it after that.
+        await Task.Delay(120);
+        try { await box.FocusAsync(); }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { }
+    }
+
+    private void OnInput(ChangeEventArgs e)
+    {
+        query = e.Value?.ToString() ?? "";
+        hits = Help.Search(query);
+    }
+}

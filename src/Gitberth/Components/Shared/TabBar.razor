@@ -1,9 +1,9 @@
-@* Tabs that are links, one route each (/apps/postgres/settings): the active one has the brand underline and a glow. *@
+@* Tabs that are links, one route each (/apps/postgres/settings): the active one has the brand underline and a glow. A tab with a Tip shows it on hover and focus. *@
 <nav class="gb-tabbar @Class" aria-label="@Label">
     @foreach (var tab in Tabs)
     {
         var on = tab.Key == Active;
-        <a class="gb-tabbar-item @(on ? "on" : null)" href="@tab.Href" aria-current="@(on ? "page" : null)">
+        <a class="gb-tabbar-item @(on ? "on" : null)" href="@tab.Href" aria-current="@(on ? "page" : null)" data-tip="@tab.Tip">
             @if (tab.Icon is not null)
             {
                 <SvgIcon Icon="@tab.Icon" />
@@ -18,11 +18,11 @@
             }
             @if (tab.Badge is int n and > 0)
             {
-                <span class="gb-tab-badge" title="@($"{n} unsaved {(n == 1 ? "change" : "changes")}")">@n</span>
+                <span class="gb-tab-badge" data-tip-text="@($"{n} unsaved {(n == 1 ? "change" : "changes")}")">@n</span>
             }
             else if (tab.Dot)
             {
-                <span class="gb-tab-badge gb-tab-badge--dot" title="Unsaved changes"></span>
+                <span class="gb-tab-badge gb-tab-badge--dot" data-tip-text="Unsaved changes"></span>
             }
         </a>
     }

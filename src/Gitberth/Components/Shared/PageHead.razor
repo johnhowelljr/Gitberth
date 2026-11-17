@@ -1,11 +1,21 @@
-@* A page's head: breadcrumbs, the title at display size, one line under it, and its actions on the right. *@
+@*
+    A page's head: breadcrumbs, the title at display size (with an info button when it has a Tip, and a small "?" to the
+    page's help when docs/help.yaml has some for this address), one line under it, and its actions on the right.
+*@
 <header class="gb-phead @Class">
     <div style="min-width:0">
         @if (Crumbs is not null)
         {
             <nav class="gb-crumbs" aria-label="Breadcrumb">@Crumbs</nav>
         }
-        <h1 class="gb-display">@Title</h1>
+        <div class="gb-phead-title">
+            <h1 class="gb-display">@Title</h1>
+            @if (Tip is not null)
+            {
+                <Tip Key="@Tip" />
+            }
+            <PageHelpLink />
+        </div>
         @if (Lead is not null)
         {
             <p class="gb-lead">@Lead</p>
@@ -25,5 +35,7 @@
     [Parameter] public RenderFragment? Actions { get; set; }
     /// <summary>Under the lead: tags, a "Live" marker.</summary>
     [Parameter] public RenderFragment? ChildContent { get; set; }
+    /// <summary>The title's tip: its key in the catalog (Help/Tips), shown by an info button after the title.</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public string? Class { get; set; }
 }

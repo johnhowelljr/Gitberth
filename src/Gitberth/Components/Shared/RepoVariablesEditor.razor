@@ -9,7 +9,7 @@
 *@
 <MudPaper Outlined="true" Class="gb-card mb-4">
     <div class="gb-card-head">
-        <span class="gb-card-title"><MudIcon Icon="@(OnGitLab ? GitberthIcons.GitLab : Icons.Custom.Brands.GitHub)" Size="Size.Small" />Stored in @HostName</span>
+        <span class="gb-card-title"><MudIcon Icon="@(OnGitLab ? GitberthIcons.GitLab : Icons.Custom.Brands.GitHub)" Size="Size.Small" />Stored in @HostName<Tip Key="app.env.repo" /></span>
         <a class="gb-card-hint" href="@SettingsUrl" target="_blank" rel="noopener">Open in @HostName</a>
     </div>
     <div class="gb-card-body">
@@ -54,18 +54,18 @@
                                 @v.Name
                                 @if (OnGitLab)
                                 {
-                                    <span class="gb-tag gb-tag--outline" title="Its environment scope in GitLab">@(v.Scope ?? RepoVariables.AllScope)</span>
+                                    <span class="gb-tag gb-tag--outline" data-tip="app.env.gitlab.scope">@(v.Scope ?? RepoVariables.AllScope)</span>
                                     @if (v.Protected)
                                     {
-                                        <span class="gb-tag gb-tag--outline" title="Protected in GitLab: only production gets it">protected</span>
+                                        <span class="gb-tag gb-tag--outline" data-tip="app.env.gitlab.protected">protected</span>
                                     }
                                     @if (v.IsFile)
                                     {
-                                        <span class="gb-tag gb-tag--warn" title="A file variable: Gitberth passes plain ones only">file</span>
+                                        <span class="gb-tag gb-tag--warn" data-tip="app.env.gitlab.file">file</span>
                                     }
                                     else if (!Used(v.Scope))
                                     {
-                                        <span class="gb-tag gb-tag--warn" title="Gitberth uses *, production and preview/* only">not used</span>
+                                        <span class="gb-tag gb-tag--warn" data-tip="app.env.gitlab.not-used">not used</span>
                                     }
                                 }
                             </span>
@@ -74,10 +74,10 @@
                                 @if (secret)
                                 {
                                     <MudIconButton Icon="@(shown ? Icons.Material.Outlined.VisibilityOff : Icons.Material.Outlined.Visibility)" Size="Size.Small"
-                                                   OnClick="() => ToggleReveal(id)" aria-label="@($"{(shown ? "Hide" : "Show")} {what}")" />
+                                                   OnClick="() => ToggleReveal(id)" aria-label="@($"{(shown ? "Hide" : "Show")} {what}")" data-tip-text="@(shown ? "Hide" : "Show")" />
                                 }
-                                <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" OnClick="() => Edit(v)" aria-label="@($"Edit {what}")" Disabled="@busy" />
-                                <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" OnClick="() => DeleteAsync(v)" aria-label="@($"Delete {what}")" Disabled="@busy" />
+                                <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" OnClick="() => Edit(v)" aria-label="@($"Edit {what}")" Disabled="@busy" data-tip-text="Edit" />
+                                <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" OnClick="() => DeleteAsync(v)" aria-label="@($"Delete {what}")" Disabled="@busy" data-tip-text="Delete" />
                             </span>
                         </div>
                     }
@@ -100,7 +100,8 @@
                         <option value="@RepoVariables.PreviewScope">Previews (preview/*)</option>
                     </select>
                 }
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(name) || string.IsNullOrEmpty(value))" Class="gb-inline-btn">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(name) || string.IsNullOrEmpty(value))" Class="gb-inline-btn"
+                           data-tip="app.env.repo.save">
                     Save to @HostName
                 </MudButton>
             </div>

@@ -10,7 +10,7 @@
     Each one shows its kind, server, size and variable, copies its connection string on a click (never shown on the page),
     and goes with Remove: its data kept, or deleted once its name is typed in.
 *@
-<SettingsSection Id="sec-databases" Title="Databases" Icon="@GitberthIcons.Database" Description="@Description">
+<SettingsSection Id="sec-databases" Title="Databases" Icon="@GitberthIcons.Database" Description="@Description" Tip="app.settings.databases">
     @if (rows is null)
     {
         <div class="gb-skel" style="height:64px"></div>
@@ -28,24 +28,31 @@
                 {
                     <div class="gb-db" role="listitem" @key="d.Id">
                         <div class="gb-db-head">
-                            <span class="gb-tag @(d.Kind == DatabaseKind.Redis ? "gb-tag--warn" : "gb-tag--accent")">@d.KindText</span>
+                            @if (d.Kind == DatabaseKind.Redis)
+                            {
+                                <span class="gb-tag gb-tag--warn" data-tip="app.settings.databases.redis">@d.KindText</span>
+                            }
+                            else
+                            {
+                                <span class="gb-tag gb-tag--accent" data-tip="app.settings.databases.postgres">@d.KindText</span>
+                            }
                             <strong>@d.Name</strong>
                             <span class="gb-t3">@(d.Kind == DatabaseKind.Redis ? "its own container" : $"on {d.Server}")@(d.SizeBytes is long size ? $" · {AppFacts.Bytes(size)}" : "")</span>
                             <span class="gb-db-actions">
                                 <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ContentCopy" OnClick="() => CopyAsync(d)" Disabled="busy"
-                                     Label="@($"Copy {d.Variable}'s connection string")">Copy connection string</Btn>
-                                <button type="button" class="gb-iconbtn" title="Remove" aria-label="@($"Remove the database {d.Name}")" disabled="@busy" @onclick="() => RemoveAsync(d)">
+                                     Label="@($"Copy {d.Variable}'s connection string")" Tip="app.settings.databases.copy">Copy connection string</Btn>
+                                <button type="button" class="gb-iconbtn" data-tip-text="Remove" aria-label="@($"Remove the database {d.Name}")" disabled="@busy" @onclick="() => RemoveAsync(d)">
                                     <SvgIcon Icon="@Icons.Material.Outlined.Delete" />
                                 </button>
                             </span>
                         </div>
                         <dl class="gb-kv">
-                            <dt>Variable</dt>
+                            <dt><Tip Key="app.settings.databases.variable">Variable</Tip></dt>
                             <dd><code>@d.Variable</code> <span class="gb-t3">set by Gitberth@(replaces.GetValueOrDefault(d.Variable) is { Any: true } r ? ". " + r.Text(d.Variable) : "")</span></dd>
-                            <dt>Reached at</dt>
+                            <dt><Tip Key="app.settings.databases.reached">Reached at</Tip></dt>
                             <dd><span class="gb-mono">@d.Host:@(d.Kind == DatabaseKind.Redis ? DatabaseService.RedisPort : 5432)</span>@(d.Role is { } role ? $" as {role}" : "")</dd>
-                            <dt>Made</dt>
-                            <dd title="@Format.Local(d.CreatedAt)">@(d.Created ? $"By Gitberth {Format.Ago(d.CreatedAt)}" : $"Taken over {Format.Ago(d.CreatedAt)}: Gitberth never deletes its data")</dd>
+                            <dt><Tip Key="app.settings.databases.made">Made</Tip></dt>
+                            <dd data-tip-text="@Format.Local(d.CreatedAt)">@(d.Created ? $"By Gitberth {Format.Ago(d.CreatedAt)}" : $"Taken over {Format.Ago(d.CreatedAt)}: Gitberth never deletes its data")</dd>
                         </dl>
                         @if (d.Problem is { } problem)
                         {
@@ -57,12 +64,12 @@
         }
 
         <div class="gb-db-add">
-            <Field Label="Add">
+            <Field Label="Add" Tip="app.settings.databases.kind">
                 <Seg T="DatabaseKind" Options="KindOptions" Value="kind" ValueChanged="SetKindAsync" Label="Kind of database" />
             </Field>
             @if (kind == DatabaseKind.Postgres)
             {
-                <Field Label="Server" For="db-server" Help="@ServerHelp">
+                <Field Label="Server" For="db-server" Tip="app.settings.databases.server" Help="@ServerHelp">
                     <select id="db-server" class="gb-input" value="@server" @onchange="e => server = e.Value?.ToString()" disabled="@(usable.Count == 0)">
                         @if (usable.Count == 0)
                         {
@@ -77,17 +84,17 @@
             }
             else
             {
-                <Field Label="Container" Help="Redis 8, with a password and its data on a volume of its own.">
+                <Field Label="Container" Tip="app.settings.databases.container" Help="Redis 8, with a password and its data on a volume of its own.">
                     <input class="gb-input gb-input--mono" value="@DatabaseNames.RedisContainer(View.Summary.Container)" readonly aria-label="Redis container" />
                 </Field>
             }
-            <Field Label="Variable" For="db-variable" Error="@variableProblem" Help="@VariableHelp">
+            <Field Label="Variable" For="db-variable" Tip="app.settings.databases.variable" Error="@variableProblem" Help="@VariableHelp">
                 <input id="db-variable" class="gb-input gb-input--mono" value="@variable" autocomplete="off" spellcheck="false" maxlength="100"
                        @oninput="e => { variable = e.Value?.ToString() ?? string.Empty; variableProblem = null; }" @onchange="CheckVariableAsync" />
             </Field>
             <div class="gb-row">
                 <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Busy="busy"
-                     Disabled="@(variable.Trim().Length == 0 || kind == DatabaseKind.Postgres && usable.Count == 0)">Add database</Btn>
+                     Disabled="@(variable.Trim().Length == 0 || kind == DatabaseKind.Postgres && usable.Count == 0)" Tip="app.settings.databases.add">Add database</Btn>
             </div>
         </div>
         @if (kind == DatabaseKind.Postgres && usable.Count == 0)
@@ -116,7 +123,8 @@
     private Dictionary<string, VariableReplaces> replaces = new(StringComparer.Ordinal);
     private VariableReplaces? typedReplaces;
 
-    private static readonly IReadOnlyList<SegOption<DatabaseKind>> KindOptions = [new(DatabaseKind.Postgres, "Postgres"), new(DatabaseKind.Redis, "Redis")];
+    private static readonly IReadOnlyList<SegOption<DatabaseKind>> KindOptions =
+        [new(DatabaseKind.Postgres, "Postgres", Tip: "app.settings.databases.postgres"), new(DatabaseKind.Redis, "Redis", Tip: "app.settings.databases.redis")];
 
     private bool IsGit => View.Summary.Source == AppSource.Git;
 

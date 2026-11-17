@@ -1,16 +1,18 @@
 @implements IDisposable
 @inject DockerCli Docker
 
-<MudTooltip Text="@tooltip" Placement="Placement.Bottom">
-    <span class="gb-engine @(ok ? "gb-engine--ok" : "gb-engine--down")">
-        <span class="gb-engine-dot"></span>@label
-    </span>
-</MudTooltip>
+@* The engine's version, or that it can't be reached; its tip says what that means, with the engine's and CLI's versions or the error. *@
+<span class="gb-engine @(ok ? "gb-engine--ok" : "gb-engine--down")" data-tip="@(Tip ?? "topbar.docker")" data-tip-detail="@detail">
+    <span class="gb-engine-dot"></span>@label
+</span>
 
 @code {
+    /// <summary>Another tip than the top bar's (its key in the catalog).</summary>
+    [Parameter] public string? Tip { get; set; }
+
     private bool ok = true;
     private string label = "Docker";
-    private string tooltip = "Checking the Docker engine…";
+    private string detail = "Checking the Docker engine…";
     private Timer? timer;
 
     protected override async Task OnInitializedAsync()
@@ -28,7 +30,7 @@
         var info = await Docker.GetInfoAsync();
         ok = info.ServerVersion is not null;
         label = ok ? $"Docker {info.ServerVersion}" : "Docker offline";
-        tooltip = ok ? $"Engine {info.ServerVersion}, CLI {info.ClientVersion}" : info.Error ?? "The Docker engine isn't reachable.";
+        detail = ok ? $"Engine {info.ServerVersion}, CLI {info.ClientVersion}" : info.Error ?? "The Docker engine isn't reachable.";
     }
 
     public void Dispose() => timer?.Dispose();

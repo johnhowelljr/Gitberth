@@ -69,7 +69,7 @@ strongest that applies, with each file's reason:
 
 | Tier | When | What runs |
 |---|---|---|
-| `none` | Every changed file maps to `@none`: docs, unit tests, the e2e tooling, workflows | the unit tests only |
+| `none` | Every changed file maps to `@none`: unit tests, the e2e tooling, workflows (the docs are built into the image's Help: they run 34) | the unit tests only |
 | `scenarios` | Only scenario files (`scenarios/test_*.py`) changed | their groups, and the groups that import a name they changed |
 | `impact` | Product or rig files with specific rules | the unit tests, their groups, the smoke |
 | `wide` | A hub file with no narrowing word, or a file only the catch-all matches | `@wide`: the smoke and 00 01 06 12 19 20 22 23 24 25, and any other groups selected |
@@ -167,6 +167,30 @@ every run from a fresh Gitberth with no apps and empty stand-ins.
 Everything the rig makes on the host is named `gitberth-e2e` or `gbe2e-*`. It never touches anything else, and `down`
 removes only those names. (The `docker:29-dind` image stays, since other things may use it.)
 
+## The docs' screenshots
+
+`tests/e2e/shots/` takes every picture `docs/` shows. It's on demand only: never in an impact plan, the full suite or CI.
+
+```sh
+sh tests/e2e/shots/run.sh                                     # every picture, into docs/images (WebP)
+sh tests/e2e/shots/run.sh -k "step or dashboard or settings"  # every set-up step, and the pictures named
+```
+
+It runs `run.sh test` on rig c (`E2E_INSTANCE` picks another) made to look like the docs' example home server: host
+name `homelab` (`E2E_HOSTNAME`), the LAN 192.168.50.0/24 with Gitberth at `http://192.168.50.10:8080`
+(`E2E_LAN_SUBNET`, `E2E_LAN_GATEWAY`, `E2E_RIG_IP`), and Gitberth's image named `gitberth:local`
+(`E2E_GITBERTH_IMAGE`), with an install's own waits (production timings) and the rig's own containers out of Gitberth's
+pages (`E2E_HIDE_RIG=1`, under How it works). Its browser reaches Gitberth through a relay on the rig's engine
+(`shots/relay.py`), so Gitberth sees it come from 192.168.50.10, and it can reach nothing else. Its steps set up the
+docs' demo apps and settings through Gitberth's UI and the stand-ins (the example repos on github.com/you and
+gitlab.com/you, example.com through Cloudflare, a Discord channel). Each shot then takes its picture in a 1440 × 900
+window at twice the pixels, checks it shows none of the rig's addresses, ports or names and no API token or deploy
+hook's secret, frames it (`shots/frame.py`) and saves it as WebP. The pictures and `report.txt` land in
+`tests/e2e/out/shots`, and the apps stay in the rig to look at. From a PC, `e2e-run.ps1 -Tree <tree> -Shots` does all
+of it on rig c and copies the pictures into the tree. A full run takes about 15 minutes (pytest about 14); a rig made
+from nothing first builds its images, which can take half an hour more. The rig keeps that look, and the containers the
+steps started by hand, until `run.sh down` (with the same `E2E_INSTANCE`): take it down before it runs scenarios again.
+
 ## How it works
 
 ```
@@ -181,8 +205,8 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
                                        └─ gb-*            the apps Gitberth deploys
 ```
 
-- **`run.sh`** runs on the host. It starts the engine container, copies Gitberth's sources and this folder into it, and
-  runs **`rig/inner.sh`** there to build and start everything else.
+- **`run.sh`** runs on the host. It starts the engine container, copies Gitberth's sources, the docs (built into its Help)
+  and this folder into it, and runs **`rig/inner.sh`** there to build and start everything else.
 - **Gitberth** is the image built from the repo's `Dockerfile`. It's started with `docker-compose.yml` plus
   `rig/compose.e2e.yml`, which adds only test settings:
   - `extra_hosts` send GitHub's, GitLab's and Cloudflare's names to the stand-in;
@@ -191,6 +215,10 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
 
   Its admin password is made once per rig and only kept in the rig. Apps get `GITBERTH_PUBLIC_HOST=192.168.70.10`, so
   their LAN addresses are the engine container's.
+- With `E2E_HIDE_RIG=1`, which only the docs' screenshots set, the rig's own network (`gbe2e`), stand-ins, fake
+  cloudflared and runner carry Gitberth's helper label (`gitberth.helper=rig`): Gitberth leaves them out of its pages
+  and its audit log, as it does its own short-lived helpers, still finds the fake cloudflared, and `reset` keeps them.
+  Otherwise they carry `gbe2e.hidden=no`, which nothing reads, and Gitberth shows them like any other container.
 - **`standins/`** hold the stand-ins (Python 3 standard library, plus git and openssl):
   - **The GitHub stand-in** serves bare repos over git's smart HTTP (`git http-backend`). Pull requests' heads are real
     `refs/pull/<n>/head` refs.

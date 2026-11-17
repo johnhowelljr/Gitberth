@@ -152,7 +152,7 @@ def test_turning_forks_on_shows_its_warning_and_previews_the_forks_pull_request(
     row = preview_row(page, f"PR #{fork_n}")
     row.wait_for()
     tag = row.locator(".gb-drow-host .gb-tag", has_text="Fork")
-    assert tag.count() == 1 and tag.get_attribute("title") == "Its code comes from someone else's copy of the repo"
+    assert tag.count() == 1 and tag.get_attribute("data-tip-detail") == "Its code comes from someone else's copy of the repo"
     pill = row.locator(".gb-pill2")
     until(lambda: text_of(pill) == "Ready", 60, "the fork's preview to say Ready", seen=lambda: text_of(pill))
     foot = text_of(previews_card(page).locator(".gb-card-foot"))

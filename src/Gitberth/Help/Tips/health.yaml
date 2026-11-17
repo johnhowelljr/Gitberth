@@ -1,0 +1,153 @@
+# Tips for the Health page (Components/Pages/Health.razor) and the charts and gauges it shares with the rest of
+# Gitberth (Components/Shared: TimeChart, Meter, Waffle). See Help/TipCatalog.cs for the rules.
+
+health.page:
+  title: Health
+  text: >-
+    CPU, memory and network traffic of every container on this host, read every 5 seconds and kept 6 hours, across
+    Gitberth's own restarts. Click a row's arrow for its charts.
+  more: guides/health-and-monitoring#the-health-page
+
+health.live:
+  title: Live
+  text: >-
+    Gitberth reads every container's stats every 5 seconds; the time is the last reading. **Not updating** means Docker
+    can't be read now, and the last readings stay on screen.
+  more: guides/health-and-monitoring#the-health-page
+
+health.host.cpus:
+  title: CPUs
+  text: >-
+    The CPU cores Docker sees on this host. A container at 100% uses one full core, so the most one can show is this
+    many times 100%.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.host.memory:
+  title: Memory
+  text: >-
+    The memory Docker sees on this host. A container without a memory limit can use up to all of it.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.host.running:
+  title: Running
+  text: >-
+    How many containers run on this host now, whoever started them. Stopped ones with readings from the last 6 hours
+    are listed under **Stopped**.
+  more: guides/health-and-monitoring#the-health-page
+
+health.window.hour:
+  title: 1 hour
+  text: >-
+    The last hour, with every 5-second reading.
+  more: guides/health-and-monitoring#the-health-page
+
+health.window.6h:
+  title: 6 hours
+  text: >-
+    The last 6 hours, as 30-second averages: everything Gitberth keeps.
+  more: guides/health-and-monitoring#the-health-page
+
+health.order.busiest:
+  title: Busiest first
+  text: >-
+    The containers using the most CPU at the last reading come first. The twelve busiest show; the rest are one click
+    away.
+  more: guides/health-and-monitoring#the-health-page
+
+health.column.state:
+  title: State
+  text: >-
+    What Docker says of the container: running, healthy or unhealthy by its health check, restarting, stopped, or
+    exited with an error. An app checked from outside also shows its uptime.
+  more: guides/health-and-monitoring#health-checks
+
+health.column.cpu:
+  title: CPU
+  text: >-
+    CPU over the last few minutes, and the latest reading, on the `docker stats` scale: 100% is one full core, so a busy
+    container can show more than 100%.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.column.memory:
+  title: Memory
+  text: >-
+    The memory the container uses now. The bar is its share of its memory limit, or of the host's memory (dashed) when
+    it has none; past 80% of a limit it turns amber.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.column.events-hour:
+  title: Last hour
+  text: >-
+    What happened to the container in the last hour, from Docker's own events: deploys, recreates, restarts, crashes
+    and stops.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.column.events-6h:
+  title: Last 6 hours
+  text: >-
+    What happened to the container in the last 6 hours, from Docker's own events: deploys, recreates, restarts,
+    crashes and stops.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.uptime:
+  title: Uptime
+  text: >-
+    How the app's uptime check stands: Gitberth checks it from outside, at its main domain or its LAN address, as a
+    visitor reaches it. Two failed checks in a row make it down.
+  more: guides/uptime-and-status-page#whats-checked
+
+health.not-gathering:
+  title: Not gathering stats
+  text: >-
+    Containers whose stats Gitberth doesn't read any more. Their last 6 hours are kept; turn **Gather stats** on to chart
+    one again.
+  more: guides/health-and-monitoring#stop-gathering-stats-for-a-container
+
+health.gather:
+  title: Gather stats
+  text: >-
+    Whether Gitberth reads this container's CPU, memory and network every 5 seconds. Off, it moves to **Not gathering
+    stats** and its last 6 hours are kept. An app has the same switch in its **Settings › General**.
+  default: "On"
+  more: guides/health-and-monitoring#stop-gathering-stats-for-a-container
+
+health.rename:
+  title: Rename
+  text: >-
+    An app's name changes everywhere in Gitberth; any other container gets a title only Gitberth shows. Docker's own
+    name for it never changes, so nothing is redeployed.
+  more: guides/health-and-monitoring#rename-a-container
+
+health.table:
+  title: As a table
+  text: >-
+    Lists the readings and what happened instead of the charts, newest first. **Charts** goes back.
+  more: guides/health-and-monitoring#open-a-containers-charts
+
+health.chart.cpu:
+  title: CPU
+  text: >-
+    CPU use over time: 100% is one full core. Each point is the average over its 5 seconds, so a short burst still
+    shows, lower. Dashed lines mark deploys, restarts and stops; point at one for what happened.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.chart.memory:
+  title: Memory
+  text: >-
+    The memory the container used at each reading. A spike between readings isn't seen. With a memory limit, the key
+    says how much of it is in use.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.chart.network:
+  title: Network
+  text: >-
+    Traffic per second: **In** is what the container receives, **Out** what it sends. A container on the host's
+    network has no counters of its own.
+  more: guides/health-and-monitoring#reading-the-charts
+
+health.waffle:
+  title: Apps at a glance
+  text: >-
+    One square per app: filled green while it runs, a hollow ring when it's stopped, orange with a rounded top when it's
+    in trouble. The counts are written next to it.
+  more: guides/manage-apps#the-apps-list

@@ -11,7 +11,7 @@
 <section class="gb-card @Class" id="@Id" aria-labelledby="gb-lanaddr-title">
     <div class="gb-card-head">
         <div class="gb-card-title" id="gb-lanaddr-title" tabindex="-1" @ref="title">
-            <SvgIcon Icon="@Icons.Material.Outlined.Router" />Own LAN address
+            <SvgIcon Icon="@Icons.Material.Outlined.Router" />Own LAN address<Tip Key="network.own-lan-card" />
             @if (view is { On: true, Refusal: null })
             {
                 <span class="gb-tag @(view.Address is null ? null : "gb-tag--good")">@(view.Address is null ? "Off" : view.Automatic ? "Automatic" : "Static")</span>
@@ -19,7 +19,7 @@
         </div>
         @if (view?.Block is { } block)
         {
-            <div class="gb-card-actions"><a class="gb-card-link" href="settings#own-lan">Block @block.Text ›</a></div>
+            <div class="gb-card-actions"><a class="gb-card-link" href="settings#own-lan" data-tip="settings.own-lan.block">Block @block.Text ›</a></div>
         }
     </div>
     <div class="gb-card-body gb-lanbox">
@@ -54,7 +54,7 @@
                 {
                     <div class="gb-row gb-row--wrap" style="margin-left:auto;gap:6px">
                         <Btn Size="BtnSize.Sm" OnClick="Change" Disabled="@(busy || Busy is not null)">Change</Btn>
-                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Danger" OnClick="() => RemoveAsync(address)" Disabled="@(busy || Busy is not null)">Remove…</Btn>
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Danger" OnClick="() => RemoveAsync(address)" Disabled="@(busy || Busy is not null)" Tip="network.own-lan-card.remove">Remove…</Btn>
                     </div>
                 }
             </div>
@@ -67,13 +67,15 @@
         else
         {
             <div class="gb-choices gb-lanchoices" role="radiogroup" aria-label="@($"Own address for {Title}")">
-                @Choice("off", "Off", $"Reached through {LanHost} and its host ports.")
-                @Choice("automatic", "Automatic", view.Block is { } b ? $"Next free address of {b.Text}, kept across restarts." : "The next free address of the block in Settings.")
+                @Choice("off", "Off", $"Reached through {LanHost} and its host ports.", Tip: "network.own-lan-card.off")
+                @Choice("automatic", "Automatic", view.Block is { } b ? $"Next free address of {b.Text}, kept across restarts." : "The next free address of the block in Settings.",
+                    Tip: "network.own-lan-card.automatic")
                 <div class="gb-choice @(choice == "static" ? "on" : null)" role="radio" aria-checked="@(choice == "static" ? "true" : "false")" tabindex="0"
                      @onclick="@(() => Choose("static"))" @onkeydown="@(e => KeyChoose(e, "static"))">
                     <span class="gb-radio @(choice == "static" ? "on" : null)"></span>
                     <div style="min-width:0;flex:1">
-                        <div class="gb-choice-title">Static</div>
+                        @* The tip on the words, not the card: the card holds the address field, which a tip mustn't cover. *@
+                        <div class="gb-choice-title"><span data-tip="network.own-lan-card.static">Static</span></div>
                         <div class="gb-choice-sub">@(view.Subnet is { } s ? $"Any free address on {s.Cidr}." : "Any free address of this host's network.")</div>
                         <input class="gb-input gb-input--sm gb-input--mono" placeholder="@StaticPlaceholder" value="@typed" aria-label="@($"Static address for {Title}")"
                                @oninput="e => typed = e.Value?.ToString()" @onclick:stopPropagation="true" @onfocus="@(() => Choose("static"))"
@@ -90,9 +92,13 @@
                 {
                     <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" OnClick="() => changing = false" Disabled="busy">Cancel</Btn>
                 }
-                @if (CanApply)
+                @if (CanApply && choice == "off")
                 {
-                    <Btn Kind="BtnKind.Primary" Size="BtnSize.Sm" OnClick="ApplyAsync" Busy="busy" Disabled="@(Busy is not null)">@(choice == "off" ? "Remove…" : "Apply")</Btn>
+                    <Btn Kind="BtnKind.Primary" Size="BtnSize.Sm" OnClick="ApplyAsync" Busy="busy" Disabled="@(Busy is not null)" Tip="network.own-lan-card.remove">Remove…</Btn>
+                }
+                else if (CanApply)
+                {
+                    <Btn Kind="BtnKind.Primary" Size="BtnSize.Sm" OnClick="ApplyAsync" Busy="busy" Disabled="@(Busy is not null)" Tip="network.own-lan-card.apply">Apply</Btn>
                 }
             </div>
         }
@@ -147,8 +153,9 @@
         ? subnet.Prefix >= 24 ? string.Join('.', LanAddresses.Text(subnet.Network).Split('.')[..3]) + ".___" : subnet.Cidr
         : "10.1.1.___";
 
-    private RenderFragment Choice(string value, string name, string sub) => @<div class="gb-choice @(choice == value ? "on" : null)" role="radio"
-        aria-checked="@(choice == value ? "true" : "false")" tabindex="0" @onclick="() => Choose(value)" @onkeydown="e => KeyChoose(e, value)">
+    // A choice card; Tip is its tip's key in the catalog.
+    private RenderFragment Choice(string value, string name, string sub, string Tip) => @<div class="gb-choice @(choice == value ? "on" : null)" role="radio"
+        aria-checked="@(choice == value ? "true" : "false")" tabindex="0" data-tip="@Tip" @onclick="() => Choose(value)" @onkeydown="e => KeyChoose(e, value)">
         <span class="gb-radio @(choice == value ? "on" : null)"></span>
         <div style="min-width:0">
             <div class="gb-choice-title">@name</div>

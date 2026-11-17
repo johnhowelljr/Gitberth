@@ -1,5 +1,5 @@
 @* One square per app: filled green running, a hollow ring stopped, an orange rounded-top square in trouble. The counts are always written next to it. *@
-<span class="gb-waffle @(Small ? "gb-waffle--sm" : null) @Class" aria-hidden="true">
+<span class="gb-waffle @(Small ? "gb-waffle--sm" : null) @Class" aria-hidden="true" data-tip="health.waffle">
     @foreach (var state in Ordered)
     {
         <i class="@AppStatus.WaffleClass(state)"></i>

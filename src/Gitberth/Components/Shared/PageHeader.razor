@@ -1,3 +1,4 @@
+@* A page's header: breadcrumb, the title (with an info button when it has a Tip, and a small "?" to the page's help when there's some), a subtitle, details and actions. *@
 <header class="gb-page-header">
     <div class="gb-page-header-text">
         @if (Breadcrumb is not null)
@@ -7,7 +8,12 @@
         <div class="gb-page-title">
             @Leading
             <h1 class="gb-h1">@Title</h1>
+            @if (Tip is not null)
+            {
+                <Tip Key="@Tip" />
+            }
             @TitleContent
+            <PageHelpLink />
         </div>
         @if (Subtitle is not null)
         {
@@ -29,4 +35,6 @@
     [Parameter] public RenderFragment? TitleContent { get; set; }
     [Parameter] public RenderFragment? Details { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
+    /// <summary>The title's tip: its key in the catalog (Help/Tips), shown by an info button after the title.</summary>
+    [Parameter] public string? Tip { get; set; }
 }

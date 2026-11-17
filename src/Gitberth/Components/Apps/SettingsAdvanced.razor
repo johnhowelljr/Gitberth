@@ -5,7 +5,7 @@
     unless the source set something in it, and nothing is marked changed.
 *@
 <SettingsSection Id="@Id" Title="Advanced" Icon="@Icons.Material.Outlined.Build" Changed="@(!Create && Draft.ChangedFields().Overlaps(Fields))"
-                 Description="Everything else Docker can set. Each is editable; most apps never need them.">
+                 Description="Everything else Docker can set. Each is editable; most apps never need them." Tip="app.settings.advanced">
     <Actions>
         @if (Create)
         {
@@ -21,14 +21,14 @@
         else
         {
                 <div class="gb-fgrid gb-fgrid--4">
-                    @Text("Hostname", SettingField.Hostname, () => Draft.Hostname, v => Draft.Hostname = v, Draft.Loaded.Hostname is { Length: 12 } && Draft.Loaded.Hostname.All(char.IsAsciiHexDigitLower) ? "Docker picked it" : null, "Docker's own")
-                    @Text("Stop signal", SettingField.Stop, () => Draft.StopSignal, v => Draft.StopSignal = v, Draft.StopSignal.Length == 0 ? "image" : null, ImageStopSignal ?? "SIGTERM")
-                    <Field Label="Stop timeout" Tag="@(Draft.StopTimeoutSeconds is null ? "default" : null)" Changed="@Is(SettingField.Stop)">
+                    @Text("Hostname", SettingField.Hostname, () => Draft.Hostname, v => Draft.Hostname = v, Draft.Loaded.Hostname is { Length: 12 } && Draft.Loaded.Hostname.All(char.IsAsciiHexDigitLower) ? "Docker picked it" : null, "Docker's own", Tip: "app.settings.advanced.hostname")
+                    @Text("Stop signal", SettingField.Stop, () => Draft.StopSignal, v => Draft.StopSignal = v, Draft.StopSignal.Length == 0 ? "image" : null, ImageStopSignal ?? "SIGTERM", Tip: "app.settings.advanced.stop-signal")
+                    <Field Label="Stop timeout" Tip="app.settings.advanced.stop-timeout" Tag="@(Draft.StopTimeoutSeconds is null ? "default" : null)" Changed="@Is(SettingField.Stop)">
                         <label class="gb-input gb-input--sm"><input type="number" min="0" placeholder="10" aria-label="Stop timeout" readonly="@RO(SettingField.Stop)" @bind="Draft.StopTimeoutSeconds" @bind:event="oninput" @bind:after="Notify" /><span class="gb-input-suffix">s</span></label>
                     </Field>
                     @if (ShowNetworkMode)
                     {
-                        <Field Label="Network mode" Changed="@Is(SettingField.NetworkMode)">
+                        <Field Label="Network mode" Tip="app.settings.advanced.network-mode" Changed="@Is(SettingField.NetworkMode)">
                             <select class="gb-input gb-input--sm" aria-label="Network mode" disabled="@RO(SettingField.NetworkMode)" @bind="Draft.NetworkMode" @bind:after="Notify">
                                 <option value="">Its networks</option>
                                 <option value="host">The host's</option>
@@ -40,21 +40,21 @@
                             </select>
                         </Field>
                     }
-                    @Flag("Init process", SettingField.Init, Draft.Init, v => Draft.Init = v)
-                    @Flag("Privileged", SettingField.Privileged, Draft.Privileged, v => Draft.Privileged = v)
-                    @Flag("Read-only root", SettingField.ReadOnlyRootfs, Draft.ReadOnlyRootfs, v => Draft.ReadOnlyRootfs = v)
-                    @Flag("Terminal (TTY)", SettingField.Terminal, Draft.Tty, v => Draft.Tty = v)
-                    @Text("Capabilities added", SettingField.Capabilities, () => Draft.CapAdd, v => Draft.CapAdd = v, null, "None")
-                    @Text("Capabilities dropped", SettingField.Capabilities, () => Draft.CapDrop, v => Draft.CapDrop = v, null, "None")
-                    @Text("DNS servers", SettingField.Dns, () => Draft.Dns, v => Draft.Dns = v, null, "Host default")
-                    @Text("GPUs", SettingField.Gpus, () => Draft.Gpus, v => Draft.Gpus = v, null, "None")
+                    @Flag("Init process", SettingField.Init, Draft.Init, v => Draft.Init = v, Tip: "app.settings.advanced.init")
+                    @Flag("Privileged", SettingField.Privileged, Draft.Privileged, v => Draft.Privileged = v, Tip: "app.settings.advanced.privileged")
+                    @Flag("Read-only root", SettingField.ReadOnlyRootfs, Draft.ReadOnlyRootfs, v => Draft.ReadOnlyRootfs = v, Tip: "app.settings.advanced.read-only-root")
+                    @Flag("Terminal (TTY)", SettingField.Terminal, Draft.Tty, v => Draft.Tty = v, Tip: "app.settings.advanced.tty")
+                    @Text("Capabilities added", SettingField.Capabilities, () => Draft.CapAdd, v => Draft.CapAdd = v, null, "None", Tip: "app.settings.advanced.cap-add")
+                    @Text("Capabilities dropped", SettingField.Capabilities, () => Draft.CapDrop, v => Draft.CapDrop = v, null, "None", Tip: "app.settings.advanced.cap-drop")
+                    @Text("DNS servers", SettingField.Dns, () => Draft.Dns, v => Draft.Dns = v, null, "Host default", Tip: "app.settings.advanced.dns")
+                    @Text("GPUs", SettingField.Gpus, () => Draft.Gpus, v => Draft.Gpus = v, null, "None", Tip: "app.settings.advanced.gpus")
                 </div>
                 <div class="gb-fgrid">
-                    @Lines("Extra hosts", SettingField.ExtraHosts, () => Draft.ExtraHosts, v => Draft.ExtraHosts = v, "host:ip, one per line", "printer.lan:10.1.1.20")
-                    @Lines("Devices", SettingField.Devices, () => Draft.Devices, v => Draft.Devices = v, "host path:container path, one per line", "/dev/dri:/dev/dri")
-                    @Lines("Ulimits", SettingField.Ulimits, () => Draft.Ulimits, v => Draft.Ulimits = v, "name=soft:hard, one per line", "nofile=65536:65536")
-                    @Lines("Security options", SettingField.SecurityOpt, () => Draft.SecurityOpt, v => Draft.SecurityOpt = v, "One per line", "no-new-privileges")
-                    @Lines("Sysctls", SettingField.Sysctls, () => Draft.Sysctls, v => Draft.Sysctls = v, "key=value, one per line", "net.core.somaxconn=1024")
+                    @Lines("Extra hosts", SettingField.ExtraHosts, () => Draft.ExtraHosts, v => Draft.ExtraHosts = v, "host:ip, one per line", "printer.lan:10.1.1.20", Tip: "app.settings.advanced.extra-hosts")
+                    @Lines("Devices", SettingField.Devices, () => Draft.Devices, v => Draft.Devices = v, "host path:container path, one per line", "/dev/dri:/dev/dri", Tip: "app.settings.advanced.devices")
+                    @Lines("Ulimits", SettingField.Ulimits, () => Draft.Ulimits, v => Draft.Ulimits = v, "name=soft:hard, one per line", "nofile=65536:65536", Tip: "app.settings.advanced.ulimits")
+                    @Lines("Security options", SettingField.SecurityOpt, () => Draft.SecurityOpt, v => Draft.SecurityOpt = v, "One per line", "no-new-privileges", Tip: "app.settings.advanced.security-opt")
+                    @Lines("Sysctls", SettingField.Sysctls, () => Draft.Sysctls, v => Draft.Sysctls = v, "key=value, one per line", "net.core.somaxconn=1024", Tip: "app.settings.advanced.sysctls")
                 </div>
         }
     </ChildContent>
@@ -130,27 +130,27 @@
         return Changed.InvokeAsync();
     }
 
-    // ---- Small field builders ----
+    // ---- Small field builders (Tip: each label's tip, given by name at each call so the tips' test finds it) ----
 
-    private RenderFragment Text(string label, SettingField field, Func<string> get, Action<string> set, string? tag, string placeholder) => __builder =>
+    private RenderFragment Text(string label, SettingField field, Func<string> get, Action<string> set, string? tag, string placeholder, string Tip) => __builder =>
     {
-        <Field Label="@label" Tag="@tag" Changed="@Is(field)">
+        <Field Label="@label" Tag="@tag" Changed="@Is(field)" Tip="@Tip">
             <input class="gb-input gb-input--sm gb-input--mono" value="@get()" placeholder="@placeholder" aria-label="@label" readonly="@RO(field)" spellcheck="false"
                    @oninput="e => Change(() => set(e.Value?.ToString() ?? string.Empty))" />
         </Field>
     };
 
-    private RenderFragment Lines(string label, SettingField field, Func<string> get, Action<string> set, string help, string placeholder) => __builder =>
+    private RenderFragment Lines(string label, SettingField field, Func<string> get, Action<string> set, string help, string placeholder, string Tip) => __builder =>
     {
-        <Field Label="@label" Help="@help" Changed="@Is(field)">
+        <Field Label="@label" Help="@help" Changed="@Is(field)" Tip="@Tip">
             <textarea class="gb-input" rows="2" spellcheck="false" placeholder="@placeholder" aria-label="@label" readonly="@RO(field)" style="min-height:58px"
                       value="@get()" @oninput="e => Change(() => set(e.Value?.ToString() ?? string.Empty))"></textarea>
         </Field>
     };
 
-    private RenderFragment Flag(string label, SettingField field, bool value, Action<bool> set) => __builder =>
+    private RenderFragment Flag(string label, SettingField field, bool value, Action<bool> set, string Tip) => __builder =>
     {
-        <Field Label="@label" Changed="@Is(field)">
+        <Field Label="@label" Changed="@Is(field)" Tip="@Tip">
             <div class="gb-row" style="height:30px">
                 <button type="button" role="switch" aria-checked="@(value ? "true" : "false")" aria-label="@label" class="gb-switch @(value ? "on" : null)" disabled="@RO(field)"
                         @onclick="() => Change(() => set(!value))"></button>

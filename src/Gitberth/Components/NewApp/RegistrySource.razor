@@ -11,7 +11,7 @@
     <section class="gb-card" aria-labelledby="gb-reg-title">
         <div class="gb-card-head">
             <div class="gb-card-title" id="gb-reg-title">
-                <SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Registry image
+                <SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Registry image<Tip Key="newapp.registry" />
                 <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Docker Hub, ghcr.io, or any registry you add</span>
             </div>
         </div>
@@ -39,11 +39,11 @@
                         <div class="r-extra">
                             @if (LocalHas(r.Name) is { } local)
                             {
-                                <span class="gb-tag gb-tag--good"><SvgIcon Icon="@Icons.Material.Outlined.Check" />On this host: @local</span>
+                                <span class="gb-tag gb-tag--good" data-tip="newapp.on-host"><SvgIcon Icon="@Icons.Material.Outlined.Check" />On this host: @local</span>
                             }
                             @if (r.Stars > 0)
                             {
-                                <span class="gb-t3" style="font-size:12px" title="Stars on Docker Hub">★ @Stars(r.Stars)</span>
+                                <span class="gb-t3" style="font-size:12px" data-tip-text="Stars on Docker Hub">★ @Stars(r.Stars)</span>
                             }
                         </div>
                         @if (on)
@@ -70,7 +70,7 @@
         {
             <div class="gb-card-foot" style="flex-direction:column;align-items:stretch;gap:14px;color:inherit;font-size:13.5px">
                 <div class="gb-fgrid" style="grid-template-columns:minmax(0,1fr) minmax(0,1fr)">
-                    <Field Label="Tag" For="gb-reg-tag" Help="@(tags.Count > 0 ? null : "latest unless you pick another; a digest (sha256:…) pins it.")">
+                    <Field Label="Tag" For="gb-reg-tag" Tip="newapp.registry.tag" Help="@(tags.Count > 0 ? null : "latest unless you pick another; a digest (sha256:…) pins it.")">
                         <input id="gb-reg-tag" class="gb-input gb-input--mono" value="@tag" list="gb-reg-tags" @onchange="SetTagAsync" spellcheck="false" />
                         <datalist id="gb-reg-tags">
                             @foreach (var t in tags)
@@ -79,7 +79,7 @@
                             }
                         </datalist>
                     </Field>
-                    <Field Label="Sign in with" For="gb-reg-cred" Help="@CredentialHelp">
+                    <Field Label="Sign in with" For="gb-reg-cred" Tip="newapp.registry.sign-in" Help="@CredentialHelp">
                         <select id="gb-reg-cred" class="gb-input" value="@(registryId?.ToString(CultureInfo.InvariantCulture) ?? "")" @onchange="SetCredential">
                             <option value="">@(AutoCredential is { } auto ? $"Automatic: {auto.Username} on {auto.Host}" : "No credential (public image)")</option>
                             @foreach (var c in credentials)
@@ -124,8 +124,8 @@
                             </span>
                         }
                     </div>
-                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Sync" OnClick="CheckAsync" Busy="checking">Check</Btn>
-                    <Btn Kind="BtnKind.Primary" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="ContinueAsync" Busy="Busy" Disabled="@(ImageReference.Parse(Reference) is null)">Continue</Btn>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Sync" OnClick="CheckAsync" Busy="checking" Tip="newapp.registry.check">Check</Btn>
+                    <Btn Kind="BtnKind.Primary" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="ContinueAsync" Busy="Busy" Disabled="@(ImageReference.Parse(Reference) is null)" Tip="newapp.continue">Continue</Btn>
                 </div>
             </div>
         }
@@ -133,7 +133,7 @@
     <section class="gb-card" aria-labelledby="gb-pop-title">
         <div class="gb-card-head">
             <div class="gb-card-title" id="gb-pop-title">
-                <SvgIcon Icon="@Icons.Material.Outlined.AutoAwesome" />Popular
+                <SvgIcon Icon="@Icons.Material.Outlined.AutoAwesome" />Popular<Tip Key="newapp.registry.popular" />
                 <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Ports, volumes and checks filled in</span>
             </div>
         </div>

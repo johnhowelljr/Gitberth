@@ -5,6 +5,22 @@ tunnel, DNS record or certificate, or an app that stops answering, sends a [noti
 public status page can show how your apps are doing. While an app can't be served, its domains show a clean "temporarily
 unavailable" page instead of Cloudflare's error.
 
+```mermaid
+flowchart TD
+    check["Every 60 s: ask the app<br/>as a visitor would"] --> where{"Does it have<br/>a domain?"}
+    where -->|"yes"| domain["https://app.example.com/<br/>through Cloudflare"]
+    where -->|"no"| lan["Its LAN address"]
+    domain --> answer{"Below 500,<br/>and not the<br/>down page?"}
+    lan --> answer
+    answer -->|"yes"| up["Up"]
+    answer -->|"no, twice<br/>in a row"| down["Down: an<br/>incident starts"]
+    down --> notify["Notification: An<br/>app goes down"]
+    up -->|"after an incident"| back["Notification: it's back up,<br/>and how long it was down"]
+    down --> page["Status page: Partial<br/>outage or Major outage"]
+    crashed["Its container isn't<br/>running: crashed, say"] --> downpage["Its domains show<br/>the down page"]
+    downpage -.-> answer
+```
+
 ## What's checked
 
 Every app is checked every minute, on its own, with nothing to set up. **Check each app every** in **Settings › Uptime
@@ -48,12 +64,16 @@ the checked address in `address`.
 
 ## What you see
 
-- The app's **Overview** has an **Uptime** card: whether it's up, its uptime over the last 24 hours, 7 days and 30 days,
-  its response times over the last day, its recent incidents, the address it checks and when, and its certificate's
-  expiry. **Check now** checks it at once.
+- The app's **Overview** has an **Uptime** card: whether it's **Up**, **Down**, **Paused**, **Not checked** or
+  **Checking**, its uptime over the last **24 hours**, **7 days** and **30 days**, its **Response time** over the last
+  day, its **Recent incidents**, what it **Checks** and when it was **Last checked**, and its **Certificate**'s expiry.
+  **Check now** checks it at once.
 - The card also has the app's **Uptime check** switch, and the **Path** it asks for (`/` unless you set one, like
-  `/health`). Each saves on its own.
-- The **Health** page shows each app's uptime under its state.
+  `/health`), saved with **Save path**. Each saves on its own.
+
+![An app's Uptime card: up, 100% over 24 hours, 7 days and 30 days, its response times, what it checks, its certificate, and the Uptime check switch with its path](../images/app-uptime.webp)
+
+- The **Health** page shows each app's uptime under its state, like **Uptime: up**.
 
 The history stays in `/data/uptime.db`: every check for 7 days, an hourly summary and the incidents for 400 days.
 
@@ -76,11 +96,12 @@ While it's off both answer `404`.
 |---|---|
 | The banner | **All systems operational**, **Partial outage** (some apps are down) or **Major outage** (every app is). |
 | Each app | Its name as Gitberth shows it, whether it's operational or down, a bar per day for 90 days (green, amber or red by that day's uptime; hover one for its percentage), its uptime over the 90 days, and its response time when chosen. |
-| Past 14 days | Each incident: "web was down for 4 minutes on Nov 12, 14:05–14:09 UTC: Server error 502". |
+| Past 14 days | Each incident: "website was down for 4 minutes on Nov 12, 14:05–14:09 UTC: Server error 502". |
 
 The page never shows an address, a container's name or an error's own text, and everything on it is escaped. It
 refreshes itself every minute, and reads well on a phone, in light and dark.
 
+![The public status page: all systems operational, and each app with its uptime](../images/status-page.webp)
 ### On the internet
 
 Give the status page a **Host name on the internet**, like `status.example.com`, which needs [domains](domains.md). The
@@ -109,6 +130,8 @@ an address or an error.
 
 A [protected](domains.md#protect-a-domain) domain's down page says nothing beyond its name. While Cloudflare Access works,
 visitors sign in before they see it, as they would for the app.
+
+![The down page a visitor sees for app.example.com while its app isn't running, with the message Back by 9:00 UTC.](../images/down-page.webp)
 
 ### Turn it off, or add a message
 

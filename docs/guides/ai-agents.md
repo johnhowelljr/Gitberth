@@ -9,7 +9,7 @@ make and can revoke, and everything it changes is in the [audit log](audit-log.m
 
 ## How it works
 
-- The MCP server is at `/mcp` on Gitberth's own address (`http://192.168.1.10:8080/mcp`), using stateless Streamable
+- The MCP server is at `/mcp` on Gitberth's own address (`http://192.168.50.10:8080/mcp`), using stateless Streamable
   HTTP: no sessions, so it works behind any proxy. The same tools are at `/api/v1` for scripts.
 - Every tool calls the same service the button or form on the web page calls, with the same checks. An agent can't do
   anything a signed-in person couldn't, or skip a check a person gets.
@@ -25,6 +25,23 @@ make and can revoke, and everything it changes is in the [audit log](audit-log.m
   one of that branch (or one production ran before). A preview's code reaches production only through `promote_preview`.
 
 [The tools reference](../reference/api.md) lists every tool with its arguments.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 24}}}%%
+flowchart TD
+    ask["You ask the agent<br/>in plain words"] --> request["It calls a tool: /mcp,<br/>or /api/v1/tools/name"]
+    request --> origin{"Sent from a<br/>browser page?"}
+    origin -->|"yes"| browser["403: refused"]
+    origin -->|"no"| token{"A good token:<br/>not revoked<br/>or expired?"}
+    token -->|"no"| bad["401; 429 after<br/>10 bad ones in<br/>15 minutes"]
+    token -->|"yes"| access{"Does its<br/>access allow<br/>the tool?"}
+    access -->|"no"| denied["Refused with<br/>the access it needs,<br/>in the audit log"]
+    access -->|"yes"| confirm{"Destructive,<br/>without<br/>confirm?"}
+    confirm -->|"yes"| again["Asked to repeat<br/>the app's name"]
+    confirm -->|"no"| service["The same service<br/>a button on the<br/>page calls"]
+    service --> result["Compact JSON back:<br/>secrets by name only"]
+    service --> audit["An audit log entry<br/>under the token's name"]
+```
 
 ## Make a token
 
@@ -63,13 +80,13 @@ token may call it.
 
 ## Connect a client
 
-Each client's setup is shown with the new token in Settings, ready to paste. In what follows, `http://192.168.1.10:8080`
+Each client's setup is shown with the new token in Settings, ready to paste. In what follows, `http://192.168.50.10:8080`
 stands for your Gitberth's address.
 
 ### Claude Code
 
 ```bash
-claude mcp add --transport http gitberth http://192.168.1.10:8080/mcp --header "Authorization: Bearer gbt_…"
+claude mcp add --transport http gitberth http://192.168.50.10:8080/mcp --header "Authorization: Bearer gbt_…"
 ```
 
 Add `--scope user` to have it in every project. `/mcp` in Claude Code shows it connected.
@@ -83,7 +100,7 @@ In `.vscode/mcp.json` (or **MCP: Open User Configuration** for every workspace):
   "servers": {
     "gitberth": {
       "type": "http",
-      "url": "http://192.168.1.10:8080/mcp",
+      "url": "http://192.168.50.10:8080/mcp",
       "headers": { "Authorization": "Bearer ${input:gitberth-token}" }
     }
   },
@@ -103,7 +120,7 @@ In `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project):
 {
   "mcpServers": {
     "gitberth": {
-      "url": "http://192.168.1.10:8080/mcp",
+      "url": "http://192.168.50.10:8080/mcp",
       "headers": { "Authorization": "Bearer gbt_…" }
     }
   }
@@ -120,7 +137,7 @@ Claude Desktop reaches Gitberth through [mcp-remote](https://github.com/geelen/m
   "mcpServers": {
     "gitberth": {
       "command": "npx",
-      "args": ["mcp-remote", "http://192.168.1.10:8080/mcp", "--allow-http", "--header", "Authorization:${GITBERTH_AUTH}"],
+      "args": ["mcp-remote", "http://192.168.50.10:8080/mcp", "--allow-http", "--header", "Authorization:${GITBERTH_AUTH}"],
       "env": { "GITBERTH_AUTH": "Bearer gbt_…" }
     }
   }
@@ -133,7 +150,7 @@ connectors are reached from Anthropic's cloud and can't send this header, so the
 
 ### Other MCP clients
 
-Any client that speaks Streamable HTTP: the URL `http://192.168.1.10:8080/mcp` and the header
+Any client that speaks Streamable HTTP: the URL `http://192.168.50.10:8080/mcp` and the header
 `Authorization: Bearer gbt_…`.
 
 ### Scripts: the HTTP API
@@ -142,12 +159,12 @@ The same tools, with the same token, access and audit log:
 
 ```bash
 # Every tool, its description, its input schema, and whether this token may call it ("allowed")
-curl -s http://192.168.1.10:8080/api/v1/tools -H "Authorization: Bearer gbt_…"
+curl -s http://192.168.50.10:8080/api/v1/tools -H "Authorization: Bearer gbt_…"
 
 # Call one: a JSON object of its arguments
-curl -s -X POST http://192.168.1.10:8080/api/v1/tools/deploy_app \
+curl -s -X POST http://192.168.50.10:8080/api/v1/tools/deploy_app \
   -H "Authorization: Bearer gbt_…" -H "Content-Type: application/json" \
-  -d '{"app": "shop", "wait": true}'
+  -d '{"app": "orders-api", "wait": true}'
 ```
 
 `/api/v1/openapi.json` describes every tool as an OpenAPI 3.1 document, for agent frameworks and API clients that read
@@ -158,13 +175,13 @@ one. See [the tools reference](../reference/api.md#calling-a-tool) for the answe
 Ask in plain words; the agent picks the tools. For example:
 
 - "Which of my apps aren't running, and why?" (`list_apps`, `get_app`, `get_app_logs`)
-- "Deploy shop and tell me if it worked." (`deploy_app` with `wait`)
-- "The last deploy of shop broke the checkout: roll it back." (`list_deployments`, `rollback_app`)
-- "Build shop from commit 1d2948c of main." (`deploy_app` with `commit`)
-- "Give blog a Postgres database." (`add_database`)
+- "Deploy orders-api and tell me if it worked." (`deploy_app` with `wait`)
+- "The last deploy of orders-api broke the checkout: roll it back." (`list_deployments`, `rollback_app`)
+- "Build orders-api from commit 1d2948c of main." (`deploy_app` with `commit`)
+- "Give website a Postgres database." (`add_database`)
 - "Install Miniflux for me." (`list_templates`, then `create_postgres_server` if there's no Postgres server yet, then
   `create_app` with `template` and its inputs)
-- "Set STRIPE_KEY on shop as a secret, for production only." (`set_env_vars`)
+- "Set STRIPE_KEY on orders-api as a secret, for production only." (`set_env_vars`)
 - "What did the nightly report token change this week?" (`query_audit_log`)
 
 ## Safety

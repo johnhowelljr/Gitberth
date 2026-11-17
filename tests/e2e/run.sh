@@ -37,6 +37,9 @@
 #                      install runs); E2E_TEST_TIMINGS, when set, is passed on as the waits themselves
 #   E2E_TEMPLATES=a,b  the template smoke's templates (empty: every template)
 #   E2E_DIND_IMAGE, E2E_DIND_ARGS   the rig's engine (docker:29-dind) and dockerd's flags, e.g. --registry-mirror=...
+#   E2E_HOSTNAME       the rig's host name (gbe2e-host), E2E_LAN_SUBNET, E2E_LAN_GATEWAY and E2E_RIG_IP its LAN,
+#   E2E_GITBERTH_IMAGE the name Gitberth's image runs under (gitberth:e2e), and E2E_HIDE_RIG=1 the rig's own containers
+#                      out of Gitberth's pages (its helper label): the docs' screenshots (shots/run.sh) set them
 #   E2E_NUGET_VOLUME   the unit tests' NuGet cache (gbe2e-nuget)
 # Everything it makes on this host is named gitberth-e2e or gbe2e-*. It never touches anything else.
 set -eu
@@ -59,6 +62,7 @@ LAN_SUBNET=${E2E_LAN_SUBNET:-192.168.$NET_N.0/24}
 LAN_GATEWAY=${E2E_LAN_GATEWAY:-192.168.$NET_N.1}
 RIG_IP=${E2E_RIG_IP:-192.168.$NET_N.10}
 UI_PORT=${E2E_UI_PORT:-$PORT_N}
+RIG_HOSTNAME=${E2E_HOSTNAME:-gbe2e-host}
 DIND_IMAGE=${E2E_DIND_IMAGE:-docker:29-dind}
 DIND_ARGS=${E2E_DIND_ARGS:-}
 TAB=$(printf '\t')
@@ -130,13 +134,20 @@ lanes_of() {
 # ---- one rig
 
 engine() {
+  # Its network is made again (and its engine with it: their volume stays) when it has another subnet than asked for.
+  had=$(docker network inspect -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' "$LAN" 2>/dev/null || true)
+  if [ -n "$had" ] && [ "$had" != "$LAN_SUBNET" ]; then
+    say "the rig's network $LAN had the subnet $had; making it again with $LAN_SUBNET (the engine's volume stays)"
+    docker rm -f "$RIG" >/dev/null 2>&1 || true
+    docker network rm "$LAN" >/dev/null
+  fi
   docker network inspect "$LAN" >/dev/null 2>&1 \
     || docker network create --subnet "$LAN_SUBNET" --gateway "$LAN_GATEWAY" "$LAN" >/dev/null
-  # Its engine is made again (its volume and images stay) when its image or dockerd's flags changed.
+  # Its engine is made again (its volume and images stay) when its image, dockerd's flags or its host name changed.
   if docker container inspect "$RIG" >/dev/null 2>&1; then
-    had=$(docker container inspect -f '{{.Config.Image}}|{{index .Config.Labels "gbe2e.args"}}' "$RIG")
-    if [ "$had" != "$DIND_IMAGE|$DIND_ARGS" ]; then
-      say "the rig's engine had other settings ($had); starting it again with $DIND_IMAGE $DIND_ARGS (its volume stays)"
+    had=$(docker container inspect -f '{{.Config.Image}}|{{index .Config.Labels "gbe2e.args"}}|{{.Config.Hostname}}' "$RIG")
+    if [ "$had" != "$DIND_IMAGE|$DIND_ARGS|$RIG_HOSTNAME" ]; then
+      say "the rig's engine had other settings ($had); starting it again with $DIND_IMAGE $DIND_ARGS as $RIG_HOSTNAME (its volume stays)"
       docker rm -f "$RIG" >/dev/null
     fi
   fi
@@ -144,7 +155,7 @@ engine() {
     say "starting the rig's own Docker engine ($RIG, $RIG_IP on $LAN, UI on port $UI_PORT)"
     # The dind image hands arguments that start with - to dockerd: one word each, on purpose.
     # shellcheck disable=SC2086
-    docker run -d --privileged --name "$RIG" --hostname gbe2e-host --network "$LAN" --ip "$RIG_IP" -p "$UI_PORT:8080" \
+    docker run -d --privileged --name "$RIG" --hostname "$RIG_HOSTNAME" --network "$LAN" --ip "$RIG_IP" -p "$UI_PORT:8080" \
       -v "$VOLUME:/var/lib/docker" --label gbe2e.rig=1 --label "gbe2e.args=$DIND_ARGS" "$DIND_IMAGE" $DIND_ARGS >/dev/null
   fi
   [ "$(docker container inspect -f '{{.State.Running}}' "$RIG")" = "true" ] || docker start "$RIG" >/dev/null
@@ -156,10 +167,11 @@ engine() {
   done
 }
 
-# Only what the rig builds and runs goes in: Gitberth's sources and this folder (not an earlier run's report).
+# Only what the rig builds and runs goes in: Gitberth's sources, the docs it embeds for its Help, and this folder (not an
+# earlier run's report).
 sync_tree() {
   (cd "$ROOT" && tar --exclude=bin --exclude=obj --exclude=__pycache__ --exclude=.pytest_cache --exclude=tests/e2e/out \
-    -cf - Dockerfile .dockerignore LICENSE.md docker-compose.yml src/Gitberth tests/e2e) \
+    -cf - Dockerfile .dockerignore LICENSE.md docker-compose.yml docs src/Gitberth tests/e2e) \
     | docker exec -i "$RIG" sh -c 'rm -rf /e2e/src.new && mkdir -p /e2e/src.new && tar -xf - -C /e2e/src.new && rm -rf /e2e/src && mv /e2e/src.new /e2e/src'
 }
 
@@ -172,7 +184,8 @@ inner() {
     test) [ -z "${E2E_TEST_TIMINGS+set}" ] || set -- -e "E2E_TEST_TIMINGS=$E2E_TEST_TIMINGS" "$@" ;;
     *) refuse "E2E_TIMINGS is test or production, not $E2E_TIMINGS" ;;
   esac
-  docker exec -e E2E_PUBLIC_HOST="$RIG_IP" -e E2E_KEEP="${E2E_KEEP:-}" -e E2E_TEMPLATES="${E2E_TEMPLATES:-}" "$@"
+  docker exec -e E2E_PUBLIC_HOST="$RIG_IP" -e E2E_KEEP="${E2E_KEEP:-}" -e E2E_TEMPLATES="${E2E_TEMPLATES:-}" \
+    -e E2E_GITBERTH_IMAGE="${E2E_GITBERTH_IMAGE:-}" -e E2E_HIDE_RIG="${E2E_HIDE_RIG:-}" "$@"
 }
 
 # ---- the unit tests: on a copy of the tree, so a checkout never gets root's bin/ and obj/

@@ -11,13 +11,13 @@
     when, and its domain's certificate. Check now runs one check at once. The check itself (on or off, and the path it
     asks for) is saved here, on its own.
 *@
-<SectionCard Title="Uptime" Icon="@Icons.Material.Outlined.MonitorHeart" Id="uptime" Class="gb-upcard">
+<SectionCard Title="Uptime" Icon="@Icons.Material.Outlined.MonitorHeart" Id="uptime" Class="gb-upcard" Tip="app.uptime">
     <Actions>
-        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="CheckNowAsync" Busy="checking" Disabled="@(checking || !checkOn)">Check now</Btn>
+        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="CheckNowAsync" Busy="checking" Disabled="@(checking || !checkOn)" Tip="app.uptime.check-now">Check now</Btn>
     </Actions>
     <ChildContent>
         <div class="gb-up-head">
-            <span class="gb-pill2 @Tone(state.Status)">
+            <span class="gb-pill2 @Tone(state.Status)" data-tip="@StateTip(state.Status)">
                 @if (state.Status == UptimeStatus.Up)
                 {
                     <i class="gb-st-dot gb-st-dot--running"></i>
@@ -47,19 +47,19 @@
             {
                 <div class="gb-up-stat">
                     <span class="gb-up-stat-v">@(value is double v ? Percent(v) : "–")</span>
-                    <span class="gb-up-stat-k">@label</span>
+                    <span class="gb-up-stat-k"><Tip Key="app.uptime.ratio">@label</Tip></span>
                 </div>
             }
         </div>
 
-        <TimeChart Title="Response time" Subject="@Name" Times="times" End="end" Window="TimeSpan.FromHours(24)" MaxGap="TimeSpan.FromMinutes(Math.Max(5, interval * 3 / 60.0))"
+        <TimeChart Title="Response time" Tip="app.uptime.chart.response-time" Subject="@Name" Times="times" End="end" Window="TimeSpan.FromHours(24)" MaxGap="TimeSpan.FromMinutes(Math.Max(5, interval * 3 / 60.0))"
                    Series="@([new ChartSeries("Response time", 1, values)])" ValueFormat="Ms" Floor="100" Area="true"
                    EmptyText="@(state.Address is null ? "Not checked" : "No checks in the last day yet")" Down="downSpans" />
 
         @if (incidents.Count > 0)
         {
             <div class="gb-up-incidents">
-                <div class="gb-label">Recent incidents</div>
+                <div class="gb-label"><Tip Key="app.uptime.incidents">Recent incidents</Tip></div>
                 @foreach (var i in incidents.Take(5))
                 {
                     <div class="gb-up-incident @(i.Ended is null ? "open" : null)">
@@ -76,10 +76,10 @@
         <dl class="gb-kv gb-up-kv">
             @if (state.Address is { } address)
             {
-                <dt>Checks</dt>
+                <dt><Tip Key="app.uptime.checks">Checks</Tip></dt>
                 <dd><span class="gb-mono" style="overflow-wrap:anywhere">@address</span></dd>
             }
-            <dt>Last checked</dt>
+            <dt><Tip Key="app.uptime.last-checked">Last checked</Tip></dt>
             <dd>
                 @(state.Last is { } last ? $"{Format.Ago(last.At)}{(last.Status is int s ? $" · HTTP {s}" : "")}{(last.Ms is int ms ? $" · {ms} ms" : "")}" : "Not yet")
                 @if (state.Status is not (UptimeStatus.Paused or UptimeStatus.NotChecked))
@@ -89,19 +89,19 @@
             </dd>
             @if (state.CertificateExpires is { } expires)
             {
-                <dt>Certificate</dt>
+                <dt><Tip Key="app.uptime.certificate">Certificate</Tip></dt>
                 <dd>Expires @expires.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)<span class="gb-t3">in @Math.Max(0, (int)(expires - DateTime.UtcNow).TotalDays) days</span></dd>
             }
         </dl>
     </ChildContent>
     <Foot>
         <div class="gb-up-set">
-            <SwitchRow @key="@($"uc{switchKey}")" Title="Uptime check" Value="checkOn" ValueChanged="SetCheckAsync" Disabled="saving"
+            <SwitchRow @key="@($"uc{switchKey}")" Title="Uptime check" Value="checkOn" ValueChanged="SetCheckAsync" Disabled="saving" Tip="app.uptime.check"
                        Sub="Its main domain through Cloudflare, or its web port on the LAN, the way a visitor reaches it." />
             @if (checkOn)
             {
                 <div class="gb-up-path">
-                    <label class="gb-input gb-input--sm"><span class="gb-input-prefix gb-t3">Path</span><input id="uptime-path" value="@path" placeholder="/" aria-label="The path the uptime check asks for"
+                    <label class="gb-input gb-input--sm"><span class="gb-input-prefix gb-t3"><Tip Key="app.uptime.path">Path</Tip></span><input id="uptime-path" value="@path" placeholder="/" aria-label="The path the uptime check asks for"
                            @oninput="e => path = e.Value?.ToString()" disabled="@saving" /></label>
                     <Btn Size="BtnSize.Sm" Kind="BtnKind.Secondary" OnClick="SavePathAsync" Disabled="@(saving || (path ?? "").Trim() == (savedPath ?? ""))">Save path</Btn>
                 </div>
@@ -271,6 +271,18 @@
         UptimeStatus.NotChecked => Icons.Material.Outlined.RemoveCircleOutline,
         _ => Icons.Material.Outlined.HourglassEmpty,
     };
+
+    // The state pill's tip, given by name (Tip: "…") so the tips' test finds each key.
+    private static string StateTip(UptimeStatus s) => s switch
+    {
+        UptimeStatus.Up => Key(Tip: "app.uptime.state.up"),
+        UptimeStatus.Down => Key(Tip: "app.uptime.state.down"),
+        UptimeStatus.Paused => Key(Tip: "app.uptime.state.paused"),
+        UptimeStatus.NotChecked => Key(Tip: "app.uptime.state.not-checked"),
+        _ => Key(Tip: "app.uptime.state.checking"),
+    };
+
+    private static string Key(string Tip) => Tip;
 
     /// <summary>How the app stands, in a word or two.</summary>
     public static string StateText(AppUptime s) => s.Status switch

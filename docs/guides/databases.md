@@ -4,6 +4,21 @@ An app can have a Postgres database or a Redis of its own, added from its page, 
 Gitberth makes the database and its login, and puts the connection string in a variable the app reads, such as
 `DATABASE_URL`. Each [preview](previews.md) gets its own, empty or a copy of production's, and loses it when it goes.
 
+```mermaid
+flowchart TD
+    add["Settings, Databases: Add database"] --> kind{"Postgres or Redis?"}
+    kind -->|"Postgres"| pg["A database and a role on the server, named after the app"]
+    kind -->|"Redis"| redis["A Redis container of its own, with a volume"]
+    pg --> pgvar["Its connection string in DATABASE_URL"]
+    redis --> redisvar["Its connection string in REDIS_URL"]
+    pgvar --> app{"What kind of app?"}
+    redisvar --> app
+    app -->|"Git or Compose"| deploy["A deploy without a build sets the variable"]
+    app -->|"any other"| recreate["The container is recreated with it"]
+    deploy -->|"previews on"| preview["Each preview gets its own: empty, or a copy"]
+    preview --> dropped["Dropped when the preview goes"]
+```
+
 ## Postgres servers
 
 Gitberth puts each app's Postgres database on a Postgres server of this host: a container of a Postgres image
@@ -44,11 +59,13 @@ It shows in **Apps** like any other app, and becomes the default server unless y
    Gitberth's value takes its place.
 4. Click **Add database**.
 
+![An app's Settings tab at Databases: its Postgres database with Copy connection string, its variable and where it's reached, and the row that adds another](../images/app-databases.webp)
+
 | | Postgres | Redis |
 |---|---|---|
-| What Gitberth makes | A database and a role of the app's own, both named after the app (`shop`, `my_shop`; `shop_2` when the server has a `shop` already). The role owns the database, and only it (and the server's superusers) may connect. | A container of the app's own, `gb-shop_redis`, from `redis:8-alpine`, with a password, its data appended to a named volume of its own (`gb-shop_redis-data`). |
-| Where the app reaches it | The server's name on Gitberth's network | `shop-redis` on Gitberth's network, a name no app can ever take |
-| The variable | `postgres://shop:<password>@postgres:5432/shop` | `redis://:<password>@shop-redis:6379` |
+| What Gitberth makes | A database and a role of the app's own, both named after the app (`website`, `orders_api`; `website_2` when the server has a `website` already). The role owns the database, and only it (and the server's superusers) may connect. | A container of the app's own, `gb-website_redis`, from `redis:8-alpine`, with a password, its data appended to a named volume of its own (`gb-website_redis-data`). |
+| Where the app reaches it | The server's name on Gitberth's network | `website-redis` on Gitberth's network, a name no app can ever take |
+| The variable | `postgres://website:<password>@postgres:5432/website` | `redis://:<password>@website-redis:6379` |
 
 The app takes the variable the way it takes any change of its settings:
 
@@ -58,7 +75,7 @@ The app takes the variable the way it takes any change of its settings:
 | A [Compose app](compose-apps.md) (a repo's, a pasted file's or a [template's](templates.md)) | As a Git app, in the project's `.env`, and in parts too (`DATABASE_URL_HOST`, `_PORT`, `_NAME`, `_USER`, `_PASSWORD`) for a file that wants them one by one: see [Use a database's parts](compose-apps.md#use-a-databases-parts). A service gets them where its file uses them. |
 | Any other app: from a registry, a local image, made by hand, or a container already on the host | It's put in the container's environment by the change engine, which recreates it with its checks, as an edit on its **Environment** tab would. A container that isn't on Gitberth's network joins it first, so it reaches the database by name. |
 
-Every app can have databases but Gitberth itself and its tunnel. A preview's follow its parent's (see [Previews](#previews)),
+Every app can have databases but Gitberth itself and its tunnel (the app's **Settings** tab has no **Databases** section for them). A preview's follow its parent's (see [Previews](#previews)),
 and a container that Docker Compose made can't get one from here: Compose would undo the change to its environment.
 
 > **Note**
@@ -77,6 +94,38 @@ and a container that Docker Compose made can't get one from here: Compose would 
 - The **Overview** has a **Databases** card.
 - The [audit log](audit-log.md) records each database added, removed, made for a preview or dropped with one, and each
   server set up, by name only: no password ever goes in it.
+
+## Connect to a database
+
+**Connect** gives the host, port, user, password and database of a database container, ready to copy, from your PC or
+from another app. It works for any container Gitberth recognizes as one, whoever started it: Postgres (and PostGIS,
+TimescaleDB, pgvector), MySQL and MariaDB, MongoDB, Redis (and Valkey, KeyDB, Dragonfly) and RabbitMQ. The user, password
+and database come from the container's own settings, such as its `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`
+(or Redis's `--requirepass`), with the image's defaults where it sets none.
+
+1. Open the database's page and click **Connect** in the header. It's there while the database runs; the **Overview**'s
+   **Addresses** card and the **Network** tab have it too.
+2. **Connect to postgres** opens on the tab that reaches it:
+   - **LAN**: **From any device on your network.** Use it for a database client on your PC. The host is the host's LAN
+     address and the port its host port, like `192.168.50.10:5432`. A database reached at more than one address (its
+     own LAN address too, say) has **Reach it at**, to pick one.
+   - **Internal**: **From containers on gitberth.** Use it for another app. The host is the container's name, like
+     `postgres`, on its own port. The line says which apps' settings name it already, like **Used by website.**
+3. Copy what you need: **Host**, **Port**, **User**, **Password**, **Database**, or the **URL** that puts them together,
+   like `postgres://postgres:…@postgres:5432/postgres`. The password shows as dots until **Show**; copying always copies
+   the password itself.
+
+When the database isn't published, the **LAN** tab says so (**postgres isn't published on the LAN.**, or that it's
+published on the host only, where the LAN can't reach it) and offers **Publish on LAN**. From the header, that opens the
+**Network** tab; on the **Network** tab, it picks the database's port and a free host port, and goes straight to the
+change dialog (for a container Docker Compose manages, to the lines for its Compose file). See
+[Publish a port on the LAN](networking.md#publish-a-port-on-the-lan). When it's on no shared network, the
+**Internal** tab says to join `gitberth` under **Networks** on its **Network** tab first.
+
+To connect another app, put the **Internal** URL in one of its variables on its **Environment** tab, such as
+`DATABASE_URL`: the two must be on the same network, and every app Gitberth makes is on `gitberth`. A database added to
+an app in **Settings › Databases** needs none of this: Gitberth sets the variable for it (see
+[Add a database to an app](#add-a-database-to-an-app)).
 
 ## Previews
 
@@ -107,7 +156,7 @@ A preview gets its own database for a variable when:
 
 A variable the app gives a value for **Previews** on its **Environment** tab is yours: Gitberth leaves it as it is.
 
-The preview's database is named after production's and the preview, such as `shop_pr_12` for pull request 12 of `shop`,
+The preview's database is named after production's and the preview, such as `website_pr_12` for pull request 12 of `website`,
 and is made before the preview's first build. The preview's deploys set the same variable, pointing at it: the same URL
 as production's, with the preview's own role, password and database (its query, such as `?schema=public`, stays). Two
 variables that name the same database (Prisma's `DATABASE_URL` and `DIRECT_URL`) point at the same preview database, each
@@ -121,7 +170,7 @@ is dropped, and made again by the preview's next deploy if it stays.
 
 ## Remove a database
 
-Click the bin next to it, then choose:
+Click the bin (**Remove**) next to it, then choose, and click **Remove it** (or **Delete it**):
 
 | Choice | What happens |
 |---|---|

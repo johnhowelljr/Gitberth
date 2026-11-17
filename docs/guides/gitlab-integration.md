@@ -9,7 +9,8 @@ Everything here is set in **Settings › GitLab**, and none of it is ever the re
 1. Go to **Settings › GitLab**.
 2. **GitLab address**: leave it as `https://gitlab.com`, or type your own GitLab's address, like `https://gitlab.example.com` (with the path it's served under, if it has one: `https://example.com/gitlab`). A plain `http://` address on your network works too.
 3. **Token**: paste a token (see [The token's scopes](#the-tokens-scopes)) and click **Save token**. Gitberth asks GitLab who the token is and which scopes it has before it saves it, and refuses a token GitLab refuses. It's kept encrypted and never shown again; **Replace token** saves another, **Remove token** forgets it.
-4. Add an app: **New app › Git repository**, paste the project's URL, **Check**, then **Create and deploy**.
+4. Add an app: **New app › Git repository**, paste the project's URL, **Check**, then **Create and deploy**. See
+   [Deploy an app from GitHub or GitLab](deploy-from-github.md).
 
 Once saved, the section shows **Token saved**, whose it is, the GitLab it's for, when it expires (highlighted with **renew it soon** in its last 14 days) and its scopes. When it lacks a scope Gitberth uses, a banner names each one and what it's for. **Check the token** asks GitLab again, after you've changed the token's scopes, say.
 
@@ -27,7 +28,7 @@ A [personal access token](https://gitlab.com/-/user_settings/personal_access_tok
 
 With **read_api** and **read_repository** alone, Gitberth deploys, previews and reads the variables, and reports nothing to GitLab. The token's user also needs a role on each project: **Reporter** to comment, **Developer** for statuses, **Maintainer** for the project's CI/CD variables and its hook. Gitberth never changes your code.
 
-When GitLab refuses something on a project, **Settings › GitLab** says what's missing in a banner like **Commit statuses aren't set on acme/web**, and Gitberth stops asking on that project for an hour, or until you save a token again. Other projects carry on. A token GitLab refuses outright (expired, revoked) stops it everywhere until it's replaced: **Commit statuses aren't set: GitLab refused the token**. Deploys carry on either way.
+When GitLab refuses something on a project, **Settings › GitLab** says what's missing in a banner like **Commit statuses aren't set on you/website**, and Gitberth stops asking on that project for an hour, or until you save a token again. Other projects carry on. A token GitLab refuses outright (expired, revoked) stops it everywhere until it's replaced: **Commit statuses aren't set: GitLab refused the token**. Deploys carry on either way.
 
 GitLab's rate limit (an answer `429`, with `Retry-After`) is said, never pushed through: the call fails with when to try again, and Gitberth asks again later, as it does with GitHub's.
 
@@ -35,10 +36,10 @@ GitLab's rate limit (an answer `429`, with `Retry-After`) is said, never pushed 
 
 Any of these works, groups and subgroups included:
 
-- `https://gitlab.com/acme/platform/web`, with or without `.git`
-- `gitlab.com/acme/platform/web`, without a scheme
-- a page of the project: `https://gitlab.com/acme/platform/web/-/tree/main/api` also picks the branch `main` and the folder `api`
-- `git@gitlab.com:acme/platform/web.git`
+- `https://gitlab.com/you/team/website`, with or without `.git`
+- `gitlab.com/you/team/website`, without a scheme
+- a page of the project: `https://gitlab.com/you/team/website/-/tree/main/site` also picks the branch `main` and the folder `site`
+- `git@gitlab.com:you/team/website.git`
 
 Only projects on the GitLab in **Settings › GitLab** are taken: one GitLab at a time, as there's one GitHub token. Change the address and every GitLab app follows it (a project is kept by its path, never with the address). The app's page and its Settings › Source link to the project there, with GitLab's mark.
 
@@ -52,7 +53,7 @@ Only projects on the GitLab in **Settings › GitLab** are taken: one GitLab at 
 | [Variables](environment-variables.md) | The project's CI/CD variables, at build time and when it runs; see [CI/CD variables](#cicd-variables). |
 | Statuses and a comment | See [Commit statuses](#commit-statuses) and [Comments on merge requests](#comments-on-merge-requests). |
 | Instant deploys | See [Instant deploys](#instant-deploys). |
-| Vercel's variables | `VERCEL_GIT_PROVIDER` is `gitlab`, `VERCEL_GIT_REPO_OWNER` the project's namespace (`acme/platform`). |
+| Vercel's variables | `VERCEL_GIT_PROVIDER` is `gitlab`, `VERCEL_GIT_REPO_OWNER` the project's namespace (`you/team`). |
 | AI agents and the API | `create_app` takes a GitLab project's URL; `get_app` says `git.host: gitlab`; `get_settings` has a `gitlab` block (never the token). |
 
 ## CI/CD variables
@@ -73,7 +74,7 @@ The app's **Environment** tab lists them under **Stored in GitLab**, each with i
 
 ## Commit statuses
 
-On by default (**Settings › GitLab › Commit statuses**). Each deploy that builds a commit marks it on GitLab, where it shows on the commit, its pipeline and the merge request, under the same name as on GitHub (**Gitberth: Web**, and **Gitberth preview: Web** for a preview), with the same text and link:
+On by default (**Settings › GitLab › Commit statuses**). Each deploy that builds a commit marks it on GitLab, where it shows on the commit, its pipeline and the merge request, under the same name as on GitHub (**Gitberth: website**, and **Gitberth preview: website** for a preview), with the same text and link:
 
 | When | State |
 |---|---|

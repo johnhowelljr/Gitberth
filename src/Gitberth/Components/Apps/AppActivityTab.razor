@@ -5,7 +5,7 @@
 @inject IDialogService Dialogs
 
 @* Everything that happened to the app, newest first: deploys (with their logs, and Roll back for a Git app), changes, updates, starts, stops and crashes. *@
-<SectionCard Title="Activity" Icon="@Icons.Material.Outlined.History" Sub="@(items is null ? null : $"{items.Count} {(items.Count == 1 ? "entry" : "entries")}")">
+<SectionCard Title="Activity" Icon="@Icons.Material.Outlined.History" Tip="app.activity" Sub="@(items is null ? null : $"{items.Count} {(items.Count == 1 ? "entry" : "entries")}")">
     <Actions>
         <Seg T="string" Options="Filters" Value="filter" ValueChanged="v => filter = v" Label="Show" />
     </Actions>
@@ -17,7 +17,7 @@
         else if (Shown.Count == 0)
         {
             <EmptyState Icon="@Icons.Material.Outlined.History" Title="Nothing yet">
-                Deploys, settings changes, updates, starts, stops and crashes show here as they happen. Docker's own events are kept for 7 days.
+                Deploys, settings changes, updates, starts, stops and crashes show here as they happen. Docker's own events are kept for @EventsKept.
             </EmptyState>
         }
         else
@@ -36,7 +36,7 @@
                             <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Href="@($"apps/{dep.AppId}/deployments/{dep.Id}")" Icon="@Icons.Material.Outlined.Article">Log</Btn>
                             @if (CanRollBackTo(dep, View.Row?.CurrentImage, kept))
                             {
-                                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Undo" OnClick="() => RollbackAsync(dep)" Disabled="busy">Roll back to this</Btn>
+                                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Undo" OnClick="() => RollbackAsync(dep)" Disabled="busy" Tip="app.activity.rollback">Roll back to this</Btn>
                             }
                         </div>
                     }
@@ -55,7 +55,7 @@
         }
         else
         {
-            <span>Docker's events are kept for 7 days; Gitberth's own entries stay.</span>
+            <span>Docker's events are kept for @EventsKept; Gitberth's own entries stay.</span>
         }
         <a class="gb-card-link" style="margin-left:auto;gap:5px" href="@AuditHref"><SvgIcon Icon="@Icons.Material.Outlined.Policy" />All changes to @View.Summary.Title in the audit log</a>
     </Foot>
@@ -64,6 +64,10 @@
 @code {
     [Parameter, EditorRequired] public AppView View { get; set; } = default!;
     [Parameter] public EventCallback Changed { get; set; }
+
+    // How long Docker's own events (starts, stops, crashes) stay: the Health store's few hours, said from its own constant
+    // so the words can't drift from it again (they said 7 days while it kept 7 hours).
+    private static readonly string EventsKept = $"{(int)Gitberth.Health.ContainerEventWatcher.Kept.TotalHours} hours";
 
     // Every change to the app, who made it and how it ended, over its whole life: the audit log, filtered to it.
     private string AuditHref => $"audit?range=all&app={Uri.EscapeDataString(View.Summary.Container)}";
@@ -86,10 +90,10 @@
 
     private IReadOnlyList<SegOption<string>> Filters =>
     [
-        new("all", "All"),
-        .. View.Row?.Deployed == true ? [new SegOption<string>("deploys", "Deploys")] : Array.Empty<SegOption<string>>(),
-        new("changes", "Changes"),
-        new("docker", "Starts and stops"),
+        new("all", "All", Tip: "app.activity.all"),
+        .. View.Row?.Deployed == true ? [new SegOption<string>("deploys", "Deploys", Tip: "app.activity.deploys")] : Array.Empty<SegOption<string>>(),
+        new("changes", "Changes", Tip: "app.activity.changes"),
+        new("docker", "Starts and stops", Tip: "app.activity.docker"),
     ];
 
     private IReadOnlyList<ActivityItem> Shown => (items ?? []).Where(i => filter switch
