@@ -19,13 +19,22 @@ No. One Gitberth manages the Docker host it runs on.
 **Do my apps stop when Gitberth restarts or updates?**
 No. Gitberth isn't in the path of your apps' traffic, so they keep answering on the LAN and on their domains. See [Updating Gitberth](guides/updating-gitberth.md).
 
+**Where's the help inside Gitberth?**
+Click **?** in the top bar, or **Help** at the foot of the sidebar. **Help for this page** opens the page of these docs about the page you're on, and **Search help** finds any topic. Labels with a dotted underline, and small info icons, show a tip when you point at them. See [Get help in Gitberth](getting-started/first-steps.md#get-help-in-gitberth).
+
 ## Deploying
 
 **Which repos can it deploy?**
-GitHub repos, public or private. Private repos need a token in **Settings › GitHub access**. See [Deploy from GitHub](guides/deploy-from-github.md).
+GitHub repositories and GitLab projects (gitlab.com, or your own GitLab), public or private. Private ones need a token in **Settings › GitHub access** or **Settings › GitLab**. See [Deploy from GitHub or GitLab](guides/deploy-from-github.md) and [GitLab](guides/gitlab-integration.md).
 
 **Does it use webhooks?**
-No. Gitberth runs one `git ls-remote` per repo every 30 seconds by default, so a push deploys within about that long. Change the interval in **Settings › Deploys**. See [Deploys and rollbacks](guides/deploys-and-rollbacks.md).
+It can. By default Gitberth runs one `git ls-remote` per repo every 30 seconds, so a push deploys within about that long; change the interval in **Settings › Deploys**. With domains on, GitHub and GitLab can tell Gitberth about a push the moment it happens, through the tunnel. See [Instant deploys](guides/github-integration.md#instant-deploys).
+
+**Can it run a Compose file with several services?**
+Yes, as one app with all its services, from a repo or pasted. See [Compose apps](guides/compose-apps.md). [App templates](guides/templates.md) install popular self-hosted apps that way in one click.
+
+**Can it give each pull request its own preview?**
+Yes: a preview of each pull request (or GitLab merge request), and of branches if you like, with its own address and database. See [Preview deployments](guides/previews.md).
 
 **What if my repo has no Dockerfile?**
 Gitberth works out how to build static sites, Node.js, Python, Go, Rust, Deno, .NET, Ruby, PHP and Java projects. See [How Gitberth builds](reference/build-detection.md).
@@ -70,7 +79,24 @@ No. It doesn't terminate TLS itself; apps on a domain get HTTPS from Cloudflare.
 **Can I put Gitberth's own page on a domain?**
 Yes, with Cloudflare Access in front of it first. See [Putting a domain in front of Gitberth](concepts/security.md#putting-a-domain-in-front-of-gitberth).
 
+## Monitoring
+
+**Can Gitberth tell me when something breaks?**
+Yes, by email, Discord, Slack, ntfy or a webhook: a failed deploy, a crash, a failing health check, an app that goes down. See [Notifications](guides/notifications.md).
+
+**Can it check my apps from outside, and show a status page?**
+Yes. Each app is checked every minute the way a visitor reaches it, and a public status page can list them. See [Uptime checks, the status page and the down page](guides/uptime-and-status-page.md).
+
+**Who changed what?**
+The [audit log](guides/audit-log.md) records every change, who made it and how it ended, Docker changes made outside Gitberth too.
+
 ## Data and security
+
+**Can an app get a database of its own?**
+Yes: a Postgres database or a Redis, with its connection string set in a variable for it. See [Databases](guides/databases.md).
+
+**Can an AI agent use Gitberth?**
+Yes, over MCP or a plain HTTP API, with a token of its own and the access you give it. See [AI agents and the API](guides/ai-agents.md).
 
 **Where is my data?**
 Gitberth's is in the `gitberth_gitberth-data` volume. Your apps' data is in their own volumes. See [Back up and restore](guides/backups-and-restore.md).

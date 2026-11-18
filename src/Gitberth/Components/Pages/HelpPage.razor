@@ -1,0 +1,130 @@
+@page "/help/{*Page}"
+@implements IAsyncDisposable
+@inject HelpDocs Help
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+@*
+    A page of the docs: the sections' list on the left (a drawer on narrow screens), the page, "On this page" on wide
+    screens, and the previous and next pages in the sections' order. Its diagrams are drawn, and its pictures open
+    larger, by wwwroot/js/help.js once it's on the screen.
+*@
+<PageTitle>@(doc?.Title ?? "Not found") · Help · Gitberth</PageTitle>
+
+<div class="gb-helpdoc">
+    <aside class="gb-helpnav @(navOpen ? "open" : null)" id="gb-helpnav">
+        <HelpNav Current="@doc?.Id" />
+    </aside>
+    @if (navOpen)
+    {
+        <div class="gb-scrim gb-helpnav-scrim" @onclick="CloseNav"></div>
+    }
+
+    <div class="gb-helpdoc-main">
+        <button type="button" class="gb-btn gb-btn--sm gb-helpnav-open" aria-controls="gb-helpnav" aria-expanded="@(navOpen ? "true" : "false")" @onclick="OpenNav">
+            <SvgIcon Icon="@Icons.Material.Outlined.MenuBook" />Help topics
+        </button>
+        @if (doc is null)
+        {
+            <EmptyState Icon="@Icons.Material.Outlined.SearchOff" Title="No help page here" Class="gb-help-missing">
+                <ChildContent>There's no help page at help/@Page. Find what you're after in the topics, or search them.</ChildContent>
+                <Actions><Btn Kind="BtnKind.Primary" Href="help" Icon="@Icons.Material.Outlined.MenuBook">Help topics</Btn></Actions>
+            </EmptyState>
+        }
+        else
+        {
+            <PageHead Title="@doc.Title" Class="gb-helpdoc-head">
+                <Crumbs>
+                    <a href="help">Help</a>
+                    @if (Help.SectionOf(doc) is { } section)
+                    {
+                        <SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+                        <span>@section</span>
+                    }
+                </Crumbs>
+            </PageHead>
+            <div class="gb-doc" id="@doc.TitleId">@((MarkupString)doc.Html)</div>
+
+            <nav class="gb-doc-pager" aria-label="Previous and next page">
+                @if (Help.Previous(doc) is { } previous)
+                {
+                    <a class="gb-doc-pager-link" href="@previous.Href">
+                        <span class="gb-micro"><SvgIcon Icon="@Icons.Material.Outlined.ArrowBack" Size="xs" />Previous</span>
+                        <span class="gb-doc-pager-t">@previous.Title</span>
+                    </a>
+                }
+                @if (Help.Next(doc) is { } next)
+                {
+                    <a class="gb-doc-pager-link gb-doc-pager-link--next" href="@next.Href">
+                        <span class="gb-micro">Next<SvgIcon Icon="@Icons.Material.Outlined.ArrowForward" Size="xs" /></span>
+                        <span class="gb-doc-pager-t">@next.Title</span>
+                    </a>
+                }
+            </nav>
+        }
+    </div>
+
+    @if (doc is not null && doc.Contents.Any())
+    {
+        <nav class="gb-helptoc" aria-label="On this page">
+            <div class="gb-micro">On this page</div>
+            @foreach (var heading in doc.Contents)
+            {
+                <a class="gb-helptoc-l@(heading.Level)" href="@($"{doc.Href}#{heading.Id}")" data-toc="@heading.Id">@heading.Text</a>
+            }
+        </nav>
+    }
+</div>
+
+@code {
+    /// <summary>The page's id: its path under docs/ without .md.</summary>
+    [Parameter] public string? Page { get; set; }
+
+    private HelpDoc? doc;
+    private bool navOpen;
+    private string? shown;
+    private IJSObjectReference? module;
+
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+
+    protected override void OnParametersSet()
+    {
+        var id = Page?.Trim('/') ?? "";
+        if (id.EndsWith(".md", StringComparison.OrdinalIgnoreCase)) id = id[..^3];
+        doc = id == HelpDocs.IndexId ? null : Help.Find(id);
+    }
+
+    // Each page, once it's on the screen: its diagrams drawn, the heading its address names brought into view.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (doc is null || shown == doc.Id) return;
+        shown = doc.Id;
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", Nav.ToAbsoluteUri(Assets["js/help.js"]).ToString());
+            await module.InvokeVoidAsync("show", Nav.ToAbsoluteUri(Assets["lib/mermaid/mermaid.min.js"]).ToString());
+        }
+        catch (JSDisconnectedException) { }
+        catch (JSException) { /* the page reads as it is: diagrams stay as their source */ }
+    }
+
+    private void OpenNav() => navOpen = true;
+
+    private void CloseNav() => navOpen = false;
+
+    // Following a link in the drawer closes it.
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        if (!navOpen) return;
+        navOpen = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        if (module is null) return;
+        try { await module.DisposeAsync(); }
+        catch (JSDisconnectedException) { }
+    }
+}

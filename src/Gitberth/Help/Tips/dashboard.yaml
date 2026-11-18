@@ -1,0 +1,102 @@
+# Tips for the dashboard (Components/Pages/Home.razor). See Help/TipCatalog.cs for the rules.
+
+dashboard.title:
+  title: Dashboard
+  text: >-
+    This host at a glance, read again every 5 seconds. Click a figure at the top for the apps behind it; the cards
+    below hold the apps in trouble, your pinned apps, the host's CPU, memory and disk, and recent deploys.
+  more: getting-started/first-steps#the-dashboard
+
+dashboard.live:
+  title: Live
+  text: >-
+    The figures on this page are read again every 5 seconds, so there's nothing to reload. The time is the last read.
+  more: getting-started/first-steps#the-dashboard
+
+dashboard.not-updating:
+  title: Not updating
+  text: >-
+    The last read of the apps failed, so the figures may be out of date; the line below says why. Gitberth tries again
+    every 5 seconds, and the pill says **Live** again once a read works.
+  more: guides/troubleshooting#docker
+
+# ---- The figures across the top ----
+
+dashboard.kpi.apps:
+  title: Apps running
+  text: >-
+    How many apps run now, out of every container on this host, with a square for each: filled while it runs, hollow
+    when it's stopped, orange when it's in trouble. Click it for the Apps list.
+  more: guides/manage-apps#the-apps-list
+
+dashboard.kpi.attention:
+  title: Needs attention
+  text: >-
+    Apps that exited with an error, report unhealthy, are degraded or dead, lost their container, or wait for your
+    decision on a change. Click it to list only those.
+  more: guides/manage-apps#search-filter-sort-and-group
+
+dashboard.kpi.deploys:
+  title: Deploys in 24 hours
+  text: >-
+    How many deploys ran in the last 24 hours across every app, and the last one: builds from Git, new apps, image
+    updates, rollbacks and changes that recreated a container. Skipped commits aren't counted.
+  more: guides/deploys-and-rollbacks#recent-deploys-on-the-dashboard
+
+dashboard.kpi.updates:
+  title: Updates available
+  text: >-
+    Apps whose image has a newer version: in its registry, or a newer build of its tag on this host. Apps set to **When
+    I ask** and apps built from Git aren't counted. Click it to list them.
+  more: guides/updates#see-which-apps-have-an-update
+
+# ---- The cards ----
+
+dashboard.attention:
+  title: Needs attention
+  text: >-
+    The apps in trouble, up to 8, each with its state. Its buttons restart, stop or start it, or open its logs;
+    **In Apps** lists every one.
+  more: guides/manage-apps#start-stop-and-restart
+
+dashboard.pinned:
+  title: Pinned
+  text: >-
+    The apps you pinned, with their state and address, so the ones you open most are one click away. Pin an app from
+    its page's **⋯** menu, or with **Pinned** in its **Settings › General**; pinned apps show in the sidebar too.
+  more: guides/manage-apps#rename-and-pin
+
+dashboard.host:
+  title: This host
+  text: >-
+    The machine your apps run on: its CPUs and memory, how busy it is, and its disk. **Health** has every container's
+    CPU, memory and network over the last 6 hours.
+  more: guides/health-and-monitoring#the-health-page
+
+dashboard.host.cpu:
+  title: CPU of the host
+  text: >-
+    What every container uses together, as a share of all the host's CPUs, with its last 5 minutes drawn under it.
+    Programs that run outside Docker aren't counted.
+  more: guides/health-and-monitoring#reading-the-charts
+
+dashboard.host.memory:
+  title: Memory the apps use
+  text: >-
+    The memory every app's container uses now, added up. The bar is its share of the host's memory; what the host uses
+    for anything else isn't counted.
+  more: guides/health-and-monitoring#reading-the-charts
+
+dashboard.host.disk:
+  title: Disk
+  text: >-
+    Free space on the disk Docker keeps its images and volumes on. Images, build caches and volumes fill it; the bar is
+    the part in use. Below 5 GB free, or 5% of the disk, Gitberth stops pulling images until you make room.
+  more: guides/troubleshooting#dockers-disk-is-filling-up
+
+dashboard.recent-deploys:
+  title: Recent deploys
+  text: >-
+    The last 6 deploys of every app in the last 30 days, newest first: builds, new apps, updates, rollbacks and changes
+    that recreated a container. Click one for its log, or for its app.
+  more: guides/deploys-and-rollbacks#recent-deploys-on-the-dashboard

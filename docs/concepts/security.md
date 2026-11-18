@@ -21,11 +21,18 @@ If you lose the password, see [Forgot the admin password](../guides/troubleshoot
 
 Gitberth encrypts these at rest in its database, with ASP.NET Core Data Protection:
 
-- the GitHub token and the Cloudflare API token;
+- the GitHub and GitLab tokens, the Cloudflare API token, and the webhook secrets;
 - registry passwords and tokens;
+- notification destinations: webhook URLs, tokens and the mail password;
 - every environment variable value set in Gitberth, secret or not;
-- the copy it keeps of each repo's GitHub variables, used when GitHub can't be reached during a deploy;
+- the copy it keeps of each repo's GitHub variables (or GitLab CI/CD variables), used when they can't be read during a
+  deploy;
+- deploy hooks' tokens, the passwords of apps' [databases](../guides/databases.md), and the Compose file of a Compose app
+  Gitberth keeps;
 - the saved settings of apps from images, which Gitberth uses to create a missing container again.
+
+API tokens aren't stored at all: only their SHA-256. The [audit log](../guides/audit-log.md) never holds a secret value,
+only its name.
 
 The keys are in `/data/keys`, in the same volume as the database. Anyone with a copy of the volume can read the secrets, so keep backups private. Keep the keys with the database: without them, Gitberth can't read the secrets, and tokens, passwords and variable values have to be entered again. **Settings › Registries** marks a sign-in whose password it can't read with **needs its password again: enter it below**.
 
@@ -50,10 +57,13 @@ Gitberth mounts the host's Docker socket, `/var/run/docker.sock`, and runs as ro
 
 ## Where Gitberth connects
 
-- `github.com` with git, and `api.github.com`, for repos, the token and repo variables.
+- `github.com` with git, and `api.github.com`, for repos, the token and repo variables, statuses, comments and webhooks.
+- The GitLab in **Settings › GitLab** (gitlab.com unless you changed it), with git and its API, for the same.
 - Image registries, through the Docker engine, for pulls and update checks, and directly, when **New app** reads an image's ports, volumes and health check before it's pulled. `hub.docker.com` for the image search in **New app**.
 - `api.cloudflare.com`, only while domains are on.
-- Your apps, for their health URLs and scheduled jobs.
+- The [notification](../guides/notifications.md) destinations you add: a mail server, Discord, Slack, ntfy or your webhook.
+- Your apps, for their health URLs, scheduled jobs and [uptime checks](../guides/uptime-and-status-page.md) (through their
+  domains, as a visitor would).
 
 ## Putting a domain in front of Gitberth
 
@@ -65,9 +75,15 @@ Gitberth's own page is an app like any other, so you can give it a domain on its
 
 Gitberth keeps a route's settings when it rewrites the route, Cloudflare Access included. With [protection](../guides/domains.md#protect-a-domain) set up, you can instead turn on **Protected** next to the domain and let Gitberth make the Access application.
 
-## GitHub's webhook
+## Webhooks from GitHub and GitLab
 
-With [instant deploys](../guides/github-integration.md#instant-deploys) on, one address is open to the internet without a sign-in: `https://<the host name you chose>/hooks/github`, and nothing else on that host name but deploy hooks' (below). It only accepts deliveries signed with the secret Gitberth made (HMAC-SHA256, compared in fixed time), refuses bodies over 1 MB, answers a sender that keeps getting the signature wrong with `429` for 10 minutes, and never deploys anything by itself: it only makes Gitberth check the repo now, as it would anyway within 30 seconds.
+With [instant deploys](../guides/github-integration.md#instant-deploys) on, two addresses are open to the internet without a sign-in: `https://<the host name you chose>/hooks/github` and `/hooks/gitlab`, and nothing else on that host name but deploy hooks' (below). GitHub's only accepts deliveries signed with the secret Gitberth made (HMAC-SHA256, compared in fixed time); GitLab's only those that carry its own secret token (compared in fixed time). Both refuse bodies over 1 MB, answer a sender that keeps getting it wrong with `429` for 10 minutes, and never deploy anything by themselves: they only make Gitberth check the repo now, as it would anyway within 30 seconds.
+
+## The status page and the down page
+
+The [status page](../guides/uptime-and-status-page.md#the-status-page) is off until you turn it on. Then it answers on
+your network at `/status` without a sign-in, and on the internet only at the host name you give it. The down page answers
+only for a domain whose app can't be served. Neither ever shows an address, a container's name or an error's text.
 
 ## Deploy hooks
 

@@ -3,15 +3,30 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Gitberth.Services;
 
 public sealed record TokenCheck(bool Valid, string? Login, DateTimeOffset? ExpiresAt, string? Warning);
 
-/// <summary>One of a repo's GitHub Actions variables (Settings > Secrets and variables > Actions > Variables).</summary>
-public sealed record RepoVariable(string Name, string Value);
+/// <summary>
+/// One of a repo's GitHub Actions variables (Settings > Secrets and variables > Actions > Variables), or one of a GitLab
+/// project's CI/CD variables, with what GitLab says of it besides (GitHub's have none of it, and their kept copy is as it was).
+/// </summary>
+/// <param name="Scope">A GitLab variable's environment scope (*, production, preview/*, or another).</param>
+/// <param name="Masked">Masked in GitLab: secret in Gitberth too.</param>
+/// <param name="Protected">Protected in GitLab: only production gets it.</param>
+/// <param name="IsFile">A GitLab file variable, which isn't passed.</param>
+public sealed record RepoVariable(string Name, string Value,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Scope = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Masked = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool Protected = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsFile = false);
 
-public sealed class GitHubApiException(string message) : Exception(message);
+/// <summary>A Git host's API couldn't be reached, or said no, when Gitberth read something (or saved a variable): GitHub's or GitLab's.</summary>
+public abstract class HostApiException(string message) : Exception(message);
+
+public sealed class GitHubApiException(string message) : HostApiException(message);
 
 /// <summary>
 /// Gitberth's GitHub API calls: who owns the token and when it expires, and the repo variables apps read their

@@ -39,7 +39,7 @@
                         <span>@(hostOnly is not null ? $"Published on the host only ({hostOnly}): the LAN can't reach it." : $"{Name} isn't published on the LAN.")</span>
                         @if (CanPublish)
                         {
-                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="() => MudDialog.Close(DialogResult.Ok(true))">Publish on LAN</MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" OnClick="() => MudDialog.Close(DialogResult.Ok(true))" data-tip="network.reach.publish-lan">Publish on LAN</MudButton>
                         }
                     </div>
                 }
@@ -113,7 +113,7 @@
         @if (ConnectionDetails.For(Details, at.Host, at.Port) is { } info)
         {
             <dl class="gb-connect">
-                <dt>Host</dt>
+                <dt><Tip Key="network.connect.host">Host</Tip></dt>
                 <dd><CopyText Text="@info.Host" Label="@($"the host, {info.Host}")" /></dd>
                 <dt>Port</dt>
                 <dd><CopyText Text="@info.Port.ToString(CultureInfo.InvariantCulture)" Label="@($"the port, {info.Port}")" /></dd>
@@ -135,7 +135,7 @@
                     <dt>Database</dt>
                     <dd><CopyText Text="@database" Label="@($"the database, {database}")" /></dd>
                 }
-                <dt>URL</dt>
+                <dt><Tip Key="network.connect.url">URL</Tip></dt>
                 <dd>
                     <CopyText Text="@ConnectionDetails.Render(info, ConnectionFormat.Url, reveal)" Value="@ConnectionDetails.Render(info, ConnectionFormat.Url, reveal: true)"
                               Label="the URL" />

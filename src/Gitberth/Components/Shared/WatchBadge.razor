@@ -1,18 +1,17 @@
+@* A Git app's auto-deploy: off, paused while it's stopped, or on (with when the repo was last checked). Its tip says what each means; on, its line says what's checked and how often, or why the repo can't be read. *@
 @if (!App.AutoDeploy)
 {
-    <span class="gb-watch gb-watch--off"><MudIcon Icon="@Icons.Material.Outlined.SyncDisabled" Size="Size.Small" />Auto-deploy off</span>
+    <span class="gb-watch gb-watch--off" data-tip="@(Tip ?? "badge.watch.off")"><MudIcon Icon="@Icons.Material.Outlined.SyncDisabled" Size="Size.Small" />Auto-deploy off</span>
 }
 else if (App.DesiredState == DesiredState.Stopped)
 {
-    <span class="gb-watch gb-watch--off"><MudIcon Icon="@Icons.Material.Outlined.SyncDisabled" Size="Size.Small" />Auto-deploy paused while stopped</span>
+    <span class="gb-watch gb-watch--off" data-tip="@(Tip ?? "badge.watch.paused")"><MudIcon Icon="@Icons.Material.Outlined.SyncDisabled" Size="Size.Small" />Auto-deploy paused while stopped</span>
 }
 else
 {
-    <MudTooltip Text="@Tooltip" Placement="Placement.Bottom">
-        <span class="gb-watch @(Info?.Error is null ? "gb-watch--on" : "gb-watch--error")">
-            <MudIcon Icon="@(Info?.Error is null ? Icons.Material.Outlined.Sync : Icons.Material.Outlined.SyncProblem)" Size="Size.Small" />@Text
-        </span>
-    </MudTooltip>
+    <span class="gb-watch @(Info?.Error is null ? "gb-watch--on" : "gb-watch--error")" data-tip="@(Tip ?? (Info?.Error is null ? "badge.watch.on" : "badge.watch.error"))" data-tip-detail="@Detail">
+        <MudIcon Icon="@(Info?.Error is null ? Icons.Material.Outlined.Sync : Icons.Material.Outlined.SyncProblem)" Size="Size.Small" />@Text
+    </span>
     <button type="button" class="gb-linkbtn" @onclick="OnCheckNow">Check now</button>
 }
 
@@ -21,6 +20,8 @@ else
     [Parameter] public WatchInfo? Info { get; set; }
     [Parameter] public int Interval { get; set; }
     [Parameter] public EventCallback OnCheckNow { get; set; }
+    /// <summary>Another tip than the state's own (its key in the catalog).</summary>
+    [Parameter] public string? Tip { get; set; }
 
     private string Text => Info switch
     {
@@ -29,7 +30,7 @@ else
         _ => $"Auto-deploy on · checked {Format.Ago(Info.CheckedAt)}",
     };
 
-    private string Tooltip => Info switch
+    private string Detail => Info switch
     {
         { Error: { } error } => error,
         { RemoteSha: { Length: >= 7 } sha } => $"Checks {App.Branch} every {Interval} s. The branch is at {sha[..7]}.",

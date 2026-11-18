@@ -416,13 +416,13 @@ public static class PopularImages
 /// <summary>The five source cards' words and icons.</summary>
 public static class NewAppSources
 {
-    /// <summary>The Git source's card: only github.com repositories work for now, so it says so.</summary>
-    public const string GitTitle = "GitHub repository";
+    /// <summary>The Git source's card: a github.com repository, or a project on Gitberth's GitLab.</summary>
+    public const string GitTitle = "Git repository";
 
     public static (string Title, string Text, string Icon, string[] Tags) Of(NewAppSource source) => source switch
     {
-        NewAppSource.Git => (GitTitle, "Gitberth builds it from GitHub, then again on every push. It detects Next.js, Python, Go, .NET, Dockerfiles and more.",
-            Icons.Custom.Brands.GitHub, ["GitHub", "Deploy on push"]),
+        NewAppSource.Git => (GitTitle, "Gitberth builds it from GitHub or GitLab, then again on every push. It detects Next.js, Python, Go, .NET, Dockerfiles and more.",
+            Icons.Custom.Brands.GitHub, ["GitHub", "GitLab", "Deploy on push"]),
         NewAppSource.Registry => ("Registry image", "Pull any image from Docker Hub, GitHub or your own registry, and keep it up to date.",
             Icons.Material.Outlined.CloudDownload, ["Docker Hub", "ghcr.io"]),
         NewAppSource.Local => ("Local image", "Run an image that's already on this host, with no pull.", Icons.Material.Outlined.Layers, ["No pull"]),

@@ -4,36 +4,37 @@ Gitberth changes a running app in three ways: a Git deploy builds a new image fr
 
 ## A Git deploy
 
-A deploy starts when Gitberth sees a new commit on the app's branch (**New commit**), when you click **Deploy** (**Manual**), when a failed build is tried again (**Automatic retry**), and for an app's **First deploy**. The deploy's page shows these on its tag, and its state as it goes: **Queued**, **Cloning**, **Building**, **Starting**, then **Succeeded**, **Failed**, **Rolled back**, **Cancelled** or **Skipped**.
+A deploy starts when Gitberth sees a new commit on the app's branch (**New commit**, or **Push on GitHub** and **Push on GitLab** when a webhook told it), when you click **Deploy** (**Manual**), when a failed build is tried again (**Automatic retry**), when a [deploy hook](../guides/deploy-hooks.md) is called (**Deploy hook "…"**), when you promote a preview (**Promoted**), and for an app's **First deploy**. The deploy's page shows these on its tag, and its state as it goes: **Queued**, **Cloning**, **Building**, **Starting**, then **Succeeded**, **Failed**, **Rolled back**, **Cancelled** or **Skipped**. A [Compose app](../guides/compose-apps.md#what-a-deploy-does)'s deploy runs its file with `docker compose` instead of building one container.
 
 ```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 24}}}%%
 flowchart TD
-    start["New commit, Deploy or retry"] --> queue["Queue: one deploy at a time per app"]
-    queue --> vars["Read the repo's GitHub variables"]
-    vars --> clone["Clone the branch tip"]
-    vars -->|"rollback, settings change, restart"| built["Use an image already built"]
-    clone -->|"build filters or [skip ci]"| skipped["Skipped: the running container is untouched"]
-    clone --> dockerfile["Detect the project, write the Dockerfile"]
+    start["New commit, Deploy,<br/>a hook or a retry"] --> queue["Queue: one deploy<br/>at a time per app"]
+    queue --> vars["Read the repo's GitHub<br/>or GitLab variables"]
+    vars --> clone["Clone the<br/>branch tip"]
+    vars -->|"rollback, settings<br/>change, restart"| built["Use an image<br/>already built"]
+    clone -->|"build filters<br/>or [skip ci]"| skipped["Skipped: the<br/>running container<br/>is untouched"]
+    clone --> dockerfile["Detect the project,<br/>write the Dockerfile"]
     dockerfile --> build["Build the image"]
-    build -->|"build fails"| untouched["Failed: the running container is untouched"]
-    build --> swap{"Domain, no volume, tunnel on host ports?"}
+    build -->|"build fails"| untouched["Failed: the<br/>running container<br/>is untouched"]
+    build --> swap{"Domain, no<br/>volume, tunnel on<br/>host ports?"}
     built --> swap
-    swap -->|"yes"| side["New version starts next to the old one"]
-    swap -->|"no"| usual["Old container stops, new one starts"]
-    side --> checks{"Stays up 15 s, healthy, health URL answers?"}
+    swap -->|"yes"| side["New version<br/>starts next to<br/>the old one"]
+    swap -->|"no"| usual["Old container<br/>stops, new<br/>one starts"]
+    side --> checks{"Stays up 15 s,<br/>healthy, health<br/>URL answers?"}
     usual --> checks
-    checks -->|"no"| back["New one removed, old one runs"]
-    checks -->|"yes"| done["Succeeded: domains routed, last 3 images kept"]
+    checks -->|"no"| back["New one removed,<br/>old one runs"]
+    checks -->|"yes"| done["Succeeded: domains<br/>routed, last 3<br/>images kept"]
 ```
 
 1. **Queue.** Each app has its own queue and runs one deploy at a time. A deploy queued while another waits replaces it; the one replaced says **Superseded by a newer deploy**.
-2. **Variables.** Gitberth reads the repo's GitHub Actions variables, and the app's own values in Gitberth win over them. If GitHub can't be reached, it uses an encrypted copy of the last successful read, and the log says so. `PORT`, `HOST`, `HOSTNAME`, `ASPNETCORE_URLS` and `ASPNETCORE_HTTP_PORTS` from GitHub are ignored, because Gitberth sets where the app listens.
+2. **Variables.** Gitberth reads the repo's GitHub Actions variables (a GitLab project's CI/CD variables, by scope), and the app's own values in Gitberth win over them; the app's [databases](../guides/databases.md) set theirs over both. If GitHub or GitLab can't be reached, it uses an encrypted copy of the last successful read, and the log says so. `PORT`, `HOST`, `HOSTNAME`, `ASPNETCORE_URLS` and `ASPNETCORE_HTTP_PORTS` from GitHub are ignored, because Gitberth sets where the app listens.
 3. **Clone.** A shallow clone of the branch's newest commit, into a work folder in Gitberth's volume. The log names the commit and its author. For a new commit (not **Deploy** or a retry), its message is read for `[skip ci]` and the like, and when the app has build filters, Gitberth fetches the commit the app runs too and lists the files that changed since. A commit they leave out ends here as **Skipped**, before GitHub hears of a build, and the running container isn't touched. See [Skip commits that don't need a deploy](../guides/deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
 4. **Dockerfile.** Your custom Dockerfile when the app has one, else the repo's own Dockerfile, else one Gitberth writes for what it detected (see [How Gitberth builds](../reference/build-detection.md)). It's written outside the clone, so your repo is never changed. When the app now listens on another port than before, its container port moves with it, unless you set that port yourself. `vercel.json` cron jobs are read here too.
 5. **Build.** `docker build` with BuildKit, one build at a time across all apps. The build runs on the host's network with every container on `gitberth` added by name, so a build step can reach `postgres:5432`. In a Dockerfile Gitberth writes, secret values go in as BuildKit secrets, so they're never written into the image's history, and other values as build arguments; a Dockerfile in your repo gets build arguments for the `ARG`s it declares. The image is `gitberth/<app>:<commit>`. **Deploy without the build cache** adds `--no-cache --pull`: every step runs again, and the base images are pulled. A build that fails ends the deploy here, and the running container isn't touched.
 6. **Swap.** If the app has a domain and can swap without downtime, the new version starts next to the old one (see [Deploys without downtime](#deploys-without-downtime)). Otherwise the old container stops and is renamed `gb-<app>_prev`, and the new one starts as `gb-<app>`. An app that was stopped while the deploy waited isn't started again.
 7. **Checks.** The new container has to stay up for 15 seconds: no exit, no restart, not out of memory. A container with a Docker health check has to report healthy, within 60 seconds after that. Then, if the app has a health URL, it has to answer below 400 within 60 seconds.
-8. **Done.** Gitberth records the new image and commit, makes the app's domains point at the running container, and keeps the images of the last 3 successful deploys for rollbacks.
+8. **Done.** Gitberth records the new image and commit, makes the app's domains point at the running container, and keeps the images of the last 3 successful deploys for rollbacks. GitHub or GitLab gets the commit's status (pending since the build started), a preview's pull or merge request its comment, and the [notifications](../guides/notifications.md) you chose go out.
 
 When the checks fail, Gitberth writes the new container's last output into the log, removes it, and starts the previous container again: the deploy ends **Rolled back** with **Rolled back to the previous container.**
 
@@ -44,20 +45,21 @@ When the checks fail, Gitberth writes the new container's last output into the l
 For an app with a domain, the new version starts next to the old one, and the domain's visitors move to it before the old one stops.
 
 ```mermaid
+%%{init: {"sequence": {"width": 100, "actorMargin": 24}}}%%
 sequenceDiagram
     participant G as Gitberth
     participant N as gb-website_next
     participant T as Tunnel
     participant O as gb-website
-    G->>N: Start on 127.0.0.1, on a spare port from 8100 up
-    G->>N: Check that it stays up, is healthy and opens its port
-    G->>T: Send the domains to the new version
-    T-->>G: cloudflared logs the new route
-    G->>O: Stop the old one, rename it gb-website_prev
-    G->>O: Start the new version as gb-website, on its own port
+    G->>N: Start on 127.0.0.1, on a<br/>spare port from 8100 up
+    G->>N: Check that it stays up,<br/>is healthy and opens<br/>its port
+    G->>T: Send the domains<br/>to the new version
+    T-->>G: cloudflared logs<br/>the new route
+    G->>O: Stop the old one,<br/>rename it<br/>gb-website_prev
+    G->>O: Start the new version<br/>as gb-website, on<br/>its own port
     G->>O: Check again
-    G->>T: Send the domains back to the app's own port
-    G->>N: Remove it, and remove gb-website_prev
+    G->>T: Send the domains<br/>back to the app's<br/>own port
+    G->>N: Remove it, and<br/>remove<br/>gb-website_prev
 ```
 
 - The temporary container publishes only the web port, on `127.0.0.1`, where the tunnel reaches it and the LAN doesn't. Other apps only reach it by the app's name once it has passed its checks.
@@ -127,7 +129,7 @@ Gitberth writes each step down as it goes. If Gitberth restarts in the middle of
 
 ## A settings change on a Git app
 
-A Git app's settings are saved in Gitberth first, then made live:
+A Git app's settings (and a Compose app's variables and ports) are saved in Gitberth first, then made live:
 
 - **Restart policy, memory and CPU** change at once, without a restart.
 - **Most other settings** (environment, ports, volumes, health check) apply with a deploy without a build, through the same swap and checks as a deploy. **Save for next deploy** keeps them for later instead, and the app shows **Saved, not live yet** with **Apply now**.

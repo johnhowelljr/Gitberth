@@ -63,6 +63,44 @@ Nothing else is lost: apps, tokens and secrets stay as they were.
 | "Changing ports needs Docker 25 or later (API 1.44). This host has Docker …" | The Docker engine is too old for Gitberth to recreate containers. | Update Docker on the host. |
 | "Couldn't join the 'gitberth' network (…); health URL checks may fail." in the log | Gitberth's own container couldn't join the shared network at start. | Check that the network exists (`docker network ls`) and restart Gitberth. |
 
+## Docker's disk is filling up
+
+Images, build caches, containers and volumes all live on Docker's disk. Gitberth reads how much of it is free on the disk
+that holds its own data volume, which is in Docker's storage, so it's the same disk. It shows it in three places:
+
+- **Disk** in the strip at the top of the **Apps** list: what's used of its size, and how much is free. Under 15 GB free
+  it adds **getting low**; under 5 GB, or 5% of the disk, **too little to pull images**.
+- **Disk** in the dashboard's **This host** card: how much is free, with a bar for the part in use.
+- **Disk** on a new app's review: what's free of the disk's size, with **Getting low** under 15 GB free, or **Too little
+  to pull** when its image has to be pulled and the disk is below the limit.
+
+Under 5 GB free, or under 5% of the disk when that's more, Gitberth won't pull an image, so a pull never fills the disk
+halfway through.
+
+| Message or symptom | Cause | Fix |
+|---|---|---|
+| **Not enough disk to pull it** on a new app's review, with "Only … free on Docker's disk. Free some space first.", and **Create and start** can't be clicked | The image isn't on the host yet, and the disk is below the limit. An app whose image is on the host already can still be created. | Make room (below), then click **Change settings** and **Review and create** again. |
+| "Only … free on Docker's disk. Free some space first." when you update an app, click **Pull it**, or set up a Postgres server | The same limit, for every pull. An automatic update isn't made either: Gitberth tries again at its next look in the update window. | Make room, then try again. |
+| "Only … free on Docker's disk." as a note on a new app's review | Under 15 GB free: the pull still goes ahead. | Nothing yet, but make room soon. |
+| "Docker's disk is full: free some space, then try again. Docker said: …" | The disk filled up while Docker was pulling. | Make room, then try again. |
+| A build or a Compose app's deploy fails with Docker's `no space left on device` | Those aren't checked beforehand: the disk filled up on the way. A failed build leaves the running version as it was. | Make room, then click **Deploy**. |
+
+To make room:
+
+1. See what takes the space: `docker system df` on the host lists images, containers, local volumes and the build cache,
+   with how much of each could be freed.
+2. Clear Docker's build cache with **Clear build cache** in **Settings › Deploys**, which says how big it is. The next
+   build of each app runs every step again. See [Gitberth settings](../reference/gitberth-settings.md#deploys).
+3. Remove the apps you don't use, with **Also delete its image** (**Also delete its images** for a Git or Compose app)
+   ticked. See [Remove an app](manage-apps.md#remove-an-app).
+4. Remove images on the host. `docker image prune` removes the ones with no name left, and `docker image prune -a` every
+   one no container uses. Either also removes the image an app ran before its last update, so **Roll back** isn't
+   offered for that app any more; `-a` also removes the images Gitberth keeps of each Git app's last 3 successful deploys,
+   so it can't roll back to those.
+
+Gitberth tidies up as it goes: a Git app keeps the images of its last 3 successful deploys and no more, and an update keeps
+the image it replaced, for **Roll back**, and removes the one from the update before when nothing uses it.
+
 ## GitHub and deploys
 
 A failed deploy's page shows **The deploy failed**, or **Rolled back: the old version kept running**, with the reason. The log below it shows the details, and **Last output from the new container:** when the container started and stopped.
@@ -177,6 +215,56 @@ A domain marked **Not working** says why under its name; [When a domain isn't wo
 | "Own LAN addresses are off. Turn them on in Settings › Own LAN addresses." | Own LAN addresses aren't turned on. | Turn them on in **Settings › Own LAN addresses**. |
 | "gitberth-lan isn't there any more, so own LAN addresses are off. Turn them on again to use …" | The `gitberth-lan` network was removed, or Gitberth moved to a new host. | Click **Turn on** with the same block. |
 | An app can't reach another by name | They aren't on the same Docker network. | **Join gitberth** on the other app's **Network** tab (see [Networking](networking.md#reach-other-containers-by-name)). |
+
+## GitLab
+
+| Message | Cause | Fix |
+|---|---|---|
+| "… needs a GitLab token. Add one in Settings › GitLab (read_api and read_repository scopes)." | The project is private and no GitLab token is saved. | Save one in **Settings › GitLab** (see [GitLab](gitlab-integration.md#the-tokens-scopes)). |
+| "GitLab rejected the token, or it can't read this project. …" or "GitLab says the token is invalid, expired or revoked. Update it in Settings › GitLab." | The token expired, was revoked, or lacks a scope. **Settings › GitLab** shows its expiry and scopes. | Make a new token and click **Replace token**, or **Check the token** after you changed its scopes. |
+| "GitLab can't find …, or your token can't see it. …" | A typo in the URL, or the token's user isn't a member of the project. | Check the URL, and the user's role on the project. |
+| "Gitberth deploys from github.com and from its GitLab, …. For another GitLab, set its address in Settings › GitLab." | The URL isn't on github.com or on the GitLab set in **Settings › GitLab**. | Set **GitLab address** in **Settings › GitLab** first. |
+| "Can't reach …. Check its address in Settings › GitLab, and the host's network and DNS." | The host can't reach your GitLab. | Check the address, and the host's network. |
+| A banner such as **Commit statuses aren't set on …** in **Settings › GitLab** | GitLab refused that on the project: the token lacks the **api** scope, or its user the role. | Give the token what the banner says. Deploys carry on meanwhile. |
+
+## Previews
+
+| Message | Cause | Fix |
+|---|---|---|
+| "… would reach this preview with production's value (…), so the preview's build and code would use production's database. …" | A variable that names a database would give the preview production's, and Gitberth can't make it one of its own. | Give the variable a **Previews** value on the app's **Environment** tab. See [Production's database](previews.md#productions-database). |
+| **Waiting: 3 previews run already** | The app has as many previews running as **At most running** allows. | Remove one, raise the limit in **Settings › Previews**, or wait for one to expire. |
+| **Pull requests couldn't be read** (or **Merge requests couldn't be read**) on the **Previews** tab | GitHub or GitLab couldn't be asked which requests are open: often a public repo's 60 questions an hour, or a token without access. | Save a token with **Pull requests** access (GitHub) or **read_api** (GitLab). Previews already there keep following their commits. |
+
+## Databases
+
+| Message | Cause | Fix |
+|---|---|---|
+| "There's no Postgres server for it yet. Create one in Settings › Databases, or choose one there." | No Postgres server Gitberth can use. | Click **Create a Postgres server** in **Settings › Databases**. See [Databases](databases.md#postgres-servers). |
+| **Not usable** next to a server in **Settings › Databases**, with why | The server isn't running, isn't on Gitberth's network, or Gitberth can't sign in to it as its superuser. | Fix what it says, such as joining it to `gitberth` on its **Network** tab. |
+| "Compose made … (project …): Compose would undo a change Gitberth made to it, so it can't get a database from here." | The container belongs to a Compose project Gitberth didn't deploy. | Add the variable in its Compose file, or deploy the file as a [Compose app](compose-apps.md). |
+| "It replaces the … set on the Environment tab." under **Variable** | The app already has a value by that name. | Nothing: Gitberth's value wins. Use another **Variable** to keep both. |
+
+## Compose apps
+
+| Message | Cause | Fix |
+|---|---|---|
+| "The service … asks for … containers (deploy.replicas or scale). Gitberth runs one container a service: set it to 1." | The file asks for several copies of a service. | Set it to 1 in the file. |
+| "There's no service … in the file …" | The **Web service** named isn't in the file. | Pick another **Web service**. |
+| A deploy ends **Rolled back**, its log showing the failing service's last output | A service didn't stay up, or the web service didn't answer its health URL. | Read the service's output in the log, fix the file or its variables, and deploy again. |
+
+## AI agents and the API
+
+| Message | Cause | Fix |
+|---|---|---|
+| "That isn't a Gitberth token: they start with gbt_." or "The token isn't known: …" (401) | The header doesn't carry a token Gitberth made. | Copy the token again, or make a new one in **Settings › AI agents and API**. |
+| "The token … was revoked." or "… expired on …" (401) | What it says. | Make a new token. |
+| "The token … has Read access, and … needs Operate. …" (403) | The tool needs more access than the token has. | Make a token with that access, if the agent should have it. |
+| "Requests from a browser page (with an Origin header) aren't accepted here. …" (403) | The call came from a web page. | Call it from an MCP client, a script or `curl`. |
+| "Too many requests with a bad token from this address. …" (429) | 10 bad tokens from one address in 15 minutes. | Wait a few minutes, then use a good token. |
+| "There are 50 tokens in use, the most there can be. Revoke one first." | The limit of tokens in use. | Revoke one you no longer need. |
+
+Notifications that don't arrive are covered in [Notifications](notifications.md#when-a-message-doesnt-arrive), and an
+app that's down for its uptime check in [Uptime checks](uptime-and-status-page.md#whats-checked).
 
 ## Health page
 

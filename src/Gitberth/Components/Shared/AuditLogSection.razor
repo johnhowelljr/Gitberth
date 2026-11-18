@@ -8,13 +8,13 @@
     <div class="gb-sec-head">
         <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Policy" /></span>
         <div style="min-width:0">
-            <div class="gb-h3" id="audit-t">Audit log</div>
+            <div class="gb-h3"><span id="audit-t">Audit log</span><Tip Key="settings.audit" /></div>
             <p>Every change to this Gitberth and its apps, who made it and how it ended, kept in a file of its own and checked against tampering.</p>
         </div>
     </div>
     <div class="gb-sec-body">
         <div class="gb-setrow">
-            <Field Label="Keep entries for" For="audit-days" Help="@($"{AuditSettings.MinRetentionDays} to {AuditSettings.MaxRetentionDays} days. Older entries are removed once a day; the rest still check out.")"
+            <Field Label="Keep entries for" For="audit-days" Tip="settings.audit.retention" Help="@($"{AuditSettings.MinRetentionDays} to {AuditSettings.MaxRetentionDays} days. Older entries are removed once a day; the rest still check out.")"
                    Error="@AuditSettings.RetentionProblem(days)">
                 <label class="gb-input"><input id="audit-days" type="number" min="@AuditSettings.MinRetentionDays" max="@AuditSettings.MaxRetentionDays" value="@days"
                        @onchange="e => days = int.TryParse(e.Value?.ToString(), out var d) ? d : days" /><span class="gb-input-suffix">days</span></label>
@@ -24,11 +24,11 @@
                      Disabled="@(AuditSettings.RetentionProblem(days) is not null || (days == Options.RetentionDays && outside == Options.RecordOutside))">Save</Btn>
             </div>
         </div>
-        <SwitchRow @key="@($"out{switchKey}")" Title="Record changes made outside Gitberth" Value="outside" ValueChanged="v => outside = v" Disabled="busy"
+        <SwitchRow @key="@($"out{switchKey}")" Title="Record changes made outside Gitberth" Value="outside" ValueChanged="v => outside = v" Disabled="busy" Tip="settings.audit.outside"
                    Changed="@(outside != Options.RecordOutside)"
                    Sub="Containers, images, networks and volumes changed with docker on the host, Compose or another tool. Gitberth's own changes are recorded either way." />
         <dl class="gb-kv">
-            <dt>File</dt>
+            <dt><Tip Key="settings.audit.file">File</Tip></dt>
             <dd><code>@(Log.FilePath ?? "in memory")</code></dd>
             <dt>Size</dt>
             <dd>@(summary is null ? "…" : Format.Memory(summary.Bytes))</dd>
@@ -59,9 +59,9 @@
         }
         <div class="gb-row gb-row--wrap">
             <Btn Href="audit" Icon="@Icons.Material.Outlined.Policy">Open the audit log</Btn>
-            <Btn Href="@AuditEndpoints.ExportUrl(AuditFilter.Default with { Range = AuditRange.All }, AuditExportFormat.Csv)" Icon="@Icons.Material.Outlined.Download">Export everything (CSV)</Btn>
-            <Btn Href="@AuditEndpoints.ExportUrl(AuditFilter.Default with { Range = AuditRange.All }, AuditExportFormat.JsonLines)" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.DataObject">JSON Lines</Btn>
-            <Btn OnClick="VerifyAsync" Busy="verifying" Icon="@Icons.Material.Outlined.VerifiedUser">Check its integrity</Btn>
+            <Btn Href="@AuditEndpoints.ExportUrl(AuditFilter.Default with { Range = AuditRange.All }, AuditExportFormat.Csv)" Icon="@Icons.Material.Outlined.Download" Tip="settings.audit.export-csv">Export everything (CSV)</Btn>
+            <Btn Href="@AuditEndpoints.ExportUrl(AuditFilter.Default with { Range = AuditRange.All }, AuditExportFormat.JsonLines)" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.DataObject" Tip="settings.audit.export-json">JSON Lines</Btn>
+            <Btn OnClick="VerifyAsync" Busy="verifying" Icon="@Icons.Material.Outlined.VerifiedUser" Tip="settings.audit.verify">Check its integrity</Btn>
         </div>
         <p class="gb-help">
             Each entry's hash covers the one before it, so a changed or missing entry shows when the log is checked. Secret values (variables marked

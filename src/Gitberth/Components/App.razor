@@ -20,6 +20,9 @@
     <link rel="stylesheet" href="css/uptime.css" />
     @* New app's template gallery and template pages (1.3). *@
     <link rel="stylesheet" href="css/templates.css" />
+    @* The built-in Help's pages, and the tips' cards (1.4). *@
+    <link rel="stylesheet" href="@Assets["css/help.css"]" />
+    <link rel="stylesheet" href="@Assets["css/tips.css"]" />
     <link rel="stylesheet" href="@Assets["Gitberth.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/svg+xml" href="@Assets["favicon.svg"]" />
@@ -47,6 +50,8 @@
     </form>
     <ReconnectModal />
     <script src="@Assets["js/gitberth.js"]"></script>
+    @* The tips' cards, for any [data-tip] on any page; the catalog comes once per version. *@
+    <script src="@Assets["js/tips.js"]" data-catalog="@Gitberth.Help.HelpEndpoints.TipsUrl(Tips)" defer></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="@Assets["_content/MudBlazor/MudBlazor.min.js"]"></script>
 </body>
@@ -55,6 +60,7 @@
 
 @code {
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [Inject] private Gitberth.Help.TipCatalog Tips { get; set; } = default!;
 
     // Every page is interactive except those marked [ExcludeFromInteractiveRouting] (sign-in, error).
     private IComponentRenderMode? PageRenderMode => HttpContext.AcceptsInteractiveRouting() ? RenderModes.Server : null;

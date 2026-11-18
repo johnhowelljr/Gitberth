@@ -104,7 +104,7 @@ public sealed class WordsAndLabelsTests : IDisposable
     [Fact]
     public void The_settings_index_names_each_section_by_its_title()
     {
-        Assert.Equal(["GitHub access", "GitHub integration", "Notifications", "Registries", "Updates", "Domains", "Uptime and status page", "Network", "Own LAN addresses", "Deploys",
+        Assert.Equal(["GitHub access", "GitHub integration", "GitLab", "Notifications", "Registries", "Updates", "Domains", "Uptime and status page", "Network", "Own LAN addresses", "Deploys",
                 "Databases", "Admin password", "AI agents and API", "Audit log", "System"],
             SettingsPage.Toc.Select(t => t.Text));
         // A message that sends you to a section names one there is.

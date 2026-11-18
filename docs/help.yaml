@@ -1,0 +1,131 @@
+# Gitberth's built-in Help: its table of contents (the Help menu, the sidebar of /help) and the page that
+# "Help for this page" opens on each of Gitberth's pages. The pages are the files in docs/, named by their path
+# without ".md". A page's title is its first "# " heading. Every page in docs/ is listed in exactly one section.
+
+sections:
+  - title: Get started
+    pages:
+      - getting-started/install
+      - getting-started/first-steps
+
+  - title: Add an app
+    pages:
+      - guides/add-an-app
+      - guides/deploy-from-github
+      - guides/run-a-registry-image
+      - guides/use-a-local-image
+      - guides/paste-docker-run-or-compose
+      - guides/compose-apps
+      - guides/templates
+
+  - title: Run your apps
+    pages:
+      - guides/manage-apps
+      - guides/environment-variables
+      - guides/deploys-and-rollbacks
+      - guides/previews
+      - guides/databases
+      - guides/updates
+      - guides/scheduled-jobs-and-restarts
+      - guides/deploy-hooks
+
+  - title: Networks and domains
+    pages:
+      - guides/networking
+      - guides/domains
+
+  - title: Watch your apps
+    pages:
+      - guides/health-and-monitoring
+      - guides/uptime-and-status-page
+      - guides/notifications
+      - guides/audit-log
+
+  - title: Connect other tools
+    pages:
+      - guides/github-integration
+      - guides/gitlab-integration
+      - guides/ai-agents
+
+  - title: Look after Gitberth
+    pages:
+      - guides/backups-and-restore
+      - guides/updating-gitberth
+      - guides/troubleshooting
+      - faq
+
+  - title: Reference
+    pages:
+      - reference/app-settings
+      - reference/gitberth-settings
+      - reference/build-detection
+      - reference/api
+      - reference/configuration
+
+  - title: Concepts
+    pages:
+      - concepts/architecture
+      - concepts/how-deploys-work
+      - concepts/security
+
+# "Help for this page": the first rule whose route matches the address's path wins. In a route, * stands for one
+# segment and ** for any number of them. A page may end in #anchor (a heading's GitHub-style id).
+routes:
+  - route: /
+    page: getting-started/first-steps#the-dashboard
+  - route: /login
+    page: concepts/security#sign-in-and-the-lockout
+  - route: /help
+    page: getting-started/first-steps#get-help-in-gitberth
+  - route: /help/**
+    page: getting-started/first-steps#get-help-in-gitberth
+  - route: /apps
+    page: guides/manage-apps#the-apps-list
+  - route: /apps/new
+    page: guides/add-an-app
+  - route: /apps/*/deployments/*
+    page: guides/deploys-and-rollbacks#the-deploy-page
+  - route: /apps/*/overview
+    page: guides/manage-apps#the-tabs
+  - route: /apps/*/environment
+    page: guides/environment-variables
+  - route: /apps/*/env
+    page: guides/environment-variables
+  - route: /apps/*/network
+    page: guides/networking
+  - route: /apps/*/previews
+    page: guides/previews#the-previews-tab
+  - route: /apps/*/settings
+    page: reference/app-settings#settings-tab
+  - route: /apps/*/logs
+    page: guides/manage-apps#the-tabs
+  - route: /apps/*/activity
+    page: guides/deploys-and-rollbacks#the-activity-tab
+  - route: /apps/*/deployments
+    page: guides/deploys-and-rollbacks#the-activity-tab
+  - route: /apps/*
+    page: guides/manage-apps#the-app-page
+  - route: /apps/**
+    page: guides/manage-apps#the-app-page
+  - route: /containers/**
+    page: guides/manage-apps#the-app-page
+  - route: /containers
+    page: guides/manage-apps#the-apps-list
+  - route: /network
+    page: guides/networking#see-who-holds-a-host-port
+  - route: /health
+    page: guides/health-and-monitoring#the-health-page
+  - route: /audit
+    page: guides/audit-log#find-a-change
+  - route: /settings
+    page: reference/gitberth-settings
+  - route: /status
+    page: guides/uptime-and-status-page#the-status-page
+  - route: /down-page/**
+    page: guides/uptime-and-status-page#the-down-page
+  - route: /Error
+    page: guides/troubleshooting#gitberths-page
+  - route: /not-found
+    page: guides/troubleshooting#gitberths-page
+  - route: /**
+    page: getting-started/first-steps

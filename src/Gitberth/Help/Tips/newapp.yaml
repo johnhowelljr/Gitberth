@@ -1,0 +1,706 @@
+# Tips for New app (Components/NewApp: NewAppPage, the sources GitSource, RegistrySource, LocalSource, HandSource,
+# TemplateSource and ComposeWholeForm, ConfigureForm, CreatePreview, ParseIssues; NewAppState.cs). The ports table, the
+# "how it's reached" drawing and the change steps it shows have the network area's tips. See Help/TipCatalog.cs.
+
+newapp.page:
+  title: New app
+  text: >-
+    Adds an app to this host in three steps: where it comes from, its settings, then create. Nothing is created until
+    the last step, and every setting can change afterwards on the app's page.
+  more: guides/add-an-app#the-three-steps
+
+newapp.step.source:
+  title: Source
+  text: >-
+    Where the app comes from: a template, a Git repository, a registry image, an image already on this host, or a
+    `docker run` or Compose file you paste.
+  more: guides/add-an-app#choose-where-it-comes-from
+
+newapp.step.configure:
+  title: Configure
+  text: >-
+    Its settings, filled in from the source: name, ports, networks, storage, environment and the rest. The preview beside
+    them shows what will run.
+  more: guides/add-an-app#configure
+
+newapp.step.create:
+  title: Create
+  text: >-
+    A last look at what will be made, then the pull, the container and its first start, step by step. It ends on the new
+    app's page.
+  more: guides/add-an-app#create
+
+# ---- Where it comes from ----
+
+newapp.source.templates:
+  title: Templates
+  text: >-
+    Popular self-hosted apps, ready to install: Gitberth makes each one's database and secrets, adds a domain if you
+    want one, then deploys it as a Compose app.
+  more: guides/templates
+
+newapp.source.git:
+  title: Git repository
+  text: >-
+    Gitberth builds the app from a GitHub repository or a GitLab project, working out how from what's in it, and deploys
+    it again on every push to its branch.
+  more: guides/deploy-from-github
+
+newapp.source.registry:
+  title: Registry image
+  text: >-
+    Runs an image from Docker Hub, ghcr.io or a registry of your own, and can keep it up to date. A private image needs
+    a sign-in in **Settings › Registries**.
+  more: guides/run-a-registry-image
+
+newapp.source.local:
+  title: Local image
+  text: >-
+    Runs an image that's already on this host, built here or loaded, so nothing is pulled.
+  more: guides/use-a-local-image
+
+newapp.source.hand:
+  title: By hand
+  text: >-
+    Paste a `docker run` command or a Compose file and see what Gitberth reads from it, or start from a blank form with
+    only an image.
+  more: guides/paste-docker-run-or-compose
+
+# ---- Fields more than one source has ----
+
+newapp.name:
+  title: Name
+  text: >-
+    What Gitberth calls the app. Other containers on the shared network reach it by a name made from it (lower case,
+    with dashes), and its container is `gb-` and that name. You can rename it later.
+  example: orders-api
+  more: guides/add-an-app#configure
+
+newapp.restart:
+  title: Restart
+  text: >-
+    What Docker does when the container stops: **Unless stopped** starts it again, also after a reboot, until you stop
+    it; **Always** even then; **On failure** only after a crash; **Never** leaves it stopped.
+  default: Unless stopped
+  more: reference/app-settings#restart
+
+newapp.web-service:
+  title: Web service
+  text: >-
+    The service whose container is the app's: its domains, its port on the LAN, the health URL and its logs go there.
+    The other services stay inside the app.
+  more: guides/compose-apps#use-the-app
+
+newapp.continue:
+  title: Continue
+  text: >-
+    Goes on to the settings, filled in from what you picked: its ports, volumes and health check come from the image.
+    Nothing is created yet.
+  more: guides/add-an-app#configure
+
+newapp.on-host:
+  title: On this host
+  text: >-
+    Docker has this image already, so it isn't pulled: the app starts from it as soon as it's created.
+  more: guides/use-a-local-image
+
+# ---- The Create step ----
+
+newapp.review-create:
+  title: Review and create
+  text: >-
+    Checks the settings and shows what will be made: its name, its container, the image and the disk it needs, and the
+    `docker run` it amounts to. Nothing is created until **Create and start**.
+  more: guides/add-an-app#create
+
+newapp.create:
+  title: Create and start
+  text: >-
+    Pulls the image if this host doesn't have it, creates the container and starts it, then checks it answers. The new
+    app's page opens when it's done.
+  more: guides/add-an-app#create
+
+newapp.review.container:
+  title: Container
+  text: >-
+    The name Docker knows the container by: `gb-` and the app's name. A name already taken on this host gets another
+    one, and the tag says so.
+  more: guides/add-an-app#create
+
+newapp.review.network-name:
+  title: Network name
+  text: >-
+    The name other containers on the shared network reach the app by, like `orders-api:3000`, without any port
+    published on the host.
+  more: guides/networking#reach-other-containers-by-name
+
+newapp.review.image:
+  title: Image
+  text: >-
+    The image it runs. **Pulled first** means this host doesn't have it yet, so creating it starts with a pull; **On
+    this host** means it starts at once.
+  more: guides/add-an-app#create
+
+newapp.review.disk:
+  title: Disk
+  text: >-
+    The free space on Docker's disk. With too little to pull the image, it can't be created; **Getting low** is worth
+    freeing space for anyway.
+  more: guides/troubleshooting#dockers-disk-is-filling-up
+
+newapp.try-again:
+  title: Try again
+  text: >-
+    Creates it again with the same settings and the same name: the failed try left nothing behind. If something changed
+    meanwhile, like the name being taken, the review says what first.
+  more: guides/add-an-app#if-something-stops-it
+
+# ---- Configure ----
+
+newapp.cfg.basics:
+  title: Basics
+  text: >-
+    The app's name and the image it runs. What reading the source found, from a paste especially, is listed here too.
+  more: guides/add-an-app#configure
+
+newapp.cfg.network-name:
+  title: Network name
+  text: >-
+    Made from the name, unique on this host: other containers on the shared network reach the app by it, and its
+    container is `gb-` and this name.
+  more: guides/networking#reach-other-containers-by-name
+
+newapp.cfg.pulled:
+  title: Pulled when it's created
+  text: >-
+    This host doesn't have the image yet: creating the app starts with a pull from its registry.
+  more: guides/run-a-registry-image#review-and-create
+
+newapp.cfg.ports:
+  title: Ports
+  text: >-
+    The ports its program listens on, who reaches each and the host port that leads to it. A new app's ports are on the
+    LAN, at a free host port, unless you change them.
+  more: guides/networking#publish-a-port-on-the-lan
+
+newapp.cfg.add-port:
+  title: Add port
+  text: >-
+    Adds a row for another port its program listens on: on the LAN, with a free host port suggested and checked as you
+    type.
+  more: guides/networking#publish-a-port-on-the-lan
+
+newapp.cfg.network:
+  title: Network
+  text: >-
+    Where other containers find the app by name: always Gitberth's shared network, and any other you tick. It can use
+    the host's network instead, or none.
+  more: guides/networking#reach-other-containers-by-name
+
+newapp.cfg.network-mode:
+  title: Network mode
+  text: >-
+    How the container is connected. **Its networks** is what almost every app wants: its own address on Docker's
+    networks, reached by name, with ports you publish.
+  default: Its networks
+  more: reference/app-settings#advanced
+
+newapp.cfg.mode.networks:
+  title: Its networks
+  text: >-
+    On the shared network and any you tick: other containers reach it by name, and its ports can be published on the
+    host.
+  more: guides/networking#reach-other-containers-by-name
+
+newapp.cfg.mode.host:
+  title: The host's
+  text: >-
+    It shares the host's own network: no ports of its own to publish, no name for other containers. Whatever port its
+    program opens answers at this host's address.
+  more: guides/networking#host-network-mode
+
+newapp.cfg.mode.none:
+  title: None
+  text: >-
+    No network at all: nothing reaches it, and it reaches nothing.
+  more: guides/networking#who-reaches-a-port-access
+
+newapp.cfg.mode.container:
+  title: Another container's
+  text: >-
+    It shares that container's network: its addresses and ports are the other container's.
+  more: guides/networking#who-reaches-a-port-access
+
+newapp.cfg.create-network:
+  title: Create it
+  text: >-
+    Makes a plain bridge network with this name on the host, so the app can join it as the source asks.
+  more: guides/networking#reach-other-containers-by-name
+
+newapp.cfg.lan-address:
+  title: Own LAN address
+  text: >-
+    An address of its own on your LAN, from this host's network, besides its ports on the host. Leave it empty for none.
+    It needs own LAN addresses turned on in **Settings**.
+  example: 192.168.50.230
+  more: guides/networking#give-an-app-an-address
+
+newapp.cfg.storage:
+  title: Storage
+  text: >-
+    Where the app keeps data that outlives the container: a named volume Docker keeps, or a folder of the host's. Data
+    anywhere else is lost when the container is recreated, by an update say.
+  more: reference/app-settings#volumes
+
+newapp.cfg.add-volume:
+  title: Add volume
+  text: >-
+    Adds a named volume: Docker keeps its files apart from the container, so they stay when it's updated or recreated.
+  example: gb-orders-api-data → /data
+  more: reference/app-settings#volumes
+
+newapp.cfg.add-folder:
+  title: Host folder
+  text: >-
+    Adds a folder of the host's, shared with the container: the host and the app see the same files.
+  example: /srv/data → /data
+  more: reference/app-settings#volumes
+
+newapp.cfg.read-only:
+  title: Read-only
+  text: >-
+    The container can read the files there but not change them.
+  more: reference/app-settings#volumes
+
+newapp.cfg.env:
+  title: Environment
+  text: >-
+    Variables the app reads when it starts, like a database's address or a password. A secret one is masked wherever
+    it's shown.
+  more: guides/environment-variables#set-an-apps-own-variables
+
+newapp.cfg.image-env:
+  title: From the image
+  text: >-
+    The variables the image sets itself. Change one and it becomes the app's own; the rest keep following the image.
+  more: guides/environment-variables#the-images-variables
+
+newapp.cfg.secret:
+  title: Secret
+  text: >-
+    Masks the value wherever it's shown, in Gitberth and in its logs. The app still gets the real value.
+  more: guides/environment-variables#secrets
+
+newapp.cfg.command:
+  title: Command
+  text: >-
+    What the container runs, after the entrypoint. Leave it empty to use the image's own, shown greyed in the field.
+  more: reference/app-settings#command
+
+newapp.cfg.entrypoint:
+  title: Entrypoint
+  text: >-
+    The program that starts the container, with the command as its arguments. Leave it empty to use the image's own.
+  more: reference/app-settings#command
+
+newapp.cfg.workdir:
+  title: Working directory
+  text: >-
+    The folder the command runs in, inside the container. Leave it empty to use the image's own.
+  more: reference/app-settings#command
+
+newapp.cfg.user:
+  title: User
+  text: >-
+    The user the command runs as inside the container, by name or number. Leave it empty to use the image's own.
+  example: 1000:1000
+  more: reference/app-settings#command
+
+newapp.cfg.run:
+  title: Restart & resources
+  text: >-
+    What Docker does when the container stops, and limits on its memory and CPU, so one app can't starve the others.
+  more: reference/app-settings#resources
+
+newapp.cfg.health:
+  title: Health check
+  text: >-
+    A command Docker runs every so often to tell whether the app works: **Image default** is the image's own,
+    **Command** one of yours, **None** none. After a change, Gitberth waits for it to report healthy.
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+newapp.cfg.health-command:
+  title: Health check command
+  text: >-
+    Run in the container's shell: exit code 0 means healthy. The tool it uses, like `curl`, must be in the image.
+  example: curl -fs http://localhost:3000/health
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+newapp.cfg.health-every:
+  title: Every
+  text: >-
+    How many seconds apart Docker runs the check.
+  default: 30 seconds
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+newapp.cfg.more:
+  title: Everything else
+  text: >-
+    What the source set that has no field here, kept as it was given. Each can change on the app's Settings tab once
+    it's created.
+  more: guides/paste-docker-run-or-compose#what-gitberth-keeps-and-what-it-doesnt
+
+# ---- What will run ----
+
+newapp.preview:
+  title: What will run
+  text: >-
+    The app as it will be, following every change you make: how it's reached, where its data lives, and the `docker
+    run` it amounts to.
+  more: guides/add-an-app#configure
+
+newapp.preview.addresses:
+  title: Addresses
+  text: >-
+    Where it will answer: this host's LAN address and host port for a LAN port, `127.0.0.1` for Host only, and its
+    name on the shared network for other containers.
+  more: guides/networking#who-reaches-a-port-access
+
+newapp.preview.data:
+  title: Data
+  text: >-
+    The volumes and host folders it keeps data in, and where they go inside. **in the container only** means its data
+    is lost when the container is recreated.
+  more: reference/app-settings#volumes
+
+# ---- Git repository ----
+
+newapp.git.repo:
+  title: Git repository
+  text: >-
+    A github.com repository, or a project on your GitLab, groups and subgroups too. A link to a branch or a folder works
+    as well. A private one needs the token in **Settings**.
+  example: https://github.com/you/website
+  more: guides/deploy-from-github#pick-the-repository
+
+newapp.git.check:
+  title: Check
+  text: >-
+    Reads the repository's branches, then clones the default one (or the branch and folder in the link) and works out
+    how to build it. Nothing is created.
+  more: guides/deploy-from-github#pick-the-repository
+
+newapp.git.branch:
+  title: Branch
+  text: >-
+    The branch Gitberth builds and watches: with **Deploy on push** on, each new commit on it deploys.
+  default: The repository's default branch
+  more: guides/deploy-from-github#pick-the-repository
+
+newapp.git.subfolder:
+  title: Subfolder
+  text: >-
+    The folder the app is in, for a repository that holds more than one. Leave it empty for the repository's top.
+  example: src/api
+  more: guides/deploy-from-github#pick-the-repository
+
+newapp.git.analyze:
+  title: Analyze again
+  text: >-
+    Clones the branch and folder as they're set now and works out again how to build it.
+  more: guides/deploy-from-github#check-how-it-will-run
+
+newapp.git.compose:
+  title: A Compose file
+  text: >-
+    The repository has a Compose file: deploy it as one app with all its services, or build one container from the
+    repository instead.
+  more: guides/deploy-from-github#a-repo-with-a-compose-file
+
+newapp.git.with-compose:
+  title: With Compose
+  text: >-
+    One app with all the file's services, deployed with `docker compose`: every service with a build section is built,
+    and the web service is the one you reach.
+  more: guides/compose-apps#deploy-a-repo-with-compose
+
+newapp.git.one-container:
+  title: As one container
+  text: >-
+    Ignores the Compose file and builds a single container from the repository, as Gitberth would without one.
+  more: guides/deploy-from-github#check-how-it-will-run
+
+newapp.git.compose-file:
+  title: Compose file
+  text: >-
+    Which of the repository's Compose files to deploy, when it has more than one.
+  more: guides/compose-apps#which-files
+
+newapp.git.detected:
+  title: How it will run
+  text: >-
+    What Gitberth found in the repository and how it will build it; the ticks are what told it. A repo with its own
+    Dockerfile is built with that.
+  more: reference/build-detection
+
+newapp.git.project:
+  title: Project to run
+  text: >-
+    The repository has more than one project Gitberth could run: pick the one this app is.
+  more: reference/build-detection
+
+newapp.git.customize:
+  title: Customize the Dockerfile
+  text: >-
+    Edit the Dockerfile Gitberth made: it's stored with the app and used as it is on every deploy. Off, Gitberth makes
+    it again on each deploy, so a new language version in the repo is picked up.
+  default: "Off"
+  more: reference/build-detection
+
+newapp.git.health-url:
+  title: Health URL
+  text: >-
+    A path on the web port, like `/health`, that a new version must answer (below 400) before it takes over from the
+    running one. Leave it empty if "it started" is enough.
+  example: /health
+  more: guides/health-and-monitoring#set-a-health-url
+
+newapp.git.deploy-on-push:
+  title: Deploy on push
+  text: >-
+    Each new commit on the branch deploys by itself. Off, a new commit waits until you click **Deploy**.
+  default: "On"
+  more: guides/deploys-and-rollbacks#automatic-deploys
+
+newapp.git.env:
+  title: Environment variables
+  text: >-
+    The app's own variables. A value you set here wins over the same name in the repository's GitHub or GitLab
+    variables.
+  more: guides/environment-variables#where-an-apps-variables-come-from
+
+newapp.git.compose-vars:
+  title: Variables
+  text: >-
+    Values for the Compose file's `${…}`: they're the app's own variables. One left empty takes the file's default.
+  more: guides/compose-apps#deploy-a-repo-with-compose
+
+newapp.git.volumes:
+  title: Volumes
+  text: >-
+    Folders the app keeps data in, so it stays across deploys: each deploy makes a new container.
+  more: reference/app-settings#volumes
+
+newapp.git.resources:
+  title: Resources
+  text: >-
+    Limits on the app's memory and CPU, so one app can't starve the others. Empty means no limit.
+  more: reference/app-settings#resources
+
+newapp.git.create:
+  title: Create and deploy
+  text: >-
+    Creates the app and starts its first deploy: Gitberth clones the branch, builds it and starts it. The deploy's page
+    shows every step, and you can leave it.
+  more: guides/deploy-from-github#create-and-deploy
+
+# ---- Registry image ----
+
+newapp.registry:
+  title: Registry image
+  text: >-
+    Search Docker Hub, or paste a full reference for any registry, like `ghcr.io/owner/app:1.4`. Images already on this
+    host say so: they need no pull.
+  more: guides/run-a-registry-image#pick-the-image
+
+newapp.registry.tag:
+  title: Tag
+  text: >-
+    Which version of the image. A digest (`sha256:…`) pins one exact build, which then never updates.
+  default: latest
+  more: guides/run-a-registry-image#pick-the-image
+
+newapp.registry.sign-in:
+  title: Sign in with
+  text: >-
+    The registry sign-in to pull it with, and to check it for updates. **Automatic** uses the one saved for this
+    registry; a public image needs none.
+  more: guides/run-a-registry-image#before-you-start
+
+newapp.registry.check:
+  title: Check
+  text: >-
+    Asks the registry whether this image and tag are there, with the sign-in chosen, without pulling anything.
+  more: guides/run-a-registry-image#pick-the-image
+
+newapp.registry.popular:
+  title: Popular
+  text: >-
+    Well-known images with their ports, volumes and health checks filled in. Click one to pick it.
+  more: guides/run-a-registry-image#pick-the-image
+
+# ---- Local image ----
+
+newapp.local:
+  title: Local image
+  text: >-
+    Every tagged image on this host, newest first, with its size and how many containers use it. An app made from one
+    needs no pull.
+  more: guides/use-a-local-image#steps
+
+newapp.local.unused:
+  title: Not in use
+  text: >-
+    Images no container uses yet, leaving out what Gitberth built for its own apps.
+  more: guides/use-a-local-image#steps
+
+newapp.local.all:
+  title: All
+  text: >-
+    Every image on this host, used or not.
+  more: guides/use-a-local-image#steps
+
+newapp.local.gitberth:
+  title: Built by Gitberth
+  text: >-
+    The images Gitberth built from Git apps' repositories. Another app can run one too.
+  more: guides/use-a-local-image#steps
+
+# ---- By hand ----
+
+newapp.hand:
+  title: By hand
+  text: >-
+    Paste what you'd run yourself and see what Gitberth reads from it before anything is created, or start from a blank
+    form. A pasted command or service becomes settings; a whole Compose file is kept, encrypted, with its app.
+  more: guides/paste-docker-run-or-compose
+
+newapp.hand.docker-run:
+  title: docker run
+  text: >-
+    Paste a `docker run` command, as you'd type it: its image, ports, volumes, variables and the rest become the app's
+    settings.
+  more: guides/paste-docker-run-or-compose#paste-a-docker-run-command
+
+newapp.hand.compose:
+  title: Compose
+  text: >-
+    Paste a Compose file: all its services as one app, or one of them as an app of its own.
+  more: guides/paste-docker-run-or-compose#paste-a-whole-compose-file
+
+newapp.hand.blank:
+  title: Blank form
+  text: >-
+    Start from an image alone and fill in the rest yourself.
+  more: guides/paste-docker-run-or-compose#start-from-a-blank-form
+
+newapp.hand.image:
+  title: Image
+  text: >-
+    A registry's image or one on this host. If this host doesn't have it, it's pulled when the app is created.
+  example: ghcr.io/owner/app:1.4
+  more: guides/paste-docker-run-or-compose#start-from-a-blank-form
+
+newapp.hand.whole:
+  title: One app with all services
+  text: >-
+    Deploys the whole file with `docker compose`, as one app: its web service is the one you reach, and the others
+    stay inside it.
+  more: guides/paste-docker-run-or-compose#paste-a-whole-compose-file
+
+newapp.hand.one-service:
+  title: One service as an app of its own
+  text: >-
+    Makes one service an app like any other container. Paste the file again for each of the others.
+  more: guides/paste-docker-run-or-compose#paste-a-compose-service
+
+newapp.hand.read:
+  title: Gitberth read
+  text: >-
+    What Gitberth understood from the paste, before anything is created. Check it, then **Continue** to change any of
+    it.
+  more: guides/paste-docker-run-or-compose#what-gitberth-keeps-and-what-it-doesnt
+
+newapp.issues.dropped:
+  title: Not carried over
+  text: >-
+    What the paste had that the app won't, each with why. The app is created without them.
+  more: guides/paste-docker-run-or-compose#what-gitberth-keeps-and-what-it-doesnt
+
+newapp.compose.web-port:
+  title: Web port
+  text: >-
+    The web service's port inside its container: the app's domains and its LAN address go to it. Leave it empty for an
+    app without one.
+  example: "8080"
+  more: guides/paste-docker-run-or-compose#paste-a-whole-compose-file
+
+newapp.compose.variables:
+  title: Its variables
+  text: >-
+    Values for the file's `${…}`: they're the app's own variables, changed later on its Environment tab. One left empty
+    takes the file's default.
+  more: guides/paste-docker-run-or-compose#paste-a-whole-compose-file
+
+newapp.compose.create:
+  title: Create and deploy
+  text: >-
+    Keeps the file, encrypted, and deploys it with `docker compose`: it pulls, builds and starts every service. The
+    deploy's page shows each step.
+  more: guides/paste-docker-run-or-compose#paste-a-whole-compose-file
+
+# ---- Templates ----
+
+newapp.templates:
+  title: Templates
+  text: >-
+    Popular self-hosted apps, ready to run. Pick one to see what it needs; **Install** makes its database and secrets
+    and deploys it.
+  more: guides/templates#whats-in-the-gallery
+
+newapp.templates.domain:
+  title: Domain
+  text: >-
+    A domain for it on the internet, through your Cloudflare Tunnel, added with the install. An app whose first visitor
+    becomes its admin is put behind Cloudflare Access first, or refused when protection isn't ready.
+  example: app.example.com
+  more: guides/templates#a-domain-at-install
+
+newapp.templates.needs:
+  title: What it needs
+  text: >-
+    What the install makes or uses: its database, its images, the secrets generated for it, and where it will be reached.
+  more: guides/templates#what-it-needs
+
+newapp.templates.database:
+  title: Database
+  text: >-
+    A Postgres database and a role of its own on your default server, or a Redis of its own, made before it starts.
+    Gitberth sets its connection string for it.
+  more: guides/templates#what-it-needs
+
+newapp.templates.secrets:
+  title: Secrets
+  text: >-
+    Passwords and keys it needs, generated at install and kept as secret variables, masked everywhere.
+  more: guides/templates#what-it-needs
+
+newapp.templates.address:
+  title: Address
+  text: >-
+    Where it will be reached once it's installed: its domain, or this host's LAN address and a free host port.
+  more: guides/templates#where-its-reached
+
+newapp.templates.setup-postgres:
+  title: Set up a Postgres server
+  text: >-
+    Pulls `postgres:18` and sets it up as an app, reached only by your apps, its password generated and kept secret. It
+    then holds every app's databases.
+  more: guides/databases#create-a-postgres-server
+
+newapp.templates.install:
+  title: Install
+  text: >-
+    Makes it a Compose app with its database and secrets, adds the domain if you gave one, then pulls and starts it.
+    Afterwards it's an app like any other.
+  more: guides/templates#what-install-does

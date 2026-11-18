@@ -1,9 +1,10 @@
-"""The stand-ins' server. HTTPS on 443 answers for github.com (git), api.github.com and api.cloudflare.com, chosen by
-Host; plain HTTP on 8099 is the control API (/__control/...) the scenarios and the fake cloudflared use. Every call to
-443 is recorded, and failures can be injected per host, method and path.
+"""The stand-ins' server. HTTPS on 443 answers for github.com (git), api.github.com, api.cloudflare.com and GitLab
+(gitlab.e2e.test and gitlab.com: its API and git), chosen by Host; plain HTTP on 8099 is the control API (/__control/...)
+the scenarios and the fake cloudflared use. Every call to 443 is recorded, and failures can be injected per host, method
+and path.
 
-GitHub's webhook deliveries go through the Cloudflare stand-in's edge (DNS, Access) to the fake cloudflared, which
-routes them by the tunnel ingress it runs: each of its polls tells the stand-in where it is and which version it runs.
+GitHub's and GitLab's webhook deliveries go through the Cloudflare stand-in's edge (DNS, Access) to the fake cloudflared,
+which routes them by the tunnel ingress it runs: each of its polls tells the stand-in where it is and which version it runs.
 
 State that has to outlive a restart (the test CA, the admin password, the Cloudflare account and tunnel IDs, the tunnel
 configuration's version) is in /state; the CA certificate is copied to /trust for the CA bundles. Everything else is in
@@ -32,11 +33,13 @@ import certs  # noqa: E402
 from cf import Cloudflare, ingress_problem  # noqa: E402
 from common import ApiError, Failures, Recorder, Request, Response, injected_response, injected_status, log, log_exception, send  # noqa: E402
 from gh import GitHub  # noqa: E402
+from gl import GitLab, control_routes as gitlab_control_routes  # noqa: E402
 
 STATE = os.environ.get("STANDIN_STATE", "/state")
 TRUST = os.environ.get("STANDIN_TRUST", "/trust")
 TEMPLATES = os.environ.get("STANDIN_TEMPLATES", "/app/apps")
 REPOS = os.environ.get("STANDIN_REPOS", "/var/lib/standin/git")
+GITLAB_REPOS = os.environ.get("STANDIN_GITLAB_REPOS", "/var/lib/standin/gitlab")
 GITBERTH_URL = os.environ.get("E2E_GITBERTH_URL", "http://gitberth:8080")
 
 
@@ -81,12 +84,13 @@ REC = Recorder()
 FAILS = Failures()
 CF = Cloudflare(RIG["cf_account_id"], RIG["cf_tunnel_id"], STATE)
 GH = GitHub(REPOS, TEMPLATES, REC, GITBERTH_URL, edge=CF.edge)
+GL = GitLab(GITLAB_REPOS, TEMPLATES, REC, GITBERTH_URL, edge=CF.edge)
 # Cloudflare's edge certificates, for visitors' HTTPS requests to any other host name (see handle_edge).
 EDGE_CERTS = certs.EdgeCerts(STATE, CF.zone_for)
 
 # The names the HTTPS side answers as an API or a service; any other host name is a visitor's, through Cloudflare's edge.
 API_HOSTS = {"github.com", "www.github.com", "api.github.com", "api.cloudflare.com", "codeload.github.com", "uploads.github.com",
-             "raw.githubusercontent.com", "objects.githubusercontent.com", "gbe2e-standin"}
+             "raw.githubusercontent.com", "objects.githubusercontent.com", "gbe2e-standin", *GitLab.HOSTS}
 
 
 # ---- notifications: where Gitberth sends them ----
@@ -267,13 +271,16 @@ def handle_edge(req, call):
 def handle_api(req):
     kind = "git" if req.host in ("github.com", "www.github.com") else "github" if req.host == "api.github.com" \
         else "cloudflare" if req.host == "api.cloudflare.com" else "notify" if req.host in NOTIFY_HOSTS \
+        else GL.kind_of(req) if req.host in GitLab.HOSTS \
         else "other" if req.host in API_HOSTS or not req.host else "edge"
     call = REC.start(req, kind)
     try:
         # Which repo the call is about (and for git, what it asked for), before anything answers it: a call an injected
-        # failure answers, or that GitHub refuses, is still found by its repo.
+        # failure answers, or that GitHub or GitLab refuses, is still found by its repo.
         if kind in ("git", "github"):
             GH.describe(req, call)
+        elif kind in ("gitlab", "gitlab-git"):
+            GL.describe(req, call)
         rule = FAILS.match(req)
         if rule:
             call["injected"] = rule["id"]
@@ -282,7 +289,12 @@ def handle_api(req):
             if rule["action"] == "close":
                 call["status"] = 0
                 return None
-            if injected_status(rule, req.host):
+            if kind in ("gitlab", "gitlab-git"):
+                resp = GL.injected_response(rule, req)
+                if resp is not None:
+                    call["status"] = resp.status
+                    return resp
+            elif injected_status(rule, req.host):
                 resp = injected_response(rule, req.host, GH.rate_state(req) if kind == "github" else None)
                 call["status"] = resp.status
                 return resp
@@ -290,6 +302,10 @@ def handle_api(req):
             resp = GH.git_http(req, call)
         elif kind == "github":
             resp = GH.api(req, call)
+        elif kind == "gitlab-git":
+            resp = GL.git_http(req, call)
+        elif kind == "gitlab":
+            resp = GL.api(req, call)
         elif kind == "cloudflare":
             resp = CF.api(req, call)
         elif kind == "notify":
@@ -350,6 +366,7 @@ def c_seq(req):
 @route("POST", "/reset")
 def c_reset(req):
     GH.reset()
+    GL.reset()
     CF.reset()
     FAILS.remove()
     REC.clear()
@@ -842,6 +859,10 @@ def c_cf_delete_app(req, id):
     return {"deleted": id}
 
 
+# GitLab's: /__control/gitlab/... (gl.control_routes).
+CONTROL.extend(gitlab_control_routes(GL))
+
+
 def handle_control(req):
     for method, rx, fn in CONTROL:
         m = rx.match(req.path)
@@ -892,7 +913,8 @@ def make_handler(dispatch, name):
 
         def log_message(self, fmt, *args):
             if os.environ.get("STANDIN_VERBOSE"):
-                log(name, self.address_string(), fmt % args)
+                # The request line keeps its query, where GitLab takes a token too (?private_token=): never logged.
+                log(name, self.address_string(), re.sub(r"((?:private|access)_token=)[^&\s\"]*", r"\1[FILTERED]", fmt % args))
 
     return Handler
 
@@ -940,8 +962,8 @@ def main():
     control = PlainServer(("0.0.0.0", 8099), make_handler(handle_control, "control"))
     threading.Thread(target=https.serve_forever, name="https", daemon=True).start()
     threading.Thread(target=serve_smtp, name="smtp", daemon=True).start()
-    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com and the notification hosts, and Cloudflare's "
-        "edge for any other name; SMTP on 2525; "
+    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com, GitLab (gitlab.e2e.test, gitlab.com) and "
+        "the notification hosts, and Cloudflare's edge for any other name; SMTP on 2525; "
         f"control on 8099; deliveries go through the tunnel's connector (or straight to {GITBERTH_URL} when a scenario asks)")
     control.serve_forever()
 

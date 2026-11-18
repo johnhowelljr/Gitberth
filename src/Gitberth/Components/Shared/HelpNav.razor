@@ -1,0 +1,20 @@
+@inject HelpDocs Help
+
+@* The Help's sections and their pages, in docs/help.yaml's order, the page you're on marked. *@
+<nav class="gb-helpnav-list" aria-label="Help topics">
+    <a class="gb-helpnav-home" href="help"><SvgIcon Icon="@Icons.Material.Outlined.MenuBook" Size="sm" />Help topics</a>
+    @foreach (var section in Help.Manifest.Sections)
+    {
+        <div class="gb-helpnav-sec">@section.Title</div>
+        @foreach (var doc in section.Pages.Select(Help.Find).OfType<HelpDoc>())
+        {
+            var on = doc.Id == Current;
+            <a class="gb-helpnav-item @(on ? "on" : null)" href="@doc.Href" aria-current="@(on ? "page" : null)">@doc.Title</a>
+        }
+    }
+</nav>
+
+@code {
+    /// <summary>The id of the page shown, which the list marks.</summary>
+    [Parameter] public string? Current { get; set; }
+}

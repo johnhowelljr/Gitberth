@@ -3,7 +3,7 @@
     last few minutes, the memory the apps use against the host's, and the disk.
 *@
 <div class="gb-hoststrip @Class" role="group" aria-label="This host">
-    <a class="gb-hs" href="apps" title="Every app">
+    <a class="gb-hs" href="apps" data-tip="apps.host.apps">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.GridView" />Apps</span>
         <span class="gb-hs-v">@Running <small>running of @Apps.Count</small></span>
         <Waffle States="@Apps.Select(a => a.State)" Sorted="true" />
@@ -16,20 +16,20 @@
             }
         </span>
     </a>
-    <a class="gb-hs" href="health" title="CPU on the Health page">
+    <a class="gb-hs" href="health" data-tip="apps.host.cpu">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Speed" />CPU @(Host is { } h ? $"· {h.Cpus} cores" : "")</span>
         <span class="gb-hs-v">@AppFacts.Percent(HostCpu) <small>of the host</small></span>
         <Sparkline Values="@CpuHistory" Width="240" Height="26" Stretch="true" />
         <span class="gb-hs-sub">@(Busiest is { Length: > 0 } busiest ? $"Busiest: {busiest}" : "Nothing busy")</span>
     </a>
-    <a class="gb-hs" href="health" title="Memory on the Health page">
+    <a class="gb-hs" href="health" data-tip="apps.host.memory">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Memory" />Memory</span>
         <span class="gb-hs-v">@Gib(AppsMemory) <small>@(Host is { } m ? $"of {Gib(m.MemoryBytes)} GiB" : "GiB")</small></span>
         <Meter Fraction="@(Host is { MemoryBytes: > 0 } m2 ? AppsMemory / m2.MemoryBytes : null)" Large="true" Title="What the apps use of the host's memory" />
         <span class="gb-hs-sub">What the apps use, read every 5 s</span>
     </a>
     <div class="gb-hs">
-        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Storage" />Disk</span>
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Storage" /><Tip Key="apps.host.disk">Disk</Tip></span>
         @if (Disk is { TotalBytes: > 0 } disk)
         {
             var used = disk.TotalBytes - disk.FreeBytes;

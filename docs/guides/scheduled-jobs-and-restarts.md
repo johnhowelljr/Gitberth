@@ -112,6 +112,9 @@ a restart by hand starts the count again. Gitberth checks every minute.
   While the app has saved settings that aren't live yet, its container is restarted as it is, with `docker restart`, so a
   schedule never applies changes you haven't.
 
+- **Compose apps** have every service replaced from the release that runs, with a deploy's checks. While the web service
+  is replaced, the app's domains show the [down page](uptime-and-status-page.md#the-down-page).
+
 - **Every other container** gets `docker restart`, so it's down for a few seconds. Restarting `cloudflared` briefly takes
   every domain offline, and restarting a database drops its connections. Restarting Gitberth's own container interrupts a
   deploy that's running, which is then tried again.

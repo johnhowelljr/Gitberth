@@ -10,11 +10,11 @@ Gitberth is free for personal use. Businesses need a license; see [License](#lic
 
 ## What it does
 
-- **Builds from GitHub.** Node.js, Python, Go, .NET, Rust, Ruby, PHP, Java, static sites, or the repo's own Dockerfile, found by looking at the repo. Each push deploys within about 30 seconds, and a deploy that fails its checks leaves the running version in place. [How Gitberth builds your project](docs/reference/build-detection.md)
+- **Builds from GitHub or GitLab.** Node.js, Python, Go, .NET, Rust, Ruby, PHP, Java, static sites, or the repo's own Dockerfile, found by looking at the repo: a GitHub repo, or a project on gitlab.com or your own GitLab, groups and subgroups too. Each push deploys within about 30 seconds, and a deploy that fails its checks leaves the running version in place. [How Gitberth builds your project](docs/reference/build-detection.md) · [GitLab](docs/guides/gitlab-integration.md)
 - **Compose apps.** A repo with a `compose.yaml` (a web app, a worker, Redis) deploys as one app with all its services, with previews and rollbacks like any Git app; a pasted Compose file becomes one app the same way. [Compose apps](docs/guides/compose-apps.md)
 - **One-click app templates.** A gallery of popular self-hosted apps (Uptime Kuma, Vaultwarden, n8n, Gitea, Paperless-ngx, Nextcloud and more): pick one, and Gitberth sets it up with its database, generated secrets and domain, then deploys it. [App templates](docs/guides/templates.md)
 - **Previews of every pull request.** Each pull request, and each branch if you like, runs next to production with its own address and its own data, with variables for production or for previews, and **Promote** puts a preview's commit into production. [Preview deployments](docs/guides/previews.md)
-- **Talks to GitHub and to you.** Each deploy marks its commit on GitHub, a pull request's preview comments its address, a push deploys at once through a webhook, and a failed deploy or a crash sends a message by email, Discord, Slack, ntfy or webhook. [GitHub integration](docs/guides/github-integration.md) · [Notifications](docs/guides/notifications.md)
+- **Talks to GitHub, GitLab and you.** Each deploy marks its commit on GitHub or GitLab, a pull request's (or merge request's) preview comments its address, a push deploys at once through a webhook, and a failed deploy or a crash sends a message by email, Discord, Slack, ntfy or webhook. [GitHub integration](docs/guides/github-integration.md) · [GitLab](docs/guides/gitlab-integration.md) · [Notifications](docs/guides/notifications.md)
 - **Deploy hooks.** A secret URL per app that deploys it when a CMS, a scheduled job or CI calls it, as on Vercel. [Deploy hooks](docs/guides/deploy-hooks.md)
 - **Databases from the app page.** Add a Postgres database or a Redis to any app in a click: Gitberth makes it and its login, and puts the connection string in the app's `DATABASE_URL`. Each preview gets its own, empty or a copy of production's, dropped when it goes. [Databases](docs/guides/databases.md)
 - **Every container is an app.** The same page, settings and history for an app you deployed, a database you pulled and a container someone started by hand. [Manage apps](docs/guides/manage-apps.md)
@@ -57,7 +57,7 @@ The image, `ghcr.io/johnhowelljr/gitberth`, is ready-made for Intel/AMD and ARM 
 Start with [the documentation's index](docs/README.md), or go straight to:
 
 - [Install Gitberth](docs/getting-started/install.md) and [first steps](docs/getting-started/first-steps.md)
-- Add an app: [from GitHub](docs/guides/deploy-from-github.md), [a registry image](docs/guides/run-a-registry-image.md), [a local image](docs/guides/use-a-local-image.md), [a pasted docker run or Compose service](docs/guides/paste-docker-run-or-compose.md)
+- Add an app: [from GitHub or GitLab](docs/guides/deploy-from-github.md), [a registry image](docs/guides/run-a-registry-image.md), [a local image](docs/guides/use-a-local-image.md), [a pasted docker run or Compose file](docs/guides/paste-docker-run-or-compose.md), [a template](docs/guides/templates.md)
 - [Troubleshooting](docs/guides/troubleshooting.md) and the [FAQ](docs/faq.md)
 
 ## Development

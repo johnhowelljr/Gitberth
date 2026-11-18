@@ -19,12 +19,12 @@ refused with 403.
 | `GET /api/v1/openapi.json` | An OpenAPI 3.1 document of the tools, for agent frameworks and API clients that read one. |
 
 ```bash
-curl -s -X POST http://192.168.1.10:8080/api/v1/tools/deploy_app \
+curl -s -X POST http://192.168.50.10:8080/api/v1/tools/deploy_app \
   -H "Authorization: Bearer gbt_…" -H "Content-Type: application/json" \
-  -d '{"app": "shop", "wait": true}'
+  -d '{"app": "orders-api", "wait": true}'
 ```
 
-Name an app by its key from `list_apps` (`gb-shop`), its name (`shop`) or its number. Results are compact JSON with
+Name an app by its key from `list_apps` (`gb-orders-api`), its name (`orders-api`) or its number. Results are compact JSON with
 snake_case names; a secret variable comes back by name only, and no tool returns a token, a password, a connection
 string or a deploy hook's URL (except the new hook's, once, from `create_deploy_hook`).
 
@@ -179,14 +179,14 @@ Access: **Read** · read-only
 
 ### `query_audit_log`
 
-The audit log: every change to this Gitberth, who made it (a person, a token, a hook, GitHub, Gitberth itself, or something outside Gitberth), how and with what outcome, newest first, with the same filters as its page. Page with before_id (the last id you got).
+The audit log: every change to this Gitberth, who made it (a person, a token, a hook, GitHub or GitLab, Gitberth itself, or something outside Gitberth), how and with what outcome, newest first, with the same filters as its page. Page with before_id (the last id you got).
 
 Access: **Read** · read-only
 
 | Argument | Type | Required | What it is |
 |---|---|---|---|
 | `range` | string | no | How far back: day, week (default), month or all. |
-| `who` | string | no | Who made the changes, as kind:name, like User:admin, ApiToken:my-agent, DeployHook:cms, GitHub:GitHub, Docker:outside Gitberth. |
+| `who` | string | no | Who made the changes, as kind:name, like User:admin, ApiToken:my-agent, DeployHook:cms, GitHub:GitHub, GitLab:GitLab, Docker:outside Gitberth. |
 | `app` | string | no | Only this app's entries: its key, name or number. |
 | `area` | string | no | Only one part: apps, deploys, domains, settings, signins or outside (Docker changes made outside Gitberth). |
 | `outcome` | string | no | Only entries that ended so: succeeded, failed or denied. |
@@ -369,7 +369,7 @@ Access: **Operate** · destructive: needs `confirm`, idempotent
 
 ### `create_app`
 
-Creates an app as New app does, checked the same way, and deploys or starts it. Sources: git (a GitHub repo, built with what Gitberth detects, or with its Compose file when it has one: give repo, and maybe branch and subdirectory); image (a registry's image like nginx:1.27 or ghcr.io/owner/app:latest: give image); compose (a whole Compose file deployed as one app: give compose_yaml, and maybe web_service); template (one of Gitberth's app templates, as list_templates lists them: give template, its inputs, and maybe a domain; its databases and secrets are made as its page in New app makes them, and a template that needs Postgres needs a Postgres server first: create_postgres_server). Returns the app's key, and the deployment_id of a Git, Compose or template app's first deploy (wait follows it).
+Creates an app as New app does, checked the same way, and deploys or starts it. Sources: git (a GitHub repo, or a project on Gitberth's GitLab (Settings › GitLab: gitlab.com unless another is set), groups and subgroups too, built with what Gitberth detects, or with its Compose file when it has one: give repo, and maybe branch and subdirectory); image (a registry's image like nginx:1.27 or ghcr.io/owner/app:latest: give image); compose (a whole Compose file deployed as one app: give compose_yaml, and maybe web_service); template (one of Gitberth's app templates, as list_templates lists them: give template, its inputs, and maybe a domain; its databases and secrets are made as its page in New app makes them, and a template that needs Postgres needs a Postgres server first: create_postgres_server). Returns the app's key, and the deployment_id of a Git, Compose or template app's first deploy (wait follows it).
 
 Access: **Admin**
 
@@ -377,7 +377,7 @@ Access: **Admin**
 |---|---|---|---|
 | `source` | string | yes | git, image, compose or template. |
 | `name` | string | no | The app's name; leave out to take the repo's, the image's or the Compose file's. |
-| `repo` | string | no | git: the repository, like https://github.com/owner/repo (a link to a branch or folder works too). |
+| `repo` | string | no | git: the repository, like https://github.com/owner/repo or https://gitlab.com/group/subgroup/project (a link to a branch or folder works too). |
 | `branch` | string | no | git: the branch to deploy; the repo's default when left out. |
 | `subdirectory` | string | no | git: the folder the app is in, when it isn't the repo's root. |
 | `use_compose` | boolean | no | git: true to deploy with the repo's Compose file, false to build one container; leave out to choose as New app does. |

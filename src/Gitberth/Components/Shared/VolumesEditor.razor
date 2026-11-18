@@ -2,9 +2,9 @@
 {
     <div class="gb-rows">
         <div class="gb-edrow gb-edrow--vol gb-edrow-head">
-            <span>Volume name or host folder</span>
-            <span>Path in the container</span>
-            <span>Read-only</span>
+            <span><Tip Key="app.settings.volumes.source">Volume name or host folder</Tip></span>
+            <span><Tip Key="app.settings.volumes.target">Path in the container</Tip></span>
+            <span><Tip Key="app.settings.volumes.mode">Read-only</Tip></span>
             <span></span>
         </div>
         @foreach (var row in Rows)
@@ -14,7 +14,7 @@
                               Class="gb-mono-input" HelperText="@Describe(row.Source)" />
                 <MudTextField T="string" @bind-Value="row.Target" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="/app/data" Class="gb-mono-input" />
                 <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.ReadOnly" Size="Size.Small" Color="Color.Primary" /></div>
-                <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="gb-edrow-delete" OnClick="() => Rows.Remove(row)" aria-label="Remove" />
+                <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="gb-edrow-delete" OnClick="() => Rows.Remove(row)" aria-label="Remove" data-tip-text="Remove" />
             </div>
         }
     </div>

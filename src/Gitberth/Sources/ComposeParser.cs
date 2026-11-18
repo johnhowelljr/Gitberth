@@ -446,12 +446,12 @@ public static partial class ComposeParser
             if (_image is null or "")
             {
                 issues.Add(_build
-                    ? DockerRunParser.Error("Code to build: this service has build: and no image:. Use the GitHub repository source to build an app from its code.", "build")
+                    ? DockerRunParser.Error("Code to build: this service has build: and no image:. Use the Git repository source to build an app from its code.", "build")
                     : DockerRunParser.Error("The service has no image: add image:, such as image: postgres:18.", "image"));
             }
             else
             {
-                if (_build) issues.Add(DockerRunParser.Note($"It has build: as well: Gitberth runs {_image} as the registry or this host has it, and builds nothing. To build it from its code, use the GitHub repository source.", "build"));
+                if (_build) issues.Add(DockerRunParser.Note($"It has build: as well: Gitberth runs {_image} as the registry or this host has it, and builds nothing. To build it from its code, use the Git repository source.", "build"));
                 if (ImageReference.Parse(_image) is null && !ImageReference.IsImageId(_image))
                     issues.Add(DockerRunParser.Error(ImageService.NotAReference(_image), "image"));
             }

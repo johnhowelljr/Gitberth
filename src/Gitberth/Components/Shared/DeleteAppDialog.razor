@@ -24,15 +24,16 @@
                 when domains are turned back on, and until then no new app gets the port or name they go to.
             </MudText>
         }
-        <MudCheckBox T="bool" @bind-Value="removeImages" Color="Color.Error" Label="Also delete its images" />
-        <MudCheckBox T="bool" @bind-Value="removeVolumes" Color="Color.Error" Label="Also delete its named volumes (their data is lost)" />
+        @* MudCheckBox puts data-tip on its hidden input, which covers only the box: the words carry the tip too. *@
+        <MudCheckBox T="bool" @bind-Value="removeImages" Color="Color.Error" data-tip="app.delete.images"><Tip Key="app.delete.images" Focusable="false">Also delete its images</Tip></MudCheckBox>
+        <MudCheckBox T="bool" @bind-Value="removeVolumes" Color="Color.Error" data-tip="app.delete.volumes"><Tip Key="app.delete.volumes" Focusable="false">Also delete its named volumes (their data is lost)</Tip></MudCheckBox>
         @if (Databases.Count > 0)
         {
             <MudText Typo="Typo.body2" Class="mt-3">
                 Its databases: @string.Join(", ", Databases). Unless you tick below, their data stays where it is (a Postgres database on its server,
                 a Redis's in its volume), and only Gitberth forgets them. Its previews' own databases always go, with their previews.
             </MudText>
-            <MudCheckBox T="bool" @bind-Value="removeDatabases" Color="Color.Error" Label="Also delete their data" />
+            <MudCheckBox T="bool" @bind-Value="removeDatabases" Color="Color.Error" data-tip="app.delete.databases"><Tip Key="app.delete.databases" Focusable="false">Also delete their data</Tip></MudCheckBox>
         }
     </DialogContent>
     <DialogActions>

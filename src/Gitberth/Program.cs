@@ -72,6 +72,8 @@ builder.Services.AddDataProtection()
     .SetApplicationName("Gitberth");
 builder.Services.AddDbContextFactory<GitberthDb>(o => o.UseSqlite($"Data Source={options.DbPath}"));
 builder.Services.AddHttpClient("github", c => c.Timeout = TimeSpan.FromSeconds(15));
+// Gitberth's GitLab (Settings › GitLab): gitlab.com, or a self-hosted one.
+builder.Services.AddHttpClient(GitLabApi.ClientName, c => c.Timeout = TimeSpan.FromSeconds(15));
 builder.Services.AddHttpClient("cloudflare", c => c.Timeout = TimeSpan.FromSeconds(20));
 builder.Services.AddHttpClient("health", c => c.Timeout = TimeSpan.FromSeconds(5))
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
@@ -103,6 +105,11 @@ builder.Services.AddSingleton<LiveLogHub>();
 // through GitHub's webhook. Each does nothing until a token (and, for the webhook, a host name) is set up.
 builder.Services.AddSingleton<GitHubWrites>();
 builder.Services.AddSingleton<GitHubIntegrationState>();
+// ---- GitLab: the same for GitLab projects (statuses, a merge request's comment, the project hook, CI/CD variables),
+// with GitLab's token and state of its own. GitHubReporter and WebhookKeeper report and keep hooks for both hosts.
+builder.Services.AddSingleton<GitLabApi>();
+builder.Services.AddSingleton<GitLabIntegrationState>();
+builder.Services.AddSingleton<GitLabSettings>();
 builder.Services.AddSingleton<GitHubReporter>();
 // ---- Notifications (1.2): failed deploys, crashes and failing health checks, by mail, Discord, Slack, ntfy or a webhook.
 // Nothing is sent until Settings › Notifications has somewhere to send it.
@@ -119,6 +126,7 @@ builder.Services.AddSingleton<IDeployReporter>(sp => new DeployReporters(
 builder.Services.AddSingleton<ContainerAlerts>();
 builder.Services.AddSingleton<WebhookThrottle>();
 builder.Services.AddSingleton<GitHubWebhookEndpoint>();
+builder.Services.AddSingleton<GitLabWebhookEndpoint>();
 builder.Services.AddSingleton<WebhookKeeper>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<WebhookKeeper>());
 builder.Services.AddSingleton<DeployPipeline>();
@@ -245,6 +253,9 @@ builder.Services.AddHostedService<Gitberth.Audit.OutsideChanges>();
 // ---- AI agents and the HTTP API (1.3): API tokens (Settings › AI agents and API), the MCP server at /mcp and the same tools
 // at /api/v1, each tool calling the service the UI calls.
 builder.Services.AddGitberthAgents();
+// ---- Help (1.4): the docs, built in (/help), and the tips on the UI's labels, both read from the assembly once.
+builder.Services.AddSingleton(_ => Gitberth.Help.HelpDocs.Bundled);
+builder.Services.AddSingleton(_ => Gitberth.Help.TipCatalog.Bundled);
 
 var app = builder.Build();
 
@@ -259,6 +270,17 @@ await app.Services.GetRequiredService<ContainerTitles>().LoadAsync();
 await app.Services.GetRequiredService<RestartSchedules>().LoadAsync();
 await app.Services.GetRequiredService<NotificationSettings>().LoadAsync();
 await app.Services.GetRequiredService<Gitberth.Audit.AuditSettings>().LoadAsync();
+
+// The docs and the tips are part of the build: what's wrong with them stops a developer's Gitberth at once (the unit tests
+// hold them to the same), and a release says it in the log and shows what it can.
+{
+    var help = app.Services.GetRequiredService<Gitberth.Help.HelpDocs>();
+    var problems = help.Problems.Concat(app.Services.GetRequiredService<Gitberth.Help.TipCatalog>().Check(help)).ToList();
+    if (problems.Count > 0 && app.Environment.IsDevelopment())
+        throw new InvalidOperationException("The help or the tips have problems:\n" + string.Join("\n", problems));
+    foreach (var problem in problems)
+        app.Logger.LogWarning("Help: {Problem}", problem);
+}
 
 // The end-to-end rig's shorter waits, before any background job starts. An install never sets them: see TestTimings.
 if (options.TestTimings is { } testTimings)
@@ -296,6 +318,8 @@ app.MapRazorComponents<App>()
 // GitHub's webhook (instant deploys): anonymous, signed by GitHub with Gitberth's secret instead of a sign-in or a form token.
 // Every method is mapped, so its host answers a bare status code and never shows Gitberth's pages.
 GitHubWebhookEndpoint.Map(app);
+// GitLab's project hooks (instant deploys of GitLab projects): anonymous, with the secret token Gitberth set on the hook.
+GitLabWebhookEndpoint.Map(app);
 // Deploy hooks: anonymous too, the token in the path being the secret; every method and path under /hooks/deploy is mapped
 // for the same reason.
 DeployHookEndpoint.Map(app);
@@ -329,6 +353,8 @@ app.MapGet("/account/renew", async (HttpContext context, AdminAuthService auth, 
 Gitberth.Audit.AuditEndpoints.Map(app);
 // The app templates' icons, for New app's gallery (signed in only).
 Gitberth.Templates.TemplateEndpoints.Map(app);
+// The help's pictures and the tips' catalog (signed in only).
+Gitberth.Help.HelpEndpoints.Map(app);
 
 // AI agents (MCP, /mcp) and scripts (/api/v1), with an API token only: never the sign-in cookie.
 app.MapGitberthAgents();

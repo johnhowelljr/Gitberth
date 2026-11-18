@@ -1,0 +1,309 @@
+/* ==========================================================================
+   The built-in Help (/help): its pages, the docs' Markdown, diagrams and pictures, search, and the ways in (the top
+   bar's Help button, the "?" by page titles, the top search's Help group).
+   ========================================================================== */
+
+/* ---------- Ways in ---------- */
+
+.gb-topbar-help { width: 34px; height: 34px; border-radius: var(--gb-r-sm); }
+
+.gb-topbar-help .gb-i { width: 20px; height: 20px; }
+
+.gb-phead-title { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; min-width: 0; }
+
+/* The router puts the focus on a page's title after each navigation, for screen readers; it isn't a control to ring. */
+.gb-phead-title h1:focus-visible { box-shadow: none; }
+
+.gb-pagehelp {
+    display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%;
+    color: var(--gb-text-3) !important; border: 1px solid var(--gb-line-2); background: var(--gb-surface-1);
+    text-decoration: none !important; transition: color var(--gb-t-fast), border-color var(--gb-t-fast), background var(--gb-t-fast);
+}
+
+.gb-pagehelp .gb-i { width: 17px; height: 17px; }
+
+.gb-pagehelp:hover { color: var(--gb-accent-text) !important; border-color: var(--gb-accent-line); background: var(--gb-accent-soft); }
+
+.gb-search-group { padding: 10px 9px 4px; margin-top: 4px; border-top: 1px solid var(--gb-line-1); font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--gb-text-3); }
+
+.gb-search-doc-icon { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--gb-accent-soft); color: var(--gb-accent-text); }
+
+.gb-search-doc-t { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gb-search-doc-s { font-size: 11.5px; color: var(--gb-text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- The front page: search, then the docs' index ---------- */
+
+.gb-helpindex { max-width: 920px; }
+
+.gb-helpsearch { margin: 0 0 22px; }
+
+.gb-helpsearch-box { height: 44px; font-size: 14.5px; border-radius: var(--gb-r-lg); background: var(--gb-surface-1); box-shadow: var(--gb-e1); }
+
+.gb-helpsearch-box .gb-i { width: 20px; height: 20px; }
+
+.gb-help-results { display: flex; flex-direction: column; gap: 6px; }
+
+.gb-help-count { font-size: 12.5px; color: var(--gb-text-3); margin: 0 2px 6px; }
+
+.gb-help-hit {
+    display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: var(--gb-r-md);
+    border: 1px solid var(--gb-line-1); background: var(--gb-surface-1); color: var(--gb-text-1) !important; text-decoration: none !important;
+    transition: border-color var(--gb-t-fast), background var(--gb-t-fast);
+}
+
+.gb-help-hit:hover { border-color: var(--gb-accent-line); background: var(--gb-surface-2); }
+
+.gb-help-hit-t { font-weight: 600; font-size: 14px; }
+
+.gb-help-hit-p { font-size: 12px; color: var(--gb-text-3); }
+
+.gb-help-hit-s { font-size: 13px; color: var(--gb-text-2); line-height: 1.55; }
+
+.gb-help-hit-s mark, .gb-doc mark { background: rgba(245, 192, 78, .2); color: #ffe3a3; border-radius: 3px; padding: 0 2px; }
+
+/* ---------- A page: the sections' list, the page, "On this page" ---------- */
+
+.gb-helpdoc { display: grid; grid-template-columns: 214px minmax(0, 1fr) 196px; gap: 36px; align-items: start; }
+
+.gb-helpnav { position: sticky; top: calc(var(--gb-top-h) + 20px); max-height: calc(100vh - var(--gb-top-h) - 40px); overflow-y: auto; padding-bottom: 12px; }
+
+.gb-helpnav-list { display: flex; flex-direction: column; gap: 1px; }
+
+.gb-helpnav-home { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 6px; font-weight: 600; font-size: 13px; color: var(--gb-text-1) !important; text-decoration: none !important; }
+
+.gb-helpnav-home:hover { background: var(--gb-hover); }
+
+.gb-helpnav-home .gb-i { color: var(--gb-accent-text); }
+
+.gb-helpnav-sec { padding: 16px 10px 5px; font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--gb-text-3); }
+
+.gb-helpnav-item { display: block; padding: 5px 10px; border-radius: 6px; font-size: 13px; line-height: 1.4; color: var(--gb-text-2) !important; text-decoration: none !important; }
+
+.gb-helpnav-item:hover { background: var(--gb-hover); color: var(--gb-text-1) !important; }
+
+.gb-helpnav-item.on { color: var(--gb-text-1) !important; background: var(--gb-surface-2); box-shadow: inset 2px 0 0 var(--gb-accent); }
+
+.gb-helpnav-open { display: none; margin-bottom: 16px; }
+
+.gb-helpdoc-main { min-width: 0; }
+
+.gb-helpdoc-head { margin-bottom: 18px; }
+
+.gb-helptoc { position: sticky; top: calc(var(--gb-top-h) + 20px); display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - var(--gb-top-h) - 40px); overflow-y: auto; border-left: 1px solid var(--gb-line-1); padding-left: 2px; }
+
+.gb-helptoc .gb-micro { padding: 0 12px 8px; }
+
+.gb-helptoc a { display: block; padding: 4px 12px; margin-left: -3px; border-left: 2px solid transparent; font-size: 12.5px; line-height: 1.4; color: var(--gb-text-3) !important; text-decoration: none !important; }
+
+.gb-helptoc a:hover { color: var(--gb-text-1) !important; }
+
+.gb-helptoc a.on { color: var(--gb-text-1) !important; border-left-color: var(--gb-accent); }
+
+.gb-helptoc .gb-helptoc-l3 { padding-left: 24px; }
+
+.gb-doc-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 40px; padding-top: 22px; border-top: 1px solid var(--gb-line-1); }
+
+.gb-doc-pager-link {
+    display: flex; flex-direction: column; gap: 4px; padding: 13px 16px; border-radius: var(--gb-r-md);
+    border: 1px solid var(--gb-line-2); background: var(--gb-surface-1); text-decoration: none !important; color: var(--gb-text-1) !important;
+    transition: border-color var(--gb-t-fast), background var(--gb-t-fast);
+}
+
+.gb-doc-pager-link:hover { border-color: var(--gb-accent-line); background: var(--gb-surface-2); }
+
+.gb-doc-pager-link .gb-micro { display: inline-flex; align-items: center; gap: 5px; }
+
+.gb-doc-pager-link--next { grid-column: 2; text-align: right; align-items: flex-end; }
+
+.gb-doc-pager-t { font-weight: 600; font-size: 14px; }
+
+.gb-help-missing { margin-top: 40px; }
+
+/* ---------- The docs' Markdown ---------- */
+
+.gb-doc { font-size: 14.5px; line-height: 1.7; color: var(--gb-text-2); max-width: 780px; overflow-wrap: break-word; }
+
+.gb-doc > :first-child { margin-top: 0; }
+
+.gb-doc h2, .gb-doc h3, .gb-doc h4, .gb-doc h5, .gb-doc h6 { color: var(--gb-text-1); line-height: 1.3; letter-spacing: -.015em; scroll-margin-top: calc(var(--gb-top-h) + 16px); }
+
+.gb-doc h2 { font-size: 21px; font-weight: 650; margin: 42px 0 12px; padding-bottom: 9px; border-bottom: 1px solid var(--gb-line-1); }
+
+.gb-doc h3 { font-size: 16.5px; font-weight: 650; margin: 30px 0 8px; }
+
+.gb-doc h4 { font-size: 14.5px; font-weight: 650; margin: 24px 0 6px; }
+
+.gb-doc h5, .gb-doc h6 { font-size: 13.5px; font-weight: 650; margin: 20px 0 6px; }
+
+.gb-doc p { margin: 0 0 14px; }
+
+.gb-doc ul, .gb-doc ol { margin: 0 0 14px; padding-left: 24px; }
+
+.gb-doc li { margin: 4px 0; }
+
+.gb-doc li > p { margin: 6px 0; }
+
+.gb-doc li::marker { color: var(--gb-text-4); }
+
+.gb-doc ol > li::marker { color: var(--gb-text-3); font-weight: 600; }
+
+.gb-doc strong { color: var(--gb-text-1); font-weight: 600; }
+
+.gb-doc a { color: var(--gb-accent-text); text-decoration: underline; text-decoration-color: rgba(143, 182, 255, .35); text-underline-offset: 3px; }
+
+.gb-doc a:hover { text-decoration-color: currentColor; }
+
+/* A link that leaves Gitberth (another site, or a file of the repo on GitHub): a small arrow out of a box. */
+a.gb-ext::after {
+    content: ""; display: inline-block; width: .72em; height: .72em; margin-left: .22em; vertical-align: .02em;
+    background: currentColor; opacity: .75;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.gb-doc hr { border: 0; border-top: 1px solid var(--gb-line-2); margin: 28px 0; }
+
+.gb-doc blockquote { margin: 0 0 16px; padding: 4px 16px; border-left: 3px solid var(--gb-line-3); color: var(--gb-text-2); }
+
+.gb-doc blockquote > :last-child { margin-bottom: 0; }
+
+.gb-doc del { color: var(--gb-text-3); }
+
+/* Tables, as GitHub lays them out: as wide as they need, scrolling sideways on a narrow screen. */
+.gb-doc table { display: block; width: max-content; max-width: 100%; overflow: auto; border-collapse: collapse; margin: 0 0 18px; font-size: 13.5px; line-height: 1.55; }
+
+.gb-doc th, .gb-doc td { padding: 8px 12px; border: 1px solid var(--gb-line-2); text-align: left; vertical-align: top; }
+
+.gb-doc th { color: var(--gb-text-1); font-weight: 600; background: var(--gb-surface-2); }
+
+.gb-doc tr:nth-child(2n) td { background: rgba(255, 255, 255, .012); }
+
+.gb-doc thead:not(:has(th:not(:empty))) { display: none; }
+
+.gb-doc td > :last-child { margin-bottom: 0; }
+
+.gb-doc .task-list-item { list-style: none; margin-left: -20px; }
+
+.gb-doc .task-list-item input { margin: 0 8px 0 0; vertical-align: -1px; accent-color: var(--gb-accent); }
+
+/* Code: Gitberth's code frame, with the language and a copy button. */
+.gb-doc-code { margin: 0 0 16px; }
+
+.gb-doc-code .gb-code-bar { min-height: 34px; }
+
+.gb-doc-code .gb-code-title { font: 600 11.5px/1 var(--gb-mono); color: var(--gb-text-3); text-transform: lowercase; }
+
+.gb-doc-code pre { margin: 0; padding: 12px 14px; font: 12.5px/1.65 var(--gb-mono); color: #c9d1d9; overflow: auto; white-space: pre; max-height: 520px; }
+
+.gb-doc-code pre code { padding: 0; background: none; font-size: inherit; color: inherit; border-radius: 0; }
+
+/* Callouts: GitHub's alerts (> [!NOTE]) and the docs' "> **Note**". */
+.gb-callout {
+    --tone: var(--gb-info);
+    margin: 0 0 18px; padding: 12px 16px 12px 16px; border-radius: var(--gb-r-md);
+    border: 1px solid color-mix(in srgb, var(--tone) 28%, transparent); border-left: 3px solid var(--tone);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--tone) 9%, transparent), color-mix(in srgb, var(--tone) 3%, transparent)), var(--gb-surface-1);
+    color: var(--gb-text-2);
+}
+
+.gb-callout > :last-child { margin-bottom: 0; }
+
+.gb-callout-title { display: flex; align-items: center; gap: 7px; margin: 0 0 4px !important; font-weight: 650; font-size: 13px; color: color-mix(in srgb, var(--tone) 75%, white); }
+
+.gb-callout-title .gb-i { color: var(--tone); }
+
+.gb-callout--tip { --tone: var(--gb-good); }
+
+.gb-callout--important { --tone: var(--gb-violet); }
+
+.gb-callout--warning { --tone: var(--gb-warn); }
+
+.gb-callout--caution { --tone: var(--gb-critical); }
+
+/* Pictures: their room kept while they load; a click opens them larger. */
+.gb-doc img { display: block; max-width: 100%; height: auto; border-radius: var(--gb-r-md); border: 1px solid var(--gb-line-2); box-shadow: var(--gb-e1); background: var(--gb-surface-1); }
+
+.gb-doc a.gb-doc-zoom { display: block; width: fit-content; max-width: 100%; margin: 6px 0 18px; border-radius: var(--gb-r-md); cursor: zoom-in; text-decoration: none; }
+
+.gb-doc a.gb-doc-zoom:hover img { border-color: var(--gb-accent-line); }
+
+.gb-doc p > a.gb-doc-zoom:only-child { margin: 6px 0 4px; }
+
+/* Diagrams: the mermaid source until it's drawn, then the drawing; the source with a note when it can't be. */
+.gb-mermaid {
+    margin: 4px 0 20px; padding: 18px; border-radius: var(--gb-r-lg); border: 1px solid var(--gb-line-2);
+    background: radial-gradient(600px 220px at 30% 0%, rgba(76, 141, 255, .06), transparent 70%), var(--gb-surface-1);
+    overflow-x: auto; text-align: center;
+}
+
+.gb-mermaid-src { margin: 0; text-align: left; font: 12px/1.6 var(--gb-mono); color: var(--gb-text-3); white-space: pre; overflow: auto; }
+
+.gb-mermaid[data-drawn] .gb-mermaid-src { display: none; }
+
+/* Drawn: as wide as the page allows, never under 80% of its own size (help.js sets those); a click opens it larger. */
+.gb-mermaid[data-drawn] { cursor: zoom-in; transition: border-color var(--gb-t-fast); }
+
+.gb-mermaid[data-drawn]:hover { border-color: var(--gb-accent-line); }
+
+.gb-mermaid[data-drawn]:focus-visible { outline: none; box-shadow: var(--gb-focus); }
+
+.gb-mermaid-svg svg { display: block; margin: 0 auto; height: auto; }
+
+.gb-mermaid-note { margin: 0 0 8px; text-align: left; font-size: 12px; color: var(--gb-text-3); }
+
+/* The picture viewer. */
+.gb-lightbox {
+    position: fixed; inset: 0; z-index: 1650; display: grid; place-items: center; padding: 28px;
+    background: rgba(3, 5, 8, .86); backdrop-filter: blur(4px); animation: gb-fade var(--gb-t) var(--gb-ease) both; cursor: zoom-out;
+}
+
+.gb-lightbox img { max-width: 100%; max-height: 100%; width: auto; height: auto; border-radius: var(--gb-r-lg); border: 1px solid var(--gb-line-3); box-shadow: var(--gb-e3); animation: gb-rise var(--gb-t-slow) var(--gb-ease) both; }
+
+.gb-lightbox-chart {
+    max-width: 100%; max-height: 100%; overflow: auto; padding: 28px; border-radius: var(--gb-r-lg);
+    border: 1px solid var(--gb-line-3); background: radial-gradient(700px 260px at 30% 0%, rgba(76, 141, 255, .07), transparent 70%), var(--gb-surface-1);
+    box-shadow: var(--gb-e3); animation: gb-rise var(--gb-t-slow) var(--gb-ease) both;
+}
+
+.gb-lightbox-chart svg { display: block; height: auto; }
+
+.gb-lightbox-close {
+    position: fixed; top: 16px; right: 16px; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+    border: 1px solid var(--gb-line-3); background: var(--gb-surface-3); color: var(--gb-text-1); cursor: pointer;
+}
+
+.gb-lightbox-close svg { width: 20px; height: 20px; fill: currentColor; }
+
+.gb-lightbox-cap { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); max-width: min(720px, 90vw); text-align: center; font-size: 12.5px; color: var(--gb-text-2); }
+
+/* ---------- Narrower screens ---------- */
+
+@media (max-width: 1320px) {
+    .gb-helpdoc { grid-template-columns: 214px minmax(0, 1fr); }
+
+    .gb-helptoc { display: none; }
+}
+
+/* As the main menu becomes a drawer, so does the Help's list of topics. */
+@media (max-width: 960px) {
+    .gb-helpdoc { grid-template-columns: minmax(0, 1fr); gap: 0; }
+
+    .gb-helpnav { display: none; }
+
+    .gb-helpnav.open {
+        display: block; position: fixed; left: 0; top: 0; bottom: 0; z-index: 61; width: min(300px, 86vw); max-height: none;
+        padding: 16px 12px; background: #0c0f15; border-right: 1px solid var(--gb-line-2); box-shadow: var(--gb-e3);
+        animation: gb-slide var(--gb-t-slow) var(--gb-ease) both;
+    }
+
+    .gb-helpnav-open { display: inline-flex; }
+}
+
+@media (max-width: 760px) {
+    .gb-doc { font-size: 14px; }
+
+    .gb-doc-pager { grid-template-columns: 1fr; }
+
+    .gb-doc-pager-link--next { grid-column: 1; }
+}

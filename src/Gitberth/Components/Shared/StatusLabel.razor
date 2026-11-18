@@ -1,5 +1,8 @@
-@* An app's state as a shape and a word, with how long it's been that way (AppStatus). The hero's dot breathes; a row's doesn't. *@
-<span class="gb-st @look.Modifier @(Hero ? "gb-st--hero" : null) @Class" title="@Title">
+@*
+    An app's state as a shape and a word, with how long it's been that way (AppStatus). The hero's dot breathes; a row's
+    doesn't. Its tip says what the state means (status.<state>); Title adds a line to it (Docker's own status).
+*@
+<span class="gb-st @look.Modifier @(Hero ? "gb-st--hero" : null) @Class" data-tip="@(Tip ?? TipKeys.State(State))" data-tip-detail="@Title">
     @if (look.Icon is { } icon)
     {
         <SvgIcon Icon="@icon" />
@@ -28,7 +31,10 @@
     /// <summary>Faint words after it when there's no time: "3 checks failed".</summary>
     [Parameter] public string? Detail { get; set; }
     [Parameter] public bool Hero { get; set; }
+    /// <summary>A line of facts for its tip ("Up 3 hours (healthy)").</summary>
     [Parameter] public string? Title { get; set; }
+    /// <summary>Another tip than the state's own (its key in the catalog).</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public string? Class { get; set; }
 
     private StatusLook look = AppStatus.Of(AppState.Unknown);

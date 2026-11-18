@@ -8,7 +8,7 @@
     @if (ComposeText.CommandLine(Compose) is { } command)
     {
         <div class="gb-compose-command">
-            <span class="gb-faint">Then on the host:</span>
+            <span class="gb-faint"><Tip Key="network.compose.command">Then on the host</Tip>:</span>
             <CopyText Text="@command" Label="the command" />
         </div>
     }

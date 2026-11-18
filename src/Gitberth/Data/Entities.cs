@@ -208,8 +208,19 @@ public class AppDefinition
 
     public static string ContainerNameFor(string slug) => $"gb-{slug}";
     public string ImageRepository => $"gitberth/{Slug}";
-    public string RepoFullName => $"{Owner}/{Repo}";
-    public string RepoWebUrl => $"https://github.com/{Owner}/{Repo}";
+
+    /// <summary>owner/repo, or a GitLab project's group/subgroup/project, as people read it.</summary>
+    public string RepoFullName => Git.RepoRef.FullNameOf(Owner, Repo);
+
+    /// <summary>A GitHub app's repo on github.com. A GitLab app's project is on Gitberth's GitLab: <see cref="RepoWebUrlOn"/>.</summary>
+    public string RepoWebUrl => RepoWebUrlOn(Git.GitLabRepoRef.DefaultInstance);
+
+    /// <summary>The repo's page: on github.com, or for a GitLab app on <paramref name="gitLabInstance"/> (Settings › GitLab).</summary>
+    public string RepoWebUrlOn(string gitLabInstance) =>
+        Git.RepoRef.Of(Owner, Repo) is Git.GitLabRepoRef project ? project.WebUrl(gitLabInstance) : $"https://github.com/{Owner}/{Repo}";
+
+    /// <summary>Its repo is a GitLab project's (its Owner is "gitlab:" and the namespace).</summary>
+    public bool FromGitLab => Git.RepoRef.IsGitLab(Owner);
 }
 
 /// <summary>A port of an app: the container port, who reaches it (its Access), and the host port that leads to it when it's published.</summary>

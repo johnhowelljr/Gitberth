@@ -5,6 +5,8 @@ WORKDIR /src
 # Restore with the full source present: .NET 10 only restores the package that ships blazor.web.js
 # when it can see the .razor files, so a csproj-only restore step produces a UI that never starts.
 COPY src/Gitberth/ src/Gitberth/
+# The docs, which the build embeds for the built-in Help (/help works without internet).
+COPY docs/ docs/
 # Set by the release workflow: the tag it builds (v1.2.3, which overrides Version in the csproj) and the commit, which
 # Settings › System shows. A build from a folder leaves both empty.
 ARG GITBERTH_VERSION=

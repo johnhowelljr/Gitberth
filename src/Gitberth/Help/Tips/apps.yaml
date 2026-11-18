@@ -1,0 +1,271 @@
+# Tips for the Apps list (Components/Pages/Apps.razor, Apps/HostStrip.razor, Apps/AppRow.razor, Shared/PortChip.razor)
+# and what the dashboard shares with it. See Help/TipCatalog.cs for the rules.
+
+apps.title:
+  title: Apps
+  text: >-
+    Every container on this host, whoever started it, read again every 5 seconds. Search, filter, sort and group it
+    with the bar below; click an app's name to open its page.
+  more: guides/manage-apps#the-apps-list
+
+apps.paste:
+  title: Paste docker run
+  text: >-
+    Starts a new app from a `docker run` command you paste: its image, ports, variables and volumes fill the form, and
+    what Gitberth can't carry over is listed. Nothing runs until you create it.
+  more: guides/paste-docker-run-or-compose#paste-a-docker-run-command
+
+apps.docker-error:
+  title: Docker can't be read
+  text: >-
+    Gitberth reads every container through Docker's socket, `/var/run/docker.sock`, which its compose file mounts into
+    its container. While Docker doesn't answer, nothing can be started or changed; Gitberth tries again every 5
+    seconds.
+  more: guides/troubleshooting#docker
+
+apps.trouble:
+  title: Apps in trouble
+  text: >-
+    Apps that exited with an error, report unhealthy, are degraded or dead, lost their container, or wait for your
+    decision on a change. **Show them** lists only those; the cross hides this until the page is opened again.
+  more: guides/manage-apps#the-apps-list
+
+# ---- The strip across the top ----
+
+apps.host.apps:
+  title: Apps
+  text: >-
+    How many apps run now, out of every container on this host, with a square for each: filled while it runs, hollow
+    when it's stopped, orange when it's in trouble. Stopped counts every app that isn't running, those in trouble too.
+  more: guides/manage-apps#the-apps-list
+
+apps.host.cpu:
+  title: CPU of the host
+  text: >-
+    What every container uses together, as a share of all the host's cores, with its last few minutes and the busiest
+    apps. Click it for the Health page, where each container has its own chart.
+  more: guides/health-and-monitoring#reading-the-charts
+
+apps.host.memory:
+  title: Memory
+  text: >-
+    The memory every app's container uses now, added up, against the host's memory in GiB. What the host uses for
+    anything else isn't counted. Click it for the Health page.
+  more: guides/health-and-monitoring#reading-the-charts
+
+apps.host.disk:
+  title: Disk
+  text: >-
+    Docker's disk, where its images, build caches and volumes live: what's used, of its size. Below 15 GB free it's
+    **getting low**; below 5 GB, or 5% of the disk, Gitberth won't pull images until you make room.
+  more: guides/troubleshooting#dockers-disk-is-filling-up
+
+# ---- The toolbar ----
+
+apps.show.all:
+  title: All
+  text: >-
+    Every app on this host, running or not. The number is how many there are.
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.show.running:
+  title: Running
+  text: >-
+    Apps whose container runs now, including those starting up, unhealthy or degraded.
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.show.stopped:
+  title: Stopped
+  text: >-
+    Apps that aren't running, for whatever reason: stopped on purpose, exited with an error, never started, or with no
+    container at all.
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.show.attention:
+  title: Needs attention
+  text: >-
+    Apps in trouble: exited with an error, unhealthy, degraded, dead, missing their container, or waiting for your
+    decision on a change. Shown only while there are some.
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.show.updates:
+  title: Updates
+  text: >-
+    Apps with a newer image waiting, in their registry or as a newer build of their tag on this host. Shown only while
+    there are some; apps set to **When I ask** never show here.
+  more: guides/updates#see-which-apps-have-an-update
+
+apps.source-filter:
+  title: Source
+  text: >-
+    Shows only the apps that came from the sources you tick: Git, a registry, a local image, by hand, Compose, or
+    containers started outside Gitberth. Tick more than one to see them together; **Every source** clears it.
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.sort:
+  title: Sort by
+  text: >-
+    The order inside each group. **Pinned, then name** is the default; CPU and memory start with the highest, the rest
+    from A. The arrow next to it reverses the order, and a column's heading sorts by that column too.
+  default: Pinned, then name
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.group:
+  title: Group by
+  text: >-
+    **Name** gathers apps whose names share a first word, like `sample-*`, once three or more do; **Source** groups
+    them by where they came from; **Nothing** shows one list. A big group is split by runtime.
+  default: Name
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.group.prefix:
+  title: Name prefix
+  text: >-
+    These apps' names start with the same word, so the list keeps them together. Gitberth stores no groups: they come
+    from the names, and an app renamed out of the pattern leaves the group.
+  more: guides/manage-apps#search-filter-sort-and-group
+
+apps.group.start-stopped:
+  title: Start the stopped apps
+  text: >-
+    Starts every app in this group that was stopped on purpose or never started, one after another, after asking.
+    Apps that exited with an error are left alone, for you to look at first.
+  more: guides/manage-apps#start-stop-and-restart
+
+apps.new-from-search:
+  title: New app from what you typed
+  text: >-
+    Opens **New app** with your search filled in as the registry image to look up, such as `redis:7-alpine`.
+  more: guides/run-a-registry-image#pick-the-image
+
+# ---- The column headings ----
+
+apps.column.app:
+  title: App
+  text: >-
+    The app's name, and under it the repository it's built from or the image it runs. **Update** means a newer image
+    is waiting; **System** marks Gitberth itself and its tunnel. Click to sort by name.
+  more: guides/manage-apps#the-apps-list
+
+apps.column.status:
+  title: Status
+  text: >-
+    Its state, and how long it has run. Point at a state for what it means. Click to sort: trouble first, then what
+    runs, what's paused, and what's stopped.
+  more: guides/manage-apps#the-apps-list
+
+apps.column.address:
+  title: Address
+  text: >-
+    Where you reach it first: its web port on the LAN, which opens in a new tab, else a published port to copy. A lock
+    means only the host itself reaches it; **Internal only** means no port is published, **No ports** that it has none.
+  more: guides/networking#who-reaches-a-port-access
+
+apps.column.ports:
+  title: Ports
+  text: >-
+    Its ports in Docker's order, host port first (`9101:80`). A web port opens, any other published port copies its
+    address, a lock marks a host-only one, and a faint one like `5432/tcp` isn't published.
+  more: guides/networking#who-reaches-a-port-access
+
+apps.column.cpu:
+  title: CPU
+  text: >-
+    Its latest CPU reading, with its last few minutes drawn beside it. 100% is one full core, so a busy app can show
+    more than 100%. Click to sort, busiest first.
+  more: guides/health-and-monitoring#reading-the-charts
+
+apps.column.memory:
+  title: Memory
+  text: >-
+    The memory it uses now. The bar fills against its memory limit, or, dashed, against the host's memory when it has
+    none. Click to sort, the most first.
+  more: guides/health-and-monitoring#reading-the-charts
+
+apps.column.source:
+  title: Source
+  text: >-
+    Where the app came from: Git, a registry, a local image, by hand, Compose, or a container started outside Gitberth.
+    Point at one for what it means; click to sort.
+  more: guides/manage-apps#the-apps-list
+
+# ---- A row ----
+
+apps.row.system:
+  title: System
+  text: >-
+    Gitberth's own container, or the Cloudflare tunnel it runs. They're apps you can look at like any other, but
+    Gitberth won't stop or remove its own container.
+  more: guides/manage-apps#start-stop-and-restart
+
+apps.row.update:
+  title: Update available
+  text: >-
+    A newer image is waiting for this app: in its registry, or a newer build of its tag on this host. **Update** on its
+    page pulls it and recreates the app, and puts the old one back if the new one fails.
+  more: guides/updates#update-an-app
+
+apps.row.not-gathered:
+  title: Not gathered
+  text: >-
+    Gitberth doesn't read this app's CPU and memory, since **Gather stats** is off in its **Settings › General**.
+    Turn it on to see them here and on the Health page.
+  more: guides/health-and-monitoring#stop-gathering-stats-for-a-container
+
+apps.row.internal-only:
+  title: Internal only
+  text: >-
+    None of its ports is published on the host, so only containers on its networks reach it, by its name. Its
+    **Network** tab publishes a port on the LAN.
+  more: guides/networking#publish-a-port-on-the-lan
+
+apps.action.restart:
+  title: Restart
+  text: >-
+    Restarts its container with the same settings (`docker restart`); a Compose app restarts every service. When
+    something else depends on it, such as domains or apps that use this database, Gitberth says so and asks first.
+  more: guides/manage-apps#start-stop-and-restart
+
+apps.action.stop:
+  title: Stop
+  text: >-
+    Stops its container until you start it again, after asking, and says what else it affects. A Git app's new commits
+    aren't deployed while it's stopped.
+  more: guides/manage-apps#start-stop-and-restart
+
+apps.action.start:
+  title: Start
+  text: >-
+    Starts its container. A container that's gone is made again from the saved settings, and a Git app whose saved
+    settings aren't live yet is recreated with them.
+  more: guides/manage-apps#start-stop-and-restart
+
+# ---- A port chip ----
+
+apps.port.open:
+  title: Web port
+  text: >-
+    A published port that serves a web page: click to open it in a new tab. The line below says where Docker binds
+    it: the host's address and port, then the container's.
+  more: guides/networking#who-reaches-a-port-access
+
+apps.port.copy:
+  title: Published port
+  text: >-
+    A published port that isn't a web page, like a database's, or any port while the app is stopped: click to copy its
+    address. The line below says where Docker binds it.
+  more: guides/networking#who-reaches-a-port-access
+
+apps.port.host-only:
+  title: Host-only port
+  text: >-
+    Published on `127.0.0.1` only, so programs on the host reach it, the Cloudflare tunnel among them, but not the rest
+    of your LAN. Click to copy its address.
+  more: guides/networking#who-reaches-a-port-access
+
+apps.port.unpublished:
+  title: Not published
+  text: >-
+    The container listens on this port, but it isn't published on the host. Containers on its networks reach it by
+    name; the line below says how.
+  more: guides/networking#reach-other-containers-by-name

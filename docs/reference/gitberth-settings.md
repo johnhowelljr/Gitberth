@@ -1,8 +1,8 @@
 # Gitberth's settings
 
-The **Settings** page holds the settings for Gitberth as a whole: GitHub and registry access, notifications, image updates, domains, uptime checks and the status page, the network, deploys, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
+The **Settings** page holds the settings for Gitberth as a whole: GitHub, GitLab and registry access, notifications, image updates, domains, uptime checks and the status page, the network, deploys, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
 
-The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Network**, **Own LAN addresses**, **Deploys**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
+The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **GitLab**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Network**, **Own LAN addresses**, **Deploys**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
 
 ![The Settings page](../images/settings.webp)
 
@@ -30,20 +30,46 @@ Deploys reported on GitHub, and deploys that start the moment you push. See [Git
 
 | Field or button | What it does | Default |
 |---|---|---|
-| **Commit statuses** | Each deploy that builds a commit marks it on GitHub: pending while it builds, then live (linking to the app) or failed (linking to the deploy log). A commit that was skipped gets success, saying why. One status per app, named **Gitberth: <app>**, and **Gitberth preview: <app>** for its previews. Needs **Commit statuses: Read and write**. | On |
+| **Commit statuses** | Each deploy that builds a commit marks it on GitHub: pending while it builds, then live (linking to the app) or failed (linking to the deploy log). A commit that was skipped gets success, saying why. One status per app, named **Gitberth: &lt;app&gt;**, and **Gitberth preview: &lt;app&gt;** for its previews. Needs **Commit statuses: Read and write**. | On |
 | **Comments on pull requests** | A preview of a pull request keeps one comment on it up to date: its state, address, commit and time. Needs **Pull requests: Read and write**. | On |
-| **Host name for GitHub's webhooks** | Instant deploys, shown while domains are on: a host name nothing else uses, like `hooks.example.com`. Only its addresses `/hooks/github` and `/hooks/deploy/<token>` ([deploy hooks](../guides/deploy-hooks.md)) go to Gitberth through the tunnel, never behind Access; every other address answers 404. **Turn on** routes it and adds the DNS record; **Save** moves it to another name; **Turn off** asks first, then takes its route out. | None: Gitberth checks every 30 seconds, and deploy hooks work on your network only |
+| **Host name for GitHub's webhooks** | Instant deploys, shown while domains are on: a host name nothing else uses, like `hooks.example.com`. Only its addresses `/hooks/github`, `/hooks/gitlab` ([GitLab's project hooks](#gitlab)) and `/hooks/deploy/<token>` ([deploy hooks](../guides/deploy-hooks.md)) go to Gitberth through the tunnel, never behind Access; every other address answers 404. **Turn on** routes it and adds the DNS record; **Save** moves it to another name; **Turn off** asks first, then takes its route out. | None: Gitberth checks every 30 seconds, and deploy hooks work on your network only |
 | **Payload URL**, **Content type**, **Secret**, **Events** | What GitHub's webhook needs, to add it by hand when the token can't (no **Webhooks: Read and write**). **Show** reveals the secret; the copy buttons copy. | |
 
-When GitHub refuses one of these on a repo, a banner says which permission is missing (for example **Commit statuses aren't set on acme/web**) and Gitberth stops asking on that repo for an hour, or until a token is saved again; the banner goes with the hour, and comes back if GitHub refuses again. Other repos carry on. A token GitHub refuses outright stops it everywhere (**Commit statuses aren't set: GitHub refused the token**). A list under the webhook values says, per repo, **Webhook added**, **Webhook set up** or why not. With domains off, the section says instant deploys need them.
+When GitHub refuses one of these on a repo, a banner says which permission is missing (for example **Commit statuses aren't set on you/website**) and Gitberth stops asking on that repo for an hour, or until a token is saved again; the banner goes with the hour, and comes back if GitHub refuses again. Other repos carry on. A token GitHub refuses outright stops it everywhere (**Commit statuses aren't set: GitHub refused the token**). A list under the webhook values says, per repo, **Webhook added**, **Webhook set up** or why not. With domains off, the section says instant deploys need them.
+
+## GitLab
+
+Projects on gitlab.com or your own GitLab: private ones, their CI/CD variables, merge request previews, statuses and instant deploys. See [GitLab](../guides/gitlab-integration.md).
+
+![Settings, GitLab with a token saved: its user, expiry and scopes, the GitLab address, what deploys tell GitLab, and instant deploys](../images/settings-gitlab.webp)
+
+The switches **Commit statuses** and **Comments on merge requests** sit under **What deploys tell GitLab**, and the hook's
+values under **Instant deploys**.
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **GitLab address** | gitlab.com, or your own GitLab's address, with the path it's served under if it has one (`https://gitlab.example.com`, or `http://192.168.50.10:8929/gitlab` for one on this host). GitLab apps follow it: a project is kept by its path, never with the address. | `https://gitlab.com` |
+| **Token** (**Replace the token** once one is saved) | A personal, project or group access token. **api** does everything; **read_api** and **read_repository** alone deploy, preview and read the variables, and report nothing. Kept encrypted, never shown again. | None: public projects only |
+| **Save** / **Save token** / **Replace token** | Saves the address and, when one is typed, the token, once GitLab took it (it's asked who the token is and which scopes it has). A token GitLab refuses isn't saved. | |
+| **Check the token** | Asks GitLab again who the token is, its scopes and when it expires. | |
+| **Remove token** | Asks first, then forgets the token. Project hooks Gitberth added stay on GitLab. | |
+| **Commit statuses** | Each deploy that builds a commit marks it on GitLab: running while it builds, then success (linking to the app) or failed (linking to the deploy log); canceled when it was. Named **Gitberth: &lt;app&gt;** and **Gitberth preview: &lt;app&gt;**. Needs **api**. | On |
+| **Comments on merge requests** | A preview of a merge request keeps one comment on it up to date: its state, address, commit and time. Needs **api**. | On |
+| **URL**, **Secret token**, **Trigger** | Shown while there's a host name for webhooks (**GitHub integration › Instant deploys**): what GitLab's project hook needs, to add it by hand when the token can't (no **api**, or no Maintainer role). **Show** reveals the secret token; the copy buttons copy. | |
+
+Once saved, the section shows **Token saved**, whose it is, on which GitLab, when it expires (**renew it soon** in its last 14 days) and its scopes, and a banner naming each scope it lacks and what for. When GitLab refuses something on a project, a banner says so (for example **Commit statuses aren't set on you/website**) and Gitberth stops asking on that project for an hour, or until a token is saved again; a token GitLab refuses outright stops it everywhere. A list under the hook's values says, per project, **Webhook added**, **Webhook set up** or why not.
 
 ## Notifications
 
 Failed deploys, crashes, failing health checks and apps that go down, by email, Discord, Slack, ntfy or a webhook. See [Notifications](../guides/notifications.md).
 
+![Settings, Notifications with a Discord channel and an ntfy topic, each with its last delivery, then Add a destination and Tell me when](../images/settings-notifications.webp)
+
+The events are switches under **Tell me when**. With no destination the section says **Nothing is sent yet**.
+
 | Field or button | What it does | Default |
 |---|---|---|
-| **Add a destination** | Opens a dialog for one place messages go: **Email** (mail server, port, **STARTTLS** or **None**, user name and password, **From**, **To**), **Discord** or **Slack** (the channel's webhook URL), **ntfy** (the topic's URL, and an access token for a topic that needs one) or **Webhook** (a URL, and a bearer token if it wants one). **Add and send a test** saves it encrypted and sends a test. Up to 10. | None: nothing is sent |
+| **Add a destination** | Opens a dialog for one place messages go (**Send to** picks the kind; **Name** is what the list calls it): **Email** (mail server, port, **STARTTLS** or **None**, user name and password, **From**, **To**), **Discord** or **Slack** (the channel's webhook URL), **ntfy** (the topic's URL, and an access token for a topic that needs one) or **Webhook** (a URL, and a bearer token if it wants one). **Add and send a test** saves it encrypted and sends a test. Up to 10. | None: nothing is sent |
 | **Send a test** | Sends a test to that destination now. | |
 | **Edit** | The same dialog. A secret field (a webhook URL, a token, the password) left empty keeps the saved one; saved secrets are never shown again. | |
 | **Remove** | Asks first, then forgets the destination and its secrets. | |
@@ -106,23 +132,25 @@ Optional: apps on their own domains through the Cloudflare Tunnel on the host. S
 
 With domains on, the section shows **Token saved** or **No token**, and the tunnel Gitberth uses, like **Tunnel 1a2b3c4d from the cloudflared container**, or why it can't use one. Notes under the help text say what the last sync did, and what needs attention. With domains off and a token saved, it shows **Token saved** with **Not used while domains are off.**
 
-**Protection** is tagged **Ready** (with where visitors sign in, like **Visitors sign in at acme.cloudflareaccess.com.**, and how many domains are protected) or **Not set up**, with a **Protection isn't ready** banner saying what's missing. A domain is protected with its **Protected** switch on the app's Network tab; see [Protect a domain](../guides/domains.md#protect-a-domain).
+**Protection** is tagged **Ready** (with where visitors sign in, like **Visitors sign in at homelab.cloudflareaccess.com.**, and how many domains are protected) or **Not set up**, with a **Protection isn't ready** banner saying what's missing. A domain is protected with its **Protected** switch on the app's Network tab; see [Protect a domain](../guides/domains.md#protect-a-domain).
 
 ## Uptime and status page
 
 How often every app is checked from outside, and the public status page. See
 [Uptime checks, the status page and the down page](../guides/uptime-and-status-page.md).
 
+![Settings, Uptime and status page: how often apps are checked, and the status page on, with its title, description, apps and host name](../images/settings-uptime.webp)
+
 | Field or button | What it does | Default |
 |---|---|---|
-| **Check each app every** | How many seconds apart each app is checked, 30 to 900. **Save** saves it. | 60 seconds |
+| **Check each app every** | How many seconds apart each app is checked, 30 to 900. Two failed checks in a row make an app down. **Save** saves it. | 60 seconds |
 | **Status page** | A public page with each listed app's state, 90 days of uptime and the last 14 days' incidents. On your network at `/status` and `/status.json` without signing in; while it's off both answer 404. | Off |
 | **Title** | The page's title, up to 60 characters. | **Status** |
 | **Description** | A sentence under the title, up to 280 characters. | None |
 | **Apps it lists** | **Every app with uptime checks** (apps added later too), or **Only the apps I pick**, from the list under it. | Every app with uptime checks |
 | **Show response times** | Each app's average response time over the last 24 hours. | Off |
 | **Host name on the internet** | Needs domains: a host name nothing else uses, like `status.example.com`. The tunnel sends the whole host to the status page, with its DNS record like any domain, and nothing else of Gitberth's answers there. Not an app's domain, nor GitHub's webhook host. Emptied, its route and the DNS record Gitberth added go. | None |
-| **Save status page** | Saves the status page's settings. The line next to it links the page on your network and on the internet. | |
+| **Save status page** | Saves the status page's settings. The line next to it links the page on your network and on the internet, or says **Off: /status answers 404.** | |
 
 Every change is recorded in the audit log.
 
@@ -184,10 +212,12 @@ clear it once the build is done. To build one app without the cache instead, use
 The Postgres servers apps' databases go on. Each app adds its own on its Settings tab › **Databases**: a database and a
 role of its own, or a Redis. See [Databases](../guides/databases.md).
 
+![Settings, Databases with the postgres server Gitberth uses: its image, how apps reach it, who Gitberth signs in as, and Create a Postgres server](../images/settings-databases.webp)
+
 | Field or button | What it does | Default |
 |---|---|---|
-| The servers | Every container of a Postgres image on the host: **Gitberth uses it**, or **Not usable** with why (it isn't running, it isn't on Gitberth's network, or Gitberth can't sign in to it as its superuser inside its container). Each shows its image and version, the name apps reach it by, and who Gitberth signs in as. | |
-| **Default** / **Make it the default** | The server new databases go on. An app can still pick another when it adds a database. | The only server Gitberth can use, when there's one |
+| The servers | Every container of a Postgres image on the host: **Gitberth uses it**, or **Not usable** with why (it isn't running, it isn't on Gitberth's network, or Gitberth can't sign in to it as its superuser inside its container). Each shows its **Image** and version, how **Apps reach it as** (`postgres:5432` on `gitberth`), and who **Gitberth signs in as**. With none, the section says **No Postgres server yet**. | |
+| **Default** / **Make it the default** | The server new databases go on. An app can still pick another when it adds a database. With several and none chosen, a **Choose where new databases go** box asks you to. | The only server Gitberth can use, when there's one |
 | **Create a Postgres server** | Pulls `postgres:18` and makes an app of it: container `postgres` (or the first free name after it), reached by that name on Gitberth's network and published nowhere, its data on a volume of its own, a generated superuser password kept as a secret variable, updates that only tell. It becomes the default unless one was chosen. | |
 
 Choosing the default and setting up a server are recorded in the audit log.
@@ -215,13 +245,15 @@ Tokens for AI agents (over MCP, at `/mcp`) and scripts (the HTTP API, at `/api/v
 | **Create token** | Makes it and shows it once (`gbt_` and 43 characters), with a copy button and the setup for **Claude Code**, **VS Code**, **Cursor**, **Claude Desktop**, **Other MCP clients** and the **HTTP API (curl)**. Gitberth keeps only its SHA-256 and its first characters. | |
 | **Revoke** | Ends the token at once: every request with it gets 401. It stays in the list, marked **Revoked**. | |
 
-Each token in the list shows its name, access, first characters (`gbt_AbCd1234…`), when it was **Created**, when and from which address it was **Last used**, and when it **Expires** (or **Expired**). The section also shows the **MCP server**'s and the **HTTP API**'s addresses, with copy buttons.
+The fields are under **Create a token**. Each token in the list shows its name, access, first characters (`gbt_AbCd1234…`), when it was **Created**, when and from which address it was **Last used**, and when it **Expires** (or **Expired**). The section also shows the **MCP server**'s and the **HTTP API**'s addresses, with copy buttons, and where the OpenAPI description is (`/api/v1/openapi.json`).
 
 No tool makes, lists or revokes tokens, changes the admin password, or turns off the audit log's recording of changes made outside Gitberth. That's a promise about the tools: for a Read or Operate token it's the whole story, but an Admin token can create an app whose container reaches the whole host, and from there those too. Making and revoking a token, and its expiry, are recorded in the audit log, by name and access, never the token.
 
 ## Audit log
 
 Every change to this Gitberth and its apps, who made it and how it ended, in a file of its own. See [Audit log](../guides/audit-log.md).
+
+![Settings, Audit log: how long entries are kept, Record changes made outside Gitberth, the log's file, size and entries, and its buttons](../images/settings-audit.webp)
 
 | Field or button | What it does | Default |
 |---|---|---|
@@ -243,7 +275,7 @@ What this Gitberth installation is talking to. Nothing here can be changed.
 | **Docker engine** | The engine's version and the docker CLI's, or **Not reachable** with the reason. |
 | **git** | The version of git Gitberth uses, or **Not found**. |
 | **Data folder** | Where Gitberth keeps its data inside its container, `/data` in the published image. |
-| **Version** | Gitberth's version, and the commit a published image was built from, like `1.0.0 (3f9c2ab)`. |
+| **Version** | Gitberth's version, and the commit a published image was built from, like `1.4.0 (3f9c2ab)`. |
 
 ## Related
 

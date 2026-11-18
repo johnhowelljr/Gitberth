@@ -1,13 +1,20 @@
 @*
     A form field's frame: the label (with "Changed" and a tag such as "image" after it), the control, then "was <old>"
     with Undo while it's changed, a line of help, or what's wrong with it. The control itself is the page's own native
-    input with .gb-input (add .gb-input--changed while Changed).
+    input with .gb-input (add .gb-input--changed while Changed). With a Tip, the label's words show that tip.
 *@
 <div class="gb-field @(Changed ? "gb-field--changed" : null) @Class">
     @if (Label is not null)
     {
         <label class="gb-label" for="@For">
-            @Label
+            @if (Tip is not null)
+            {
+                <Tip Key="@Tip">@Label</Tip>
+            }
+            else
+            {
+                @Label
+            }
             @if (Tag is not null)
             {
                 <span class="gb-default-tag">@Tag</span>
@@ -29,7 +36,7 @@
             was <s>@Was</s>
             @if (OnUndo.HasDelegate)
             {
-                <button type="button" class="gb-iconbtn" style="width:22px;height:22px" title="Undo" aria-label="@($"Undo {Label}")" @onclick="OnUndo">
+                <button type="button" class="gb-iconbtn" style="width:22px;height:22px" data-tip-text="Undo" aria-label="@($"Undo {Label}")" @onclick="OnUndo">
                     <SvgIcon Icon="@Icons.Material.Outlined.Undo" Size="xs" />
                 </button>
             }
@@ -54,6 +61,8 @@
     [Parameter] public string? Help { get; set; }
     [Parameter] public RenderFragment? HelpContent { get; set; }
     [Parameter] public string? Error { get; set; }
+    /// <summary>The label's tip: its key in the catalog (Help/Tips). The label's words become its trigger.</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }
     [Parameter] public string? Class { get; set; }
 }

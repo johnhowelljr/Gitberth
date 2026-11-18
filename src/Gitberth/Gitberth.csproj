@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <!-- The release number. A release tag (v1.2.3) overrides it in the image build; see the Dockerfile. -->
-    <Version>1.3.1</Version>
+    <Version>1.4.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,6 +15,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.*" />
+    <!-- The built-in Help (/help): the docs' Markdown, rendered as GitHub renders it. -->
+    <PackageReference Include="Markdig" Version="1.6.0" />
     <!-- The MCP server for AI agents (Settings › AI agents and API): /mcp, stateless Streamable HTTP. -->
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.4.0" />
     <PackageReference Include="MudBlazor" Version="9.12.0" />
@@ -28,6 +30,20 @@
   <ItemGroup>
     <!-- The app templates' catalog (one YAML file per template, with its icon), read from the assembly (TemplateCatalog). -->
     <EmbeddedResource Include="Templates\catalog\*.yaml;Templates\catalog\*.svg;Templates\catalog\*.png" LogicalName="Gitberth.Templates.catalog.%(Filename)%(Extension)" />
+    <!--
+      The built-in Help (HelpDocs): the repo's docs folder, so /help needs no internet. Every page, every image and the
+      manifest (docs/help.yaml), named by their path under docs/ with forward slashes on every OS: Gitberth.Docs/guides/networking.md.
+    -->
+    <EmbeddedResource Include="..\..\docs\**\*.md" LogicalName="Gitberth.Docs/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\docs\images\**\*" LogicalName="Gitberth.Docs/images/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\..\docs\help.yaml" LogicalName="Gitberth.Docs/help.yaml" />
+    <!-- The tips' catalog (TipCatalog): one YAML file per area of the UI. -->
+    <EmbeddedResource Include="Help\Tips\*.yaml" LogicalName="Gitberth.Help.Tips.%(Filename)%(Extension)" />
   </ItemGroup>
+
+  <!-- A build without the docs (an image built from src/ alone) would have an empty Help: it fails here instead. -->
+  <Target Name="GitberthNeedsTheDocs" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('..\..\docs\help.yaml')" Text="The docs folder (..\..\docs, with help.yaml) isn't next to src: Gitberth embeds it for its Help. Build from the repo's root (the Dockerfile copies docs/)." />
+  </Target>
 
 </Project>

@@ -5,16 +5,24 @@ using System.Text.Json;
 
 namespace Gitberth.Services;
 
-/// <summary>What Gitberth tells GitHub about deploys, or asks it to do, each with the token permission it needs.</summary>
+/// <summary>
+/// What Gitberth tells a Git host about deploys, or asks it to do, each with the token permission it needs: GitHub's, and
+/// GitLab's the same three (commit statuses, a merge request's comment, the project hook).
+/// </summary>
 public enum GitHubFeature { Statuses, Comments, Webhooks }
 
-/// <param name="MissingPermission">GitHub refused on this repo (403 or 404): the token lacks the permission there, or can't see the repo. Asking again there won't help for a while; other repos may be fine.</param>
-/// <param name="BadToken">GitHub refused the token itself (401): nothing works with it until it's replaced.</param>
-public sealed class GitHubWriteException(string message, bool missingPermission = false, bool badToken = false) : Exception(message)
+/// <summary>A Git host refused, or failed, something Gitberth told it or asked it to do: GitHub's or GitLab's.</summary>
+/// <param name="missingPermission">The host refused on this repo (403 or 404): the token lacks the permission there, or can't see the repo. Asking again there won't help for a while; other repos may be fine.</param>
+/// <param name="badToken">The host refused the token itself (401): nothing works with it until it's replaced.</param>
+public abstract class HostWriteException(string message, bool missingPermission = false, bool badToken = false) : Exception(message)
 {
     public bool MissingPermission { get; } = missingPermission;
     public bool BadToken { get; } = badToken;
 }
+
+/// <param name="missingPermission">GitHub refused on this repo (403 or 404): the token lacks the permission there, or can't see the repo. Asking again there won't help for a while; other repos may be fine.</param>
+/// <param name="badToken">GitHub refused the token itself (401): nothing works with it until it's replaced.</param>
+public sealed class GitHubWriteException(string message, bool missingPermission = false, bool badToken = false) : HostWriteException(message, missingPermission, badToken);
 
 /// <summary>A commit status: pending, success, failure or error, with a line of text and a link, under a context of its own.</summary>
 public sealed record CommitStatus(string State, string Description, string Context, string? TargetUrl);

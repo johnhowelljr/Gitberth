@@ -5,15 +5,15 @@
     <div class="gb-terminal-bar">
         <MudIcon Icon="@Icons.Material.Outlined.Terminal" Size="Size.Small" />
         <span class="gb-terminal-title">@Title</span>
+        @if (Tip is not null)
+        {
+            <Tip Key="@Tip" />
+        }
         @Toolbar
         <span class="gb-spacer"></span>
-        <MudTooltip Text="@(wrap ? "Don't wrap long lines" : "Wrap long lines")">
-            <MudIconButton Icon="@Icons.Material.Outlined.WrapText" Size="Size.Small" Color="@(wrap ? Color.Primary : Color.Default)"
-                           OnClick="() => wrap = !wrap" aria-label="Toggle line wrap" />
-        </MudTooltip>
-        <MudTooltip Text="Copy the log">
-            <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="Copy the log" />
-        </MudTooltip>
+        <MudIconButton Icon="@Icons.Material.Outlined.WrapText" Size="Size.Small" Color="@(wrap ? Color.Primary : Color.Default)"
+                       OnClick="() => wrap = !wrap" aria-label="Toggle line wrap" data-tip-text="@(wrap ? "Don't wrap long lines" : "Wrap long lines")" />
+        <MudIconButton Icon="@Icons.Material.Outlined.ContentCopy" Size="Size.Small" OnClick="CopyAsync" aria-label="Copy the log" data-tip-text="Copy the log" />
     </div>
     <div class="gb-terminal-body @(wrap ? "gb-terminal-body--wrap" : "")" @ref="element">
         @if (Lines.Count == 0)
@@ -51,6 +51,8 @@
     [Parameter] public string Height { get; set; } = "60vh";
     [Parameter] public string EmptyText { get; set; } = "No output yet.";
     [Parameter] public RenderFragment? Toolbar { get; set; }
+    /// <summary>The title's tip: its key in the catalog (Help/Tips), shown by an info button after the title.</summary>
+    [Parameter] public string? Tip { get; set; }
 
     private ElementReference element;
     private bool wrap = true;

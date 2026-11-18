@@ -1,0 +1,2043 @@
+# Tips for an app's page (Components/Pages/AppPage.razor) and everything on it: the hero, the tabs and their cards and
+# sections (Components/Apps/*), and the dialogs and editors they open (Components/Shared). See Help/TipCatalog.cs.
+
+# ---- The tabs ----
+
+app.tab.overview:
+  title: Overview
+  text: >-
+    How it's reached, its CPU and memory over the last hour or 6 hours, what its container is, and what happened to it
+    lately, with its uptime, databases, updates and scheduled jobs when it has them.
+  more: guides/manage-apps#the-tabs
+
+app.tab.environment:
+  title: Environment
+  text: >-
+    Its environment variables: change them, add some, mark one secret, or paste a `.env` file. Changes wait until you
+    apply them; a Git app's can be for production, for previews, or for every deploy.
+  more: guides/environment-variables
+
+app.tab.network:
+  title: Network
+  text: >-
+    Every way it's reached: its ports and who reaches each, its domains, the Docker networks it's on, and its own LAN
+    address. Port changes wait until you apply them; networks and an own address change at once.
+  more: reference/app-settings#network-tab
+
+app.tab.previews:
+  title: Previews
+  text: >-
+    A preview of each pull request (and, if you like, each branch) as an app of its own, with its own address, to try
+    before it reaches production. Turn them on in **Settings › Previews**.
+  more: guides/previews#the-previews-tab
+
+app.tab.settings:
+  title: Settings
+  text: >-
+    Every other setting, in sections: its name, its source or image, command, volumes, restart, resources, health check
+    and more. Changes wait until you apply them, and the bar at the bottom says what applying does.
+  more: reference/app-settings#settings-tab
+
+app.tab.logs:
+  title: Logs
+  text: >-
+    Its live output as it comes, with each line's time. Choose how many earlier lines to show; a Compose app picks the
+    service whose log it shows.
+  more: guides/manage-apps#read-an-apps-logs
+
+app.tab.activity:
+  title: Activity
+  text: >-
+    Everything that happened to it, newest first: deploys with their logs, settings changes, updates, starts, stops and
+    crashes. A Git app rolls back to an earlier deploy from here.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+# ---- The hero: where it comes from ----
+
+app.hero.branch:
+  title: Branch
+  text: >-
+    The branch Gitberth builds and watches for new commits. Change it in **Settings › Source**; the next deploy builds
+    the new one.
+  more: reference/app-settings#source
+
+app.hero.subfolder:
+  title: Subfolder
+  text: >-
+    The app's folder in its repository: Gitberth builds from here rather than from the repository's root. Change it in
+    **Settings › Source**.
+  more: reference/app-settings#source
+
+app.hero.commit:
+  title: Commit
+  text: >-
+    The commit that runs now, with the first line of its message. Its deploy is on the **Activity** tab.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+app.hero.compose:
+  title: Deployed with Compose
+  text: >-
+    This Git app runs the Compose file named here, from its repository: its services run together as one app. Its
+    **Overview** lists each service.
+  more: guides/compose-apps
+
+app.hero.compose-inline:
+  title: A Compose file Gitberth keeps
+  text: >-
+    This app is a whole Compose file that Gitberth keeps, pasted or from a template, with all its services as one app.
+    Edit it in **Settings › Compose**; saving deploys it.
+  more: guides/compose-apps
+
+app.hero.template:
+  title: Template
+  text: >-
+    Installed from this template of the gallery. Click for the template's page, with its notes and links.
+  more: guides/templates#after-its-installed
+
+app.hero.image:
+  title: Image
+  text: >-
+    The image its container was created from, by name and tag. **Settings › Image** changes it: the new one is pulled
+    first, then the app is recreated on it.
+  more: reference/app-settings#image
+
+app.hero.origin:
+  title: Where its image comes from
+  text: >-
+    **From Docker Hub** or **from its registry**: updates are looked for there. **Local image**: no registry is known
+    to have it, so an update is a newer build of its tag on this host. **Pinned to one image**: a digest or an ID, so
+    there's nothing to update.
+  more: guides/updates#what-counts-as-newer
+
+app.hero.image-id:
+  title: Image ID
+  text: >-
+    The start of the ID of the image the container runs, which stays the same whatever tag names it later. The whole
+    ID is below.
+  more: guides/updates#what-counts-as-newer
+
+app.hero.container:
+  title: Container name
+  text: >-
+    The container's own name in Docker, which other containers reach it by. Renaming the app in Gitberth doesn't
+    change it.
+  more: guides/manage-apps#rename-and-pin
+
+app.hero.compose-project:
+  title: Compose project
+  text: >-
+    Docker Compose made this container, as part of the project named here. Gitberth changes its limits in place, but
+    a change that needs a new container gives you the lines for its Compose file instead.
+  more: guides/manage-apps#change-settings
+
+app.hero.host-network:
+  title: Host network
+  text: >-
+    It uses the host's network directly (network mode host): it listens on the host's own addresses, on whatever ports
+    its program opens, with no ports of its own to publish.
+  more: guides/networking#host-network-mode
+
+app.hero.not-published:
+  title: Not published on the LAN
+  text: >-
+    It has ports, but none is published on the host, so only containers on its networks reach it, by name.
+    **Publish on LAN** opens its Network tab to publish one.
+  more: guides/networking#publish-a-port-on-the-lan
+
+# ---- The hero: its buttons ----
+
+app.open:
+  title: Open
+  text: >-
+    Opens the app in a new tab, at its main domain when that's live, else at its web port on the LAN.
+  more: guides/networking#the-web-port
+
+app.connect:
+  title: Connect
+  text: >-
+    How to reach this database from a device on your LAN, or from containers on its network: host, port, user,
+    password, database and a URL, each ready to copy. Unpublished, its LAN tab offers **Publish on LAN**.
+  more: guides/databases#connect-to-a-database
+
+app.deploy:
+  title: Deploy
+  text: >-
+    Clones the newest commit of its branch, builds it and deploys it, even a commit the build filters skipped; a
+    Compose app deploys its file again. The running version stays until the new one passes its checks.
+  more: guides/deploys-and-rollbacks#deploy-by-hand
+
+app.update:
+  title: Update
+  text: >-
+    A newer image is waiting. Update pulls it, shows you what changes, then recreates the app on it; if the new one
+    doesn't start, the old one comes back. The image it ran before is kept for **Roll back**.
+  more: guides/updates#update-an-app
+
+app.check-update:
+  title: Check for update
+  text: >-
+    Asks the image's registry now whether its tag points at a newer image, instead of waiting for the next check. For
+    an image built on this host, it looks for a newer build of its tag here.
+  more: guides/updates#how-checks-work
+
+app.menu.deploy-no-cache:
+  title: Deploy without the build cache
+  text: >-
+    Builds the newest commit again with every step run anew and the base images pulled fresh. Use it when a build went
+    wrong because of something cached, or a base image moved on.
+  more: guides/deploys-and-rollbacks#without-the-build-cache
+
+app.menu.pin:
+  title: Pin to the menu
+  text: >-
+    Puts the app in the sidebar and on the dashboard, one click away; the same item unpins it. Nothing about the app
+    itself changes.
+  more: guides/manage-apps#rename-and-pin
+
+app.menu.rename:
+  title: Rename
+  text: >-
+    Opens **Settings › General** to change the name Gitberth calls the app everywhere. The container keeps its own
+    name, so other containers still reach it by it, and nothing restarts.
+  more: guides/manage-apps#rename-and-pin
+
+app.menu.rollback:
+  title: Roll back
+  text: >-
+    Recreates the app on the image it ran before its last update, kept for this; nothing is pulled. Its data stays in
+    its volumes, and the change dialog shows what changes first.
+  more: guides/updates#roll-back-an-update
+
+app.menu.forget:
+  title: Forget
+  text: >-
+    Deletes Gitberth's record of an app that has no container: its settings, saved ports and domains. No container,
+    volume or image is touched.
+  more: guides/manage-apps#remove-an-app
+
+app.menu.remove:
+  title: Remove
+  text: >-
+    Removes the app after a dialog that says what goes with it: its container (a Compose app's whole project), and its
+    volumes, images and databases' data only if you tick them. It can't be undone.
+  more: guides/manage-apps#remove-an-app
+
+# ---- The hero: its figures ----
+
+app.stat.uptime:
+  title: Uptime
+  text: >-
+    How long its container has run since it last started; a restart or a deploy starts the count again. **Not
+    running** while it's stopped.
+  more: guides/manage-apps#the-header
+
+app.stat.cpu:
+  title: CPU
+  text: >-
+    Its latest CPU reading, with its last few minutes. 100% is one full core, so on a host with several cores an app
+    can use more than 100%.
+  more: guides/health-and-monitoring#reading-the-charts
+
+app.stat.memory:
+  title: Memory
+  text: >-
+    The memory its container uses now, against its memory limit, or **no limit** when it has none. Set one in
+    **Settings › Resources**: it changes in place, with no restart.
+  more: reference/app-settings#resources
+
+app.stat.last-deploy:
+  title: Last deploy
+  text: >-
+    Its latest deploy that wasn't skipped: how long ago it was queued, and what started it. Click the number for its
+    log.
+  more: guides/deploys-and-rollbacks#the-deploy-page
+
+app.stat.restart-policy:
+  title: Restart policy
+  text: >-
+    What Docker does when its container stops: **Never**, **On failure**, **Unless stopped** or **Always**. Change it
+    in **Settings › Restart**; it changes in place, with no restart.
+  more: reference/app-settings#restart
+
+app.stat.scheduled-restart:
+  title: Scheduled restart
+  text: >-
+    A restart every so often, counted from when the container last started, for an app that leaks memory, say. **Off**
+    unless you set one in **Settings › Restart**.
+  more: guides/scheduled-jobs-and-restarts#scheduled-restarts
+
+app.stat.health-check:
+  title: Health check
+  text: >-
+    What its Docker health check says now: healthy, unhealthy or starting, with the command it runs. Gitberth waits for
+    healthy after a change or a deploy.
+  more: guides/health-and-monitoring#health-checks
+
+app.stat.restarts:
+  title: Restarts
+  text: >-
+    How many times Docker restarted its container by itself, as its restart policy says. A number that keeps growing
+    means it keeps crashing: its **Logs** tab shows why.
+  more: reference/app-settings#restart
+
+# ---- Banners ----
+
+app.banner.preview:
+  title: Preview
+  text: >-
+    This app is a preview: a copy of its parent built from a pull request or a branch, with its own address. Its
+    settings and its variables for previews are the parent's, so it has no Settings or Environment tab.
+  more: guides/previews#what-a-preview-is
+
+app.banner.change:
+  title: A change is waiting for you
+  text: >-
+    A change of this app was cut short, and Gitberth can't tell which container should stay. **Keep the new one**
+    removes the original; **Put the original back** removes the new one. Volumes stay either way.
+  more: guides/manage-apps#banners
+
+app.banner.last-change:
+  title: About the last change
+  text: >-
+    How the last change of this app ended, when there's something to know about it. **Dismiss** hides it; the
+    **Activity** tab keeps it.
+  more: guides/manage-apps#banners
+
+app.banner.pending:
+  title: Saved, not live yet
+  text: >-
+    Settings you saved wait for a deploy. **Apply now** makes them live with a deploy that doesn't build; **Rebuild and
+    deploy** builds the newest commit too. A change that needs a new build offers only the second.
+  more: guides/manage-apps#banners
+
+app.banner.renamed:
+  title: Renamed outside Gitberth
+  text: >-
+    Its container was renamed outside Gitberth and runs under its new name, as an app of its own. Open that one, or
+    forget this record; Gitberth won't make a second container under the old name.
+  more: guides/manage-apps#banners
+
+app.banner.gone:
+  title: Its container is gone
+  text: >-
+    Gitberth has the app's settings, but its container was removed. **Start** or **Create it again** makes it from
+    them (a Git app from its last image, or built again); **Forget** drops the record.
+  more: guides/manage-apps#banners
+
+app.banner.not-created:
+  title: Not created yet
+  text: >-
+    Gitberth has the app's settings, but it never made its container: its first start failed, or hasn't happened.
+    **Start** creates it; **Forget** drops the record.
+  more: guides/manage-apps#banners
+
+app.banner.not-deployed:
+  title: Not deployed yet
+  text: >-
+    This app has never been deployed, so it has no container yet. **Start** deploys it.
+  more: guides/manage-apps#banners
+
+app.banner.settling:
+  title: Waiting for a change to settle
+  text: >-
+    A change of this app is still under way, and it can't start until that's over. The page follows by itself.
+  more: guides/manage-apps#banners
+
+app.change.keep-new:
+  title: Keep the new one
+  text: >-
+    The new container stays as the app, and the original is stopped and removed. Volumes stay.
+  more: guides/manage-apps#banners
+
+app.change.put-back:
+  title: Put the original back
+  text: >-
+    The new container stops and is removed, and the original takes back its name, its restart policy and its place.
+    Volumes stay.
+  more: guides/manage-apps#banners
+
+app.pending.apply-now:
+  title: Apply now
+  text: >-
+    Makes the saved settings live with a deploy that doesn't build: the current image runs again with them, through a
+    deploy's checks.
+  more: guides/manage-apps#change-settings
+
+app.pending.rebuild:
+  title: Rebuild and deploy
+  text: >-
+    Builds the newest commit of its branch and deploys it with the saved settings.
+  more: guides/deploys-and-rollbacks#deploy-by-hand
+
+# ---- The Logs tab ----
+
+app.logs.service:
+  title: Service
+  text: >-
+    A Compose app runs several containers, one for each service, and each has its own log. Pick the one to show; the
+    web service comes first.
+  more: guides/manage-apps#read-an-apps-logs
+
+app.logs.tail:
+  title: Lines shown
+  text: >-
+    How many of its earlier lines show when the log opens, before the live ones: 100, 500 or 2000. Choosing another
+    reconnects.
+  default: 500 lines
+  more: guides/manage-apps#read-an-apps-logs
+
+app.logs.live:
+  title: Live
+  text: >-
+    New lines appear as the container writes them. When it stops, or the stream breaks, this says so: the round arrow
+    reconnects.
+  more: guides/manage-apps#read-an-apps-logs
+
+# ---- Applying changes ----
+
+app.apply.bar:
+  title: Unsaved changes
+  text: >-
+    Changes on the Settings and Environment tabs wait here until you apply them; the line below says what applying
+    does, such as **No restart.** or how long the app will be offline. **Discard** drops them all.
+  more: guides/manage-apps#change-settings
+
+app.apply.apply:
+  title: Apply
+  text: >-
+    Applies the changes. What's only Gitberth's is saved at once, limits change in place, and anything that needs a new
+    container opens the change dialog first, as **Review and apply**. A Git or Compose app gets a deploy without a build.
+  more: reference/app-settings#how-changes-apply
+
+app.apply.save-later:
+  title: Save for next deploy
+  text: >-
+    Saves the changes without deploying: they go live with the app's next deploy, from a new commit or by hand.
+  more: guides/manage-apps#change-settings
+
+app.apply.pull:
+  title: Pull it
+  text: >-
+    The image you typed isn't on this host yet: pull it from its registry now, then apply.
+  more: reference/app-settings#image
+
+app.compose-change:
+  title: Change it in Compose
+  text: >-
+    Docker Compose made this container, and Compose would undo a change Gitberth made to it. Put these lines in the
+    service's section of its Compose file, then run the command on the host.
+  more: guides/manage-apps#change-settings
+
+# ---- Overview ----
+
+app.overview.addresses:
+  title: Addresses
+  text: >-
+    Every address the app answers on: its domains, its ports on the LAN, its own LAN address, those only the host
+    reaches, and its names inside Docker. A web address opens; the others copy.
+  more: guides/networking#who-reaches-a-port-access
+
+app.overview.main-domain:
+  title: Main domain
+  text: >-
+    The domain that stands for the app: **Open** and its uptime check use it. Change it on the **Network** tab with
+    **Make main**.
+  more: guides/domains#the-main-domain
+
+app.overview.domain-live:
+  title: Live
+  text: >-
+    The domain answers now: the tunnel reaches the app's web port.
+  more: guides/domains#how-traffic-reaches-the-app
+
+app.overview.resources:
+  title: Resources
+  text: >-
+    Its CPU and memory over the last hour, every 5 seconds, or the last 6 hours, every 30 seconds. Deploys, restarts
+    and crashes are marked, and the time it was down is shaded.
+  more: guides/health-and-monitoring#an-apps-own-charts
+
+app.overview.range.hour:
+  title: 1 hour
+  text: >-
+    The last hour, with every reading: one each 5 seconds.
+  more: guides/health-and-monitoring#an-apps-own-charts
+
+app.overview.range.six-hours:
+  title: 6 hours
+  text: >-
+    The last 6 hours, as an average of every 30 seconds. Gitberth keeps 6 hours of readings, across its own restarts.
+  more: guides/health-and-monitoring#an-apps-own-charts
+
+app.overview.chart.cpu:
+  title: CPU
+  text: >-
+    Its CPU use over the time shown, where 100% is one full core. Each point is the average since the one before, so a
+    short burst still shows, lower. Dashed lines mark deploys, restarts and crashes (point at one for what happened),
+    and the time it was down is shaded.
+  more: guides/health-and-monitoring#reading-the-charts
+
+app.overview.chart.memory:
+  title: Memory
+  text: >-
+    The memory its container used over the time shown; a spike that comes and goes between readings isn't seen. Next
+    to the latest value: how much of its memory limit that is, or **no limit**.
+  more: guides/health-and-monitoring#reading-the-charts
+
+app.overview.container:
+  title: Container
+  text: >-
+    What its container is as Docker runs it now: image, command, restart policy, health check, limits, variables,
+    volumes, networks and ID. **Edit in Settings** changes them.
+  more: reference/app-settings#settings-tab
+
+app.overview.image:
+  title: Image
+  text: >-
+    The image the container runs, by its name and tag, then the start of its ID.
+  more: reference/app-settings#image
+
+app.overview.tag-moved:
+  title: The tag has moved on
+  text: >-
+    Its tag names another image on this host now, pulled or built since, while this container still runs the one it
+    was created from. An update or a recreate moves it to the new one.
+  more: guides/updates#what-counts-as-newer
+
+app.overview.command:
+  title: Command
+  text: >-
+    What the container runs: its entrypoint and arguments, with secrets masked. **from the image** means the image's
+    own; set one in **Settings › Command**.
+  more: reference/app-settings#command
+
+app.overview.workdir:
+  title: Working directory
+  text: >-
+    The folder its program starts in.
+  more: reference/app-settings#command
+
+app.overview.user:
+  title: User
+  text: >-
+    The user its program runs as inside the container.
+  more: reference/app-settings#command
+
+app.overview.restart-policy:
+  title: Restart policy
+  text: >-
+    What Docker does when it stops, and how many times Docker has restarted it by itself.
+  more: reference/app-settings#restart
+
+app.overview.health-check:
+  title: Health check
+  text: >-
+    Its Docker health check: how it stands, and the command it runs. **None** means Docker doesn't check it; **Add
+    one** opens **Settings › Health check**.
+  more: guides/health-and-monitoring#health-checks
+
+app.overview.limits:
+  title: Limits
+  text: >-
+    The most memory and CPUs it may use. **None** means it may use all of the host's.
+  more: reference/app-settings#resources
+
+app.overview.environment:
+  title: Environment
+  text: >-
+    How many variables the container has, the image's own included. **Edit** opens the Environment tab.
+  more: guides/environment-variables
+
+app.overview.volumes:
+  title: Volumes
+  text: >-
+    Where its data lives beyond the container: each volume or host folder, and where it's mounted inside. Without one,
+    what it writes goes when it's recreated.
+  more: reference/app-settings#volumes
+
+app.overview.networks:
+  title: Networks
+  text: >-
+    The Docker networks it's on, with its address on each. Containers on the same network reach each other by name.
+  more: guides/networking#reach-other-containers-by-name
+
+app.overview.created:
+  title: Created
+  text: >-
+    When this container was made. A deploy, an update or a settings change that recreates it makes a new one.
+
+app.overview.container-id:
+  title: Container ID
+  text: >-
+    The start of the container's ID in Docker, with a button that copies the whole of it.
+
+app.overview.activity:
+  title: Recent activity
+  text: >-
+    The last few things that happened to it: deploys, changes, starts, stops and crashes. **All** opens the Activity
+    tab.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+app.overview.updates:
+  title: Updates
+  text: >-
+    Whether its image has a newer version, from the last check: in its registry, or as a newer build of its tag on this
+    host. Whether it's checked, and whether it updates by itself, is its **Updates** setting in **Settings › Image**.
+  more: guides/updates#see-which-apps-have-an-update
+
+app.overview.update.follows:
+  title: Follows
+  text: >-
+    The image name and tag updates are looked for on.
+  more: guides/updates#what-counts-as-newer
+
+app.overview.update.running:
+  title: Running
+  text: >-
+    The digest of the image the app runs now: its fingerprint in the registry.
+  more: guides/updates#what-counts-as-newer
+
+app.overview.update.latest:
+  title: Latest
+  text: >-
+    The digest the registry gave for the tag at the last check. When it differs from **Running**, there's an update.
+  more: guides/updates#what-counts-as-newer
+
+app.overview.check-now:
+  title: Check now
+  text: >-
+    Asks its registry right away whether the tag has moved on, even when the app is set to **When I ask**.
+  more: guides/updates#how-checks-work
+
+app.overview.databases:
+  title: Databases
+  text: >-
+    The app's own databases, which Gitberth made or took over: each one's kind, name, server, size, and the variable
+    its connection string is in.
+  more: guides/databases#what-you-see
+
+# ---- Overview: Services of a Compose app ----
+
+app.compose.services:
+  title: Services
+  text: >-
+    A Compose app is one app made of several containers, one for each service of its file. Start, Stop, Restart and
+    Delete act on all of them; each service here has its own log and restart.
+  more: guides/compose-apps#use-the-app
+
+app.compose.web:
+  title: Web service
+  text: >-
+    The service whose container is the app's own: its domains, LAN port, health URL and uptime checks go to it. Choose
+    another in **Settings › Compose**.
+  more: reference/app-settings#compose
+
+app.compose.restart:
+  title: Restart this service
+  text: >-
+    Restarts this one service's container, leaving the others running.
+  more: guides/compose-apps#use-the-app
+
+# ---- Overview: Uptime ----
+
+app.uptime:
+  title: Uptime
+  text: >-
+    Gitberth checks the app from outside, the way a visitor reaches it: its main domain over HTTPS, else its web port
+    on the LAN. Two failed checks in a row make it down and send a notification.
+  more: guides/uptime-and-status-page
+
+app.uptime.check-now:
+  title: Check now
+  text: >-
+    Checks it right away, instead of waiting for the next round. A stopped app isn't checked: the card says why.
+  more: guides/uptime-and-status-page#whats-checked
+
+app.uptime.state.up:
+  title: Up
+  text: >-
+    Its last check got an answer below 500 that wasn't the down page.
+  more: guides/uptime-and-status-page#whats-checked
+
+app.uptime.state.down:
+  title: Down
+  text: >-
+    Two checks in a row failed, so an incident is open and a notification went out. One good check ends it.
+  more: guides/uptime-and-status-page#when-an-app-goes-down
+
+app.uptime.state.paused:
+  title: Paused
+  text: >-
+    It's stopped, so it isn't checked until it runs again.
+  more: guides/uptime-and-status-page#whats-checked
+
+app.uptime.state.not-checked:
+  title: Not checked
+  text: >-
+    Its uptime check is off, or it has nothing to check: no domain and no web port on the LAN.
+  more: guides/uptime-and-status-page#whats-checked
+
+app.uptime.state.checking:
+  title: Checking
+  text: >-
+    It hasn't been checked since Gitberth started, or since its check was turned on. The first result comes within a
+    round of checks.
+  more: guides/uptime-and-status-page#whats-checked
+
+app.uptime.ratio:
+  title: Uptime over a period
+  text: >-
+    The share of its checks that found it up over the last 24 hours, 7 days and 30 days. **–** until there's a check
+    in that time.
+  more: guides/uptime-and-status-page#what-you-see
+
+app.uptime.chart.response-time:
+  title: Response time
+  text: >-
+    How long each of its checks over the last 24 hours took to get an answer. A check that failed leaves a gap, and
+    the time it was down is shaded.
+  more: guides/uptime-and-status-page#what-you-see
+
+app.uptime.incidents:
+  title: Recent incidents
+  text: >-
+    The last times it was down in the last 30 days: how long each lasted, when it started, and what the first failed
+    check found.
+  more: guides/uptime-and-status-page#when-an-app-goes-down
+
+app.uptime.checks:
+  title: Checks
+  text: >-
+    The address each check asks: its main domain, or its web port on the LAN, with the path set below.
+  more: guides/uptime-and-status-page#whats-checked
+
+app.uptime.last-checked:
+  title: Last checked
+  text: >-
+    When the last check ran, the HTTP status it got and how long the answer took, and how often it's checked.
+    **Settings › Uptime and status page** sets how often for every app.
+  more: guides/uptime-and-status-page#whats-checked
+
+app.uptime.certificate:
+  title: Certificate
+  text: >-
+    When its domain's HTTPS certificate expires. Gitberth tells you once 14 days before, and again 3 days before;
+    Cloudflare renews its certificates long before that.
+  more: guides/uptime-and-status-page#when-an-app-goes-down
+
+app.uptime.check:
+  title: Uptime check
+  text: >-
+    Checks the app from outside on every round. Turned off, it isn't checked, sends no down or back-up notifications,
+    and the status page leaves it out unless you picked it there. Saved as soon as you switch it.
+  default: "On"
+  more: reference/app-settings#overview-tab-uptime
+
+app.uptime.path:
+  title: Path
+  text: >-
+    The path each check asks for, such as `/health`; **Save path** saves it and checks at once. Use one that answers
+    quickly without signing in.
+  default: /
+  example: /health
+  more: reference/app-settings#overview-tab-uptime
+
+# ---- Overview: Scheduled jobs ----
+
+app.jobs:
+  title: Scheduled jobs
+  text: >-
+    The `crons` from the app's `vercel.json`: Gitberth calls each path on the app's web port when its schedule, in UTC,
+    comes round, as Vercel would. Only production runs them.
+  more: guides/scheduled-jobs-and-restarts#scheduled-jobs
+
+app.jobs.last-run:
+  title: Last run
+  text: >-
+    How its last run went: the HTTP status it answered, **Failed** when nothing answered, **Skipped** when its previous
+    run was still going, or **Not called** when the app couldn't be called, stopped or without a web port.
+  more: guides/scheduled-jobs-and-restarts#how-a-job-runs
+
+app.jobs.run-now:
+  title: Run now
+  text: >-
+    Calls the job's path right away, as its schedule would. The result shows here and in a message.
+  more: guides/scheduled-jobs-and-restarts#see-and-run-them
+
+# ---- Overview: Roll back after an update ----
+
+app.update.rollback:
+  title: Roll back
+  text: >-
+    Recreates the app on the image it ran before its last update, kept for this; nothing is pulled. The change dialog
+    shows what changes first.
+  more: guides/updates#roll-back-an-update
+
+# ---- Settings: General ----
+
+app.settings.general:
+  title: General
+  text: >-
+    How the app shows up in Gitberth: its name, its health URL, and whether it's pinned, watched and talked about.
+    Nothing here touches its container, so nothing restarts.
+  more: reference/app-settings#general
+
+app.settings.name:
+  title: Name
+  text: >-
+    What Gitberth calls the app everywhere: the Apps list, the menu, notifications. The container keeps its own name,
+    so other containers still reach it by that.
+  example: Orders API
+  more: reference/app-settings#general
+
+app.settings.health-url:
+  title: Health URL
+  text: >-
+    A path on the web port that a new container must answer, with a status below 400, before it takes over from the
+    old one after a deploy or a change. Set it when "it started" isn't enough to know the app works.
+  example: /health
+  more: guides/health-and-monitoring#set-a-health-url
+
+app.settings.pinned:
+  title: Pinned
+  text: >-
+    Shows the app in the sidebar and on the dashboard, one click away.
+  default: "Off"
+  more: guides/manage-apps#rename-and-pin
+
+app.settings.gather-stats:
+  title: Gather stats
+  text: >-
+    Reads its CPU, memory and network every 5 seconds and keeps 6 hours, for the Health page, the charts and the
+    figures in its header. Turn it off for a container you don't care about.
+  default: "On"
+  more: guides/health-and-monitoring#stop-gathering-stats-for-a-container
+
+app.settings.notifications:
+  title: Notifications
+  text: >-
+    Whether notifications tell about this app: its deploys, crashes, health check and uptime. Off leaves it out,
+    wherever **Settings › Notifications** sends the rest.
+  default: "On"
+  more: guides/notifications#leave-an-app-out
+
+# ---- Settings: Source (Git apps) ----
+
+app.settings.source:
+  title: Source
+  text: >-
+    Where the code comes from and how it's built: the branch, the folder, the Dockerfile and which commits deploy by
+    themselves. A new branch, folder or build takes effect with the next build.
+  more: reference/app-settings#source
+
+app.settings.branch:
+  title: Branch
+  text: >-
+    The branch Gitberth builds, and watches for new commits.
+  example: main
+  more: reference/app-settings#source
+
+app.settings.subfolder:
+  title: Subfolder
+  text: >-
+    The app's folder in the repository, for a repository with more than one app. Empty builds from the root.
+  example: apps/website
+  more: reference/build-detection#apps-in-a-sub-folder
+
+app.settings.deploy-on-push:
+  title: Deploy on push
+  text: >-
+    A new commit on the branch deploys by itself, as soon as Gitberth sees it. Off, nothing deploys until you click
+    **Deploy**.
+  default: "On"
+  more: guides/deploys-and-rollbacks#automatic-deploys
+
+app.settings.vercel:
+  title: Vercel's variables
+  text: >-
+    Sets `VERCEL_URL`, `VERCEL_GIT_COMMIT_SHA` and the rest, as Vercel would, so an app made for Vercel knows where it
+    runs and what was deployed. A variable of yours with the same name wins.
+  default: "On"
+  more: guides/environment-variables#variables-gitberth-sets-like-vercel
+
+app.settings.build:
+  title: Build
+  text: >-
+    How the image is built: from the Dockerfile Gitberth works out on each deploy (or the repository's own), or from
+    one you write here.
+  default: Detect automatically
+  more: reference/build-detection#how-gitberth-decides
+
+app.settings.build.auto:
+  title: Detect automatically
+  text: >-
+    Each deploy looks at the code: a Dockerfile in the repository is used as it is, otherwise Gitberth writes one for
+    the framework it finds.
+  more: reference/build-detection#how-gitberth-decides
+
+app.settings.build.custom:
+  title: Custom Dockerfile
+  text: >-
+    Builds with the Dockerfile you write below instead, starting from the one Gitberth would generate.
+  more: reference/build-detection#the-dockerfile-gitberth-writes
+
+app.settings.dockerfile:
+  title: Dockerfile
+  text: >-
+    Your Dockerfile for this app. Keep the `# gitberth:build-args` and `# gitberth:volumes` lines: Gitberth fills them
+    in with your build-time variables and volumes.
+  more: reference/build-detection#the-dockerfile-gitberth-writes
+
+app.settings.project:
+  title: Project to run
+  text: >-
+    For a .NET solution with several projects: the one that runs. Gitberth picks one; set it when that's the wrong
+    one.
+  example: src/MyApp/MyApp.csproj
+  more: reference/build-detection#net
+
+app.settings.watch-paths:
+  title: Watch paths
+  text: >-
+    A new commit deploys by itself only when it changes a file one of these patterns matches, one per line, like a
+    `.gitignore`. Empty: any file. **Deploy** by hand always builds.
+  example: website/
+  more: guides/deploys-and-rollbacks#build-filters
+
+app.settings.watch-subfolder:
+  title: Watch the app's folder
+  text: >-
+    Adds the app's folder as a watch path, so commits that only change other folders of the repository don't deploy
+    it.
+  more: guides/deploys-and-rollbacks#build-filters
+
+app.settings.ignored-paths:
+  title: Ignored paths
+  text: >-
+    A new commit whose changed files all match these patterns doesn't deploy by itself, such as `*.md` and `docs/`.
+    It ends **Skipped**, and the running version stays.
+  example: "*.md"
+  more: guides/deploys-and-rollbacks#build-filters
+
+# ---- Settings: Image ----
+
+app.settings.image:
+  title: Image
+  text: >-
+    What the app runs: where its image came from, its ID, age and size, and where its updates come from. A new tag or
+    image is pulled before the app is recreated on it.
+  more: reference/app-settings#image
+
+app.settings.image.name:
+  title: Image
+  text: >-
+    A name and tag, or a digest. Changing it pulls the new image first, then recreates the app on it; what the old
+    image set, such as its own variables, is left behind.
+  example: postgres:18
+  more: reference/app-settings#image
+
+app.settings.updates:
+  title: Updates
+  text: >-
+    What Gitberth does about newer images of this app's tag: nothing until you ask, tell you with a badge, or update it
+    by itself at night. Saved at once, with no restart.
+  more: guides/updates#update-choices
+
+app.settings.updates.off:
+  title: When I ask
+  text: >-
+    Left out of the scheduled checks: Gitberth looks for a newer image only when you click **Check for update** or
+    **Check now**, and shows no badge.
+  more: guides/updates#update-choices
+
+app.settings.updates.notify:
+  title: Tell me
+  text: >-
+    Checked on the schedule in **Settings › Updates** (every 6 hours unless changed), or against its tag on this host
+    for a local image. When there's a newer one, the app gets a badge, and you update it with **Update**.
+  more: guides/updates#update-choices
+
+app.settings.updates.auto:
+  title: Automatically
+  text: >-
+    Checked on the schedule, and updated by itself in the hours set in **Settings › Updates**; a new version that
+    fails its checks is put back. Never offered for a database, whose data files a new version can change.
+  more: guides/updates#automatic-updates
+
+# ---- Settings: Compose ----
+
+app.settings.compose:
+  title: Compose
+  text: >-
+    A Compose app's file and its web service. Saved on its own with **Save and deploy**, which deploys it with them.
+    Its services' own settings live in the file.
+  more: reference/app-settings#compose
+
+app.settings.compose.file:
+  title: Compose file
+  text: >-
+    A Git app's: the file's path in its folder. An inline app's: the whole file, as `docker compose` reads it, where
+    `${NAME}` takes the app's variables. Saving says which services come and go.
+  example: compose.yaml
+  more: reference/app-settings#compose
+
+app.settings.compose.web:
+  title: Web service
+  text: >-
+    The service whose container is the app's own: its domains, LAN port, health URL, logs and uptime checks go to it.
+    The others stay inside the app.
+  more: reference/app-settings#compose
+
+app.settings.compose.shared:
+  title: Put every service on Gitberth's network
+  text: >-
+    Every service joins Gitberth's shared network too, with no name of its own there, so a worker or a cron service
+    reaches your database server and other apps by name. Off: only the web service, as the app's name.
+  default: "Off"
+  more: reference/app-settings#compose
+
+app.settings.compose.save:
+  title: Save and deploy
+  text: >-
+    Saves the Compose section and deploys the app with it. Services taken out of the file go with their containers;
+    their volumes stay.
+  more: guides/compose-apps#what-a-deploy-does
+
+# ---- Settings: Previews ----
+
+app.settings.previews:
+  title: Previews
+  text: >-
+    Pull requests (and branches) as apps of their own, with their own address, to try before they reach production.
+    Saved on its own with **Save previews**; nothing here restarts the app.
+  more: guides/previews#turn-previews-on
+
+app.settings.previews.mode:
+  title: Previews
+  text: >-
+    Which changes get a preview of their own: none, each open pull request, or pull requests and every other branch.
+    Turning them off removes the previews, after asking.
+  default: "Off"
+  more: guides/previews#turn-previews-on
+
+app.settings.previews.off:
+  title: "Off"
+  text: >-
+    No previews: only production runs. Saving this removes any previews there are, after asking.
+  more: guides/previews#turn-previews-on
+
+app.settings.previews.prs:
+  title: Pull requests
+  text: >-
+    Each open pull request (or GitLab merge request) gets a preview, updated with each new commit and removed when it's
+    closed or merged.
+  more: guides/previews#turn-previews-on
+
+app.settings.previews.branches:
+  title: Pull requests and branches
+  text: >-
+    Pull requests, and every branch other than production's once it gets a new commit after you turn this on, so old
+    branches aren't all built at once.
+  more: guides/previews#turn-previews-on
+
+app.settings.previews.limit:
+  title: At most running
+  text: >-
+    How many previews run at once, from 1 to 20. More wait, and start when one is removed.
+  default: "3"
+  more: guides/previews#the-limit-and-how-previews-go
+
+app.settings.previews.expiry:
+  title: Remove after (days without a new commit)
+  text: >-
+    A preview with no new commit for this many days is removed, from 1 to 365. A closed or merged pull request, or a
+    deleted branch, takes its preview at once.
+  default: 7 days
+  more: guides/previews#the-limit-and-how-previews-go
+
+app.settings.previews.forks:
+  title: Also pull requests from forks
+  text: >-
+    Previews pull requests from other people's copies of the repository too. Their code is built and run on this
+    server, without added capabilities, security options or GPUs. Turning it off removes their previews.
+  default: "Off"
+  more: guides/previews#pull-requests-and-github
+
+app.settings.previews.protect:
+  title: Protect previews' domains
+  text: >-
+    Visitors sign in through Cloudflare Access before they reach a preview's domain. Access is set up in **Settings ›
+    Domains**.
+  default: "On"
+  more: guides/domains#protect-a-domain
+
+app.settings.previews.database:
+  title: Each preview's database
+  text: >-
+    What a preview gets for the app's databases: none of its own, an empty one, or a copy of production's, made before
+    its first build and dropped with it. A Redis of its own always starts empty.
+  default: An empty one
+  more: guides/previews#productions-database
+
+app.settings.previews.database.none:
+  title: None of its own
+  text: >-
+    Previews get no database of their own. A variable that would hand them production's database stops their deploys,
+    unless it has a value for previews on the Environment tab.
+  more: guides/previews#productions-database
+
+app.settings.previews.database.empty:
+  title: An empty one
+  text: >-
+    Each preview gets an empty database of its own on the same Postgres server, so its migrations make their own
+    tables.
+  more: guides/previews#productions-database
+
+app.settings.previews.database.copy:
+  title: A copy of production's
+  text: >-
+    Each preview gets a database of its own with production's data copied in, personal data included, and runs a pull
+    request's code with it. Choose it only when everyone who can open one may see that data.
+  more: guides/databases#previews
+
+app.settings.previews.save:
+  title: Save previews
+  text: >-
+    Saves the Previews section on its own; Gitberth then looks at the repository again for pull requests and branches.
+  more: guides/previews#turn-previews-on
+
+# ---- Settings: Deploy hooks ----
+
+app.settings.hooks:
+  title: Deploy hooks
+  text: >-
+    Secret URLs that deploy or update the app when something calls them: a CMS, a scheduled job, CI. Each has a name,
+    so you can tell their calls apart and delete one on its own.
+  more: guides/deploy-hooks
+
+app.settings.hooks.lan:
+  title: On your network
+  text: >-
+    The hook's URL on Gitberth's own address: a `POST` to it from your network deploys the app, or updates one that runs
+    a registry's image.
+  more: guides/deploy-hooks#call-it
+
+app.settings.hooks.internet:
+  title: From the internet
+  text: >-
+    The hook's URL through your Cloudflare Tunnel, on the host name GitHub's webhooks use, for a caller in the cloud.
+  more: guides/deploy-hooks#call-it-from-the-internet
+
+app.settings.hooks.name:
+  title: New hook's name
+  text: >-
+    What will call it, up to 50 characters: the deploy's history and the audit log show it. One hook per name, and at
+    most 10 an app.
+  example: Contentful
+  more: guides/deploy-hooks#make-a-hook
+
+app.settings.hooks.create:
+  title: Create hook
+  text: >-
+    Makes the hook with a secret URL of its own and shows a `curl` line to try it. Anyone with the URL can deploy the
+    app, so keep it as you would a password.
+  more: guides/deploy-hooks#make-a-hook
+
+# ---- Settings: Databases ----
+
+app.settings.databases:
+  title: Databases
+  text: >-
+    A Postgres database or a Redis of the app's own, made by Gitberth, with its connection string in a variable it
+    sets. Saved on its own; the app then takes it as it takes any settings change.
+  more: guides/databases#add-a-database-to-an-app
+
+app.settings.databases.copy:
+  title: Copy connection string
+  text: >-
+    Copies the database's connection string, password included, to paste into a client. The page never shows it.
+  more: guides/databases#what-you-see
+
+app.settings.databases.variable:
+  title: Variable
+  text: >-
+    The environment variable the connection string goes in, which the app reads. Gitberth's value wins over one of the
+    same name on the Environment tab or in GitHub.
+  default: DATABASE_URL, or REDIS_URL for Redis
+  more: guides/databases#add-a-database-to-an-app
+
+app.settings.databases.reached:
+  title: Reached at
+  text: >-
+    Where the app reaches it from inside Docker: the server's name and port, and the role it signs in as.
+  more: guides/databases#what-you-see
+
+app.settings.databases.made:
+  title: Made
+  text: >-
+    **By Gitberth**: Gitberth made it, and can delete its data when you remove it. **Taken over**: it was there before,
+    and Gitberth never deletes its data.
+  more: guides/databases#remove-a-database
+
+app.settings.databases.kind:
+  title: Add
+  text: >-
+    The kind of database to make for the app: a Postgres database and role on a Postgres server of this host, or a
+    Redis container of its own.
+  default: Postgres
+  more: guides/databases#add-a-database-to-an-app
+
+app.settings.databases.postgres:
+  title: Postgres
+  text: >-
+    A database and a role of the app's own on one of this host's Postgres servers, named after the app; only it may
+    connect to it.
+  more: guides/databases#postgres-servers
+
+app.settings.databases.redis:
+  title: Redis
+  text: >-
+    A Redis container of the app's own, with a password, and its data on a volume of its own.
+  more: guides/databases#add-a-database-to-an-app
+
+app.settings.databases.server:
+  title: Server
+  text: >-
+    The Postgres server it goes on, among those Gitberth can use; **· default** marks the default. **Settings ›
+    Databases** sets one up, or says why one can't be used.
+  more: guides/databases#postgres-servers
+
+app.settings.databases.container:
+  title: Container
+  text: >-
+    The Redis container's name: the app's container with `_redis` added. It can't be changed.
+  more: guides/databases#add-a-database-to-an-app
+
+app.settings.databases.add:
+  title: Add database
+  text: >-
+    Makes the database and sets the variable. A Git or Compose app takes it with a deploy without a build; any other
+    app is recreated with it.
+  more: guides/databases#add-a-database-to-an-app
+
+app.settings.databases.keep:
+  title: Keep the data
+  text: >-
+    Its variable goes, and the database stays where it is: a Postgres database on its server, a Redis's data in its
+    volume. Gitberth forgets it.
+  more: guides/databases#remove-a-database
+
+app.settings.databases.delete:
+  title: Delete the data
+  text: >-
+    Its variable goes, and the database is dropped too, once you type its name: the data is gone for good. Only for a
+    database Gitberth made.
+  more: guides/databases#remove-a-database
+
+# ---- Settings: Command ----
+
+app.settings.command:
+  title: Command
+  text: >-
+    What the container runs. Leave a field empty to use the image's own value, which shows greyed. A change recreates
+    the container.
+  more: reference/app-settings#command
+
+app.settings.entrypoint:
+  title: Entrypoint
+  text: >-
+    The program the container starts. **image** after the label means the image's own is used.
+  more: reference/app-settings#command
+
+app.settings.command.args:
+  title: Command
+  text: >-
+    The arguments the entrypoint gets, or the whole command when the image has no entrypoint. A secret in it is shown
+    masked: edit around the mask and the secret is kept.
+  more: reference/app-settings#command
+
+app.settings.workdir:
+  title: Working directory
+  text: >-
+    The folder its program starts in. Empty: the image's.
+  example: /app
+  more: reference/app-settings#command
+
+app.settings.user:
+  title: User
+  text: >-
+    The user its program runs as, by name or number. Empty: the image's, else `root`.
+  example: "1000:1000"
+  more: reference/app-settings#command
+
+# ---- Settings: Volumes ----
+
+app.settings.volumes:
+  title: Volumes
+  text: >-
+    Storage that outlives the container. Without a volume, what the app writes goes when the container is recreated;
+    recreating never deletes a volume.
+  more: reference/app-settings#volumes
+
+app.settings.volumes.source:
+  title: Volume or folder
+  text: >-
+    A named volume Docker keeps, a folder on the host (a full path), or a temporary one in memory.
+  example: /srv/data
+  more: reference/app-settings#volumes
+
+app.settings.volumes.target:
+  title: Path in the container
+  text: >-
+    Where the volume or folder appears inside the container.
+  example: /data
+  more: reference/app-settings#volumes
+
+app.settings.volumes.anonymous:
+  title: Anonymous volume
+  text: >-
+    A volume Docker made without a name, often because the image asks for one. It keeps its data across recreates
+    like any other.
+  more: reference/app-settings#volumes
+
+app.settings.volumes.mode:
+  title: Read and write, or read-only
+  text: >-
+    Whether the app may write there, or only read: read-only suits config files it should never change. On the
+    Settings tab, click it to switch.
+  default: read and write
+  more: reference/app-settings#volumes
+
+app.settings.volumes.named:
+  title: Named volume
+  text: >-
+    Adds a volume Docker keeps for the app, by name: the usual place for a database's or an app's data.
+  more: reference/app-settings#volumes
+
+app.settings.volumes.bind:
+  title: Host folder
+  text: >-
+    Adds a folder of the host, by its full path, so the app reads and writes files you can reach on the host too.
+  more: reference/app-settings#volumes
+
+app.settings.volumes.tmpfs:
+  title: Temporary (tmpfs)
+  text: >-
+    Adds a folder kept in memory: fast, and emptied whenever the container stops.
+  more: reference/app-settings#volumes
+
+# ---- Settings: Restart ----
+
+app.settings.restart:
+  title: Restart
+  text: >-
+    What Docker does when the app stops, and an optional restart on a schedule.
+  more: reference/app-settings#restart
+
+app.settings.restart-policy:
+  title: When it stops
+  text: >-
+    Docker's restart policy: whether it brings the container back after a crash, a host reboot, or a stop. It changes
+    in place, with no restart.
+  default: Unless stopped
+  more: reference/app-settings#restart
+
+app.settings.restart.no:
+  title: Never
+  text: >-
+    It stays down after a crash or a host reboot until you start it.
+  more: reference/app-settings#restart
+
+app.settings.restart.on-failure:
+  title: On failure
+  text: >-
+    It comes back after a crash, but not after a host reboot or when you stop it.
+  more: reference/app-settings#restart
+
+app.settings.restart.unless-stopped:
+  title: Unless stopped
+  text: >-
+    It comes back after a crash or a host reboot, but stays down when you stop it.
+  more: reference/app-settings#restart
+
+app.settings.restart.always:
+  title: Always
+  text: >-
+    Like **Unless stopped**, and after you stop it, it comes back too the next time Docker starts.
+  more: reference/app-settings#restart
+
+app.settings.restart.retries:
+  title: Tries before it gives up
+  text: >-
+    With **On failure**: how many times in a row Docker restarts it before leaving it down. 0 tries for ever.
+  default: "0"
+  more: reference/app-settings#restart
+
+app.settings.scheduled-restart:
+  title: Scheduled restart
+  text: >-
+    Restarts it every so many minutes, hours or days, counted from when it last started, for an app that leaks memory,
+    say. From 5 minutes to 365 days; saved at once.
+  default: "Off"
+  more: guides/scheduled-jobs-and-restarts#scheduled-restarts
+
+# ---- Settings: Resources ----
+
+app.settings.resources:
+  title: Resources
+  text: >-
+    Limits that stop one app from starving the others. Memory, CPU and processes change in place, with no restart;
+    shared memory needs a recreate.
+  more: reference/app-settings#resources
+
+app.settings.memory:
+  title: Memory limit
+  text: >-
+    The most memory it may use, at least 6 MiB; an app that goes past it is killed for running out of memory. A Java
+    app sizes its heap from it. Empty: no limit.
+  example: 512 MiB
+  more: reference/app-settings#resources
+
+app.settings.cpu:
+  title: CPU limit
+  text: >-
+    How many of the host's CPUs it may use at most, such as `0.5` or `2`. Empty: it may use every core.
+  example: "1.5"
+  more: reference/app-settings#resources
+
+app.settings.shm:
+  title: Shared memory
+  text: >-
+    The size of `/dev/shm`, which databases and headless browsers use. A change recreates the container.
+  default: 64 MiB
+  more: reference/app-settings#resources
+
+app.settings.cpu-priority:
+  title: CPU priority
+  text: >-
+    Its share of the CPU against the other containers: **Low**, **Normal** or **High**. It only matters when the host
+    is busy.
+  default: Normal
+  more: reference/app-settings#resources
+
+app.settings.pids:
+  title: Process limit
+  text: >-
+    How many processes it may run at once, a guard against a runaway one. Empty: no limit.
+  more: reference/app-settings#resources
+
+# ---- Settings: Health check ----
+
+app.settings.health:
+  title: Health check
+  text: >-
+    A command Docker runs inside the container every so often, to mark it healthy or not. Gitberth waits for healthy
+    after a change or a deploy, and the Health page marks when it starts failing.
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+app.settings.health.check:
+  title: Check
+  text: >-
+    The image's own check, one of your own, or none. A change recreates the container.
+  default: Image default
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+app.settings.health.image:
+  title: Image default
+  text: >-
+    Uses the image's own `HEALTHCHECK`, when it has one; the line below shows it. Without one, Docker reports no
+    health.
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+app.settings.health.custom:
+  title: Command
+  text: >-
+    A check of your own: the command, how often it runs, how long it may take, and how many failures in a row make
+    the container unhealthy.
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+app.settings.health.none:
+  title: None
+  text: >-
+    No health check, even when the image has one: Docker reports the container as running, with no health.
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+app.settings.health.command:
+  title: Command
+  text: >-
+    Run by the shell inside the container; it passes when it exits with 0. The image must have the program it calls,
+    such as `curl` or `wget`.
+  example: curl -fsS http://localhost:3000/health || exit 1
+  more: guides/health-and-monitoring#add-a-docker-health-check
+
+app.settings.health.interval:
+  title: Every
+  text: >-
+    Seconds between two checks.
+  default: 30 s
+  more: reference/app-settings#health-check
+
+app.settings.health.timeout:
+  title: Timeout
+  text: >-
+    Seconds a check may take before it counts as failed.
+  default: 30 s
+  more: reference/app-settings#health-check
+
+app.settings.health.retries:
+  title: Retries
+  text: >-
+    Failed checks in a row before the container is unhealthy.
+  default: "3"
+  more: reference/app-settings#health-check
+
+app.settings.health.start-period:
+  title: Grace period
+  text: >-
+    Seconds after it starts during which failed checks don't count, for an app that's slow to start.
+  default: 0 s
+  more: reference/app-settings#health-check
+
+# ---- Settings: Labels, Logging ----
+
+app.settings.labels:
+  title: Labels
+  text: >-
+    Notes on the container that other tools read, such as Traefik, Watchtower or Homepage. A change recreates the
+    container.
+  more: reference/app-settings#labels
+
+app.settings.labels.locked:
+  title: Locked label
+  text: >-
+    A label Gitberth or Docker Compose set and relies on, starting `gitberth.` or `com.docker.compose.`, so it can't be
+    changed here.
+  more: reference/configuration#labels
+
+app.settings.logging:
+  title: Logging
+  text: >-
+    Where Docker keeps the container's output. The Logs tab reads it either way; a change recreates the container.
+  more: reference/app-settings#logging
+
+app.settings.logging.driver:
+  title: Driver
+  text: >-
+    Docker's log driver: the host's default, `json-file`, `local`, `journald`, `syslog` or `none`.
+  default: The host's default
+  more: reference/app-settings#logging
+
+app.settings.logging.options:
+  title: Options
+  text: >-
+    The driver's options, `key=value`, one per line, such as how big a log file grows and how many are kept.
+  example: max-size=10m
+  more: reference/app-settings#logging
+
+# ---- Settings: Advanced ----
+
+app.settings.advanced:
+  title: Advanced
+  text: >-
+    Everything else Docker can set. Most apps never need these; each one applies with a recreate.
+  more: reference/app-settings#advanced
+
+app.settings.advanced.hostname:
+  title: Hostname
+  text: >-
+    The container's own host name, as programs inside it see it. Empty: the one Docker picks.
+  more: reference/app-settings#advanced
+
+app.settings.advanced.stop-signal:
+  title: Stop signal
+  text: >-
+    The signal Docker sends to ask the app to stop. Empty: the image's, else `SIGTERM`.
+  example: SIGINT
+  more: reference/app-settings#advanced
+
+app.settings.advanced.stop-timeout:
+  title: Stop timeout
+  text: >-
+    Seconds Docker waits after the stop signal before it kills the container. Raise it for an app that needs time to
+    finish its work.
+  default: 10 s
+  more: reference/app-settings#advanced
+
+app.settings.advanced.network-mode:
+  title: Network mode
+  text: >-
+    **Its networks**: its own address on its Docker networks, the usual. **The host's**: it uses the host's network
+    directly, with no ports of its own. **None**: no network at all.
+  default: Its networks
+  more: reference/app-settings#advanced
+
+app.settings.advanced.init:
+  title: Init process
+  text: >-
+    Runs a small init process first, which reaps zombie processes and passes signals on. Turn it on for an app that
+    leaves defunct processes behind.
+  default: "Off"
+  more: reference/app-settings#advanced
+
+app.settings.advanced.privileged:
+  title: Privileged
+  text: >-
+    Gives the container full access to the host's devices, as if it were the host. Only for an app that truly needs
+    it; a preview never gets it.
+  default: "Off"
+  more: reference/app-settings#advanced
+
+app.settings.advanced.read-only-root:
+  title: Read-only root
+  text: >-
+    Makes the container's own files read-only, so only its volumes can be written.
+  default: "Off"
+  more: reference/app-settings#advanced
+
+app.settings.advanced.tty:
+  title: Terminal (TTY)
+  text: >-
+    Gives it a terminal, for a program that expects one.
+  default: "Off"
+  more: reference/app-settings#advanced
+
+app.settings.advanced.cap-add:
+  title: Capabilities added
+  text: >-
+    Linux capabilities to add, separated by commas or spaces, for an app that needs a power a container doesn't get by
+    default.
+  example: NET_ADMIN
+  more: reference/app-settings#advanced
+
+app.settings.advanced.cap-drop:
+  title: Capabilities dropped
+  text: >-
+    Linux capabilities to take away, separated by commas or spaces, to lock the app down further.
+  example: ALL
+  more: reference/app-settings#advanced
+
+app.settings.advanced.dns:
+  title: DNS servers
+  text: >-
+    DNS servers it uses instead of the host's, separated by commas or spaces.
+  example: 1.1.1.1
+  more: reference/app-settings#advanced
+
+app.settings.advanced.gpus:
+  title: GPUs
+  text: >-
+    The GPUs it may use: `all`, a number of them, or `device=0,1` for particular ones. A preview of a pull request
+    from a fork never gets them.
+  example: all
+  more: reference/app-settings#advanced
+
+app.settings.advanced.extra-hosts:
+  title: Extra hosts
+  text: >-
+    Names to add to its `/etc/hosts`, `host:ip`, one per line, for a machine it must reach by a name your DNS doesn't
+    know.
+  example: homelab:192.168.50.10
+  more: reference/app-settings#advanced
+
+app.settings.advanced.devices:
+  title: Devices
+  text: >-
+    Host devices to pass in, `host path:container path`, one per line, such as a GPU for video encoding.
+  example: /dev/dri:/dev/dri
+  more: reference/app-settings#advanced
+
+app.settings.advanced.ulimits:
+  title: Ulimits
+  text: >-
+    Resource limits for its processes, `name=soft:hard`, one per line, such as how many files it may open.
+  example: nofile=65536:65536
+  more: reference/app-settings#advanced
+
+app.settings.advanced.security-opt:
+  title: Security options
+  text: >-
+    Docker's security options, one per line.
+  example: no-new-privileges
+  more: reference/app-settings#advanced
+
+app.settings.advanced.sysctls:
+  title: Sysctls
+  text: >-
+    Kernel settings for the container, `key=value`, one per line.
+  example: net.core.somaxconn=1024
+  more: reference/app-settings#advanced
+
+# ---- Environment ----
+
+app.env:
+  title: Environment
+  text: >-
+    The variables the container gets when it starts. Change a value in place, add one, or paste a `.env`; the bar at
+    the bottom applies them. A secret stays masked, and the copy button copies its real value.
+  more: guides/environment-variables#set-an-apps-own-variables
+
+app.env.from-image:
+  title: From the image
+  text: >-
+    Variables the image sets itself, like `PATH`, passed on as the image has them. **Show** lists them; edit one and it
+    becomes the app's own, with your value.
+  more: guides/environment-variables#the-images-variables
+
+app.env.secret:
+  title: Secret
+  text: >-
+    Masked wherever Gitberth shows it, in the UI and in build logs, and stored encrypted. The eye shows it here; the copy
+    button copies the real value.
+  more: guides/environment-variables#secrets
+
+app.env.secret-toggle:
+  title: Secret or plain
+  text: >-
+    Marks the variable secret, masked everywhere and kept out of logs, or makes it plain again. A name or a value that
+    holds a password is always secret.
+  more: guides/environment-variables#secrets
+
+app.env.build-time:
+  title: Build time
+  text: >-
+    Passed to the image's build as well as to the running container, for a front end that builds the value into its
+    code, such as `VITE_*` or `NEXT_PUBLIC_*`. Changing one needs a new build.
+  more: guides/environment-variables#build-time-variables-git-apps
+
+app.env.build-toggle:
+  title: Pass to the build
+  text: >-
+    Passes the variable to the image's build too, or stops passing it. The row then shows **Build time**, and the next
+    deploy builds with it.
+  more: guides/environment-variables#build-time-variables-git-apps
+
+app.env.scope:
+  title: Which deploys get it
+  text: >-
+    A Git app's variable is for every deploy, for production only (the app's own container), or for previews only; the
+    picker at the end of the row changes it. A **Production** or **Previews** value wins over an **All deploys** one.
+  more: guides/previews#environments
+
+app.env.set-by-gitberth:
+  title: Set by Gitberth
+  text: >-
+    This variable comes from one of the app's databases, so it isn't edited here: **Settings › Databases** adds, copies
+    and removes it.
+  more: guides/environment-variables#variables-from-the-apps-databases
+
+app.env.replaced:
+  title: Replaced by Gitberth
+  text: >-
+    Each deploy sets this name from the app's database, over the value here, so production doesn't get this one. A
+    value for **Previews** only stays the previews'.
+  more: guides/environment-variables#variables-from-the-apps-databases
+
+app.env.paste:
+  title: Paste .env
+  text: >-
+    Adds several variables at once from `.env` lines, `NAME=value`, each replacing one of the same name; lines starting
+    with `#` are skipped.
+  example: DATABASE_URL=postgres://app:secret@postgres/app
+  more: guides/environment-variables#set-an-apps-own-variables
+
+app.env.databases:
+  title: Set by Gitberth from its databases
+  text: >-
+    The connection strings of the app's own databases, each with the database it comes from. They change only with the
+    database, which **Settings › Databases** adds and removes.
+  more: guides/environment-variables#variables-from-the-apps-databases
+
+app.env.where-reached:
+  title: Set by Gitberth, where it's reached
+  text: >-
+    An app installed from a template is told where it's reached, as its file asks: `APP_URL` and the rest, from its main
+    domain, else its LAN address. A variable of the same name on the tab wins.
+  more: guides/templates#where-its-reached
+
+app.env.yours-above:
+  title: Yours above
+  text: >-
+    You set this name on the app yourself, so it gets your value instead of the one Gitberth works out.
+  more: guides/templates#where-its-reached
+
+app.env.vercel:
+  title: Set by Gitberth, like on Vercel
+  text: >-
+    What Gitberth tells a Git app about where it runs and what was deployed, with Vercel's names, such as `VERCEL_URL`.
+    A variable of the same name on the tab, or in GitHub or GitLab, wins; **Settings › Source** turns them off.
+  more: guides/environment-variables#variables-gitberth-sets-like-vercel
+
+app.env.repo:
+  title: Variables stored with the repository
+  text: >-
+    The repository's Actions variables in GitHub, or the project's CI/CD variables in GitLab. Every app from it gets them
+    at build time and when it runs; a change here is made there at once, and the app gets it with its next deploy.
+  more: guides/environment-variables#variables-kept-in-github
+
+app.env.repo.save:
+  title: Save to the repository
+  text: >-
+    Saves the name and value in the repository's variables now, for every app from it. The app gets it with its next
+    deploy.
+  more: guides/environment-variables#variables-kept-in-github
+
+app.env.gitlab.scope:
+  title: Environment scope
+  text: >-
+    Which deploys get it, as GitLab says: `*` every deploy, `production` production, `preview/*` previews. One for a
+    scope wins over the `*` one of the same name.
+  more: guides/gitlab-integration#cicd-variables
+
+app.env.gitlab.protected:
+  title: Protected
+  text: >-
+    A protected variable in GitLab: only production gets it, never a preview.
+  more: guides/gitlab-integration#cicd-variables
+
+app.env.gitlab.file:
+  title: File variable
+  text: >-
+    GitLab keeps this one as a file. Gitberth passes plain variables only, so the app doesn't get it.
+  more: guides/gitlab-integration#cicd-variables
+
+app.env.gitlab.not-used:
+  title: Not used
+  text: >-
+    Its scope is none of `*`, `production` and `preview/*`, so Gitberth leaves it to GitLab's own pipelines.
+  more: guides/gitlab-integration#cicd-variables
+
+# ---- Previews ----
+
+app.previews:
+  title: Previews
+  text: >-
+    Each preview is an app of its own, built from a pull request or a branch with this app's settings and its variables
+    for previews. The line by the title says which changes get one, and how many run of how many may.
+  more: guides/previews#the-previews-tab
+
+app.previews.fork:
+  title: Fork
+  text: >-
+    A pull request from someone else's copy of the repository, previewed because **Also pull requests from forks** is
+    on. Its code runs on this server without added capabilities, security options or GPUs.
+  more: guides/previews#pull-requests-and-github
+
+app.previews.expiry:
+  title: When it goes
+  text: >-
+    A preview is removed after the days without a new commit set in **Settings › Previews**; a new commit starts the
+    count again. A closed or merged pull request takes its preview at once.
+  more: guides/previews#the-limit-and-how-previews-go
+
+app.previews.state.building:
+  title: Building
+  text: >-
+    A deploy of the preview is queued or under way; the line says which step.
+  more: guides/previews#the-previews-tab
+
+app.previews.state.ready:
+  title: Ready
+  text: >-
+    The preview runs, at its addresses below. When its newest commit didn't deploy, it says so and keeps running the
+    one before.
+  more: guides/previews#the-previews-tab
+
+app.previews.state.failed:
+  title: Failed
+  text: >-
+    Its last deploy failed, or was cancelled, and nothing runs. **Log** shows why; a new commit tries again.
+  more: guides/previews#the-previews-tab
+
+app.previews.state.waiting:
+  title: Waiting
+  text: >-
+    It hasn't been deployed yet: it waits for its first deploy, or for a place, since **At most running** previews run
+    already. It starts when one goes.
+  more: guides/previews#the-limit-and-how-previews-go
+
+app.previews.state.stopped:
+  title: Stopped
+  text: >-
+    Someone stopped the preview, or its container isn't running now. **Its page** starts it again.
+  more: guides/previews#the-previews-tab
+
+app.previews.redeploy:
+  title: Redeploy
+  text: >-
+    Builds the preview's newest commit again and deploys it.
+  more: guides/previews#the-previews-tab
+
+app.previews.promote:
+  title: Promote to production
+  text: >-
+    Builds this preview's commit again with production's variables and runs it as the app itself, on its address. The
+    app stays on that commit until its branch gets a new one or you deploy by hand; the preview keeps running.
+  more: guides/previews#promote-to-production
+
+app.previews.remove:
+  title: Remove
+  text: >-
+    Removes the preview now: its container, images and volumes, and its domain from the tunnel. A new commit on its pull
+    request or branch makes it again.
+  more: guides/previews#the-limit-and-how-previews-go
+
+# ---- Activity ----
+
+app.activity:
+  title: Activity
+  text: >-
+    What happened to the app, newest first: deploys, changes, updates, starts, stops and crashes. Starts, stops and
+    crashes come from Docker's events, kept for 7 hours; Gitberth's own entries stay.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+app.activity.all:
+  title: All
+  text: >-
+    Every entry, whatever its kind.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+app.activity.deploys:
+  title: Deploys
+  text: >-
+    Only deploys: what started each, how it ended, its commit and how long it took, with its log.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+app.activity.changes:
+  title: Changes
+  text: >-
+    Settings changes, live changes, recreates, updates and rollbacks, and when it was created or adopted.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+app.activity.docker:
+  title: Starts and stops
+  text: >-
+    Starts, stops, restarts, crashes and health changes, from Docker's own events, whoever caused them.
+  more: guides/deploys-and-rollbacks#the-activity-tab
+
+app.activity.rollback:
+  title: Roll back to this
+  text: >-
+    Runs this deploy's version again, from its image (a Compose app's from its release), with the app's settings as they
+    are now. Only the last 3 successful deploys are kept for this; new commits still deploy.
+  more: guides/deploys-and-rollbacks#roll-back-to-an-earlier-deploy
+
+# ---- The change dialog ----
+
+app.change.what-changes:
+  title: What changes
+  text: >-
+    Each setting this change touches, the old value struck through and the new one after it. A tag says how a line
+    applies when it differs from the rest.
+  more: guides/manage-apps#the-change-dialog
+
+app.change.kept:
+  title: What's kept
+  text: >-
+    What the new container keeps from the old one: its name, image, command, environment, volumes, networks and the
+    rest. Point at one for its value.
+  more: guides/manage-apps#the-change-dialog
+
+app.change.impact:
+  title: Impact
+  text: >-
+    What applying does to the rest: about how long the app is offline, who notices (apps whose connections drop,
+    domains that pause), and what happens if the new container fails.
+  more: guides/manage-apps#the-change-dialog
+
+app.change.compose:
+  title: In its Compose file
+  text: >-
+    Compose made this container and would undo a change Gitberth made, so the change is shown as the lines for its file
+    and the command to run on the host.
+  more: guides/manage-apps#change-settings
+
+app.change.how.no-restart:
+  title: No restart
+  text: >-
+    Docker changes this one in place, on the running container.
+  more: reference/app-settings#how-changes-apply
+
+app.change.how.gitberth:
+  title: Gitberth's own
+  text: >-
+    Only Gitberth's record of the app changes; the container isn't touched.
+  more: reference/app-settings#how-changes-apply
+
+app.change.how.deploy:
+  title: Deploy
+  text: >-
+    Saved, then made live by a deploy without a build.
+  more: reference/app-settings#how-changes-apply
+
+app.change.how.build:
+  title: Build
+  text: >-
+    Saved, and used by the app's next build.
+  more: reference/app-settings#how-changes-apply
+
+app.change.start-original:
+  title: Start the original
+  text: >-
+    The new container goes, and the original comes back as it was, with its name, restart policy and place. Volumes
+    stay.
+  more: guides/manage-apps#banners
+
+app.change.last-output:
+  title: Its last output
+  text: >-
+    The last lines the new container wrote before it failed its checks, which usually say why.
+  more: guides/manage-apps#the-change-dialog
+
+# ---- Removing an app ----
+
+app.remove.volumes:
+  title: Also delete its volumes
+  text: >-
+    Its named volumes go with the container, and their data is gone for good. You type the container's name to confirm.
+    Unticked, they stay for a new container to use.
+  more: guides/manage-apps#remove-an-app
+
+app.remove.image:
+  title: Also delete its image
+  text: >-
+    Removes its image too, unless another container uses it or another app keeps it for **Roll back**; the message
+    afterwards says why one stays.
+  more: guides/manage-apps#remove-an-app
+
+app.remove.databases:
+  title: Also delete its databases' data
+  text: >-
+    Drops its databases with their data, once you type the container's name. Unticked, their data stays where it is
+    and only Gitberth forgets them. A database Gitberth didn't make is never deleted.
+  more: guides/databases#remove-a-database
+
+app.delete.images:
+  title: Also delete its images
+  text: >-
+    Removes its images too: the ones its deploys built or pulled, kept so far for rolling back.
+  default: Ticked
+  more: guides/manage-apps#remove-an-app
+
+app.delete.volumes:
+  title: Also delete its named volumes (their data is lost)
+  text: >-
+    Removes the volumes it keeps its data in, and the data is gone for good. Unticked, they stay where they are.
+  default: Not ticked
+  more: guides/manage-apps#remove-an-app
+
+app.delete.databases:
+  title: Also delete their data
+  text: >-
+    Drops the app's databases with their data. Unticked, their data stays where it is and only Gitberth forgets them; its
+    previews' own databases always go with them.
+  default: Not ticked
+  more: guides/databases#delete-an-app
+
+# ---- Settings: Remove ----
+
+app.settings.remove:
+  title: Remove
+  text: >-
+    Removes the app for good, after a dialog that says what goes with it. Its volumes, images and databases' data go
+    only if you tick them.
+  more: guides/manage-apps#remove-an-app

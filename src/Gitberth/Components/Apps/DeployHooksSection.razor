@@ -11,7 +11,7 @@
     webhooks have a host name, with copy buttons, and when it was last used. A new one shows a curl line to try it. Delete
     asks first: whatever calls the URL gets 404 from then on.
 *@
-<SettingsSection Id="sec-hooks" Title="Deploy hooks" Icon="@Icons.Material.Outlined.Webhook" Description="@Description">
+<SettingsSection Id="sec-hooks" Title="Deploy hooks" Icon="@Icons.Material.Outlined.Webhook" Description="@Description" Tip="app.settings.hooks">
     @if (hooks is null)
     {
         <div class="gb-skel" style="height:64px"></div>
@@ -30,19 +30,19 @@
                     <div class="gb-hook" role="listitem" @key="hook.Id">
                         <div class="gb-hook-head">
                             <strong class="gb-grow gb-ellipsis">@hook.Name</strong>
-                            <span class="gb-t3" title="@(hook.LastUsedAt is { } at ? Format.Local(at) : null)">@(hook.LastUsedAt is { } used ? $"Last used {Format.Ago(used)}" : "Never used")</span>
-                            <button type="button" class="gb-iconbtn" title="Delete" aria-label="@($"Delete the deploy hook {hook.Name}")" disabled="@busy" @onclick="() => DeleteAsync(hook)">
+                            <span class="gb-t3" data-tip-text="@(hook.LastUsedAt is { } at ? Format.Local(at) : null)">@(hook.LastUsedAt is { } used ? $"Last used {Format.Ago(used)}" : "Never used")</span>
+                            <button type="button" class="gb-iconbtn" data-tip-text="Delete" aria-label="@($"Delete the deploy hook {hook.Name}")" disabled="@busy" @onclick="() => DeleteAsync(hook)">
                                 <SvgIcon Icon="@Icons.Material.Outlined.Delete" />
                             </button>
                         </div>
                         @if (hook.Token is { } token)
                         {
                             <dl class="gb-kv">
-                                <dt>On your network</dt>
+                                <dt><Tip Key="app.settings.hooks.lan">On your network</Tip></dt>
                                 <dd><CopyText Text="@DeployHooks.LanUrl(root, token)" Label="@($"{hook.Name}'s URL on your network")" /></dd>
                                 @if (publicHost is not null)
                                 {
-                                    <dt>From the internet</dt>
+                                    <dt><Tip Key="app.settings.hooks.internet">From the internet</Tip></dt>
                                     <dd><CopyText Text="@DeployHooks.PublicUrl(publicHost, token)" Label="@($"{hook.Name}'s URL from the internet")" /></dd>
                                 }
                             </dl>
@@ -65,12 +65,12 @@
         @if (hooks.Count < DeployHooks.MaxPerApp)
         {
             <div class="gb-setrow">
-                <Field Label="New hook's name" For="hook-name" Error="@problem" Help="What will call it, like Contentful or Nightly build. The deploy's history shows it.">
+                <Field Label="New hook's name" For="hook-name" Tip="app.settings.hooks.name" Error="@problem" Help="What will call it, like Contentful or Nightly build. The deploy's history shows it.">
                     <input id="hook-name" class="gb-input" maxlength="@DeployHooks.MaxName" placeholder="Contentful" value="@name" autocomplete="off"
                            @oninput="e => { name = e.Value?.ToString() ?? string.Empty; problem = null; }" />
                 </Field>
                 <div class="gb-row" style="padding-bottom:22px">
-                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="CreateAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(name)">Create hook</Btn>
+                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Add" OnClick="CreateAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(name)" Tip="app.settings.hooks.create">Create hook</Btn>
                 </div>
             </div>
         }

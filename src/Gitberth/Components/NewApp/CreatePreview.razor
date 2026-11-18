@@ -5,7 +5,7 @@
 *@
 <section class="gb-card gb-preview" aria-labelledby="gb-prev-title">
     <div class="gb-card-head">
-        <div class="gb-card-title" id="gb-prev-title"><SvgIcon Icon="@Icons.Material.Outlined.Visibility" />What will run</div>
+        <div class="gb-card-title" id="gb-prev-title"><SvgIcon Icon="@Icons.Material.Outlined.Visibility" />What will run<Tip Key="newapp.preview" /></div>
         @if (Live)
         {
             <div class="gb-card-actions"><span class="gb-pill2 gb-tone-good"><i class="gb-st-dot gb-st-dot--running"></i>Updates as you type</span></div>
@@ -26,9 +26,9 @@
                 <dt>Network</dt>
                 <dd>@mode</dd>
             }
-            <dt>Addresses</dt>
+            <dt><Tip Key="newapp.preview.addresses">Addresses</Tip></dt>
             <dd class="gb-mono">@(Addresses.Count == 0 ? NoAddress : string.Join("  ", Addresses))</dd>
-            <dt>Data</dt>
+            <dt><Tip Key="newapp.preview.data">Data</Tip></dt>
             <dd class="gb-mono">@(Data.Count == 0 ? "in the container only" : string.Join(", ", Data))</dd>
             @* How long its own start takes isn't known here, so only what comes first is said. *@
             <dt>Starts</dt>

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Gitberth.Apps;
 using Gitberth.Data;
 using Gitberth.Domains;
+using Gitberth.Git;
 using Microsoft.EntityFrameworkCore;
 
 namespace Gitberth.Services;
@@ -19,12 +20,16 @@ namespace Gitberth.Services;
 /// Gitberth's by the time it would be moved. Each repo is done once per host name while Gitberth runs; then every 10
 /// minutes it only looks for new repos. A repo GitHub refuses (403 or 404) says so in Settings' list and rests on its
 /// own; a token GitHub refuses (401) is said once in Settings and stops them all for a while. Settings also shows what to
-/// paste into GitHub by hand.
+/// paste into GitHub by hand. A GitLab project gets Gitberth's project hook the same way (push and merge request events,
+/// its own secret token, at /hooks/gitlab on the same host name), with GitLab's token, IDs and state of its own.
 /// </summary>
 /// <param name="domains">The tunnel: a webhook is added or moved once cloudflared runs a route written just before, so GitHub's first ping gets through.</param>
 /// <param name="audit">Where webhooks added on GitHub and moved to a new host name are recorded, and the ones GitHub refused.</param>
+/// <param name="gitLab">GitLab's API, for GitLab projects' hooks; without it (in older tests) they're left alone.</param>
+/// <param name="gitLabState">What GitLab refused, as Settings › GitLab shows it.</param>
 public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, SettingsService settings, GitHubWrites github, GitHubIntegrationState state,
-    ILogger<WebhookKeeper> logger, DomainService? domains = null, Audit.AuditLog? audit = null) : BackgroundService
+    ILogger<WebhookKeeper> logger, DomainService? domains = null, Audit.AuditLog? audit = null, GitLabApi? gitLab = null, GitLabIntegrationState? gitLabState = null)
+    : BackgroundService
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(10);
 
@@ -49,13 +54,26 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
     /// <summary>A webhook Gitberth added or took over on a repo: its ID, and the payload URL Gitberth last set on it.</summary>
     internal sealed record KeptHook(long Id, string Url);
 
-    // Repos whose webhook was set up, with the URL it was set up for. One whose webhook isn't recorded with that URL (it
-    // was forgotten, or GitHub didn't say its ID) is set up again, which finds it by its payload URL.
-    private readonly ConcurrentDictionary<string, string> _done = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// One host's webhooks, as the keeper keeps them: where their IDs and secret are saved, the URL they send to, which apps'
+    /// repos are its, what it refused (its state), and how it's called with the token (null when none is saved).
+    /// </summary>
+    private sealed record HookHost(string Name, string AuditName, string IdsKey, string SecretKey, GitHubIntegrationState State, Func<string, string> UrlOf,
+        bool GitLab, Func<CancellationToken, Task<HookCalls?>> ConnectAsync);
+
+    /// <summary>A host's calls for one repo (by the app's Owner and Repo), with its token.</summary>
+    private sealed record HookCalls(Func<string, string, CancellationToken, Task<List<RepoHook>>> List,
+        Func<string, string, long?, string, string, CancellationToken, Task<long?>> Save);
+
+    // Repos whose webhook was set up, with the URL it was set up for, by host. One whose webhook isn't recorded with that
+    // URL (it was forgotten, or the host didn't say its ID) is set up again, which finds it by its payload URL.
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _done = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _wake = new(0, 1);
     private readonly SemaphoreSlim _one = new(1, 1);
 
     internal Func<DateTime> Now { get; set; } = () => DateTime.UtcNow;
+
+    private ConcurrentDictionary<string, string> Done(HookHost host) => _done.GetOrAdd(host.Name, _ => new(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>Look now: the host name, the token or the apps changed.</summary>
     public void Poke()
@@ -102,7 +120,7 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
     private static bool SameUrl(string? hookUrl, string url) =>
         hookUrl is not null && string.Equals(hookUrl.TrimEnd('/'), url.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>The webhooks Gitberth recorded, by owner/repo in lower case (<see cref="SettingKeys.GitHubWebhookIds"/>).</summary>
+    /// <summary>The webhooks Gitberth recorded, by owner/repo in lower case (<see cref="SettingKeys.GitHubWebhookIds"/>), or GitLab's by project path.</summary>
     internal static Dictionary<string, KeptHook> KeptHooks(string? saved)
     {
         var kept = new Dictionary<string, KeptHook>(StringComparer.OrdinalIgnoreCase);
@@ -122,57 +140,39 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
     private static string? AsSetting(Dictionary<string, KeptHook> kept) => kept.Count == 0 ? null
         : JsonSerializer.Serialize(kept.OrderBy(k => k.Key, StringComparer.Ordinal).ToDictionary(k => k.Key, k => k.Value));
 
+    // GitHub: the token and its calls, as they've always been.
+    private HookHost GitHubHost => new("GitHub", "github", SettingKeys.GitHubWebhookIds, SettingKeys.GitHubWebhookSecret, state, DomainService.WebhookUrl,
+        GitLab: false, async ct => await settings.GetSecretAsync(SettingKeys.GitHubToken, ct) is { } token
+            ? new HookCalls((owner, repo, c) => github.ListHooksAsync(token, owner, repo, c),
+                (owner, repo, id, url, secret, c) => github.SaveHookAsync(token, owner, repo, id, url, secret, c))
+            : null);
+
+    // GitLab: its token and instance, its project hooks (push and merge request events) under its own secret token.
+    private HookHost GitLabHost => new("GitLab", "gitlab", SettingKeys.GitLabWebhookIds, SettingKeys.GitLabWebhookSecret, gitLabState!, DomainService.GitLabWebhookUrl,
+        GitLab: true, async ct =>
+        {
+            var conn = await gitLab!.ConnectionAsync(ct);
+            if (!conn.HasToken) return null;
+            return new HookCalls(
+                async (owner, repo, c) => (await gitLab.ListHooksAsync(conn, (GitLabRepoRef)RepoRef.Of(owner, repo), c))
+                    .Select(h => new RepoHook(h.Id, h.Url, Active: true, [.. h.PushEvents ? new[] { "push" } : [], .. h.MergeRequestsEvents ? new[] { "merge_requests" } : []]))
+                    .ToList(),
+                (owner, repo, id, url, secret, c) => gitLab.SaveHookAsync(conn, (GitLabRepoRef)RepoRef.Of(owner, repo), id, url, secret, c));
+        });
+
     /// <summary>
-    /// Sets the webhook up on each repo not done yet for the current host name. Nothing happens on GitHub without domains,
-    /// a webhook host name, its secret and a GitHub token, or while GitHub refuses the token. A repo GitHub refused waits
-    /// its turn. What's recorded is forgotten without a host name, for a repo no app deploys any more, and for a webhook
-    /// this run left on an earlier host name.
+    /// Sets the webhook up on each repo not done yet for the current host name, on GitHub and on GitLab. Nothing happens on a
+    /// host without domains, a webhook host name, its secret and the host's token, or while the host refuses the token. A
+    /// repo the host refused waits its turn. What's recorded is forgotten without a host name, for a repo no app deploys any
+    /// more, and for a webhook this run left on an earlier host name.
     /// </summary>
     public async Task EnsureAllAsync(CancellationToken ct = default)
     {
         await _one.WaitAsync(ct);
         try
         {
-            var saved = await settings.GetAsync(SettingKeys.GitHubWebhookIds, ct);
-            var kept = KeptHooks(saved);
-            async Task SaveAsync()
-            {
-                var now = AsSetting(kept);
-                if (now == saved) return;
-                await settings.SetAsync(SettingKeys.GitHubWebhookIds, now, ct);
-                saved = now;
-            }
-            // Instant deploys are off: the webhooks stay where they are, and another Gitberth may take over that host name
-            // and them meanwhile. Back on, only one with the payload URL counts as Gitberth's again.
-            if (await settings.GetAsync(SettingKeys.GitHubWebhookHost, ct) is not { } host)
-            {
-                kept.Clear();
-                await SaveAsync();
-                return;
-            }
-            var url = DomainService.WebhookUrl(host);
-            List<(string Owner, string Repo)> repos;
-            await using (var db = await dbFactory.CreateDbContextAsync(ct))
-            {
-                repos = (await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git && a.Owner != "" && a.Repo != "")
-                        .Select(a => new { a.Owner, a.Repo }).ToListAsync(ct))
-                    .Select(a => (a.Owner, a.Repo))
-                    .DistinctBy(a => $"{a.Owner}/{a.Repo}".ToLowerInvariant())
-                    .OrderBy(a => $"{a.Owner}/{a.Repo}", StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-            }
-            // A repo no app deploys any more keeps its webhook where it is, so it's no longer Gitberth's to move: deployed
-            // again, only one with the payload URL counts as Gitberth's, else a new one is added. Without a token too.
-            var deployed = repos.Select(r => $"{r.Owner}/{r.Repo}").ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var gone in kept.Keys.Where(k => !deployed.Contains(k)).ToList()) kept.Remove(gone);
-            if (await settings.GetAsync(SettingKeys.DomainsEnabled, ct) == "true"
-                && await settings.GetSecretAsync(SettingKeys.GitHubWebhookSecret, ct) is { } secret
-                && await settings.GetSecretAsync(SettingKeys.GitHubToken, ct) is { } token)
-                await SetUpAsync(repos, url, secret, token, kept, SaveAsync, ct);
-            // One still on an earlier host name was Gitberth's to move in this run only. One it couldn't move stays where
-            // it is: that name may be another Gitberth's from now on, and so may the webhook. A new one is added instead.
-            foreach (var left in kept.Where(k => !SameUrl(k.Value.Url, url)).Select(k => k.Key).ToList()) kept.Remove(left);
-            await SaveAsync();
+            await EnsureHostAsync(GitHubHost, ct);
+            if (gitLab is not null && gitLabState is not null) await EnsureHostAsync(GitLabHost, ct);
         }
         finally
         {
@@ -180,38 +180,99 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
         }
     }
 
-    // A webhook GitHub didn't take, once per repo and reason while Gitberth runs: the keeper tries again every 10 minutes.
+    private async Task EnsureHostAsync(HookHost hookHost, CancellationToken ct)
+    {
+        var saved = await settings.GetAsync(hookHost.IdsKey, ct);
+        var kept = KeptHooks(saved);
+        async Task SaveAsync()
+        {
+            var now = AsSetting(kept);
+            if (now == saved) return;
+            await settings.SetAsync(hookHost.IdsKey, now, ct);
+            saved = now;
+        }
+        // Instant deploys are off: the webhooks stay where they are, and another Gitberth may take over that host name
+        // and them meanwhile. Back on, only one with the payload URL counts as Gitberth's again.
+        if (await settings.GetAsync(SettingKeys.GitHubWebhookHost, ct) is not { } host)
+        {
+            kept.Clear();
+            await SaveAsync();
+            return;
+        }
+        var url = hookHost.UrlOf(host);
+        List<(string Owner, string Repo)> repos;
+        await using (var db = await dbFactory.CreateDbContextAsync(ct))
+        {
+            repos = (await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git && a.Owner != "" && a.Repo != "")
+                    .Select(a => new { a.Owner, a.Repo }).ToListAsync(ct))
+                .Where(a => RepoRef.IsGitLab(a.Owner) == hookHost.GitLab)
+                .Select(a => (a.Owner, a.Repo))
+                .DistinctBy(a => $"{a.Owner}/{a.Repo}".ToLowerInvariant())
+                .OrderBy(a => $"{a.Owner}/{a.Repo}", StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        // A repo no app deploys any more keeps its webhook where it is, so it's no longer Gitberth's to move: deployed
+        // again, only one with the payload URL counts as Gitberth's, else a new one is added. Without a token too.
+        var deployed = repos.Select(r => KeyOf(r.Owner, r.Repo)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var gone in kept.Keys.Where(k => !deployed.Contains(k)).ToList()) kept.Remove(gone);
+        if (await settings.GetAsync(SettingKeys.DomainsEnabled, ct) == "true"
+            && await SecretAsync(hookHost, ct) is { } secret
+            && await hookHost.ConnectAsync(ct) is { } calls)
+            await SetUpAsync(hookHost, repos, url, secret, calls, kept, SaveAsync, ct);
+        // One still on an earlier host name was Gitberth's to move in this run only. One it couldn't move stays where
+        // it is: that name may be another Gitberth's from now on, and so may the webhook. A new one is added instead.
+        foreach (var left in kept.Where(k => !SameUrl(k.Value.Url, url)).Select(k => k.Key).ToList()) kept.Remove(left);
+        await SaveAsync();
+    }
+
+    // The host's secret: GitHub's is made with the webhook's host name; GitLab's too, else here for a host name set before
+    // Gitberth knew GitLab.
+    private async Task<string?> SecretAsync(HookHost hookHost, CancellationToken ct)
+    {
+        if (await settings.GetSecretAsync(hookHost.SecretKey, ct) is { } secret) return secret;
+        if (!hookHost.GitLab) return null;
+        await settings.SetSecretAsync(hookHost.SecretKey, WebhookSignature.NewSecret(), ct);
+        return await settings.GetSecretAsync(hookHost.SecretKey, ct);
+    }
+
+    // owner/repo, or a GitLab project's group/sub/project, as the repo is named in what's kept, said and shown.
+    private static string KeyOf(string owner, string repo) => RepoRef.FullNameOf(owner, repo);
+
+    // A webhook the host didn't take, once per repo and reason while Gitberth runs: the keeper tries again every 10 minutes.
     private readonly ConcurrentDictionary<string, string> _refused = new(StringComparer.OrdinalIgnoreCase);
 
-    private void Refused(string repo, string why)
+    private void Refused(HookHost hookHost, string repo, string why)
     {
-        if (audit is null || (_refused.TryGetValue(repo, out var said) && said == why)) return;
-        _refused[repo] = why;
-        audit.Record(new Audit.AuditEntry("github.webhook.added", $"Couldn't set up Gitberth's webhook on {repo}: {Audit.AuditLog.Clean(why, 300)?.TrimEnd('.')}.")
+        var key = $"{hookHost.AuditName}|{repo}";
+        if (audit is null || (_refused.TryGetValue(key, out var said) && said == why)) return;
+        _refused[key] = why;
+        audit.Record(new Audit.AuditEntry($"{hookHost.AuditName}.webhook.added", $"Couldn't set up Gitberth's webhook on {repo}: {Audit.AuditLog.Clean(why, 300)?.TrimEnd('.')}.")
         {
             Target = repo, Outcome = Audit.AuditOutcome.Failed,
         });
     }
 
     // Sets the webhook up on each repo not done yet for this payload URL, and records it with that URL (save writes it).
-    private async Task SetUpAsync(List<(string Owner, string Repo)> repos, string url, string secret, string token, Dictionary<string, KeptHook> kept,
-        Func<Task> save, CancellationToken ct)
+    private async Task SetUpAsync(HookHost hookHost, List<(string Owner, string Repo)> repos, string url, string secret, HookCalls calls,
+        Dictionary<string, KeptHook> kept, Func<Task> save, CancellationToken ct)
     {
-        if (_done.Values.Any(u => u != url))
+        var done = Done(hookHost);
+        var hostState = hookHost.State;
+        if (done.Values.Any(u => u != url))
         {
-            _done.Clear();
-            state.ForgetHooks();
+            done.Clear();
+            hostState.ForgetHooks();
         }
         var routed = false;
         foreach (var (owner, repo) in repos)
         {
-            var name = $"{owner}/{repo}";
+            var name = KeyOf(owner, repo);
             var key = name.ToLowerInvariant();
             var known = kept.GetValueOrDefault(key);
-            if (_done.TryGetValue(name, out var doneFor) && doneFor == url && known is not null && SameUrl(known.Url, url)) continue;
+            if (done.TryGetValue(name, out var doneFor) && doneFor == url && known is not null && SameUrl(known.Url, url)) continue;
             // A refused token stops every repo; a refused repo rests on its own, and the others carry on.
-            if (state.Paused(GitHubFeature.Webhooks, Now())) return;
-            if (state.Paused(GitHubFeature.Webhooks, name, Now())) continue;
+            if (hostState.Paused(GitHubFeature.Webhooks, Now())) return;
+            if (hostState.Paused(GitHubFeature.Webhooks, name, Now())) continue;
             if (!routed)
             {
                 await RouteRunsAsync(ct);
@@ -219,43 +280,43 @@ public sealed class WebhookKeeper(IDbContextFactory<GitberthDb> dbFactory, Setti
             }
             try
             {
-                var existing = Ours(await github.ListHooksAsync(token, owner, repo, ct), url, known);
+                var existing = Ours(await calls.List(owner, repo, ct), url, known);
                 // Recorded with this URL, so this webhook follows the next host name, and none on an old one is taken for it.
-                if (await github.SaveHookAsync(token, owner, repo, existing?.Id, url, secret, ct) is long id) kept[key] = new KeptHook(id, url);
+                if (await calls.Save(owner, repo, existing?.Id, url, secret, ct) is long id) kept[key] = new KeptHook(id, url);
                 else kept.Remove(key);
                 await save();
-                _done[name] = url;
-                state.Worked(GitHubFeature.Webhooks, name);
-                state.Hook(new HookResult(name, true, existing is null ? "Webhook added" : "Webhook set up", Now()));
+                done[name] = url;
+                hostState.Worked(GitHubFeature.Webhooks, name);
+                hostState.Hook(new HookResult(name, true, existing is null ? "Webhook added" : "Webhook set up", Now()));
                 // Added, or moved to a new host name; set up again as it was (after a restart, say) changes nothing.
                 if (existing is null)
-                    audit?.Record(new Audit.AuditEntry("github.webhook.added", $"Added Gitberth's webhook to {name} on GitHub: pushes reach Gitberth at {url}.")
+                    audit?.Record(new Audit.AuditEntry($"{hookHost.AuditName}.webhook.added", $"Added Gitberth's webhook to {name} on {hookHost.Name}: pushes reach Gitberth at {url}.")
                     {
                         Target = name, Changes = [new("Payload URL", null, url)],
                     });
                 else if (!SameUrl(existing.Url, url))
-                    audit?.Record(new Audit.AuditEntry("github.webhook.moved", $"Moved Gitberth's webhook on {name} to {url}.")
+                    audit?.Record(new Audit.AuditEntry($"{hookHost.AuditName}.webhook.moved", $"Moved Gitberth's webhook on {name} to {url}.")
                     {
                         Target = name, Changes = [new("Payload URL", existing.Url, url)],
                     });
             }
-            catch (GitHubWriteException ex) when (ex.BadToken)
+            catch (HostWriteException ex) when (ex.BadToken)
             {
-                state.Hook(new HookResult(name, false, ex.Message, Now()));
-                if (state.Report(GitHubFeature.Webhooks, ex.Message, Now())) logger.LogWarning("GitHub refused Gitberth's token: {Problem}", ex.Message);
-                Refused(name, ex.Message);
+                hostState.Hook(new HookResult(name, false, ex.Message, Now()));
+                if (hostState.Report(GitHubFeature.Webhooks, ex.Message, Now())) logger.LogWarning("{Host} refused Gitberth's token: {Problem}", hookHost.Name, ex.Message);
+                Refused(hookHost, name, ex.Message);
                 return;
             }
-            catch (GitHubWriteException ex) when (ex.MissingPermission)
+            catch (HostWriteException ex) when (ex.MissingPermission)
             {
-                state.Hook(new HookResult(name, false, ex.Message, Now()));
-                if (state.Refused(GitHubFeature.Webhooks, name, ex.Message, Now())) logger.LogWarning("GitHub refused Gitberth's webhook on {Repo}: {Problem}", name, ex.Message);
-                Refused(name, ex.Message);
+                hostState.Hook(new HookResult(name, false, ex.Message, Now()));
+                if (hostState.Refused(GitHubFeature.Webhooks, name, ex.Message, Now())) logger.LogWarning("{Host} refused Gitberth's webhook on {Repo}: {Problem}", hookHost.Name, name, ex.Message);
+                Refused(hookHost, name, ex.Message);
             }
-            catch (GitHubWriteException ex)
+            catch (HostWriteException ex)
             {
-                state.Hook(new HookResult(name, false, ex.Message, Now()));
-                Refused(name, ex.Message);
+                hostState.Hook(new HookResult(name, false, ex.Message, Now()));
+                Refused(hookHost, name, ex.Message);
             }
         }
     }

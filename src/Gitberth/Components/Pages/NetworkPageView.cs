@@ -9,7 +9,8 @@ public enum HostPortGroup { All, Containers, Host }
 
 /// <summary>A small tag after a host port's holder: "3 domains", "Stopped", "Random".</summary>
 /// <param name="Tone">good, warn, neutral, accent or info; the tag's colour.</param>
-public sealed record PortNote(string Text, string Tone, string? Title = null);
+/// <param name="Tip">Its tip's key in the catalog (Help/Tips/network.yaml): what the tag means.</param>
+public sealed record PortNote(string Text, string Tone, string? Tip = null);
 
 /// <summary>Who holds a host port, as a row of the Network page shows it.</summary>
 /// <param name="Name">The app's or container's name, a domain, or what holds it on the host. Never "(app)".</param>
@@ -128,22 +129,22 @@ public static class NetworkPageView
             case null:
                 break;
             case HostPortUse.StoppedNote:
-                notes.Add(new PortNote("Stopped", "neutral", "It takes the port again when it starts."));
+                notes.Add(new PortNote("Stopped", "neutral", Tip: "network.note.stopped"));
                 break;
             case HostPortUse.RestartingNote:
-                notes.Add(new PortNote("Restarting", "warn", "Docker lets go of the port until it's up again."));
+                notes.Add(new PortNote("Restarting", "warn", Tip: "network.note.restarting"));
                 break;
             case HostPortUse.TemporaryNote:
-                notes.Add(new PortNote("Deploying", "info", "A deploy's temporary container holds it for a moment."));
+                notes.Add(new PortNote("Deploying", "info", Tip: "network.note.deploying"));
                 break;
             case "Saved, not live":
-                notes.Add(new PortNote("Saved, not live", "accent", "Saved for it; it takes the port when the change is applied."));
+                notes.Add(new PortNote("Saved, not live", "accent", Tip: "network.note.saved"));
                 break;
             case "Random: changes at every start":
-                notes.Add(new PortNote("Random", "warn", "Docker picked it: it changes at every start."));
+                notes.Add(new PortNote("Random", "warn", Tip: "network.note.random"));
                 break;
             case var domains when domains.EndsWith(" domain", StringComparison.Ordinal) || domains.EndsWith(" domains", StringComparison.Ordinal):
-                notes.Add(new PortNote(domains, "good", "Its domains reach it through the Cloudflare tunnel."));
+                notes.Add(new PortNote(domains, "good", Tip: "network.note.domains"));
                 break;
             case var other when u.Kind == HostPortUser.Route:
                 // "Tunnel route to app.example.com": the holder's line says it already.
@@ -221,11 +222,6 @@ public static class NetworkPageView
         "Docker's default: no names" => "Docker's default: containers here can't reach each other by name.",
         var note => note,
     };
-
-    /// <summary>What an address on the network means, for its tooltip.</summary>
-    public static string AddressHint(string network) => network == LanAddresses.Network
-        ? "Its own LAN address: devices on your network reach it there, and it stays when the container is recreated."
-        : "Changes when the container is recreated. Use the name.";
 
     /// <summary>"5 containers", "1 container", "None".</summary>
     public static string MemberCount(int n) => n == 0 ? "None" : n == 1 ? "1 container" : $"{N(n)} containers";

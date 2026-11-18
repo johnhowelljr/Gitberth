@@ -14,8 +14,9 @@ public sealed record HookResult(string Repo, bool Ok, string Text, DateTime At);
 /// <see cref="PauseFor"/> (or until the token is saved again), so a missing permission never costs every deploy a failed
 /// call. A refusal on one repo (the token lacks the permission there, or can't see it) rests only that repo; a refused
 /// token rests the feature everywhere. Settings shows both. Also each repo's webhook, as the last attempt left it.
+/// GitLab has its own (<see cref="GitLabIntegrationState"/>), with the same rules.
 /// </summary>
-public sealed class GitHubIntegrationState
+public class GitHubIntegrationState
 {
     /// <summary>How long a feature the token isn't allowed to use rests before Gitberth tries it again.</summary>
     public static readonly TimeSpan PauseFor = TimeSpan.FromHours(1);
@@ -111,3 +112,10 @@ public sealed class GitHubIntegrationState
         Changed?.Invoke();
     }
 }
+
+/// <summary>
+/// What Gitberth learned while reporting to GitLab, as <see cref="GitHubIntegrationState"/> keeps GitHub's: a feature GitLab
+/// refuses on a project (or with the token itself) rests for an hour, or until the token is saved again, and Settings ›
+/// GitLab shows it, with each project's hook.
+/// </summary>
+public sealed class GitLabIntegrationState : GitHubIntegrationState;

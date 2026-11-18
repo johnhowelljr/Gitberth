@@ -11,14 +11,14 @@
 
 @*
     New app (new-app.html, new-app-configure.html): one wizard for every source, and every app it makes is a first-class
-    one. Source: a GitHub repository, a registry image, a local image, or by hand (a pasted docker run or Compose service, or
+    one. Source: a GitHub repository or GitLab project, a registry image, a local image, or by hand (a pasted docker run or Compose service, or
     a blank form). Configure: the App page's settings in create mode, prefilled by the source, with "What will run"
     following every edit. Create: the review (its name and container, the docker run, disk and pull, what happens), then
     the pull and the engine's steps as they run, ending on the new app's page.
 *@
 <PageTitle>New app · Gitberth</PageTitle>
 
-<PageHead Title="@HeadTitle" Lead="@Lead">
+<PageHead Title="@HeadTitle" Tip="newapp.page" Lead="@Lead">
     <Crumbs>
         <a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
         @if (OpenTemplate is { } open)
@@ -37,11 +37,11 @@
 </PageHead>
 
 <ol class="gb-stepper" aria-label="Steps">
-    @Stp(NewAppStep.Source, 1, Shown == NewAppStep.Source ? "Source" : $"Source · {SourceWord}")
+    @Stp(NewAppStep.Source, 1, Shown == NewAppStep.Source ? "Source" : $"Source · {SourceWord}", Tip: "newapp.step.source")
     <li class="gb-stp-line" aria-hidden="true"></li>
-    @Stp(NewAppStep.Configure, 2, "Configure")
+    @Stp(NewAppStep.Configure, 2, "Configure", Tip: "newapp.step.configure")
     <li class="gb-stp-line" aria-hidden="true"></li>
-    @Stp(NewAppStep.Create, 3, "Create")
+    @Stp(NewAppStep.Create, 3, "Create", Tip: "newapp.step.create")
 </ol>
 
 @if (step == NewAppStep.Source || source == NewAppSource.Git)
@@ -54,7 +54,7 @@
             {
                 var (title, text, icon, tags) = NewAppSources.Of(s);
                 var on = s == source;
-                <button type="button" class="gb-srccard @(on ? "gb-srccard--on" : null)" role="radio" aria-checked="@(on ? "true" : "false")" @onclick="() => PickSource(s)">
+                <button type="button" class="gb-srccard @(on ? "gb-srccard--on" : null)" role="radio" aria-checked="@(on ? "true" : "false")" data-tip="@SourceTip(s)" @onclick="() => PickSource(s)">
                     @if (on)
                     {
                         <span class="gb-srccard-check"><SvgIcon Icon="@Icons.Material.Outlined.Check" /></span>
@@ -113,12 +113,12 @@ else if (form is not null)
                 <Footer>
                     @if (step == NewAppStep.Configure)
                     {
-                        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="ReviewAsync" Busy="planning" Class="gb-btn--block">Review and create</Btn>
+                        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" EndIcon="@Icons.Material.Outlined.ArrowForward" OnClick="ReviewAsync" Busy="planning" Class="gb-btn--block" Tip="newapp.review-create">Review and create</Btn>
                         <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ArrowBack" OnClick="BackToSource">Back to the source</Btn>
                     }
                     else if (job is null)
                     {
-                        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Disabled="@(plan is not { CanCreate: true })" Class="gb-btn--block">Create and start</Btn>
+                        <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Disabled="@(plan is not { CanCreate: true })" Class="gb-btn--block" Tip="newapp.create">Create and start</Btn>
                         <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ArrowBack" OnClick="() => step = NewAppStep.Configure">Change settings</Btn>
                     }
                 </Footer>
@@ -182,7 +182,7 @@ else if (form is not null)
 
     private string SourceWord => source switch
     {
-        NewAppSource.Git => "GitHub",
+        NewAppSource.Git => "Git",
         NewAppSource.Registry => "Registry",
         NewAppSource.Local => "Local image",
         NewAppSource.Templates => "Template",
@@ -214,14 +214,27 @@ else if (form is not null)
             await DraftAsync(() => Creator.DraftFromImageAsync(Use, source == NewAppSource.Local ? AppSource.Local : AppSource.Registry));
     }
 
-    private RenderFragment Stp(NewAppStep which, int number, string text)
+    // A step of the stepper; Tip is its tip's key in the catalog.
+    private RenderFragment Stp(NewAppStep which, int number, string text, string Tip)
     {
         var state = which < Shown ? "done" : which == Shown ? "on" : null;
-        return @<li class="gb-stp @(state is null ? null : $"gb-stp--{state}")" aria-current="@(state == "on" ? "step" : null)">
+        return @<li class="gb-stp @(state is null ? null : $"gb-stp--{state}")" aria-current="@(state == "on" ? "step" : null)" data-tip="@Tip">
             <span class="gb-stp-n">@if (state == "done") { <SvgIcon Icon="@Icons.Material.Outlined.Check" /> } else { @number }</span>
             <span class="gb-stp-t">@text</span>
         </li>;
     }
+
+    // Each source card's tip.
+    private static readonly (NewAppSource Source, string Tip)[] SourceTips =
+    [
+        (NewAppSource.Templates, Tip: "newapp.source.templates"),
+        (NewAppSource.Git, Tip: "newapp.source.git"),
+        (NewAppSource.Registry, Tip: "newapp.source.registry"),
+        (NewAppSource.Local, Tip: "newapp.source.local"),
+        (NewAppSource.Hand, Tip: "newapp.source.hand"),
+    ];
+
+    private static string? SourceTip(NewAppSource s) => SourceTips.FirstOrDefault(t => t.Source == s).Tip;
 
     // The local card says how many images there are to pick from.
     private string SourceText(NewAppSource s, string text) => s == NewAppSource.Local && localSummary is { } here ? $"{text[..^1]}: {here}." : text;
@@ -383,7 +396,7 @@ else if (form is not null)
                     <dl class="gb-read">
                         <dt>Name</dt>
                         <dd><span style="font-weight:600">@p.Draft.Name</span></dd>
-                        <dt>Container</dt>
+                        <dt><Tip Key="newapp.review.container">Container</Tip></dt>
                         <dd><span class="gb-mono">@p.Container</span>@if (p.NameTaken is { } taken) { <span class="gb-tag gb-tag--warn">@taken</span> }</dd>
                         @if (NewAppText.NetworkModeText(p.Draft.Settings.NetworkMode) is { } mode)
                         {
@@ -392,12 +405,12 @@ else if (form is not null)
                         }
                         else
                         {
-                            <dt>Network name</dt>
+                            <dt><Tip Key="newapp.review.network-name">Network name</Tip></dt>
                             <dd><span class="gb-mono">@p.Slug on @Networks.Shared</span>@if (p.Networks.Count > 1) { <span class="gb-t3">and on @string.Join(", ", p.Networks.Skip(1).Select(n => n.Name))</span> }</dd>
                         }
-                        <dt>Image</dt>
+                        <dt><Tip Key="newapp.review.image">Image</Tip></dt>
                         <dd><span class="gb-mono">@p.Draft.Settings.Image</span><span class="gb-tag @(p.NeedsPull ? null : "gb-tag--good")">@(p.NeedsPull ? "Pulled first" : "On this host")</span></dd>
-                        <dt>Disk</dt>
+                        <dt><Tip Key="newapp.review.disk">Disk</Tip></dt>
                         <dd>@NewAppText.Size(p.Disk.FreeBytes) free of @NewAppText.Size(p.Disk.TotalBytes)@if (p.Disk.TooLow && p.NeedsPull) { <span class="gb-tag gb-tag--critical">Too little to pull</span> } else if (p.Disk.Low) { <span class="gb-tag gb-tag--warn">Getting low</span> }</dd>
                     </dl>
                     @if (NewAppText.ReviewProblems(p.Problems, Missing) is { Count: > 0 } problems)
@@ -470,7 +483,7 @@ else if (form is not null)
                     }
                     else
                     {
-                        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Replay" OnClick="TryAgainAsync" Busy="retrying">Try again</Btn>
+                        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Replay" OnClick="TryAgainAsync" Busy="retrying" Tip="newapp.try-again">Try again</Btn>
                         <Btn Icon="@Icons.Material.Outlined.Tune" OnClick="EditAsync">Edit the settings</Btn>
                     }
                 </div>

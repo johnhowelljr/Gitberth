@@ -89,10 +89,10 @@ A protected domain asks visitors to sign in before they reach the app, through C
 
 ### Set up protection once
 
-1. In Cloudflare, open [Zero Trust](https://one.dash.cloudflare.com/) once and choose a team name, if you never have. Its free plan is enough. Your team domain, like `acme.cloudflareaccess.com`, is where visitors sign in.
+1. In Cloudflare, open [Zero Trust](https://one.dash.cloudflare.com/) once and choose a team name, if you never have. Its free plan is enough. Your team domain, like `homelab.cloudflareaccess.com`, is where visitors sign in.
 2. Give Gitberth's Cloudflare token **Account › Access: Apps and Policies › Edit** and **Account › Access: Organizations, Identity Providers, and Groups › Read** too (edit the token in Cloudflare; it keeps its value). Cloudflare keeps the two apart: the first makes the Access applications, the second reads your team domain.
 3. In Gitberth, go to **Settings › Domains (Cloudflare) › Protection**, type the email addresses that may sign in, one per line, in **Who may sign in**, and click **Save**.
-   The tag next to **Protection** says **Ready**, with **Visitors sign in at acme.cloudflareaccess.com.** When something's missing, the **Protection isn't ready** banner says what: Zero Trust not set up, the token without the Access permission, or nobody listed. **Check again** asks Cloudflare again. When it finds that Gitberth may use Cloudflare Access while an Access application Gitberth made is still to be removed (see [Remove a domain](#remove-a-domain)), Gitberth tries to remove it again within 15 minutes.
+   The tag next to **Protection** says **Ready**, with **Visitors sign in at homelab.cloudflareaccess.com.** When something's missing, the **Protection isn't ready** banner says what: Zero Trust not set up, the token without the Access permission, or nobody listed. **Check again** asks Cloudflare again. When it finds that Gitberth may use Cloudflare Access while an Access application Gitberth made is still to be removed (see [Remove a domain](#remove-a-domain)), Gitberth tries to remove it again within 15 minutes.
 
 ### Turn it on for a domain
 
@@ -173,12 +173,17 @@ An app deleted while domains are off keeps its routes until you turn them back o
 ## How traffic reaches the app
 
 ```mermaid
-flowchart LR
-    visitor["Visitor's browser"] -->|"HTTPS"| cf["Cloudflare: proxied DNS record"]
-    cf -->|"tunnel"| cloudflared["cloudflared on the host"]
-    cloudflared -->|"127.0.0.1 or LAN host port"| app["App container, web port"]
-    cloudflared -.->|"by name, on the gitberth network"| app
-    pc["PC on your LAN"] -->|"192.168.50.10:host port"| app
+flowchart TD
+    visitor["A visitor opens<br/>https://app.example.com"] --> dns["Cloudflare: the<br/>proxied DNS record"]
+    dns --> protected{"Is the domain<br/>protected?"}
+    protected -->|"yes"| access["Cloudflare Access: sign in<br/>with an emailed code"]
+    access -->|"an address<br/>you listed"| tunnel["The tunnel, to cloudflared<br/>on the host"]
+    access -->|"anyone else"| denied["Turned away"]
+    protected -->|"no"| tunnel
+    tunnel --> serving{"Can the app<br/>be served?"}
+    serving -->|"yes"| app["The app's web port: a host<br/>port, or its name on gitberth"]
+    serving -->|"no"| down["Gitberth's<br/>down page"]
+    pc["A PC on your LAN"] -->|"192.168.50.10 and<br/>the host port"| app
 ```
 
 cloudflared makes an outbound connection to Cloudflare, so there's no port to open on your router. Visitors on the domain and devices on your LAN reach the same container. An app with an own LAN address keeps using its host port for its domains, because the tunnel can't reach own LAN addresses.

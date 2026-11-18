@@ -7,6 +7,23 @@ then **Promote** it, and production builds that commit.
 This page covers turning previews on, what a preview is, its address, the limit and how previews go, environments
 (variables for production or for previews), and Promote.
 
+```mermaid
+flowchart TD
+    open["A pull or merge request opens, or a branch gets a commit"] --> seen["Gitberth sees it: polling, or a webhook"]
+    seen --> fork{"From a fork, with forks off?"}
+    fork -->|"yes"| none["No preview"]
+    fork -->|"no"| room{"Fewer than At most running?"}
+    room -->|"no"| wait["Waiting"]
+    wait -->|"one goes"| room
+    room -->|"yes"| db["Its own database is made, if chosen"]
+    db --> deploy["Built and started as an app of its own"]
+    deploy --> ready["Ready: its address, and a comment on the request"]
+    ready -->|"new commit"| deploy
+    ready -->|"Promote"| prod["Production builds its commit"]
+    ready --> gone{"Closed, merged, deleted or expired?"}
+    gone -->|"yes"| removed["Removed, with its volumes, domain and database"]
+```
+
 ## Turn previews on
 
 1. Open the Git app and click the **Settings** tab, then **Previews**.
@@ -19,18 +36,21 @@ This page covers turning previews on, what a preview is, its address, the limit 
 
 | Setting | What it does | Default |
 |---|---|---|
-| **At most running** | How many previews run at once. More wait, and start when one is removed. | 3 |
-| **Remove after (days without a new commit)** | A preview with no new commit for this long is removed. | 7 |
+| **At most running** | How many previews run at once, 1 to 20. More wait, and start when one is removed. | 3 |
+| **Remove after (days without a new commit)** | A preview with no new commit for this long is removed, 1 to 365. A closed or merged pull request, or a deleted branch, takes its preview at once. | 7 |
 | **Also pull requests from forks** | Previews pull requests whose code is in someone else's copy of the repo. | Off |
 | **Protect previews' domains** | Visitors sign in through Cloudflare Access before they see a preview. | On |
+| **Each preview's database** | **None of its own**, **An empty one** or **A copy of production's**. See [Production's database](#productions-database). | **An empty one** |
+
+![An app's Settings tab at Previews: pull requests and branches, how many may run, when they're removed, and each preview's database](../images/settings-previews.webp)
 
 Gitberth looks at the repo again as soon as you save. A preview shows up within a minute of a new pull request or commit,
-or at once when GitHub tells Gitberth about it (see [GitHub integration](github-integration.md)).
+or at once when GitHub or GitLab tells Gitberth about it (see [Instant deploys](github-integration.md#instant-deploys)).
 
-> **Warning**
+> **Note**
 > **Also pull requests from forks** builds and runs anyone's code on this server: whoever opens a pull request decides
-> what its preview runs, on your network. Leave it off unless you trust everyone who can open one. Turning it off
-> removes the previews of forks' pull requests at once, and none of their code is built or run again.
+> what its preview runs. Leave it off unless you trust everyone who can open one. Turning it off removes the previews of
+> forks' pull requests at once, and none of their code is built or run again.
 
 Previews follow the app's repository only while the app deploys by itself: **Deploy on push** on, and the app running.
 
@@ -42,15 +62,21 @@ your host, so Gitberth asks when a pull request changes, when GitHub tells it ab
 token saved in Settings, private repositories work too; the token needs **Pull requests** access to the repo. When
 GitHub can't be asked, the **Previews** tab says why, and previews already there keep following their commits.
 
+### Merge requests and GitLab
+
+An app from GitLab previews its project's merge requests the same way: GitLab's API says which are open, each preview
+is called **MR !12** and fetches `refs/merge-requests/12/head` from the project (a fork's merge request too, while
+**Also pull requests from forks** is on), and a merged or closed one takes its preview. See [GitLab](gitlab-integration.md).
+
 ## What a preview is
 
 A preview is an app of its own, made from its parent's settings:
 
-- **Its own container, image, volumes and name**: `gb-orb-pr-12` for pull request 12 of the app `orb`, or
-  `gb-orb-feature-login` for the branch `feature/login`. Long names are cut and given a short hash, and so is a name
-  that would give one of its volumes the name of another app's volume, or of one Docker already has: the branch `test`
-  of an `orb` with the volumes `data` and `test-data` is `orb-test-` and a hash, because as `orb-test` its `data`
-  would be `gb-orb-test-data`, production's `test-data`.
+- **Its own container, image, volumes and name**: `gb-website-pr-12` for pull request 12 (or merge request 12) of the
+  app `website`, or `gb-website-feature-login` for the branch `feature/login`. Long names are cut and given a short
+  hash, and so is a name that would give one of its volumes the name of another app's volume, or of one Docker already
+  has: the branch `test` of `website` with the volumes `data` and `test-data` is `website-test-` and a hash, because as
+  `website-test` its `data` would be `gb-website-test-data`, production's `test-data`.
 - **Its parent's settings**, copied again before each of its deploys: the subfolder, how it's built, the health URL,
   memory and CPU limits, restart policy, Vercel's variables, and its command, labels, logging and other advanced
   settings. Its ports are the parent's container ports; only the web port is published.
@@ -58,16 +84,17 @@ A preview is an app of its own, made from its parent's settings:
   **Watch paths** and **Ignored paths** leave out, compared with the commit the preview runs, or whose message says
   `[skip ci]`, is skipped: the preview keeps running, and its comment on the pull request stays as it was. A preview's
   first deploy always builds. See [Skip commits that don't need a deploy](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).
-- **Its own volumes.** A named volume of the parent (`data`) is the preview's own (`gb-orb-pr-12-data`), so a preview
-  starts with empty data and never touches production's. It keeps every volume it has until it's removed: one added to
-  the parent is added to the preview with its next deploy (unless the preview has one at that path already), and one
-  removed or renamed on the parent stays the preview's, even when the parent keeps that folder in memory (tmpfs) now:
-  Docker mounts one thing at a path, so the preview's volume stays there and its deploy log says so. No volume is shared when they change later either: a volume
-  you add to the parent is refused when its name, production's or a preview's copy, is another app's already; a folder
-  an image declares as a volume gets a number (`data-2`) when its name would be another app's, or, in a preview, one
-  Docker has already; and a deploy stops before it starts anything when it would put a preview and another app on one
-  volume, or give a preview a new volume Docker has already (another app's data, or a removed app's). Removing a
-  preview deletes its volumes, but never one another app has.
+- **Its own volumes.** A named volume of the parent (`data`) is the preview's own (`gb-website-pr-12-data`), so a
+  preview starts with empty data and never touches production's. It keeps every volume it has until it's removed: one
+  added to the parent is added to the preview with its next deploy (unless the preview has one at that path already),
+  and one removed or renamed on the parent stays the preview's, even when the parent keeps that folder in memory (tmpfs)
+  now: Docker mounts one thing at a path, so the preview's volume stays there and its deploy log says so. No volume is
+  shared when they change later either: a volume you add to the parent is refused when its name, production's or a
+  preview's copy, is another app's already; a folder an image declares as a volume gets a number (`data-2`) when its
+  name would be another app's, or, in a preview, one Docker has already; and a deploy stops before it starts anything
+  when it would put a preview and another app on one volume, or give a preview a new volume Docker has already (another
+  app's data, or a removed app's). Removing a preview deletes its volumes, but never one another app has.
+- **Its own database**, when the parent has one: see [Production's database](#productions-database).
 - **No host folders.** A folder of the host mounted into production isn't mounted into a preview: a preview never writes
   into production's files. The preview's page says which ones it leaves out.
 - **No host devices.** A device of the host given to production (a Zigbee or serial stick, say) isn't given to a
@@ -81,11 +108,12 @@ A preview is an app of its own, made from its parent's settings:
 - **No scheduled jobs.** The `crons` in `vercel.json` run only in production, as on Vercel (see
   [Scheduled jobs and restarts](scheduled-jobs-and-restarts.md)).
 
-A preview's own page shows **Preview of orb for PR #12** at the top, and has no **Settings** or **Environment** tab:
-change the parent's, and the preview takes them with its next deploy.
+A preview's own page shows **Preview of website for PR #12** at the top, with **Pull request** (or **Merge request**, or
+**Branch**) and **All previews**, and has no **Settings** or **Environment** tab: change the parent's, and the preview
+takes them with its next deploy.
 
 Previews stay out of the Apps list, the menu, search and the dashboard's counts. They're on their parent's **Previews**
-tab. Their deploys show in **Recent deploys** on the dashboard as `orb · PR #12: deployed abc1234`.
+tab. Their deploys show in **Recent deploys** on the dashboard as `website · PR #12: deployed abc1234`.
 
 ## Addresses
 
@@ -97,7 +125,7 @@ When [domains](domains.md) are on and the parent has a domain, a preview also ge
 | Parent's main domain | Pull request 12 | Branch `feature/login` |
 |---|---|---|
 | `app.example.com` | `app-pr-12.example.com` | `app-git-feature-login.example.com` |
-| `example.com` | `orb-pr-12.example.com` | `orb-git-feature-login.example.com` |
+| `example.com` | `website-pr-12.example.com` | `website-git-feature-login.example.com` |
 
 The name is one level below the zone, so Cloudflare's free certificate covers it. With **Protect previews' domains** on,
 visitors sign in with Cloudflare Access (an emailed code) before they reach the preview, once Access is set up in
@@ -105,15 +133,23 @@ visitors sign in with Cloudflare Access (an emailed code) before they reach the 
 
 ## The Previews tab
 
-A Git app's **Previews** tab lists its previews, newest activity first. For each one:
+A Git app's **Previews** tab lists its previews, newest activity first. The card's heading says how they're set (**Pull
+requests · 1 of 3 running**), and **Settings** opens the app's **Settings › Previews**. While previews are off and
+there are none, the tab says **Previews are off**, with **Turn previews on**. For each preview:
 
-- the pull request (its number and title, linking to GitHub) or the branch;
-- its state: **Building**, **Ready**, **Failed**, **Waiting** or **Stopped**;
-- its commit, its domain and LAN address, its last commit, and when it's removed without a new one;
+- the pull request (its number and title, linking to GitHub), the merge request (**MR !12**, linking to GitLab) or the
+  branch, tagged **Fork** when its code comes from someone else's copy of the repo;
+- its state: **Building** (as **Queued…**, **Fetching the code…**, **Building…** or **Starting…**), **Ready**,
+  **Failed**, **Waiting** or **Stopped**;
+- its commit, its last commit and when it's removed without a new one, its domain and LAN address, and **Its page**;
 - **Open**, **Log** (its newest deploy that wasn't skipped), and in **⋯**: **Redeploy**, **Redeploy without the build
   cache**, **Promote to production…** and **Remove…**.
 
-A skipped commit never changes a preview's state: it shows as its deploy before left it.
+![The website app's Previews tab: pull request #12 ready, and the branch feature/login building](../images/app-previews.webp)
+
+A skipped commit never changes a preview's state: it shows as its deploy before left it. When GitHub or GitLab can't
+say which requests are open, a **Pull requests couldn't be read** (or **Merge requests couldn't be read**) banner says
+why, and the previews already there keep following their commits.
 
 ## The limit, and how previews go
 
@@ -144,7 +180,8 @@ Each of a Git app's variables on its **Environment** tab is for one environment,
 | **Previews** | Only its previews. |
 
 One name can have a value in each: `API_URL` for all deploys, and another `API_URL` for previews. A **Production** or
-**Previews** value wins over an **All deploys** one of the same name. The repo's variables in GitHub go to every deploy.
+**Previews** value wins over an **All deploys** one of the same name. The repo's variables in GitHub go to every deploy;
+a GitLab project's go by their environment scope (see [CI/CD variables](gitlab-integration.md#cicd-variables)).
 
 Changing a variable for previews never marks production as needing a new build or restart; previews take it with their
 next deploy.
@@ -159,7 +196,7 @@ would reach the preview with production's value: one set for **All deploys**, or
 `redis://…`). The deploy log says which:
 
 **DATABASE_URL would reach this preview with production's value (from the repo's GitHub variables), so the preview's
-build and code would use production's database. On web's Environment tab, give it a value for Previews: a database of
+build and code would use production's database. On website's Environment tab, give it a value for Previews: a database of
 the previews' own, or the same value if previews may share production's.**
 
 Gitberth gives each preview a database of its own instead, with no variable to set, when it can: when the app has a
@@ -170,7 +207,7 @@ Previews**, under **Each preview's database**:
 | Choice | Each preview gets |
 |---|---|
 | **None of its own** | No database: a variable that would give it production's database stops its deploy, as above. |
-| **An empty one** (the default) | A database and a role of its own on the same server (`shop_pr_12`), empty. |
+| **An empty one** (the default) | A database and a role of its own on the same server (`website_pr_12`), empty. |
 | **A copy of production's** | The same, with production's data copied in when it's made. It holds production's personal data too: choose it only when everyone who can open a pull request may see that. |
 
 The preview's database is made before its first build, its deploys set the same variable pointing at it (production's
@@ -213,8 +250,8 @@ When a preview is ready, open the app's **Previews** tab, click **⋯** on it, t
 
 ## Related
 
-- [Deploy an app from GitHub](deploy-from-github.md)
+- [Deploy an app from GitHub or GitLab](deploy-from-github.md)
 - [Deploys and rollbacks](deploys-and-rollbacks.md)
 - [Environment variables](environment-variables.md)
-- [Domains](domains.md)
+- [Databases](databases.md)
 - [GitHub integration](github-integration.md)

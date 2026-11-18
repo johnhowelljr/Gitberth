@@ -197,12 +197,12 @@ public sealed class RepoWatcher(
             if (state.InBackoff(repo.Key) && !poked) continue;
             var trigger = poked ? DeployTrigger.Webhook : DeployTrigger.Poll;
             var sender = state.TakeWebhookSender(first.Owner, first.Repo);
-            // GitHub asked for this look: what it starts (deploys, previews) is GitHub's, through its webhook.
-            using var asked = poked ? Audit.AuditScope.Begin(new Audit.AuditActor(Audit.AuditActorKind.GitHub, "GitHub", Audit.AuditVia.Webhook, sender)) : null;
+            // GitHub (or GitLab) asked for this look: what it starts (deploys, previews) is the host's, through its webhook.
+            using var asked = poked ? Audit.AuditScope.Begin(WebhookActor(RepoRef.HostOf(first.Owner), sender)) : null;
             RemoteInfo remote;
             try
             {
-                remote = await git.LsRemoteAsync(new GitHubRepoRef(first.Owner, first.Repo), ct);
+                remote = await git.LsRemoteAsync(RepoRef.Of(first.Owner, first.Repo), ct);
                 state.Succeeded(repo.Key);
                 state.RecordDefaultBranch(first.Owner, first.Repo, remote.DefaultBranch);
             }
@@ -237,6 +237,11 @@ public sealed class RepoWatcher(
             if (previews is not null) await previews.CheckRepoAsync(first.Owner, first.Repo, remote, poked, repo.ToList(), busy, ct);
         }
     }
+
+    /// <summary>Who a look a host's webhook asked for is told against: GitHub, or GitLab, through its webhook, from where the delivery came.</summary>
+    internal static Audit.AuditActor WebhookActor(GitHost host, string? sender) => host == GitHost.GitLab
+        ? new Audit.AuditActor(Audit.AuditActorKind.GitLab, "GitLab", Audit.AuditVia.Webhook, sender)
+        : new Audit.AuditActor(Audit.AuditActorKind.GitHub, "GitHub", Audit.AuditVia.Webhook, sender);
 
     /// <summary>
     /// What the watcher starts for an app whose branch is at <paramref name="sha"/>: a deploy of a new commit

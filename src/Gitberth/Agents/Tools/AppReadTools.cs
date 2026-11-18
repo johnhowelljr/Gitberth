@@ -106,7 +106,9 @@ public sealed class AppReadTools(AgentContext ctx, AppCatalog catalog, AppSettin
             addresses = s.Chips.Select(ch => ch.Value ?? ch.Label).Distinct().ToList(),
             git = row is { Source: AppSource.Git } g ? new
             {
-                repo = $"{g.Owner}/{g.Repo}",
+                // owner/repo on GitHub, group/subgroup/project on Gitberth's GitLab.
+                host = g.FromGitLab ? "gitlab" : "github",
+                repo = g.RepoFullName,
                 branch = g.Branch,
                 subdirectory = g.Subdirectory,
                 commit = g.CurrentCommit is { Length: >= 7 } sha ? sha[..7] : g.CurrentCommit,

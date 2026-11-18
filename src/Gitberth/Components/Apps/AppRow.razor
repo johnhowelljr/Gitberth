@@ -11,14 +11,14 @@
                 <a class="gb-arow-title" href="@App.Href">@App.Title</a>
                 @if (App.System)
                 {
-                    <span class="gb-tag gb-tag--outline">System</span>
+                    <span class="gb-tag gb-tag--outline" data-tip="apps.row.system">System</span>
                 }
                 @if (App.Update is { Available: true } update)
                 {
-                    <span class="gb-tag gb-tag--accent" title="@update.Text"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Update</span>
+                    <span class="gb-tag gb-tag--accent" data-tip="apps.row.update" data-tip-detail="@update.Text"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Update</span>
                 }
             </span>
-            <span class="gb-arow-sub" title="@Sub">@Sub</span>
+            <span class="gb-arow-sub" data-tip-text="@Sub">@Sub</span>
         </div>
     </div>
     <div class="gb-c-st" role="cell">
@@ -30,11 +30,11 @@
             var text = chip.Value is null ? chip.Label : AppFacts.Shown(chip.Value);
             @if (chip.Kind == AddressChipKind.Open && App.Running)
             {
-                <a class="gb-addrv" href="@chip.Value" target="_blank" rel="noopener" title="@chip.Tooltip"><span>@text</span><SvgIcon Icon="@Icons.Material.Outlined.OpenInNew" /></a>
+                <a class="gb-addrv" href="@chip.Value" target="_blank" rel="noopener" data-tip-text="@chip.Tooltip"><span>@text</span><SvgIcon Icon="@Icons.Material.Outlined.OpenInNew" /></a>
             }
             else
             {
-                <span class="gb-addrv @(App.Running ? null : "gb-addrv--off")" title="@chip.Tooltip">
+                <span class="gb-addrv @(App.Running ? null : "gb-addrv--off")" data-tip-text="@chip.Tooltip">
                     @if (chip.Kind == AddressChipKind.HostOnly)
                     {
                         <SvgIcon Icon="@Icons.Material.Filled.Lock" Class="gb-ac-host" />
@@ -45,7 +45,7 @@
         }
         else if (App.Chips.Count > 0)
         {
-            <span class="gb-addrv gb-addrv--faint"><span>Internal only</span></span>
+            <span class="gb-addrv gb-addrv--faint" data-tip="apps.row.internal-only"><span>Internal only</span></span>
         }
         else
         {
@@ -59,13 +59,13 @@
         }
         @if (App.Chips.Count > 3)
         {
-            <span class="gb-pc gb-pc--more" title="@string.Join(", ", App.Chips.Skip(3).Select(c => c.Label))">+@(App.Chips.Count - 3)</span>
+            <span class="gb-pc gb-pc--more" data-tip-text="@string.Join(", ", App.Chips.Skip(3).Select(c => c.Label))">+@(App.Chips.Count - 3)</span>
         }
     </div>
     <div class="gb-c-res" role="cell">
         @if (App.Running && (App.CpuPercent is not null || App.MemoryBytes is not null))
         {
-            <div class="gb-res" title="CPU (100% is one core) and memory">
+            <div class="gb-res" data-tip-text="CPU (100% is one core) and memory">
                 <Sparkline Values="@Cpu" Hot="@(App.CpuPercent >= 50)" />
                 <span>@(App.CpuPercent is double cpu ? AppFacts.Percent(cpu) : "–")</span>
                 <Meter Fraction="@MemoryFraction" Limited="@(MemoryLimit is > 0)" Title="@MemoryTitle" />
@@ -74,14 +74,21 @@
         }
         else
         {
-            <span class="gb-res-none">@(App.Running ? "Not gathered" : "Not running")</span>
+            @if (App.Running)
+            {
+                <span class="gb-res-none" data-tip="apps.row.not-gathered">Not gathered</span>
+            }
+            else
+            {
+                <span class="gb-res-none">Not running</span>
+            }
         }
     </div>
-    <div class="gb-c-src" role="cell"><SourceBadge Source="App.Source" /></div>
+    <div class="gb-c-src" role="cell"><SourceBadge Source="App.Source" GitLab="App.GitLab" /></div>
     <div class="gb-c-act gb-arow-actions" role="cell">
         <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Class="gb-arow-kebab" AriaLabel="@($"Actions for {App.Title}")">
             <ActivatorContent>
-                <button type="button" class="gb-iconbtn" aria-label="@($"Actions for {App.Title}")" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
+                <button type="button" class="gb-iconbtn" aria-label="@($"Actions for {App.Title}")" data-tip-text="More" @onclick="context.ToggleAsync"><SvgIcon Icon="@Icons.Material.Outlined.MoreHoriz" /></button>
             </ActivatorContent>
             <ChildContent>
                 @Menu()
@@ -90,22 +97,22 @@
         <div class="gb-hoverbar">
             @if (Primary is { Kind: AddressChipKind.Open, Value: { } open } && App.Running)
             {
-                <a class="gb-iconbtn" href="@open" target="_blank" rel="noopener" title="Open" aria-label="@($"Open {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.OpenInNew" /></a>
+                <a class="gb-iconbtn" href="@open" target="_blank" rel="noopener" data-tip-text="Open" aria-label="@($"Open {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.OpenInNew" /></a>
             }
             @if (App.Running)
             {
-                <button type="button" class="gb-iconbtn" title="Restart" aria-label="@($"Restart {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Restart)"><SvgIcon Icon="@Icons.Material.Outlined.RestartAlt" /></button>
+                <button type="button" class="gb-iconbtn" data-tip="apps.action.restart" aria-label="@($"Restart {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Restart)"><SvgIcon Icon="@Icons.Material.Outlined.RestartAlt" /></button>
                 @if (App.Role != ContainerRole.Self)
                 {
-                    <button type="button" class="gb-iconbtn" title="Stop" aria-label="@($"Stop {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Stop)"><SvgIcon Icon="@Icons.Material.Outlined.Stop" /></button>
+                    <button type="button" class="gb-iconbtn" data-tip="apps.action.stop" aria-label="@($"Stop {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Stop)"><SvgIcon Icon="@Icons.Material.Outlined.Stop" /></button>
                 }
             }
             else if (CanStart)
             {
-                <button type="button" class="gb-iconbtn" title="Start" aria-label="@($"Start {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Start)"><SvgIcon Icon="@Icons.Material.Outlined.PlayArrow" /></button>
+                <button type="button" class="gb-iconbtn" data-tip="apps.action.start" aria-label="@($"Start {App.Title}")" @onclick="() => OnAction.InvokeAsync(ContainerAction.Start)"><SvgIcon Icon="@Icons.Material.Outlined.PlayArrow" /></button>
             }
-            <a class="gb-iconbtn" href="@($"{App.Href}/logs")" title="Logs" aria-label="@($"Logs of {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.Article" /></a>
-            <a class="gb-iconbtn" href="@($"{App.Href}/settings")" title="Settings" aria-label="@($"Settings of {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.Tune" /></a>
+            <a class="gb-iconbtn" href="@($"{App.Href}/logs")" data-tip-text="Logs" aria-label="@($"Logs of {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.Article" /></a>
+            <a class="gb-iconbtn" href="@($"{App.Href}/settings")" data-tip-text="Settings" aria-label="@($"Settings of {App.Title}")"><SvgIcon Icon="@Icons.Material.Outlined.Tune" /></a>
         </div>
     </div>
 </div>
@@ -146,15 +153,15 @@
         }
         @if (App.Running)
         {
-            <MudMenuItem Icon="@Icons.Material.Outlined.RestartAlt" OnClick="() => OnAction.InvokeAsync(ContainerAction.Restart)">Restart</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Outlined.RestartAlt" OnClick="() => OnAction.InvokeAsync(ContainerAction.Restart)" data-tip="apps.action.restart">Restart</MudMenuItem>
             @if (App.Role != ContainerRole.Self)
             {
-                <MudMenuItem Icon="@Icons.Material.Outlined.Stop" OnClick="() => OnAction.InvokeAsync(ContainerAction.Stop)">Stop</MudMenuItem>
+                <MudMenuItem Icon="@Icons.Material.Outlined.Stop" OnClick="() => OnAction.InvokeAsync(ContainerAction.Stop)" data-tip="apps.action.stop">Stop</MudMenuItem>
             }
         }
         else if (CanStart)
         {
-            <MudMenuItem Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => OnAction.InvokeAsync(ContainerAction.Start)">Start</MudMenuItem>
+            <MudMenuItem Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => OnAction.InvokeAsync(ContainerAction.Start)" data-tip="apps.action.start">Start</MudMenuItem>
         }
         <MudMenuItem Icon="@Icons.Material.Outlined.Article" Href="@($"{App.Href}/logs")">Logs</MudMenuItem>
         <MudMenuItem Icon="@Icons.Material.Outlined.Tune" Href="@($"{App.Href}/settings")">Settings</MudMenuItem>

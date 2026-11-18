@@ -1,18 +1,34 @@
 @inject RepoVariables Variables
+@inject GitLabApi GitLab
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
 
-@* The repo's GitHub Actions variables: where its environment is stored, shared by every app from the repo. *@
+@*
+    The repo's GitHub Actions variables, or a GitLab project's CI/CD variables: where its environment is stored, shared by
+    every app from the repo. A GitLab variable has an environment scope: every deploy (*), production, or previews (preview/*).
+*@
 <MudPaper Outlined="true" Class="gb-card mb-4">
     <div class="gb-card-head">
-        <span class="gb-card-title"><MudIcon Icon="@Icons.Custom.Brands.GitHub" Size="Size.Small" />Stored in GitHub</span>
-        <a class="gb-card-hint" href="@($"https://github.com/{Owner}/{Repo}/settings/variables/actions")" target="_blank" rel="noopener">Open in GitHub</a>
+        <span class="gb-card-title"><MudIcon Icon="@(OnGitLab ? GitberthIcons.GitLab : Icons.Custom.Brands.GitHub)" Size="Size.Small" />Stored in @HostName<Tip Key="app.env.repo" /></span>
+        <a class="gb-card-hint" href="@SettingsUrl" target="_blank" rel="noopener">Open in @HostName</a>
     </div>
     <div class="gb-card-body">
-        <p class="gb-intro">
-            The repo's variables in GitHub, under Settings › Secrets and variables › Actions › Variables. Every app from
-            @Owner/@Repo gets them, at build time and when it runs. They aren't hidden: anyone who can see the repo can read them.
-        </p>
+        @if (OnGitLab)
+        {
+            <p class="gb-intro">
+                The project's CI/CD variables in GitLab, under Settings › CI/CD › Variables. Every app from @FullName gets the ones for every
+                environment (<code>*</code>) and for <code>production</code>, at build time and when it runs; its previews get <code>*</code> and
+                <code>preview/*</code>. One for a scope wins over the <code>*</code> one of the same name. A masked one is secret here too, a protected
+                one reaches production only, and one for any other scope is left to GitLab's own pipelines.
+            </p>
+        }
+        else
+        {
+            <p class="gb-intro">
+                The repo's variables in GitHub, under Settings › Secrets and variables › Actions › Variables. Every app from
+                @Owner/@Repo gets them, at build time and when it runs. They aren't hidden: anyone who can see the repo can read them.
+            </p>
+        }
         @if (result is null)
         {
             <MudSkeleton Height="36px" />
@@ -27,21 +43,41 @@
             @if (result.Variables.Count > 0)
             {
                 <div class="gb-repo-vars mb-4">
-                    @foreach (var v in result.Variables.OrderBy(v => v.Name, StringComparer.Ordinal))
+                    @foreach (var v in result.Variables.OrderBy(v => v.Name, StringComparer.Ordinal).ThenBy(v => ScopeOrder(v.Scope)))
                     {
-                        var secret = Security.Masking.IsSecret(v.Name, v.Value);
-                        var shown = !secret || revealed.Contains(v.Name);
-                        <div class="gb-repo-var" @key="v.Name">
-                            <span class="gb-repo-var-name">@v.Name</span>
+                        var secret = v.Masked || Security.Masking.IsSecret(v.Name, v.Value);
+                        var id = Id(v);
+                        var shown = !secret || revealed.Contains(id);
+                        var what = OnGitLab ? $"{v.Name} ({ScopeWords(v.Scope)})" : v.Name;
+                        <div class="gb-repo-var" @key="id">
+                            <span class="gb-repo-var-name">
+                                @v.Name
+                                @if (OnGitLab)
+                                {
+                                    <span class="gb-tag gb-tag--outline" data-tip="app.env.gitlab.scope">@(v.Scope ?? RepoVariables.AllScope)</span>
+                                    @if (v.Protected)
+                                    {
+                                        <span class="gb-tag gb-tag--outline" data-tip="app.env.gitlab.protected">protected</span>
+                                    }
+                                    @if (v.IsFile)
+                                    {
+                                        <span class="gb-tag gb-tag--warn" data-tip="app.env.gitlab.file">file</span>
+                                    }
+                                    else if (!Used(v.Scope))
+                                    {
+                                        <span class="gb-tag gb-tag--warn" data-tip="app.env.gitlab.not-used">not used</span>
+                                    }
+                                }
+                            </span>
                             <span class="gb-repo-var-value">@(shown ? v.Value : "••••••••••")</span>
                             <span class="gb-repo-var-actions">
                                 @if (secret)
                                 {
                                     <MudIconButton Icon="@(shown ? Icons.Material.Outlined.VisibilityOff : Icons.Material.Outlined.Visibility)" Size="Size.Small"
-                                                   OnClick="() => ToggleReveal(v.Name)" aria-label="@($"{(shown ? "Hide" : "Show")} {v.Name}")" />
+                                                   OnClick="() => ToggleReveal(id)" aria-label="@($"{(shown ? "Hide" : "Show")} {what}")" data-tip-text="@(shown ? "Hide" : "Show")" />
                                 }
-                                <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" OnClick="() => Edit(v)" aria-label="@($"Edit {v.Name}")" Disabled="@busy" />
-                                <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" OnClick="() => DeleteAsync(v)" aria-label="@($"Delete {v.Name}")" Disabled="@busy" />
+                                <MudIconButton Icon="@Icons.Material.Outlined.Edit" Size="Size.Small" OnClick="() => Edit(v)" aria-label="@($"Edit {what}")" Disabled="@busy" data-tip-text="Edit" />
+                                <MudIconButton Icon="@Icons.Material.Outlined.Delete" Size="Size.Small" OnClick="() => DeleteAsync(v)" aria-label="@($"Delete {what}")" Disabled="@busy" data-tip-text="Delete" />
                             </span>
                         </div>
                     }
@@ -49,15 +85,24 @@
             }
             else if (result.Error is null)
             {
-                <div class="gb-placeholder mb-4">No variables in GitHub yet.</div>
+                <div class="gb-placeholder mb-4">No variables in @HostName yet.</div>
             }
             <div class="gb-repo-var-form">
                 <MudTextField T="string" @bind-Value="name" Immediate="true" Label="Name" Placeholder="DATABASE_URL" Variant="Variant.Outlined" Margin="Margin.Dense" Class="gb-mono-input" />
                 @* Grows for values with line breaks (a private key, say), which a one-line field would flatten. *@
                 <MudTextField T="string" @bind-Value="value" Immediate="true" Label="Value" Variant="Variant.Outlined" Margin="Margin.Dense" Class="gb-mono-input"
                               Lines="1" Sizing="InputSizing.Auto" MaxLines="8" />
-                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(name) || string.IsNullOrEmpty(value))" Class="gb-inline-btn">
-                    Save to GitHub
+                @if (OnGitLab)
+                {
+                    <select class="gb-input" aria-label="Environment scope" value="@scope" @onchange="e => scope = e.Value?.ToString() ?? RepoVariables.AllScope" disabled="@busy">
+                        <option value="@RepoVariables.AllScope">Every deploy (*)</option>
+                        <option value="@RepoVariables.ProductionScope">Production (production)</option>
+                        <option value="@RepoVariables.PreviewScope">Previews (preview/*)</option>
+                    </select>
+                }
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SaveAsync" Disabled="@(busy || string.IsNullOrWhiteSpace(name) || string.IsNullOrEmpty(value))" Class="gb-inline-btn"
+                           data-tip="app.env.repo.save">
+                    Save to @HostName
                 </MudButton>
             </div>
         }
@@ -73,16 +118,43 @@
     private RepoVariablesResult? result;
     private (string Owner, string Repo)? loadedFor;
     private readonly HashSet<string> revealed = new(StringComparer.Ordinal);
-    private string name = "", value = "";
+    private string name = "", value = "", scope = RepoVariables.AllScope;
     private bool busy;
+    // Gitberth's GitLab's address, for the link to the project's CI/CD settings.
+    private string instance = Gitberth.Git.GitLabRepoRef.DefaultInstance;
+
+    private bool OnGitLab => Gitberth.Git.RepoRef.IsGitLab(Owner);
+    private string HostName => OnGitLab ? "GitLab" : "GitHub";
+    private string FullName => Gitberth.Git.RepoRef.FullNameOf(Owner, Repo);
+
+    private string SettingsUrl => Gitberth.Git.RepoRef.Of(Owner, Repo) is Gitberth.Git.GitLabRepoRef project
+        ? $"{project.WebUrl(instance)}/-/settings/ci_cd#js-cicd-variables-settings"
+        : $"https://github.com/{Owner}/{Repo}/settings/variables/actions";
+
+    // A variable as the list knows it: a GitLab one's name and scope (one name can have a value per scope).
+    private static string Id(RepoVariable v) => $"{v.Name}|{v.Scope}";
+
+    private static int ScopeOrder(string? scope) => scope switch { null or RepoVariables.AllScope => 0, RepoVariables.ProductionScope => 1, RepoVariables.PreviewScope => 2, _ => 3 };
+
+    private static bool Used(string? scope) => scope is null or RepoVariables.AllScope or RepoVariables.ProductionScope or RepoVariables.PreviewScope;
+
+    /// <summary>A scope as the editor's labels say it.</summary>
+    internal static string ScopeWords(string? scope) => scope switch
+    {
+        null or RepoVariables.AllScope => "every deploy",
+        RepoVariables.ProductionScope => "production",
+        RepoVariables.PreviewScope => "previews",
+        _ => scope,
+    };
 
     // The page keeps this component when it moves to another app, so a new repo starts over.
     protected override async Task OnParametersSetAsync()
     {
         if (loadedFor == (Owner, Repo)) return;
         loadedFor = (Owner, Repo);
-        (result, name, value) = (null, "", "");
+        (result, name, value, scope) = (null, "", "", RepoVariables.AllScope);
         revealed.Clear();
+        if (OnGitLab) instance = await GitLab.InstanceAsync();
         await LoadAsync();
     }
 
@@ -98,21 +170,26 @@
         if (!revealed.Remove(key)) revealed.Add(key);
     }
 
-    private void Edit(RepoVariable v) => (name, value) = (v.Name, v.Value);
+    private void Edit(RepoVariable v) => (name, value, scope) = (v.Name, v.Value, Used(v.Scope) ? v.Scope ?? RepoVariables.AllScope : RepoVariables.AllScope);
 
     private async Task SaveAsync()
     {
         busy = true;
         try
         {
-            // What it was, when the repo had it (GitHub's names don't mind case), for the audit log's before and after.
-            var previous = result?.Variables.FirstOrDefault(v => string.Equals(v.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))?.Value;
-            await Variables.SetAsync(Owner, Repo, name, value, app: App, previous: previous);
-            Snackbar.Add($"Saved {name.Trim()} to GitHub. Deploy the app to use it.", Severity.Success);
+            // What it was, when the repo had it (GitHub's names don't mind case; a GitLab one is by name and scope), for the
+            // audit log's before and after.
+            var previous = OnGitLab
+                ? result?.Variables.FirstOrDefault(v => v.Name == name.Trim() && (v.Scope ?? RepoVariables.AllScope) == scope)?.Value
+                : result?.Variables.FirstOrDefault(v => string.Equals(v.Name, name.Trim(), StringComparison.OrdinalIgnoreCase))?.Value;
+            await Variables.SetAsync(Owner, Repo, name, value, app: App, previous: previous, scope: OnGitLab ? scope : null);
+            Snackbar.Add(OnGitLab
+                ? $"Saved {name.Trim()} to GitLab ({ScopeWords(scope)}). Deploy the app to use it."
+                : $"Saved {name.Trim()} to GitHub. Deploy the app to use it.", Severity.Success);
             (name, value) = ("", "");
             await LoadAsync();
         }
-        catch (GitHubApiException ex)
+        catch (HostApiException ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }
@@ -126,17 +203,19 @@
     {
         var confirmed = await Dialogs.ShowMessageBoxAsync(
             $"Delete {v.Name}?",
-            $"It's removed from {Owner}/{Repo}'s variables in GitHub, for every app from the repo.",
+            OnGitLab
+                ? $"It's removed from {FullName}'s CI/CD variables in GitLab ({ScopeWords(v.Scope)}), for every app from the project."
+                : $"It's removed from {Owner}/{Repo}'s variables in GitHub, for every app from the repo.",
             yesText: "Delete", cancelText: "Cancel");
         if (confirmed != true) return;
         busy = true;
         try
         {
-            await Variables.DeleteAsync(Owner, Repo, v.Name, app: App, previous: v.Value);
-            Snackbar.Add($"Deleted {v.Name} from GitHub.", Severity.Success);
+            await Variables.DeleteAsync(Owner, Repo, v.Name, app: App, previous: v.Value, scope: OnGitLab ? v.Scope ?? RepoVariables.AllScope : null);
+            Snackbar.Add($"Deleted {v.Name} from {HostName}.", Severity.Success);
             await LoadAsync();
         }
-        catch (GitHubApiException ex)
+        catch (HostApiException ex)
         {
             Snackbar.Add(ex.Message, Severity.Error);
         }

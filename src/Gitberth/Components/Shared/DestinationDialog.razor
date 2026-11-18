@@ -13,51 +13,51 @@
         <div class="gb-stack" style="gap:14px">
             @if (Current is null)
             {
-                <Field Label="Send to">
+                <Field Label="Send to" Tip="settings.notifications.destination.kind">
                     <Seg T="DestinationKind" Options="KindOptions" Value="kind" ValueChanged="v => { kind = v; error = null; }" Label="Kind of destination" />
                 </Field>
             }
-            <Field Label="Name" For="nd-name" Help="What the list calls it. Optional.">
+            <Field Label="Name" For="nd-name" Tip="settings.notifications.destination.name" Help="What the list calls it. Optional.">
                 <input id="nd-name" class="gb-input" placeholder="@DestinationText.KindName(kind)" @bind="name" @bind:event="oninput" maxlength="60" />
             </Field>
             @if (kind == DestinationKind.Email)
             {
                 <div class="gb-fgrid">
-                    <Field Label="Mail server" For="nd-host" Help="Like smtp.gmail.com or smtp.fastmail.com.">
+                    <Field Label="Mail server" For="nd-host" Tip="settings.notifications.destination.mail-server" Help="Like smtp.gmail.com or smtp.fastmail.com.">
                         <input id="nd-host" class="gb-input gb-input--mono" placeholder="smtp.example.com" @bind="smtpHost" @bind:event="oninput" spellcheck="false" autocomplete="off" />
                     </Field>
-                    <Field Label="Port" For="nd-port" Help="587 with STARTTLS is what every big provider has.">
+                    <Field Label="Port" For="nd-port" Tip="settings.notifications.destination.port" Help="587 with STARTTLS is what every big provider has.">
                         <input id="nd-port" type="number" min="1" max="65535" class="gb-input gb-input--mono" @bind="smtpPort" />
                     </Field>
                 </div>
-                <Field Label="Security">
+                <Field Label="Security" Tip="settings.notifications.destination.security">
                     <Seg T="SmtpSecurity" Options="SecurityOptions" Value="security" ValueChanged="v => security = v" Label="Connection security" />
                 </Field>
                 <div class="gb-fgrid">
-                    <Field Label="User name" For="nd-user" Help="Often your mail address. Leave empty for a server that needs no sign-in.">
+                    <Field Label="User name" For="nd-user" Tip="settings.notifications.destination.user" Help="Often your mail address. Leave empty for a server that needs no sign-in.">
                         <input id="nd-user" class="gb-input gb-input--mono" @bind="smtpUser" @bind:event="oninput" spellcheck="false" autocomplete="off" />
                     </Field>
-                    <Field Label="Password" For="nd-pass" Help="@(HasSaved(Current?.SmtpPassword) ? "Leave empty to keep the saved one." : "An app password, for Gmail and other providers with two-step sign-in.")">
+                    <Field Label="Password" For="nd-pass" Tip="settings.notifications.destination.password" Help="@(HasSaved(Current?.SmtpPassword) ? "Leave empty to keep the saved one." : "An app password, for Gmail and other providers with two-step sign-in.")">
                         <input id="nd-pass" type="password" class="gb-input" placeholder="@(HasSaved(Current?.SmtpPassword) ? "••••••••" : null)" @bind="smtpPassword" @bind:event="oninput" autocomplete="new-password" />
                     </Field>
                 </div>
                 <div class="gb-fgrid">
-                    <Field Label="From" For="nd-from" Help="The address the mail comes from: one your mail server lets you send as.">
+                    <Field Label="From" For="nd-from" Tip="settings.notifications.destination.from" Help="The address the mail comes from: one your mail server lets you send as.">
                         <input id="nd-from" class="gb-input gb-input--mono" placeholder="gitberth@example.com" @bind="from" @bind:event="oninput" spellcheck="false" autocomplete="off" />
                     </Field>
-                    <Field Label="To" For="nd-to" Help="Separate several addresses with commas.">
+                    <Field Label="To" For="nd-to" Tip="settings.notifications.destination.to" Help="Separate several addresses with commas.">
                         <input id="nd-to" class="gb-input gb-input--mono" placeholder="you@example.com" @bind="to" @bind:event="oninput" spellcheck="false" autocomplete="off" />
                     </Field>
                 </div>
             }
             else
             {
-                <Field Label="@UrlLabel" For="nd-url" Help="@UrlHelp">
+                <Field Label="@UrlLabel" For="nd-url" Tip="@UrlTip" Help="@UrlHelp">
                     <input id="nd-url" class="gb-input gb-input--mono" placeholder="@UrlPlaceholder" @bind="url" @bind:event="oninput" spellcheck="false" autocomplete="off" />
                 </Field>
                 @if (kind is DestinationKind.Ntfy or DestinationKind.Webhook)
                 {
-                    <Field Label="@(kind == DestinationKind.Ntfy ? "Access token" : "Bearer token")" For="nd-token"
+                    <Field Label="@(kind == DestinationKind.Ntfy ? "Access token" : "Bearer token")" For="nd-token" Tip="@TokenTip"
                            Help="@(HasSaved(Current?.Token) ? "Leave empty to keep the saved one." : kind == DestinationKind.Ntfy ? "For a topic that needs signing in: a token from your ntfy server (tk_…). Optional." : "Sent as Authorization: Bearer …. Optional.")">
                         <input id="nd-token" type="password" class="gb-input gb-input--mono" placeholder="@(HasSaved(Current?.Token) ? "••••••••" : null)" @bind="token" @bind:event="oninput" autocomplete="new-password" />
                     </Field>
@@ -71,7 +71,14 @@
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">@(Current is null ? "Add and send a test" : "Save")</MudButton>
+        @if (Current is null)
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" data-tip="settings.notifications.destination.add">Add and send a test</MudButton>
+        }
+        else
+        {
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save" data-tip="settings.notifications.destination.save">Save</MudButton>
+        }
     </DialogActions>
 </MudDialog>
 
@@ -82,18 +89,33 @@
 
     private static readonly List<SegOption<DestinationKind>> KindOptions =
     [
-        new(DestinationKind.Email, "Email", Icons.Material.Outlined.Email),
-        new(DestinationKind.Discord, "Discord", Icons.Material.Outlined.Forum),
-        new(DestinationKind.Slack, "Slack", Icons.Material.Outlined.Tag),
-        new(DestinationKind.Ntfy, "ntfy", Icons.Material.Outlined.NotificationsActive),
-        new(DestinationKind.Webhook, "Webhook", Icons.Material.Outlined.Webhook),
+        new(DestinationKind.Email, "Email", Icons.Material.Outlined.Email, Tip: "settings.notifications.destination.kind.email"),
+        new(DestinationKind.Discord, "Discord", Icons.Material.Outlined.Forum, Tip: "settings.notifications.destination.kind.discord"),
+        new(DestinationKind.Slack, "Slack", Icons.Material.Outlined.Tag, Tip: "settings.notifications.destination.kind.slack"),
+        new(DestinationKind.Ntfy, "ntfy", Icons.Material.Outlined.NotificationsActive, Tip: "settings.notifications.destination.kind.ntfy"),
+        new(DestinationKind.Webhook, "Webhook", Icons.Material.Outlined.Webhook, Tip: "settings.notifications.destination.kind.webhook"),
     ];
 
     private static readonly List<SegOption<SmtpSecurity>> SecurityOptions =
     [
-        new(SmtpSecurity.StartTls, "STARTTLS", Icons.Material.Outlined.Lock),
-        new(SmtpSecurity.None, "None", Icons.Material.Outlined.LockOpen),
+        new(SmtpSecurity.StartTls, "STARTTLS", Icons.Material.Outlined.Lock, Tip: "settings.notifications.destination.security.starttls"),
+        new(SmtpSecurity.None, "None", Icons.Material.Outlined.LockOpen, Tip: "settings.notifications.destination.security.none"),
     ];
+
+    // The URL's and the token's tips by kind, each key written out (Tip: "…") so the tips' test finds it.
+    private string UrlTip => kind switch
+    {
+        DestinationKind.Discord => Key(Tip: "settings.notifications.destination.url.discord"),
+        DestinationKind.Slack => Key(Tip: "settings.notifications.destination.url.slack"),
+        DestinationKind.Ntfy => Key(Tip: "settings.notifications.destination.url.ntfy"),
+        _ => Key(Tip: "settings.notifications.destination.url.webhook"),
+    };
+
+    private string TokenTip => kind == DestinationKind.Ntfy
+        ? Key(Tip: "settings.notifications.destination.token.ntfy")
+        : Key(Tip: "settings.notifications.destination.token.webhook");
+
+    private static string Key(string Tip) => Tip;
 
     private DestinationKind kind = DestinationKind.Discord;
     private string name = "", url = "", token = "", smtpHost = "", smtpUser = "", smtpPassword = "", from = "", to = "";

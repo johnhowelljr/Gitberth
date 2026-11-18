@@ -1,6 +1,13 @@
+@* A section of a form: its title (with an info button when it has a Tip), a line on what it's for, and its fields. *@
 <section class="gb-section">
     <div class="gb-section-head">
-        <h3>@Title</h3>
+        <h3>
+            @Title
+            @if (Tip is not null)
+            {
+                <Tip Key="@Tip" />
+            }
+        </h3>
         @if (Description is not null)
         {
             <p>@Description</p>
@@ -16,5 +23,7 @@
     [Parameter, EditorRequired] public string Title { get; set; } = "";
     [Parameter] public string? Description { get; set; }
     [Parameter] public RenderFragment? DescriptionContent { get; set; }
+    /// <summary>The title's tip: its key in the catalog (Help/Tips), shown by an info button after the title.</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public RenderFragment? ChildContent { get; set; }
 }

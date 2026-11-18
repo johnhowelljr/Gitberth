@@ -20,6 +20,7 @@ from playwright.sync_api import sync_playwright
 from e2e import config
 from e2e.engine import Engine, gitberth_logs
 from e2e.gitberth import Gitberth
+from e2e.gitlab import GitLab
 from e2e.standin import Cloudflare, GitHub, StandIns
 
 WATCH_SECONDS = 10
@@ -39,6 +40,20 @@ def github(standins):
     """The GitHub stand-in: repos from the app templates, commits, branches, forks, pull requests, tokens, and what
     Gitberth asked of it (statuses, comments, hooks, deliveries)."""
     return GitHub(standins)
+
+
+@pytest.fixture(scope="session")
+def gitlab(standins):
+    """The GitLab stand-in (https://gitlab.e2e.test, and https://gitlab.com): projects in nested groups from the app
+    templates, commits, branches, forks, merge requests, tokens with scopes and roles, and what Gitberth asked of it
+    (statuses, notes, hooks, variables, deliveries)."""
+    return GitLab(standins)
+
+
+@pytest.fixture(scope="session")
+def gl_token(gitlab):
+    """A GitLab token of the stand-in's user e2e-bot with the api scope (everything Gitberth does with GitLab)."""
+    return gitlab.token(username="e2e-bot", scopes=["api"])
 
 
 @pytest.fixture(scope="session")

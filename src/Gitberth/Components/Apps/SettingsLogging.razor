@@ -1,8 +1,8 @@
 @* The Logging section of an app's settings, shared by the Settings tab and New app's Configure step (create mode). *@
 <SettingsSection Id="@Id" Title="Logging" Icon="@Icons.Material.Outlined.Article" Changed="@ChangedNow"
-                 Description="Where its output goes. The Logs tab reads it either way.">
+                 Description="Where its output goes. The Logs tab reads it either way." Tip="app.settings.logging">
     <div class="gb-fgrid">
-        <Field Label="Driver" Changed="@ChangedNow" Was="@(Draft.Loaded.Logging.Driver is { Length: > 0 } d ? d : "the host's default")">
+        <Field Label="Driver" Tip="app.settings.logging.driver" Changed="@ChangedNow" Was="@(Draft.Loaded.Logging.Driver is { Length: > 0 } d ? d : "the host's default")">
             <select class="gb-input" aria-label="Log driver" disabled="@RO" @bind="Draft.LogDriver" @bind:after="Notify">
                 <option value="">The host's default</option>
                 @foreach (var driver in LogDrivers.Append(Draft.LogDriver).Where(d => d.Length > 0).Distinct())
@@ -11,7 +11,7 @@
                 }
             </select>
         </Field>
-        <Field Label="Options" Help="key=value, one per line: max-size=10m, max-file=3 for json-file.">
+        <Field Label="Options" Tip="app.settings.logging.options" Help="key=value, one per line: max-size=10m, max-file=3 for json-file.">
             <textarea class="gb-input" rows="2" spellcheck="false" readonly="@RO" placeholder="max-size=10m" @bind="Draft.LogOptions" @bind:event="oninput" @bind:after="Notify"></textarea>
         </Field>
     </div>

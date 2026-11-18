@@ -46,12 +46,13 @@ public sealed record PortInput(
 public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppService apps, AppActions actions, AppSettingsService settings,
     Lazy<AppCreator> creator, ComposeApps compose, GitClient git, ProjectAnalyzer analyzer, RepoVariables repoVariables, PreviewService previews,
     DatabaseService databases, DeployHooks hooks, UptimeSettings uptimeSettings, DomainService domains, GitberthOptions options,
-    TemplateCatalog templates, TemplateInstaller installer)
+    TemplateCatalog templates, TemplateInstaller installer, GitLabApi? gitLab = null)
 {
     [McpServerTool(Name = "create_app", Title = "Create an app", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = true)]
     [ToolAccess(ApiAccess.Admin)]
     [Description("Creates an app as New app does, checked the same way, and deploys or starts it. Sources: " +
-        "git (a GitHub repo, built with what Gitberth detects, or with its Compose file when it has one: give repo, and maybe branch and subdirectory); " +
+        "git (a GitHub repo, or a project on Gitberth's GitLab (Settings › GitLab: gitlab.com unless another is set), groups and subgroups too, " +
+        "built with what Gitberth detects, or with its Compose file when it has one: give repo, and maybe branch and subdirectory); " +
         "image (a registry's image like nginx:1.27 or ghcr.io/owner/app:latest: give image); " +
         "compose (a whole Compose file deployed as one app: give compose_yaml, and maybe web_service); " +
         "template (one of Gitberth's app templates, as list_templates lists them: give template, its inputs, and maybe a domain; its databases and secrets " +
@@ -60,7 +61,7 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
     public async Task<object> CreateApp(
         [Description("git, image, compose or template.")] string source,
         [Description("The app's name; leave out to take the repo's, the image's or the Compose file's.")] string? name = null,
-        [Description("git: the repository, like https://github.com/owner/repo (a link to a branch or folder works too).")] string? repo = null,
+        [Description("git: the repository, like https://github.com/owner/repo or https://gitlab.com/group/subgroup/project (a link to a branch or folder works too).")] string? repo = null,
         [Description("git: the branch to deploy; the repo's default when left out.")] string? branch = null,
         [Description("git: the folder the app is in, when it isn't the repo's root.")] string? subdirectory = null,
         [Description("git: true to deploy with the repo's Compose file, false to build one container; leave out to choose as New app does.")] bool? use_compose = null,
@@ -83,7 +84,7 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
             throw new ToolError("template, inputs and domain go with source template. Any other app gets a domain once it's made, with add_domain.");
         return kind switch
         {
-            "git" or "github" or "repo" => await CreateFromGitAsync(name, repo, branch, subdirectory, use_compose, web_service, env, wait, ct),
+            "git" or "github" or "gitlab" or "repo" => await CreateFromGitAsync(name, repo, branch, subdirectory, use_compose, web_service, env, wait, ct),
             "image" or "registry" => await CreateFromImageAsync(name, image, env, wait, ct),
             "compose" => await CreateFromComposeAsync(name, compose_yaml, web_service, env, wait, ct),
             "template" => await CreateFromTemplateAsync(name, template, inputs, domain, env, wait, ct),
@@ -530,12 +531,15 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
     private async Task<object> CreateFromGitAsync(string? name, string? url, string? branch, string? subdirectory, bool? useCompose, string? webService,
         IReadOnlyList<EnvVarInput>? env, bool wait, CancellationToken ct)
     {
-        if (!GitHubRepoRef.TryParse(url, out var repo, out var parseError) || repo is null) throw new ToolError(parseError ?? "Give the repo, like https://github.com/owner/repo.");
+        // A github.com repository, or a project on Gitberth's GitLab.
+        var instance = gitLab is null ? GitLabRepoRef.DefaultInstance : await gitLab.InstanceAsync(ct);
+        if (!RepoUrls.TryParse(url, instance, out var repo, out var parseError) || repo is null)
+            throw new ToolError(parseError ?? "Give the repo, like https://github.com/owner/repo or https://gitlab.com/group/project.");
         var remote = await git.LsRemoteAsync(repo, ct);
         if (remote.Branches.Count == 0) throw ToolError.Conflict("This repository has no branches yet. Push a commit first.");
         var chosenBranch = branch?.Trim() is { Length: > 0 } b ? b : remote.DefaultBranch ?? remote.Branches[0].Name;
         var sub = subdirectory;
-        if (repo.TreePath is not null && GitHubRepoRef.ResolveTreePath(repo.TreePath, remote.Branches.Select(x => x.Name)) is { } resolved)
+        if (repo.TreeOf is { } tree && GitHubRepoRef.ResolveTreePath(tree, remote.Branches.Select(x => x.Name)) is { } resolved)
         {
             if (branch is null) chosenBranch = resolved.Branch;
             sub ??= resolved.Subdirectory;
@@ -564,14 +568,14 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
             var custom = !useIt && detection.Kind == ProjectKind.Unknown;
             var model = new AppSettingsModel
             {
-                Name = string.IsNullOrWhiteSpace(name) ? folderName.Length == 0 ? repo.Repo : $"{repo.Repo}-{folderName.Split('/')[^1]}" : name.Trim(),
+                Name = string.IsNullOrWhiteSpace(name) ? folderName.Length == 0 ? repo.Name : $"{repo.Name}-{folderName.Split('/')[^1]}" : name.Trim(),
                 Branch = chosenBranch,
                 Subdirectory = folderName.Length == 0 ? null : folderName,
                 ProjectHint = hint,
                 DockerfileMode = custom ? DockerfileMode.Custom : DockerfileMode.Auto,
                 CustomDockerfile = custom ? detection.Dockerfile ?? DockerfileTemplates.Starter : null,
             };
-            var inGitHub = (await repoVariables.GetAsync(repo.Owner, repo.Repo, ct)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var inGitHub = (await repoVariables.GetAsync(repo.AppOwner, repo.AppRepo, ct)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (useIt && composeInfo is { } info)
             {
                 var web = !string.IsNullOrWhiteSpace(webService) ? webService.Trim() : ComposeFiles.PickWeb(info.Services)?.Service ?? info.Services[0].Name;

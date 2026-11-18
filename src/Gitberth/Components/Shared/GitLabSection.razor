@@ -1,0 +1,308 @@
+@inject GitLabSettings GitLabSettings
+@inject GitLabIntegrationState GitLabState
+@inject SettingsService Settings
+@inject DomainService Domains
+@inject WebhookKeeper Webhooks
+@inject WatchState Watch
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject Gitberth.Audit.AuditLog Audit
+@implements IDisposable
+
+@*
+    Settings › GitLab: Gitberth's GitLab (gitlab.com, or a self-hosted one), its token (encrypted, never shown again) and
+    what GitLab says the token is and lacks; what deploys tell GitLab (commit statuses, a merge request's comment), and the
+    project hook for instant deploys, through the webhook host name GitHub integration sets.
+*@
+<section class="gb-card gb-sec" id="gitlab" aria-labelledby="gitlab-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@GitberthIcons.GitLab" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3"><span id="gitlab-t">GitLab</span><Tip Key="settings.gitlab" /></div>
+            <p>Projects on gitlab.com or your own GitLab: private ones, their CI/CD variables, merge request previews, statuses and instant deploys.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        @if (status is null)
+        {
+            <div class="gb-skel" style="height:48px"></div>
+        }
+        else
+        {
+            <div class="gb-row gb-row--wrap" style="gap:10px" aria-live="polite">
+                @if (status.TokenSaved)
+                {
+                    <span class="gb-pill2 gb-tone-good"><i class="gb-st-dot gb-st-dot--running"></i>Token saved</span>
+                    @if (status.Login is not null)
+                    {
+                        <span class="gb-t2">for <strong>@status.Login</strong> on @Host(status.Instance)</span>
+                    }
+                    else
+                    {
+                        <span class="gb-t2">on @Host(status.Instance)</span>
+                    }
+                    @if (status.ExpiresAt is { } expires)
+                    {
+                        <span class="@(ExpiresSoon ? "gb-tag gb-tag--warn" : "gb-t3")"><Tip Key="settings.gitlab.expires">expires @expires.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)@(ExpiresSoon ? ": renew it soon" : "")</Tip></span>
+                    }
+                    @if (status.Scopes is { Count: > 0 } scopes)
+                    {
+                        <span class="gb-t3"><Tip Key="settings.gitlab.scopes">scopes <code>@string.Join(", ", scopes)</code></Tip></span>
+                    }
+                }
+                else
+                {
+                    <span class="gb-pill2 gb-tone-warn"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />No token</span>
+                    <span class="gb-t3">Public projects on @Host(status.Instance) only, with nothing reported to GitLab.</span>
+                }
+            </div>
+            @if (status.TokenSaved && status.Missing.Count > 0)
+            {
+                <Banner Tone="warn" Title="The token lacks scopes Gitberth uses">
+                    <ul style="margin:4px 0 0;padding-left:18px">
+                        @foreach (var (scope, what) in status.Missing)
+                        {
+                            <li><code>@scope</code>: for @what</li>
+                        }
+                    </ul>
+                </Banner>
+            }
+            @if (checkWarning is not null)
+            {
+                <Banner Tone="warn" Title="About the token">@checkWarning</Banner>
+            }
+            <div class="gb-fgrid">
+                <Field Label="GitLab address" For="gl-url" Tip="settings.gitlab.address" Help="gitlab.com, or your own GitLab's address (with the path it's served under, if any). GitLab apps follow it.">
+                    <input id="gl-url" class="gb-input gb-input--mono" placeholder="https://gitlab.com" value="@urlInput" @oninput="e => urlInput = e.Value?.ToString()"
+                           autocomplete="off" spellcheck="false" disabled="@busy" />
+                </Field>
+                <Field Label="@(status.TokenSaved ? "Replace the token" : "Token")" For="gl-token" Tip="settings.gitlab.token" Help="Kept encrypted, and never shown again once it's saved.">
+                    <input id="gl-token" type="password" class="gb-input gb-input--mono" placeholder="glpat-…" value="@newToken" @oninput="e => newToken = e.Value?.ToString()"
+                           autocomplete="new-password" disabled="@busy" />
+                </Field>
+            </div>
+            <div class="gb-row gb-row--wrap">
+                <Btn Kind="BtnKind.Primary" OnClick="SaveAsync" Busy="busy" Disabled="@(!CanSave)" Tip="settings.gitlab.save">@(string.IsNullOrWhiteSpace(newToken) ? "Save" : status.TokenSaved ? "Replace token" : "Save token")</Btn>
+                @if (status.TokenSaved)
+                {
+                    <Btn OnClick="CheckAsync" Disabled="busy" Icon="@Icons.Material.Outlined.VerifiedUser" Tip="settings.gitlab.check">Check the token</Btn>
+                    <Btn Kind="BtnKind.Danger" OnClick="RemoveAsync" Disabled="busy" Tip="settings.gitlab.remove-token">Remove token</Btn>
+                }
+            </div>
+            <p class="gb-help">
+                A <a href="@($"{status.Instance}/-/user_settings/personal_access_tokens")" target="_blank" rel="noopener">personal access token</a>
+                (or a project or group access token) with the <strong>api</strong> scope does everything: it reads and clones the projects you deploy,
+                reads and saves their CI/CD variables, reports deploys on commits and merge requests, and adds Gitberth's project hook. With only
+                <strong>read_api</strong> and <strong>read_repository</strong> Gitberth deploys, previews and reads the variables, and reports nothing.
+                Its user needs the Maintainer role on a project for its variables and its hook, Developer for statuses. Gitberth never changes your code.
+            </p>
+
+            <div class="gb-h3" style="margin-top:6px">What deploys tell GitLab<Tip Key="settings.gitlab.reports" /></div>
+            @foreach (var problem in GitLabState.Problems)
+            {
+                <Banner Tone="warn" Title="@ProblemTitle(problem)">@problem.Text</Banner>
+            }
+            <SwitchRow @key="@($"glst{switchKey}")" Title="Commit statuses" Value="statusesOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitLabStatuses, v)" Disabled="busy" Tip="settings.gitlab.statuses"
+                       Sub="Each deploy marks its commit on GitLab: running while it builds, then success (with the app's address) or failed (with a link to the deploy log). Needs the api scope." />
+            <SwitchRow @key="@($"glcm{switchKey}")" Title="Comments on merge requests" Value="commentsOn" ValueChanged="v => SetIntegrationAsync(SettingKeys.GitLabComments, v)" Disabled="busy" Tip="settings.gitlab.comments"
+                       Sub="A preview of a merge request keeps one comment on it up to date: its state, address, commit and time. Needs the api scope." />
+
+            <div class="gb-h3" style="margin-top:6px">Instant deploys<Tip Key="settings.gitlab.instant-deploys" /></div>
+            @if (hookHost is null)
+            {
+                <p class="gb-help">
+                    GitLab can tell Gitberth about a push or a merge request the moment it happens, through the host name for webhooks in
+                    <a href="settings#github-integration">GitHub integration › Instant deploys</a>, which GitLab's hooks share. Until one is set, Gitberth
+                    checks for new commits every @interval seconds.
+                </p>
+            }
+            else
+            {
+                <dl class="gb-kv">
+                    <dt><Tip Key="settings.gitlab.hook-url">URL</Tip></dt>
+                    <dd><CopyText Text="@DomainService.GitLabWebhookUrl(hookHost)" Label="the GitLab hook's URL" /></dd>
+                    <dt><Tip Key="settings.gitlab.secret-token">Secret token</Tip></dt>
+                    <dd>
+                        @if (hookSecret is not null)
+                        {
+                            <span class="gb-row" style="gap:6px">
+                                <code>@(showSecret ? hookSecret : new string('•', 16))</code>
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => showSecret = !showSecret" Label="@(showSecret ? "Hide the secret token" : "Show the secret token")">@(showSecret ? "Hide" : "Show")</Btn>
+                                <CopyButton Value="@hookSecret" Label="the GitLab hook's secret token" />
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="gb-t3">Made with the first project hook.</span>
+                        }
+                    </dd>
+                    <dt><Tip Key="settings.gitlab.trigger">Trigger</Tip></dt>
+                    <dd><code>@string.Join(", ", GitLabApi.HookEvents)</code></dd>
+                </dl>
+                <p class="gb-help">
+                    Gitberth adds this project hook to every GitLab project it deploys, with SSL verification on, which needs the <strong>api</strong> scope
+                    and the Maintainer role. Without them, add it by hand on each project: Settings › Webhooks › Add new webhook, with the values above.
+                </p>
+                @if (GitLabState.Hooks.Count > 0)
+                {
+                    <ul class="gb-dnotes" style="padding-left:18px" aria-label="GitLab projects' hooks">
+                        @foreach (var hook in GitLabState.Hooks)
+                        {
+                            <li style="@(hook.Ok ? null : "color:#ffd98a")"><code>@hook.Repo</code>: @hook.Text</li>
+                        }
+                    </ul>
+                }
+            }
+        }
+    </div>
+</section>
+
+@code {
+    private GitLabStatus? status;
+    private string? urlInput, newToken, checkWarning, hookHost, hookSecret;
+    private bool busy, statusesOn = true, commentsOn = true, showSecret;
+    // Bumped when saving a switch fails, which re-creates it so it shows the saved state rather than the click.
+    private int switchKey;
+    private int interval;
+
+    private bool ExpiresSoon => status?.ExpiresAt is { } at && at < DateTimeOffset.UtcNow.AddDays(14);
+
+    // Something to save: a token typed, or another address.
+    private bool CanSave => !busy && status is not null
+        && (!string.IsNullOrWhiteSpace(newToken) || (GitLabRepoRef.NormalizeInstance(urlInput, out _) is { } typed && !string.Equals(typed, status.Instance, StringComparison.OrdinalIgnoreCase)));
+
+    private static string Host(string instance) => new GitLabConnection(instance, null).Host;
+
+    // GitLab refused the token itself, or only on one project (the others carry on).
+    private static string ProblemTitle(GitHubProblem problem) => (problem.Feature, problem.Repo) switch
+    {
+        (GitHubFeature.Statuses, null) => "Commit statuses aren't set: GitLab refused the token",
+        (GitHubFeature.Statuses, { } repo) => $"Commit statuses aren't set on {repo}",
+        (GitHubFeature.Comments, null) => "Merge request comments aren't made: GitLab refused the token",
+        (GitHubFeature.Comments, { } repo) => $"Merge request comments aren't made on {repo}",
+        (_, null) => "The project hook isn't added to your projects: GitLab refused the token",
+        (_, { } repo) => $"The project hook isn't added to {repo}",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        GitLabState.Changed += OnChanged;
+        await LoadAsync();
+    }
+
+    public void Dispose() => GitLabState.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task LoadAsync()
+    {
+        status = await GitLabSettings.StatusAsync();
+        urlInput = status.Instance;
+        statusesOn = await Settings.GetAsync(SettingKeys.GitLabStatuses) != "false";
+        commentsOn = await Settings.GetAsync(SettingKeys.GitLabComments) != "false";
+        hookHost = await Domains.WebhookHostAsync();
+        hookSecret = hookHost is null ? null : await Settings.GetSecretAsync(SettingKeys.GitLabWebhookSecret);
+        interval = Watch.IntervalSeconds;
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        try
+        {
+            var saved = await GitLabSettings.SaveAsync(urlInput, newToken);
+            checkWarning = saved.Check?.Warning is { } warning && saved.Ok ? warning : null;
+            if (!saved.Ok)
+            {
+                Snackbar.Add(saved.Message, Severity.Error);
+                return;
+            }
+            newToken = null;
+            await LoadAsync();
+            // The token or the address is new: every GitLab project's hook is set up again, and every project looked at.
+            Webhooks.Poke();
+            Watch.CheckNow();
+            Snackbar.Add(saved.Message, Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task CheckAsync()
+    {
+        busy = true;
+        try
+        {
+            var checkedNow = await GitLabSettings.CheckAsync();
+            checkWarning = checkedNow.Check?.Warning;
+            await LoadAsync();
+            if (checkedNow.Ok) Webhooks.Poke();
+            Snackbar.Add(checkedNow.Message, checkedNow.Ok ? Severity.Success : Severity.Error);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        var confirmed = await Dialogs.ShowMessageBoxAsync("Remove the GitLab token?",
+            "Private GitLab projects can't be cloned, their CI/CD variables can't be read, and GitLab hears nothing from Gitberth until another token is saved. "
+            + "Project hooks Gitberth added stay on GitLab.",
+            yesText: "Remove", cancelText: "Cancel");
+        if (confirmed != true) return;
+        busy = true;
+        try
+        {
+            await GitLabSettings.RemoveTokenAsync();
+            checkWarning = null;
+            await LoadAsync();
+            Snackbar.Add("The GitLab token is removed.", Severity.Info);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // On unless turned off: off is saved as "false", on as nothing.
+    private async Task SetIntegrationAsync(string key, bool on)
+    {
+        busy = true;
+        try
+        {
+            await Settings.SetAsync(key, on ? null : "false");
+            if (key == SettingKeys.GitLabStatuses) statusesOn = on;
+            else commentsOn = on;
+            var said = key == SettingKeys.GitLabStatuses
+                ? on ? "Deploys set commit statuses on GitLab again." : "Deploys don't set commit statuses on GitLab any more."
+                : on ? "Previews comment on their merge requests again." : "Previews don't comment on merge requests any more.";
+            Audit.Record(new Gitberth.Audit.AuditEntry("settings.gitlab.changed", said)
+            {
+                Target = "GitLab integration",
+                Changes = [new(key == SettingKeys.GitLabStatuses ? "Commit statuses" : "Comments on merge requests", on ? "off" : "on", on ? "on" : "off")],
+            });
+            Snackbar.Add(said, Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

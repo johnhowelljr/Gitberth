@@ -14,7 +14,8 @@ public enum ReachAction { None, PublishOnLan, TurnOnLanAddress, JoinShared }
 
 /// <summary>Where a path starts: the internet, the LAN, the host, a network, the own LAN address.</summary>
 /// <param name="Href">A link of its own: another container whose network it shares.</param>
-public sealed record ReachSource(string Title, string? Sub, string Icon, ReachTone Tone, bool Ghost = false, bool MonoSub = false, string? Href = null);
+/// <param name="Tip">Its tip's key in the catalog (Help/Tips/network.yaml): who comes in that way, and how.</param>
+public sealed record ReachSource(string Title, string? Sub, string Icon, ReachTone Tone, bool Ghost = false, bool MonoSub = false, string? Href = null, string? Tip = null);
 
 /// <summary>A node a path goes through before the host port: the Cloudflare tunnel.</summary>
 public sealed record ReachVia(string Title, string Sub, string Image);
@@ -102,6 +103,9 @@ public sealed record ReachModel(IReadOnlyList<ReachLane> ThroughHost, ReachHostP
     /// <summary>At most this many paths straight in; more networks fold into the last one.</summary>
     public const int MaxDirect = 4;
 
+    /// <summary>The own-address path's button while own LAN addresses are off for the whole host: it leads to Settings.</summary>
+    public const string SetUpLanText = "Set up in Settings";
+
     public static string ToneClass(ReachTone tone) => tone switch
     {
         ReachTone.Public => "gb-ac-public",
@@ -121,18 +125,18 @@ public sealed record ReachModel(IReadOnlyList<ReachLane> ThroughHost, ReachHostP
 
         if (mode == "host")
         {
-            direct.Add(new ReachLane(new ReachSource("Your LAN", lanSub, Icons.Material.Outlined.Lan, ReachTone.Lan),
+            direct.Add(new ReachLane(new ReachSource("Your LAN", lanSub, Icons.Material.Outlined.Lan, ReachTone.Lan, Tip: "network.reach.lan-host-mode"),
                 $"{i.LanHost} · any port it opens"));
         }
         else if (mode.StartsWith("container:", StringComparison.Ordinal))
         {
             var other = i.SharesWith ?? mode["container:".Length..];
             direct.Add(new ReachLane(new ReachSource($"{other}'s network", "Its ports and addresses are " + other + "'s", Icons.Material.Outlined.CallSplit,
-                ReachTone.Internal, Href: "apps/" + Uri.EscapeDataString(other)), "shares it"));
+                ReachTone.Internal, Href: "apps/" + Uri.EscapeDataString(other), Tip: "network.reach.shares"), "shares it"));
         }
         else if (mode == "none")
         {
-            direct.Add(new ReachLane(new ReachSource("No network", "Network mode none", Icons.Material.Outlined.Block, ReachTone.Internal, Ghost: true),
+            direct.Add(new ReachLane(new ReachSource("No network", "Network mode none", Icons.Material.Outlined.Block, ReachTone.Internal, Ghost: true, Tip: "network.reach.no-network"),
                 "Nothing reaches it", Ghost: true));
         }
         else
@@ -176,16 +180,16 @@ public sealed record ReachModel(IReadOnlyList<ReachLane> ThroughHost, ReachHostP
         }
 
         if (lan is not null)
-            lanes.Add(new ReachLane(new ReachSource("Your LAN", lanSub, Icons.Material.Outlined.Lan, ReachTone.Lan),
+            lanes.Add(new ReachLane(new ReachSource("Your LAN", lanSub, Icons.Material.Outlined.Lan, ReachTone.Lan, Tip: "network.reach.lan"),
                 ContainerPorts.Address(lan.Access == PortAccess.Custom ? lan.HostIp?.Trim('[', ']') ?? i.LanHost : i.LanHost, lan.HostPort!.Value)));
         else
-            lanes.Add(new ReachLane(new ReachSource("Your LAN", lanSub, Icons.Material.Outlined.Lan, ReachTone.Lan),
+            lanes.Add(new ReachLane(new ReachSource("Your LAN", lanSub, Icons.Material.Outlined.Lan, ReachTone.Lan, Tip: "network.reach.lan"),
                 published.Count > 0 ? "Not on the LAN" : "Not published", Ghost: true,
                 Action: i.CanPublish && i.Ports.Count > 0 ? ReachAction.PublishOnLan : ReachAction.None, ActionText: "Publish on LAN"));
 
         // Programs on the host itself, when a port is published there only and the tunnel isn't already drawn using it.
         if (host is not null && lan is null && !lanes.Any(l => l.Via is not null && !l.Ghost))
-            lanes.Insert(0, new ReachLane(new ReachSource("This host", "programs on the host", Icons.Material.Filled.Lock, ReachTone.Host),
+            lanes.Insert(0, new ReachLane(new ReachSource("This host", "programs on the host", Icons.Material.Filled.Lock, ReachTone.Host, Tip: "network.reach.host"),
                 ContainerPorts.Address("127.0.0.1", host.HostPort!.Value)));
 
         ReachHostPort hp;
@@ -217,24 +221,24 @@ public sealed record ReachModel(IReadOnlyList<ReachLane> ThroughHost, ReachHostP
         foreach (var n in named)
         {
             var others = n.Others.Count == 0 ? "nothing else on it" : string.Join(" · ", n.Others.Take(3)) + (n.Others.Count > 3 ? $" +{n.Others.Count - 3}" : "");
-            lanes.Add(new ReachLane(new ReachSource($"{n.Name} network", others, Icons.Material.Outlined.Hub, ReachTone.Internal),
+            lanes.Add(new ReachLane(new ReachSource($"{n.Name} network", others, Icons.Material.Outlined.Hub, ReachTone.Internal, Tip: "network.reach.network"),
                 port is int p ? ContainerPorts.Address(i.Name, p) : $"{i.Name}, by name"));
         }
         if (i.Networks.Count > 3)
         {
             var rest = i.Networks.Skip(2).ToList();
             lanes.Add(new ReachLane(new ReachSource($"{rest.Count} more networks", string.Join(" · ", rest.Select(r => r.Name)), Icons.Material.Outlined.Hub,
-                ReachTone.Internal), port is int p ? ContainerPorts.Address(i.Name, p) : $"{i.Name}, by name"));
+                ReachTone.Internal, Tip: "network.reach.network"), port is int p ? ContainerPorts.Address(i.Name, p) : $"{i.Name}, by name"));
         }
         if (i.Networks.Count == 0 && i.OnlyDefaultBridge)
-            lanes.Add(new ReachLane(new ReachSource("Default bridge", "no names", Icons.Material.Outlined.Hub, ReachTone.Internal, Ghost: true),
+            lanes.Add(new ReachLane(new ReachSource("Default bridge", "no names", Icons.Material.Outlined.Hub, ReachTone.Internal, Ghost: true, Tip: "network.reach.default-bridge"),
                 "Not on a shared network", Ghost: true, Action: i.CanJoin ? ReachAction.JoinShared : ReachAction.None, ActionText: $"Join {i.SharedNetwork}"));
         if (i.OwnLanAddress is { } own)
-            lanes.Add(new ReachLane(new ReachSource("Own address", $"{own} · {(i.OwnLanAutomatic ? "automatic" : "static")}", Icons.Material.Outlined.Router, ReachTone.Lan),
+            lanes.Add(new ReachLane(new ReachSource("Own address", $"{own} · {(i.OwnLanAutomatic ? "automatic" : "static")}", Icons.Material.Outlined.Router, ReachTone.Lan, Tip: "network.reach.own-address"),
                 port is int p ? ContainerPorts.Address(own, p) : $"{own} · any port"));
         else if (i.OwnLanPossible)
-            lanes.Add(new ReachLane(new ReachSource("Own LAN address", "Its own IP on your LAN", Icons.Material.Outlined.Router, ReachTone.Lan, Ghost: true),
-                "Off", Ghost: true, Action: ReachAction.TurnOnLanAddress, ActionText: i.OwnLanOff ? "Set up in Settings" : "Turn on"));
+            lanes.Add(new ReachLane(new ReachSource("Own LAN address", "Its own IP on your LAN", Icons.Material.Outlined.Router, ReachTone.Lan, Ghost: true, Tip: "network.reach.own-address-off"),
+                "Off", Ghost: true, Action: ReachAction.TurnOnLanAddress, ActionText: i.OwnLanOff ? SetUpLanText : "Turn on"));
         return lanes.Take(MaxDirect);
     }
 
@@ -244,7 +248,7 @@ public sealed record ReachModel(IReadOnlyList<ReachLane> ThroughHost, ReachHostP
         && !i.Ports.Any(p => p.ContainerPort == w && p.Published && p.HostPort is not null);
 
     private static ReachSource InternetOf(ReachInput i) =>
-        new("Internet", i.Domains[0] + (i.Domains.Count > 1 ? $" +{i.Domains.Count - 1}" : ""), Icons.Material.Outlined.Public, ReachTone.Public);
+        new("Internet", i.Domains[0] + (i.Domains.Count > 1 ? $" +{i.Domains.Count - 1}" : ""), Icons.Material.Outlined.Public, ReachTone.Public, Tip: "network.reach.internet");
 
     // The port the drawing is about: the web port, else a database's own port, else the lowest published one, else the lowest.
     internal static PortRule? Primary(ReachInput i)

@@ -1,0 +1,732 @@
+# Tips for the Network page (Components/Pages/NetworkPage.razor, NetworkPageView.cs) and the network cards an app's
+# Network tab and New app share (Components/Shared/Network: PortsCard, PortsTable, HostPortField, DomainsCard,
+# NetworksCard, LanAddressCard, ConnectDialog, ReachDiagram, ComposeChange; ReachModel.cs). See Help/TipCatalog.cs.
+# The access badges' own tips (badge.access.*) are H1's; these say what a choice does or what a value means here.
+
+# ---- The Network page ----
+
+network.page:
+  title: Network
+  text: >-
+    Every port held on this host and who holds it, a check of whether a port is free, and Docker's networks with who's
+    on each. It's read again every 15 seconds. To change an app's ports or networks, open its Network tab.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.live:
+  title: Live
+  text: >-
+    The page reads Docker, the tunnel's routes and the host's sockets every 15 seconds; the time is the last reading.
+    **Not updating** means Docker couldn't be read, so what's shown may be out of date.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.strip.lan-address:
+  title: LAN address
+  text: >-
+    This host's address on your LAN: every LAN address and connection string Gitberth shows starts with it. Click to
+    change it in **Settings › Network**; that changes what Gitberth shows, not where apps listen.
+  more: guides/networking#the-lan-address-of-this-host
+
+network.strip.host-ports:
+  title: Host ports
+  text: >-
+    How many ports something holds on this host now. Under it, how many of the containers' ports every device on your
+    LAN reaches, and how many only the host itself does.
+  more: guides/networking#host-ports
+
+network.strip.networks:
+  title: Networks
+  text: >-
+    How many Docker networks this host has, and how many containers are on the shared one, where every app reaches the
+    others by name.
+  more: guides/networking#the-networks-list
+
+network.strip.docker:
+  title: Docker
+  text: >-
+    The version of the Docker Engine on this host, which runs every container here.
+  more: guides/troubleshooting#docker
+
+network.ports:
+  title: Host ports
+  text: >-
+    Each port held on this host: by a container (whoever made it), by Gitberth, by the tunnel's route to a domain, or by
+    the host itself. Gitberth counts every listed port as taken when it offers a host port.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.ports.group.all:
+  title: All
+  text: >-
+    Every host port in use, whoever holds it.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.ports.group.containers:
+  title: Containers
+  text: >-
+    Ports containers publish, stopped ones included, and the ports the tunnel sends a domain to.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.ports.group.host:
+  title: The host
+  text: >-
+    Ports the host itself holds outside Docker: SSH, Docker's API and other programs that listen on a port.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.check:
+  title: Check a port
+  text: >-
+    Type a port, like `5433`, or `53/udp` for UDP, to see whether it's free on this host or who holds it. A free port in
+    the host's random range is free now, but Docker may hand it to a container it starts.
+  more: guides/networking#check-a-port
+
+network.ports.column.port:
+  title: Host port
+  text: >-
+    The port on this host, and its protocol. A run of ports that similar containers hold is folded into one line.
+  more: guides/networking#host-ports
+
+network.ports.column.held-by:
+  title: Held by
+  text: >-
+    Who holds the port: a container and its app, Gitberth itself, the tunnel's route to a domain, or something on the
+    host outside Docker. Click a container to open its app.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.ports.column.access:
+  title: Access
+  text: >-
+    Who can reach the port: **LAN** is every address of the host, **Host only** is `127.0.0.1`, and an address means
+    that one address alone.
+  more: guides/networking#who-reaches-a-port-access
+
+network.ports.column.goes-to:
+  title: Goes to
+  text: >-
+    The port inside the container a connection to this host port reaches.
+  more: guides/networking#host-ports
+
+network.ports.column.notes:
+  title: Notes
+  text: >-
+    What's worth knowing about the port: a stopped holder, a random port, a deploy holding it for a moment, a port saved
+    but not live yet, or the domains that reach it.
+  more: guides/networking#port-notes
+
+network.access.mixed:
+  title: Mixed
+  text: >-
+    Some of these ports are published on every address of the host, some on one address only. Open the line to see
+    each one's.
+  more: guides/networking#who-reaches-a-port-access
+
+network.access.one-address:
+  title: One address
+  text: >-
+    Published on this one address of the host, not on all of them. A device reaches the port only at this address, and
+    only if it can reach the address itself.
+  more: guides/networking#who-reaches-a-port-access
+
+network.note.stopped:
+  title: Stopped
+  text: >-
+    The container that holds this port is stopped. It takes the port again when it starts, so no other container can
+    have it meanwhile.
+  more: guides/networking#port-notes
+
+network.note.restarting:
+  title: Restarting
+  text: >-
+    The container is restarting: Docker lets go of the port until it's up again.
+  more: guides/networking#port-notes
+
+network.note.deploying:
+  title: Deploying
+  text: >-
+    A deploy's temporary container holds the port for a moment: the new version, on `127.0.0.1`, while Gitberth checks
+    it. Gitberth removes it when the deploy is done.
+  more: concepts/how-deploys-work#deploys-without-downtime
+
+network.note.saved:
+  title: Saved, not live
+  text: >-
+    Saved for the app: it takes the port when the change is applied, or with its next deploy. Nothing answers on it yet.
+  more: guides/networking#port-notes
+
+network.note.random:
+  title: Random
+  text: >-
+    Docker picked this host port, so it changes every time the container starts, and its address with it. Give the port
+    a fixed host port on the app's Network tab.
+  more: guides/networking#port-notes
+
+network.note.domains:
+  title: Domains
+  text: >-
+    This container's domains reach it here, through the Cloudflare Tunnel on this host.
+  more: guides/domains#how-traffic-reaches-the-app
+
+network.ports.fold:
+  title: Folded ports
+  text: >-
+    Five or more ports in a row, held by containers whose names start the same, shown as one line. Click it to list
+    each container and its port.
+  more: guides/networking#see-who-holds-a-host-port
+
+network.networks:
+  title: Networks
+  text: >-
+    Docker's networks on this host. Containers on the same network reach each other by name; the shared one has every
+    app. Click a network to see who's on it, their names there and their addresses.
+  more: guides/networking#the-networks-list
+
+network.networks.column.name:
+  title: Network
+  text: >-
+    The network's name, with what Gitberth knows it as: the shared network, own LAN addresses, Docker's own, or the
+    Compose project that made it.
+  more: guides/networking#the-networks-list
+
+network.networks.column.driver:
+  title: Driver
+  text: >-
+    How Docker connects the network: **bridge** is a private network on this host, **ipvlan** and **macvlan** put
+    containers on your LAN, **host** is the host's own network and **null** is none.
+  more: guides/networking#the-networks-list
+
+network.networks.column.subnet:
+  title: Subnet
+  text: >-
+    The addresses Docker gives containers on this network. On a bridge network they're private to this host.
+  more: guides/networking#the-networks-list
+
+network.networks.column.members:
+  title: On it
+  text: >-
+    How many containers are on the network, stopped ones included.
+  more: guides/networking#the-networks-list
+
+network.tag.shared:
+  title: Shared network
+  text: >-
+    Gitberth's network: every app is on it, so apps reach each other by name, like `postgres:5432`, without publishing
+    a port on the host.
+  default: gitberth
+  more: guides/networking#the-networks-list
+
+network.tag.own-lan:
+  title: Own LAN addresses
+  text: >-
+    The network `gitberth-lan`, which gives containers their own address on your LAN. It's there while own LAN addresses
+    are on in **Settings**.
+  more: guides/networking#give-a-container-its-own-lan-address
+
+network.tag.internal:
+  title: "Internal: no way out"
+  text: >-
+    Docker made it internal: containers on it reach each other, but nothing outside it, not your LAN or the internet.
+  more: guides/networking#the-networks-list
+
+network.tag.system:
+  title: Docker's own
+  text: >-
+    A network Docker always has, like `bridge`, `host` and `none`. Gitberth doesn't join containers to these; on the
+    default bridge, containers can't reach each other by name.
+  more: guides/networking#the-networks-list
+
+network.members.column.names:
+  title: Names here
+  text: >-
+    The names other containers on this network reach it by: its own name and any extra names it was given here.
+  more: guides/networking#the-networks-list
+
+network.members.column.ip:
+  title: IP address
+  text: >-
+    Its address on this network. It changes whenever the container is recreated, so connect by name where the network
+    gives names.
+  more: guides/networking#the-networks-list
+
+network.members.column.own-lan-ip:
+  title: Own LAN address
+  text: >-
+    Its own address on your LAN: devices on your network reach it there, and it stays when the container is recreated.
+  more: guides/networking#give-a-container-its-own-lan-address
+
+network.member.deploy:
+  title: A deploy's container
+  text: >-
+    A container a deploy of this app runs for a while, besides the app's own: the new version while it's checked, or
+    the old one on its way out. Gitberth removes it when the deploy is done.
+  more: concepts/how-deploys-work#deploys-without-downtime
+
+network.member.stopped:
+  title: Stopped
+  text: >-
+    It's on this network but not running: nothing reaches it here until it starts.
+  more: guides/networking#the-networks-list
+
+# ---- An app's Ports card and table ----
+
+network.ports-card:
+  title: Ports
+  text: >-
+    The ports the container listens on, who reaches each (its access) and the host port that leads to it. Nothing
+    changes until you apply: the container is recreated, a Git app deploys without a build, and a Compose container
+    gets the lines to put in its file.
+  more: reference/app-settings#ports
+
+network.ports-card.exposed:
+  title: Exposed by the image
+  text: >-
+    The ports the image says its program listens on. Docker doesn't publish them by itself: each is reached only as the
+    table says.
+  more: guides/networking#publish-a-port-on-the-lan
+
+network.ports-card.add:
+  title: Add port
+  text: >-
+    Adds a row for another port the container listens on. Nothing changes until you apply.
+  more: guides/networking#publish-a-port-on-the-lan
+
+network.ports-card.put-back:
+  title: Put the original back
+  text: >-
+    Undoes the change: the new container stops and is removed (its volumes stay), and the original takes its name, its
+    restart policy and its place back.
+  more: reference/app-settings#how-changes-apply
+
+network.ports-card.save-later:
+  title: Save for next deploy
+  text: >-
+    Saves the ports without deploying now: the app keeps running as it is, and its next deploy takes them.
+  more: guides/networking#git-apps-and-compose-containers
+
+network.port.web:
+  title: Web port
+  text: >-
+    The port the app's web page is on: **Open**, its domains, the health URL and scheduled jobs use it. Click the globe
+    to make a port the web port; moving it restarts nothing.
+  more: guides/networking#the-web-port
+
+network.port.container-port:
+  title: Container port
+  text: >-
+    The port the program inside the container listens on. It must be the one the program really opens, or nothing
+    answers there.
+  more: reference/app-settings#ports
+
+network.port.protocol:
+  title: Protocol
+  text: >-
+    TCP for almost everything, web pages and databases included; UDP for the few that need it, like DNS.
+  default: TCP
+  more: reference/app-settings#ports
+
+network.port.access:
+  title: Access
+  text: >-
+    Who reaches the port. **Internal**: containers on its network, by name. **LAN**: every device on your network, at
+    this host's address and the host port. **Host only**: programs on the host itself.
+  more: guides/networking#who-reaches-a-port-access
+
+network.port.host-port:
+  title: Host port
+  text: >-
+    The port on this host that leads to the container port. It must be free on the host; the field says who holds it
+    when it isn't, and offers a free one.
+  more: guides/networking#host-ports
+
+network.port.address:
+  title: Address
+  text: >-
+    Where the port is reached: this host's LAN address and the host port for LAN, `127.0.0.1` for Host only, the
+    container's name on its network for Internal.
+  more: guides/networking#who-reaches-a-port-access
+
+network.port.service:
+  title: Usual service
+  text: >-
+    What usually listens on this port number. Gitberth goes by the number alone, so the container may run something
+    else there.
+  more: reference/app-settings#ports
+
+network.port.access.internal:
+  title: Internal
+  text: >-
+    Not published on the host: only containers on its network reach it, by its name. The LAN and the host don't.
+  more: guides/networking#reach-other-containers-by-name
+
+network.port.access.lan:
+  title: LAN
+  text: >-
+    Published on every address of the host: every device on your network reaches it at this host's LAN address and the
+    host port.
+  more: guides/networking#publish-a-port-on-the-lan
+
+network.port.access.host-only:
+  title: Host only
+  text: >-
+    Published on `127.0.0.1` only: programs on the host itself reach it, like the Cloudflare tunnel. The rest of your LAN
+    doesn't.
+  more: guides/networking#who-reaches-a-port-access
+
+network.port.access.custom:
+  title: One address only
+  text: >-
+    Docker publishes it on one address of the host alone. Gitberth keeps it as it is, but never offers it for another
+    port; LAN publishes it on every address instead.
+  more: guides/networking#who-reaches-a-port-access
+
+network.port.keep:
+  title: Keep this port
+  text: >-
+    Fixes the host port at the one Docker picked this time, so the address stops changing at every start.
+  more: guides/networking#host-ports
+
+network.port.use-own:
+  title: Use the container's port
+  text: >-
+    Fixes the host port at the container's own port number, so the address stops changing at every start.
+  more: guides/networking#host-ports
+
+network.port.use-free:
+  title: Use a free port
+  text: >-
+    Puts this host port in the field: the container's own port when it's free, else the next free one above it.
+  more: guides/networking#host-ports
+
+network.port.no-address:
+  title: No address
+  text: >-
+    Nothing reaches this Internal port by name: the container is on no shared network. Join one under **Networks**.
+  more: guides/networking#reach-other-containers-by-name
+
+network.compose.command:
+  title: Then on the host
+  text: >-
+    The command that makes Compose recreate the service from the changed file. It names the project and its files from
+    the container's labels, so it works from any folder.
+  more: guides/networking#git-apps-and-compose-containers
+
+# ---- An app's Domains card ----
+
+network.domains:
+  title: Domains
+  text: >-
+    The app's own domains, like app.example.com, through the Cloudflare Tunnel on this host: Gitberth makes each one's
+    route and DNS record. They go to the app's web port.
+  more: guides/domains#add-a-domain-to-an-app
+
+network.domains.check-again:
+  title: Check again
+  text: >-
+    Reads the tunnel's routes and the DNS records again, and says for each domain whether it works and why not.
+  more: guides/domains#when-a-domain-isnt-working
+
+network.domains.main:
+  title: Main
+  text: >-
+    The main domain: the address the app is told it has (`VERCEL_URL`, `AUTH_URL`) and the one its uptime check uses.
+  more: guides/domains#the-main-domain
+
+network.domains.live:
+  title: Live
+  text: >-
+    The tunnel sends this domain to the app, and its DNS record points at the tunnel.
+  more: guides/domains#how-traffic-reaches-the-app
+
+network.domains.not-working:
+  title: Not working
+  text: >-
+    Visitors don't reach the app at this domain: the line under it says why. A button next to it fixes what Gitberth
+    can.
+  more: guides/domains#when-a-domain-isnt-working
+
+network.domains.showing-down-page:
+  title: Down page
+  text: >-
+    The app can't be served now, so visitors to this domain get Gitberth's down page instead of Cloudflare's error. The
+    line under it says why.
+  more: guides/domains#the-down-page
+
+network.domains.fix:
+  title: Fix
+  text: >-
+    Writes the tunnel's routes and the DNS records again, as Gitberth keeps them for every app.
+  more: guides/domains#when-a-domain-isnt-working
+
+network.domains.point-here:
+  title: Point it here
+  text: >-
+    Asks first, then replaces the domain's DNS records in Cloudflare with one that sends it to your tunnel. Whatever it
+    points at now stops getting its visitors.
+  more: guides/domains#domains-made-in-cloudflare
+
+network.domains.serve-all-paths:
+  title: Serve every path
+  text: >-
+    Asks first, then sends every address on the domain to the app, not only the paths the tunnel matches now.
+  more: guides/domains#domains-made-in-cloudflare
+
+network.domains.protected:
+  title: Protected
+  text: >-
+    Visitors sign in through Cloudflare Access before they reach the app: Cloudflare emails a code, and only the
+    addresses in **Settings › Domains › Protection** get in. Scripts and webhooks can't call it any more.
+  more: guides/domains#turn-it-on-for-a-domain
+
+network.domains.make-main:
+  title: Make main
+  text: >-
+    Makes this the main domain. The app is told its new address with its next build.
+  more: guides/domains#the-main-domain
+
+network.domains.preview-down-page:
+  title: Preview the down page
+  text: >-
+    Opens, in a new tab, the down page this domain's visitors get while the app can't be served.
+  more: guides/domains#the-down-page
+
+network.domains.remove:
+  title: Remove the domain
+  text: >-
+    Asks first, then takes the domain's route out of your tunnel, and its DNS record if Gitberth added it. A record you
+    made yourself stays, and the app keeps running.
+  more: guides/domains#remove-a-domain
+
+network.domains.down-page:
+  title: Down page
+  text: >-
+    While the app can't be served (stopped, a deploy replacing it), its domains show a plain "temporarily unavailable"
+    page instead of Cloudflare's error. It saves as you switch it.
+  default: "On"
+  more: guides/uptime-and-status-page#the-down-page
+
+network.domains.down-message:
+  title: Save message
+  text: >-
+    Saves the message for visitors that the down page shows, like when the app will be back. Empty, the page has none
+    of yours.
+  example: Back by 9:00 UTC.
+  more: guides/uptime-and-status-page#turn-it-off-or-add-a-message
+
+network.domains.add:
+  title: Add domain
+  text: >-
+    Adds the domain typed and sends it to the app's web port: Gitberth makes the tunnel's route and the DNS record.
+    The domain's zone must be in your Cloudflare account.
+  example: app.example.com
+  more: guides/domains#add-a-domain-to-an-app
+
+network.domains.add-publish:
+  title: Add domain and publish
+  text: >-
+    The tunnel reaches apps through a host port, and the web port has none: this publishes it as Host only first, then
+    adds the domain. The LAN still can't reach it.
+  more: guides/domains#when-the-web-port-is-internal
+
+# ---- An app's Networks card ----
+
+network.networks-card:
+  title: Networks
+  text: >-
+    The Docker networks the container is on, the names other containers there reach it by, and who else is there.
+    Joining is instant; leaving asks first.
+  more: reference/app-settings#networks
+
+network.networks-card.pending:
+  title: Not joined yet
+  text: >-
+    Saved, but the container isn't on this network now: an app joins it with its next deploy, any other container when
+    it next starts.
+  more: reference/app-settings#networks
+
+network.networks-card.names:
+  title: Names
+  text: >-
+    What other containers on this network call it: its own name, and any extra name it joined with. Use a name, never
+    the IP address.
+  more: guides/networking#reach-other-containers-by-name
+
+network.networks-card.ip:
+  title: IP address
+  text: >-
+    Its address on this network. It changes whenever the container is recreated, so connect by name where the network
+    gives names.
+  more: guides/networking#reach-other-containers-by-name
+
+network.networks-card.also-here:
+  title: Also here
+  text: >-
+    Other containers on this network: they reach this one by its names, and it reaches them by theirs.
+  more: guides/networking#reach-other-containers-by-name
+
+network.networks-card.leave:
+  title: Leave
+  text: >-
+    Asks first, saying who loses the name and where its published ports go, then takes the container off the network.
+    It keeps running.
+  more: reference/app-settings#networks
+
+network.networks-card.join:
+  title: Join
+  text: >-
+    Puts the container on the network chosen, at once and without a restart: containers there reach it by its name, and
+    by the extra name if you give one.
+  more: reference/app-settings#networks
+
+# ---- An app's Own LAN address card ----
+
+network.own-lan-card:
+  title: Own LAN address
+  text: >-
+    An address of its own on your LAN, besides its ports on this host's address: it answers there on every port it
+    listens on, like a device of its own. The host and the tunnel can't reach it there.
+  more: guides/networking#give-an-app-an-address
+
+network.own-lan-card.off:
+  title: "Off"
+  text: >-
+    No address of its own: devices reach it only at this host's address, on its published host ports.
+  more: guides/networking#give-an-app-an-address
+
+network.own-lan-card.automatic:
+  title: Automatic
+  text: >-
+    The next free address of the block in **Settings › Own LAN addresses**, kept across restarts and recreates.
+  more: guides/networking#give-an-app-an-address
+
+network.own-lan-card.static:
+  title: Static
+  text: >-
+    An address you type, from this host's network. Keep it out of your router's DHCP range and the block, so no device
+    gets it too.
+  more: guides/networking#give-an-app-an-address
+
+network.own-lan-card.apply:
+  title: Apply
+  text: >-
+    Gives the container the address at once; nothing restarts. Gitberth then checks the address answers, and says what
+    it found.
+  more: guides/networking#give-an-app-an-address
+
+network.own-lan-card.remove:
+  title: Remove the address
+  text: >-
+    Asks first, then takes the address away at once: devices using it lose it. It's still reached on this host's
+    address and its host ports.
+  more: guides/networking#give-an-app-an-address
+
+# ---- The Connect dialog ----
+
+network.connect.host:
+  title: Host
+  text: >-
+    Where to connect: from the LAN, this host's address (or the container's own); from a container, the name it's
+    reached by on its network.
+  more: guides/databases#connect-to-a-database
+
+network.connect.url:
+  title: URL
+  text: >-
+    Every value above in one connection string, ready to paste into an app's settings. Copying it copies the real
+    password, even while it shows dots.
+  more: guides/databases#connect-to-a-database
+
+# ---- How it's reached ----
+
+network.reach:
+  title: How it's reached
+  text: >-
+    Every way into the container, drawn as a path in its access colour. A dashed path is off, with the button that
+    turns it on.
+  more: reference/app-settings#network-tab
+
+network.reach.internet:
+  title: Internet
+  text: >-
+    Visitors reach the app at its domain, through the Cloudflare Tunnel on this host, which passes each request on to
+    the app's web port.
+  more: guides/domains#how-traffic-reaches-the-app
+
+network.reach.lan:
+  title: Your LAN
+  text: >-
+    Devices on your network reach the container at this host's LAN address and the host port, when a port is published
+    on the LAN.
+  more: guides/networking#publish-a-port-on-the-lan
+
+network.reach.lan-host-mode:
+  title: Your LAN
+  text: >-
+    It uses the host's own network, so Docker maps no ports: devices reach it at this host's address, on whatever port
+    its program opens.
+  more: guides/networking#host-network-mode
+
+network.reach.host:
+  title: This host
+  text: >-
+    Programs on the host itself, like the Cloudflare tunnel, reach it at `127.0.0.1` and the host port. The rest of your
+    LAN doesn't.
+  more: guides/networking#who-reaches-a-port-access
+
+network.reach.network:
+  title: Docker network
+  text: >-
+    Containers on this network reach it by its name and the container port, without anything published on the host.
+  more: guides/networking#reach-other-containers-by-name
+
+network.reach.default-bridge:
+  title: Default bridge
+  text: >-
+    It's only on Docker's default bridge, which gives no names: other containers can't reach it by name. Join the shared
+    network to fix that.
+  more: guides/networking#reach-other-containers-by-name
+
+network.reach.own-address:
+  title: Own address
+  text: >-
+    Its own address on your LAN: devices reach it there on every port it listens on.
+  more: guides/networking#give-an-app-an-address
+
+network.reach.own-address-off:
+  title: Own LAN address
+  text: >-
+    It has no address of its own on your LAN. With one, devices reach it there on every port it listens on.
+  more: guides/networking#give-a-container-its-own-lan-address
+
+network.reach.no-network:
+  title: No network
+  text: >-
+    Its network mode is none: nothing reaches it, and it reaches nothing.
+  more: guides/networking#who-reaches-a-port-access
+
+network.reach.shares:
+  title: Another container's network
+  text: >-
+    It shares another container's network: its ports and addresses are that container's. Open it to see them.
+  more: guides/networking#who-reaches-a-port-access
+
+network.reach.publish-lan:
+  title: Publish on LAN
+  text: >-
+    Sets a port to **LAN** with a free host port, so every device on your network reaches it at this host's address.
+    You see the change before it's applied.
+  more: guides/networking#publish-a-port-on-the-lan
+
+network.reach.turn-on-lan:
+  title: Turn on
+  text: >-
+    Goes to the **Own LAN address** card below, where you give the container an address of its own.
+  more: guides/networking#give-an-app-an-address
+
+network.reach.setup-lan:
+  title: Set up in Settings
+  text: >-
+    Own LAN addresses are off on this host. This opens **Settings › Own LAN addresses**, where you turn them on first.
+  more: guides/networking#turn-on-own-lan-addresses
+
+network.reach.join-shared:
+  title: Join the shared network
+  text: >-
+    Puts the container on Gitberth's shared network at once, without a restart: every app there reaches it by name.
+  more: guides/networking#reach-other-containers-by-name

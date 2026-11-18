@@ -15,11 +15,11 @@
     Docker), every host port with who holds it (a container, whoever made it, or the host itself) and where it goes, a
     check for any port, and Docker's networks with who's on each. Every container links to its page. Read every 15 s.
 *@
-<PageHead Title="Network" Lead="Every port held on this host and who holds it, and the networks containers find each other on.">
+<PageHead Title="Network" Tip="network.page" Lead="Every port held on this host and who holds it, and the networks containers find each other on.">
     <Actions>
         @if (view is not null)
         {
-            <span class="gb-pill2 @(error is null ? "gb-tone-good" : "gb-tone-warn")">
+            <span class="gb-pill2 @(error is null ? "gb-tone-good" : "gb-tone-warn")" data-tip="network.live">
                 <i class="gb-st-dot @(error is null ? "gb-st-dot--running" : null)"></i>@(error is null ? "Live" : "Not updating") · @Format.Clock(view.ReadAt)
             </span>
         }
@@ -32,13 +32,13 @@
 }
 
 <div class="gb-hoststrip gb-kpis2 gb-np-strip" role="group" aria-label="This host's network">
-    <a class="gb-hs" href="settings#network" title="Every LAN address and connection string Gitberth shows uses it. Change it in Settings.">
+    <a class="gb-hs" href="settings#network" data-tip="network.strip.lan-address">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />LAN address</span>
         <span class="gb-hs-v gb-np-strip-mono">@(lanHost.Length > 0 ? lanHost : "–")</span>
         <span class="gb-hs-sub">Every LAN address here starts with it</span>
     </a>
     <div class="gb-hs">
-        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Host ports</span>
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" /><Tip Key="network.strip.host-ports">Host ports</Tip></span>
         @if (view is null)
         {
             <span class="gb-hs-v">–</span>
@@ -52,7 +52,7 @@
         }
     </div>
     <div class="gb-hs">
-        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks</span>
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.Hub" /><Tip Key="network.strip.networks">Networks</Tip></span>
         @if (!networksLoaded)
         {
             <span class="gb-hs-v">–</span>
@@ -75,7 +75,7 @@
         }
     </div>
     <div class="gb-hs">
-        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" />Docker</span>
+        <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.ViewInAr" /><Tip Key="network.strip.docker">Docker</Tip></span>
         <span class="gb-hs-v">@(Stats.Current.Host?.ServerVersion is { Length: > 0 } version ? version : "–")</span>
         <span class="gb-hs-sub">@(Stats.Current.Host is { } host ? $"The engine on {host.Name}" : "The engine's version")</span>
     </div>
@@ -84,7 +84,7 @@
 <section class="gb-card gb-np-card" aria-labelledby="np-ports-t">
     <div class="gb-card-head gb-np-head">
         <div class="gb-card-title" id="np-ports-t">
-            <SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Host ports
+            <SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" />Host ports<Tip Key="network.ports" />
             <span class="gb-card-sub gb-np-sub">Who holds each port, and where it goes</span>
         </div>
         @if (view is not null)
@@ -100,8 +100,9 @@
             <input value="@check" @oninput="CheckTyped" placeholder="Check a port: 5433 or 53/udp" aria-label="Check a port" spellcheck="false" autocomplete="off" />
             @if (!string.IsNullOrEmpty(check))
             {
-                <button type="button" class="gb-iconbtn" aria-label="Clear" title="Clear" @onclick="ClearCheck"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                <button type="button" class="gb-iconbtn" aria-label="Clear" data-tip-text="Clear" @onclick="ClearCheck"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
             }
+            <Tip Key="network.check" />
         </label>
         @* Always there, so screen readers announce each answer as its text changes. *@
         <span class="gb-np-answer @AnswerTone" role="status">
@@ -138,12 +139,12 @@
     {
         <div class="gb-np-list" role="table" aria-label="Host ports">
             <div class="gb-np-row gb-np-row--head" role="row">
-                <span class="gb-np-c-port" role="columnheader">Host port</span>
-                <span class="gb-np-c-who" role="columnheader">Held by</span>
+                <span class="gb-np-c-port" role="columnheader"><Tip Key="network.ports.column.port">Host port</Tip></span>
+                <span class="gb-np-c-who" role="columnheader"><Tip Key="network.ports.column.held-by">Held by</Tip></span>
                 <span class="gb-np-meta">
-                    <span class="gb-np-c-acc" role="columnheader">Access</span>
-                    <span class="gb-np-c-to" role="columnheader">Goes to</span>
-                    <span class="gb-np-c-note" role="columnheader">Notes</span>
+                    <span class="gb-np-c-acc" role="columnheader"><Tip Key="network.ports.column.access">Access</Tip></span>
+                    <span class="gb-np-c-to" role="columnheader"><Tip Key="network.ports.column.goes-to">Goes to</Tip></span>
+                    <span class="gb-np-c-note" role="columnheader"><Tip Key="network.ports.column.notes">Notes</Tip></span>
                 </span>
                 <span class="gb-np-c-act" role="columnheader"><span class="gb-sr">Open</span></span>
             </div>
@@ -157,7 +158,7 @@
                     <div class="gb-np-row gb-np-row--fold @(isOpen ? "open" : null)" role="row" @key="key">
                         <span class="gb-np-c-port" role="cell">@Port(row)</span>
                         <span class="gb-np-c-who" role="cell">
-                            <button type="button" class="gb-np-who gb-np-foldbtn" aria-expanded="@(isOpen ? "true" : "false")" @onclick="() => ToggleFold(key)"
+                            <button type="button" class="gb-np-who gb-np-foldbtn" aria-expanded="@(isOpen ? "true" : "false")" @onclick="() => ToggleFold(key)" data-tip="network.ports.fold"
                                     aria-label="@($"{(isOpen ? "Hide" : "Show")} the {count} whose names start with {row.Prefix}")">
                                 <span class="gb-np-stack gb-np-stack--deck" aria-hidden="true">
                                     @foreach (var name in row.Uses.Select(u => u.Container ?? u.Who).Distinct(StringComparer.Ordinal).Take(2))
@@ -177,7 +178,7 @@
                             <span class="gb-np-c-note" role="cell">
                                 @if (stopped > 0)
                                 {
-                                    <span class="gb-tag">@stopped stopped</span>
+                                    <span class="gb-tag" data-tip="network.note.stopped">@stopped stopped</span>
                                 }
                             </span>
                         </span>
@@ -221,7 +222,7 @@
 <section class="gb-card gb-np-card gb-mt" aria-labelledby="np-nets-t">
     <div class="gb-card-head gb-np-head">
         <div class="gb-card-title" id="np-nets-t">
-            <SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks
+            <SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks<Tip Key="network.networks" />
             <span class="gb-card-sub gb-np-sub">Where containers find each other by name</span>
         </div>
         @if (overview.Networks.Count > 0)
@@ -252,7 +253,7 @@
     {
         <div class="gb-np-nets" role="list" aria-label="Docker's networks">
             <div class="gb-np-net gb-np-net--head" aria-hidden="true">
-                <span class="gb-np-n-name">Network</span><span class="gb-np-n-driver">Driver</span><span class="gb-np-n-subnet">Subnet</span><span class="gb-np-n-members">On it</span><span></span>
+                <span class="gb-np-n-name" data-tip="network.networks.column.name">Network</span><span class="gb-np-n-driver" data-tip="network.networks.column.driver">Driver</span><span class="gb-np-n-subnet" data-tip="network.networks.column.subnet">Subnet</span><span class="gb-np-n-members" data-tip="network.networks.column.members">On it</span><span></span>
             </div>
             @foreach (var n in overview.Networks)
             {
@@ -404,9 +405,9 @@
 
     private static IReadOnlyList<SegOption<HostPortGroup>> GroupOptions((int All, int Containers, int Host) counts) =>
     [
-        new(HostPortGroup.All, "All", Count: counts.All),
-        new(HostPortGroup.Containers, "Containers", Icon: Icons.Material.Outlined.ViewInAr, Count: counts.Containers),
-        new(HostPortGroup.Host, "The host", Icon: Icons.Material.Outlined.Dns, Count: counts.Host),
+        new(HostPortGroup.All, "All", Count: counts.All, Tip: "network.ports.group.all"),
+        new(HostPortGroup.Containers, "Containers", Icon: Icons.Material.Outlined.ViewInAr, Count: counts.Containers, Tip: "network.ports.group.containers"),
+        new(HostPortGroup.Host, "The host", Icon: Icons.Material.Outlined.Dns, Count: counts.Host, Tip: "network.ports.group.host"),
     ];
 
     // ---- Check a port ----
@@ -503,9 +504,27 @@
     private static RenderFragment Port(HostPortRow row) =>
         @<span class="gb-np-port"><b>@NetworkPageView.PortText(row)</b><small>/@row.Protocol</small></span>;
 
-    private static RenderFragment Access(IEnumerable<HostPortUse> uses) => NetworkPageView.Access(uses) is { } access
-        ? @<AccessTag Kind="access.Kind" Text="@access.Word" Title="@(access.Word == "Mixed" ? "Some on every address, some on one" : null)" />
-        : @<span class="gb-np-none">–</span>;
+    // LAN and Host only are the badges' own tips; a run with several kinds, or a port on one address of the host only, has
+    // its own (never the LAN's "every address", which it isn't).
+    private static RenderFragment Access(IEnumerable<HostPortUse> uses) => NetworkPageView.Access(uses) is not { } access
+        ? @<span class="gb-np-none">–</span>
+        : access.Word is "LAN" or "Host only" ? @<AccessTag Kind="access.Kind" Text="@access.Word" />
+        : access.Word == "Mixed" ? @<AccessTag Kind="access.Kind" Text="@access.Word" Tip="network.access.mixed" />
+        : @<AccessTag Kind="access.Kind" Text="@access.Word" Tip="network.access.one-address" />;
+
+    // Each tag a network can have (NetworkPageView.Tags), and its tip.
+    private static readonly (string Text, string Tip)[] NetworkTags =
+    [
+        ("Shared network", Tip: "network.tag.shared"),
+        ("Own LAN addresses", Tip: "network.tag.own-lan"),
+        ("Internal: no way out", Tip: "network.tag.internal"),
+        ("Docker's own", Tip: "network.tag.system"),
+    ];
+
+    private static string? TagTip(string tag) => NetworkTags.FirstOrDefault(t => t.Text == tag).Tip;
+
+    // What a member's address means: an own LAN address stays; any other changes when the container is recreated.
+    private const string IpTip = "network.members.column.ip", OwnLanIpTip = "network.members.column.own-lan-ip";
 
     private static RenderFragment GoesTo(IReadOnlyList<HostPortUse> uses) => NetworkPageView.GoesTo(uses) is { } to
         ? @<span class="gb-np-to"><SvgIcon Icon="@Icons.Material.Outlined.ArrowForward" /><span class="@(to == "Several ports" ? null : "gb-mono")">@to</span></span>
@@ -520,7 +539,7 @@
             <span class="gb-np-c-who" role="cell">
                 @if (who.Link is { } link)
                 {
-                    <a class="gb-np-who" href="@link" title="@(u.Kind == HostPortUser.Route ? "Open the app this domain is for" : $"Open {who.Name}")">@Who(who, u)</a>
+                    <a class="gb-np-who" href="@link" data-tip-text="@(u.Kind == HostPortUser.Route ? "Open the app this domain is for" : $"Open {who.Name}")">@Who(who, u)</a>
                 }
                 else
                 {
@@ -533,7 +552,7 @@
                 <span class="gb-np-c-note" role="cell">
                     @foreach (var note in NetworkPageView.Notes(u))
                     {
-                        <span class="gb-tag @TagClass(note.Tone)" title="@note.Title">@note.Text</span>
+                        <span class="gb-tag @TagClass(note.Tone)" data-tip="@note.Tip">@note.Text</span>
                     }
                 </span>
             </span>
@@ -581,7 +600,7 @@
                     <span class="gb-np-name gb-mono">@n.Network.Name</span>
                     @foreach (var tag in NetworkPageView.Tags(n))
                     {
-                        <span class="gb-tag @(tag == "Shared network" ? "gb-tag--accent" : "gb-tag--outline")">@tag</span>
+                        <span class="gb-tag @(tag == "Shared network" ? "gb-tag--accent" : "gb-tag--outline")" data-tip="@TagTip(tag)">@tag</span>
                     }
                 </span>
                 @if (NetworkPageView.NoteOf(n) is { } note)
@@ -590,8 +609,8 @@
                 }
             </span>
         </span>
-        <span class="gb-np-n-driver" title="Driver">@n.Network.Driver</span>
-        <span class="gb-np-n-subnet" title="Subnet"><span class="gb-mono">@(n.Network.Subnets.Count == 0 ? "no subnet" : string.Join(", ", n.Network.Subnets))</span></span>
+        <span class="gb-np-n-driver" data-tip-text="Driver">@n.Network.Driver</span>
+        <span class="gb-np-n-subnet" data-tip-text="Subnet"><span class="gb-mono">@(n.Network.Subnets.Count == 0 ? "no subnet" : string.Join(", ", n.Network.Subnets))</span></span>
         <span class="gb-np-n-members">
             @if (n.Members.Count > 0)
             {
@@ -635,9 +654,16 @@
                 <span role="columnheader">Container</span>
                 @if (names)
                 {
-                    <span role="columnheader">Names here</span>
+                    <span role="columnheader"><Tip Key="network.members.column.names">Names here</Tip></span>
                 }
-                <span role="columnheader">IP address</span>
+                @if (n.Network.Name == LanAddresses.Network)
+                {
+                    <span role="columnheader"><Tip Key="network.members.column.own-lan-ip">IP address</Tip></span>
+                }
+                else
+                {
+                    <span role="columnheader"><Tip Key="network.members.column.ip">IP address</Tip></span>
+                }
             </div>
             @foreach (var m in shown)
             {
@@ -648,7 +674,7 @@
                     <span class="gb-np-m-who" role="cell">
                         @if (m.Link is not null)
                         {
-                            <a class="gb-np-who" href="@m.Link" title="@($"Open {look.Name}")">@MemberWho(m, look)</a>
+                            <a class="gb-np-who" href="@m.Link" data-tip-text="@($"Open {look.Name}")">@MemberWho(m, look)</a>
                         }
                         else
                         {
@@ -671,7 +697,7 @@
                             }
                         </span>
                     }
-                    <span class="gb-np-m-ip" role="cell" title="@NetworkPageView.AddressHint(n.Network.Name)">
+                    <span class="gb-np-m-ip" role="cell" data-tip="@(n.Network.Name == LanAddresses.Network ? OwnLanIpTip : IpTip)">
                         @if (m.IpAddress is { } ip)
                         {
                             <span class="gb-mono">@ip</span>
@@ -695,13 +721,17 @@
     private RenderFragment MemberWho(NetworkMember m, MemberLook look) => @<text>
         @Logo(m.Container, m.Container, 20, !m.Running, look.Tag == "Gitberth")
         <span class="gb-np-name">@look.Name</span>
-        @if (look.Tag is { } tag)
+        @if (look.Tag is { } tag && tag.StartsWith("Deploy of ", StringComparison.Ordinal))
         {
-            <span class="gb-tag gb-tag--outline">@tag</span>
+            <span class="gb-tag gb-tag--outline" data-tip="network.member.deploy">@tag</span>
+        }
+        else if (look.Tag is { } own)
+        {
+            <span class="gb-tag gb-tag--outline">@own</span>
         }
         @if (!m.Running)
         {
-            <span class="gb-tag">Stopped</span>
+            <span class="gb-tag" data-tip="network.member.stopped">Stopped</span>
         }
     </text>;
 

@@ -8,8 +8,9 @@ at that repo at once instead of at its next check (the rig's watcher looks every
   on, is refused and nothing changes; one in no zone the token can see is routed, and the page says its DNS record
   can't be made; one Cloudflare's free certificate doesn't cover (two levels below the zone) is said, since GitHub
   checks the certificate.
-- Turned on, the tunnel routes only /hooks/github of the host to Gitberth (and /hooks/deploy/<token>, deploy hooks', in
-  the same path rule) plus a 404 rule for the rest of it, never behind Access, and the host gets its DNS record. The keeper adds Gitberth's webhook to each deployed repo (the payload
+- Turned on, the tunnel routes only /hooks/github of the host to Gitberth (and /hooks/gitlab, GitLab's project hooks',
+  and /hooks/deploy/<token>, deploy hooks', in the same path rule: scenarios 33 and 23) plus a 404 rule for the rest of
+  it, never behind Access, and the host gets its DNS record. The keeper adds Gitberth's webhook to each deployed repo (the payload
   URL, the secret Settings shows, push, pull_request and delete) and records it; GitHub's ping for it is answered. The
   page shows the payload URL, content type, secret (Show, Hide, copy) and events, and each repo's webhook.
 - A signed push deploys at once, with the trigger "Push on GitHub" (on its deploy page, Activity and the app page):
@@ -47,9 +48,9 @@ from e2e.wait import stays, until
 from test_12_commit_statuses import domains_turned_on
 from e2e.audit import last_id, no_network_change_outside
 
-# The tunnel's rule for GitHub's deliveries (and deploy hooks' calls): exactly these paths of the webhook's host, to
-# Gitberth's published port, as the fake cloudflared (on the host's network, like the live install's) reaches it.
-PATH_RULE = "^/hooks/(github|deploy/[A-Za-z0-9_-]{20,100})$"
+# The tunnel's rule for GitHub's deliveries (and GitLab's, and deploy hooks' calls): exactly these paths of the webhook's
+# host, to Gitberth's published port, as the fake cloudflared (on the host's network, like the live install's) reaches it.
+PATH_RULE = "^/hooks/(github|gitlab|deploy/[A-Za-z0-9_-]{20,100})$"
 # The rule another service has for its own webhooks on a host of its own: the path Gitberth's rule had before deploy hooks.
 THEIR_PATH = "^/hooks/github$"
 OWN_SERVICE = "http://localhost:8080"
@@ -338,8 +339,9 @@ def test_instant_deploys_need_domains_and_a_host_name_of_their_own(page, new_pag
         assert flat(section.locator("label[for='hook-host']").inner_text()) == "Host name for GitHub's webhooks"
         assert box.get_attribute("placeholder") == "hooks.example.com"
         field = section.locator(".gb-field").filter(has=page.locator("#hook-host"))
-        assert flat(field.locator(".gb-help").inner_text()) == ("Only its addresses /hooks/github and /hooks/deploy/… (deploy hooks) go to Gitberth, "
-                                                                 "never behind Access; every other address on it answers 404. Use a name nothing else uses.")
+        assert flat(field.locator(".gb-help").inner_text()) == ("Only its addresses /hooks/github, /hooks/gitlab (GitLab's project hooks) and "
+                                                                 "/hooks/deploy/… (deploy hooks) go to Gitberth, never behind Access; every other "
+                                                                 "address on it answers 404. Use a name nothing else uses.")
         turn_on = section.get_by_role("button", name="Turn on", exact=True)
         assert turn_on.is_disabled(), "Turn on works without a host name"
         assert section.get_by_role("button", name="Turn off", exact=True).count() == 0
@@ -411,7 +413,8 @@ def test_turning_on_routes_only_the_hook_path_and_adds_the_webhook_to_each_repo(
 
             # ---- Settings: what the change did, and the values to paste by hand.
             shown = notes(settings)
-            for note in (f"Routed https://{host}/hooks/github and /hooks/deploy/… to Gitberth, for GitHub's webhooks and deploy hooks", f"Added a DNS record sending {host} to the tunnel"):
+            for note in (f"Routed https://{host}/hooks/github, /hooks/gitlab and /hooks/deploy/… to Gitberth, for GitHub's and GitLab's webhooks "
+                         "and deploy hooks", f"Added a DNS record sending {host} to the tunnel"):
                 assert note in shown, shown
             assert all(not (li.get_attribute("style") or "") for li in settings.locator(f"{SECTION} ul.gb-dnotes li").all()), \
                 "a line shows as a problem"
@@ -434,7 +437,7 @@ def test_turning_on_routes_only_the_hook_path_and_adds_the_webhook_to_each_repo(
             copy = kv(section, "Secret").get_by_role("button", name="Copy the webhook secret")
             copy.click()
             # It says so for a moment (1.4 s).
-            until(lambda: copy.get_attribute("title") == "Copied", 10, "the secret's copy button to say Copied", interval=0.1)
+            until(lambda: copy.get_attribute("data-tip-text") == "Copied", 10, "the secret's copy button to say Copied", interval=0.1)
             assert settings.evaluate("() => window.__gbCopied") == [url, secret]
 
             # ---- GitHub: Gitberth's webhook on each deployed repo, with the payload URL, Settings' secret and its three
@@ -706,7 +709,8 @@ def test_changing_the_host_name_moves_gitberths_webhook_and_route(page, new_page
             assert [r["id"] for r in cloudflare.dns_records(other)] == [their_record["id"]]
             assert first in (gitberth.db.setting("github.webhookHostsBefore") or "").split("\n")
             shown = notes(settings)
-            for note in (f"Removed the route GitHub's webhook and deploy hooks took through {first}", f"Routed https://{second}/hooks/github and /hooks/deploy/… to Gitberth, for GitHub's webhooks and deploy hooks",
+            for note in (f"Removed the route GitHub's webhook and deploy hooks took through {first}",
+                         f"Routed https://{second}/hooks/github, /hooks/gitlab and /hooks/deploy/… to Gitberth, for GitHub's and GitLab's webhooks and deploy hooks",
                          f"Added a DNS record sending {second} to the tunnel", f"Removed the DNS record Gitberth added for {first}"):
                 assert note in shown, shown
 

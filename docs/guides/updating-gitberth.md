@@ -61,7 +61,7 @@ By hand:
 
 Every tag is published for `linux/amd64` and `linux/arm64`. A pre-release, like `1.3.0-rc.1`, gets only its own tag, so `latest` and `1.3` never move to it. The releases are listed on the repository's **Releases** page, and the tags that exist with the package, under **Packages**.
 
-Each release's page shows its image and the `docker pull` command, and has the image attached as files, `gitberth-<version>-linux-amd64.tar.gz` (Intel/AMD) and `gitberth-<version>-linux-arm64.tar.gz` (ARM). On a machine that can't reach ghcr.io, download the one for it and load it with `docker load -i <file>`; it's tagged as the release, like `ghcr.io/johnhowelljr/gitberth:1.0.0`.
+Each release's page shows its image and the `docker pull` command, and has the image attached as files, `gitberth-<version>-linux-amd64.tar.gz` (Intel/AMD) and `gitberth-<version>-linux-arm64.tar.gz` (ARM). On a machine that can't reach ghcr.io, download the one for it and load it with `docker load -i <file>`; it's tagged as the release, like `ghcr.io/johnhowelljr/gitberth:1.3.1`.
 
 ## Pin a version
 
@@ -80,7 +80,7 @@ again, set it back to `ghcr.io/johnhowelljr/gitberth:latest`.
 
 ### See which image you run
 
-In Gitberth, **Settings › System** shows the **Version**, with the commit a published image was built from, like `1.0.0 (3f9c2ab)`, and the sidebar shows `v1.0.0`. On the host:
+In Gitberth, **Settings › System** shows the **Version**, with the commit a published image was built from, like `1.4.0 (3f9c2ab)`, and the sidebar shows `v1.4.0`. On the host:
 
 ```bash
 docker compose images

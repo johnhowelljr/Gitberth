@@ -20,8 +20,10 @@
 
 .audit-fresh ::deep .gb-i { width: 15px; height: 15px; }
 
+/* overflow: clip, not hidden: it rounds the corners the same, but hidden made the list a scroll container of its own, so
+   the day headings stuck inside a box that never scrolls (pushed down over the first entry) instead of to the page. */
 .audit-list {
-    border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-lg); background: var(--gb-surface-1); box-shadow: var(--gb-e1); overflow: hidden;
+    border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-lg); background: var(--gb-surface-1); box-shadow: var(--gb-e1); overflow: clip;
 }
 
 .audit-day {

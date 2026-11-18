@@ -3,17 +3,19 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject IDbContextFactory<GitberthDb> Db
+@inject HelpDocs Help
 
 @*
-    The top bar's search (Ctrl K): apps by name, image, port or address, as you type. Enter opens the highlighted one,
-    or the Apps list filtered by what was typed. On a phone it's an icon that opens into the bar.
+    The top bar's search (Ctrl K): apps by name, image, port or address, as you type, then the help's pages and headings
+    as a group of their own. Enter opens the highlighted one, or the Apps list filtered by what was typed. On a phone
+    it's an icon that opens into the bar.
 *@
 <div class="gb-search @(open ? "open" : null)">
-    <label class="gb-cmdk" @onclick="OpenAsync">
+    <label class="gb-cmdk" @onclick="OpenAsync" data-tip="topbar.search">
         <SvgIcon Icon="@Icons.Material.Outlined.Search" />
-        <input id="gb-search-input" type="search" placeholder="Search apps, images, ports, addresses…" autocomplete="off" spellcheck="false"
-               role="combobox" aria-expanded="@(Showing ? "true" : "false")" aria-controls="gb-search-results" aria-label="Search apps"
-               aria-activedescendant="@(Showing && hits.Count > 0 ? $"gb-hit-{selected}" : null)"
+        <input id="gb-search-input" type="search" placeholder="Search apps, images, ports, addresses, help…" autocomplete="off" spellcheck="false"
+               role="combobox" aria-expanded="@(Showing ? "true" : "false")" aria-controls="gb-search-results" aria-label="Search apps and help"
+               aria-activedescendant="@(Showing && Total > 0 ? $"gb-hit-{selected}" : null)"
                value="@query" @oninput="OnInput" @onfocus="OnFocusAsync" @onblur="OnBlur" @onkeydown="OnKeyAsync" />
         <span class="gb-kbd">Ctrl K</span>
     </label>
@@ -38,7 +40,27 @@
                     <StatusLabel State="hit.State" Text="@hit.StateText" />
                 </a>
             }
-            <div class="gb-search-foot">Enter opens it · <a href="@($"apps?q={Uri.EscapeDataString(query.Trim())}")" @onclick="Close">All matches in Apps</a></div>
+            @if (docs.Count > 0)
+            {
+                <div class="gb-search-group" role="presentation">Help</div>
+                @for (var i = 0; i < docs.Count; i++)
+                {
+                    var doc = docs[i];
+                    var index = hits.Count + i;
+                    <a id="@($"gb-hit-{index}")" role="option" aria-selected="@(index == selected ? "true" : "false")" href="@doc.Href"
+                       class="gb-search-hit gb-search-hit--doc @(index == selected ? "gb-search-hit--on" : null)" @onclick="Close" @onmouseover="() => selected = index">
+                        <span class="gb-search-doc-icon"><SvgIcon Icon="@(doc.Passage is { Anchor: not null } ? Icons.Material.Outlined.Tag : Icons.Material.Outlined.Article)" Size="sm" /></span>
+                        <span class="gb-grow" style="display:flex;flex-direction:column;min-width:0">
+                            <span class="gb-search-doc-t">@doc.Title</span>
+                            <span class="gb-search-doc-s">@(doc.Passage is { Anchor: not null } ? doc.Doc.Title : Help.SectionOf(doc.Doc) ?? "Help")</span>
+                        </span>
+                    </a>
+                }
+            }
+            <div class="gb-search-foot">
+                Enter opens it · <a href="@($"apps?q={Uri.EscapeDataString(query.Trim())}")" @onclick="Close">All matches in Apps</a>
+                · <a href="@($"help?q={Uri.EscapeDataString(query.Trim())}")" @onclick="Close">In Help</a>
+            </div>
         </div>
     }
 </div>
@@ -48,11 +70,14 @@
     private bool open, focused;
     private int selected;
     private List<AppSummary> hits = [];
+    private List<HelpHit> docs = [];
     private AppList list = AppList.Empty;
     private DateTime loadedAt = DateTime.MinValue;
     private IReadOnlyDictionary<string, string> kinds = AppKinds.None;
 
     private bool Showing => focused && query.Trim().Length > 0;
+
+    private int Total => hits.Count + docs.Count;
 
     private async Task OpenAsync()
     {
@@ -91,9 +116,11 @@
         Find();
     }
 
+    // Apps first; the help's best matches (pages, then headings, then text) after them.
     private void Find()
     {
         hits = AppSearch.Filter(list.Apps, query).Take(8).ToList();
+        docs = Help.Search(query, max: 5).ToList();
         selected = 0;
     }
 
@@ -101,14 +128,17 @@
     {
         switch (e.Key)
         {
-            case "ArrowDown" when hits.Count > 0:
-                selected = (selected + 1) % hits.Count;
+            case "ArrowDown" when Total > 0:
+                selected = (selected + 1) % Total;
                 break;
-            case "ArrowUp" when hits.Count > 0:
-                selected = (selected - 1 + hits.Count) % hits.Count;
+            case "ArrowUp" when Total > 0:
+                selected = (selected - 1 + Total) % Total;
                 break;
             case "Enter":
-                var target = hits.Count > 0 ? hits[Math.Clamp(selected, 0, hits.Count - 1)].Href : $"apps?q={Uri.EscapeDataString(query.Trim())}";
+                var index = Math.Clamp(selected, 0, Math.Max(0, Total - 1));
+                var target = index < hits.Count ? hits[index].Href
+                    : index - hits.Count < docs.Count ? docs[index - hits.Count].Href
+                    : $"apps?q={Uri.EscapeDataString(query.Trim())}";
                 Close();
                 Nav.NavigateTo(target);
                 await Task.CompletedTask;
@@ -125,6 +155,7 @@
     {
         query = "";
         hits = [];
+        docs = [];
         open = false;
         focused = false;
     }

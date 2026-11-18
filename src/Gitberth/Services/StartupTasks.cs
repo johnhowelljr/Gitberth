@@ -69,7 +69,7 @@ public sealed class StartupTasks(
                         AppId = app.Id, AppName = app.Name, Container = app.ContainerName,
                         Target = $"deploy #{Audit.AuditText.N(dep.Id)}",
                         Correlation = Audit.AuditCorrelation.ForDeployment(dep.Id),
-                        Changes = [new("Trigger", null, Audit.AuditText.Trigger(dep.Trigger))],
+                        Changes = [new("Trigger", null, Audit.AuditText.Trigger(dep))],
                     });
                 }
             }

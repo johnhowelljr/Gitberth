@@ -7,9 +7,12 @@ Nothing is sent until you add somewhere to send it. Sending never holds up a dep
 ## Add a destination
 
 1. Open **Settings** and go to **Notifications**.
-2. Click **Add a destination** and pick what kind: **Email**, **Discord**, **Slack**, **ntfy** or **Webhook**.
+2. Click **Add a destination** and, under **Send to**, pick what kind: **Email**, **Discord**, **Slack**, **ntfy** or
+   **Webhook**.
 3. Fill in its fields (below), and give it a **Name** if you like: the list calls it that.
 4. Click **Add and send a test**. Gitberth saves it and sends a test right away. The message at the bottom right says whether the test went, and the destination's row keeps saying how its last message went.
+
+![The Add a destination dialog for a Discord channel: its name, its webhook URL, and Add and send a test](../images/notification-dialog.webp)
 
 You can add up to 10 destinations. Every message goes to all of them.
 
@@ -44,7 +47,7 @@ Crashes of any container count, not only the apps Gitberth deploys. A crash whil
 
 ### A crash loop
 
-An app that crashes again and again sends one message, **web crashed**, saying whether it restarted itself or is stopped now. Gitberth then counts the crashes for 30 minutes, and if there were more sends one more message: **web keeps crashing: It crashed 14 more times in the last 30 minutes, and keeps restarting.** A failing health check is told once every 30 minutes at most, too.
+An app that crashes again and again sends one message, **website crashed**, saying whether it restarted itself or is stopped now. Gitberth then counts the crashes for 30 minutes, and if there were more sends one more message: **website keeps crashing: It crashed 14 more times in the last 30 minutes, and keeps restarting.** A failing health check is told once every 30 minutes at most, too.
 
 ### Leave an app out
 
@@ -62,12 +65,12 @@ A `POST` with `Content-Type: application/json`, the header `X-Gitberth-Event` an
 {
   "event": "deploy.failed",
   "level": "critical",
-  "title": "Deploy of web failed",
+  "title": "Deploy of website failed",
   "text": "Deploy #42 (New commit, commit 3f9c2ab) failed. npm ci exited with code 1",
-  "url": "http://192.168.1.20:8080/apps/3/deployments/42",
-  "app": "web",
+  "url": "http://192.168.50.10:8080/apps/3/deployments/42",
+  "app": "website",
   "appId": 3,
-  "container": "gb-web",
+  "container": "gb-website",
   "preview": false,
   "deployment": 42,
   "commit": "3f9c2ab8d1e04c5a9b7f6e2d1c0b9a8f7e6d5c4b",
@@ -77,7 +80,7 @@ A `POST` with `Content-Type: application/json`, the header `X-Gitberth-Event` an
 }
 ```
 
-`event` is one of `deploy.failed`, `deploy.succeeded`, `container.crashed`, `container.unhealthy`, `container.healthy`, `uptime.down`, `uptime.up`, `certificate.expiring` and `test`; `level` is `critical`, `warning`, `good` or `info`. The uptime events also carry `address`, what the check asked (`https://web.example.com/`). Fields that don't apply are `null`: a crash has no `deployment`, an app Gitberth doesn't deploy has no `appId`, and `hook` names the [deploy hook](deploy-hooks.md) that started the deploy (its `trigger` is `Hook`).
+`event` is one of `deploy.failed`, `deploy.succeeded`, `container.crashed`, `container.unhealthy`, `container.healthy`, `uptime.down`, `uptime.up`, `certificate.expiring` and `test`; `level` is `critical`, `warning`, `good` or `info`. The uptime events also carry `address`, what the check asked (`https://app.example.com/`). Fields that don't apply are `null`: a crash has no `deployment`, an app Gitberth doesn't deploy has no `appId`, and `hook` names the [deploy hook](deploy-hooks.md) that started the deploy (its `trigger` is `Hook`).
 
 ## When a message doesn't arrive
 

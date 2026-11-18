@@ -237,7 +237,7 @@ public sealed record UpdateBadge(bool Available, string Text, DateTime? CheckedA
 /// The reference its container was created with (Config.Image), even once the tag names another image and docker ps shows
 /// the image's ID instead; without a container, its row's. For Git apps, the image it runs.
 /// </param>
-/// <param name="Repo">Git apps: owner/repo · branch · short commit.</param>
+/// <param name="Repo">Git apps: owner/repo (a GitLab project's group/subgroup/project) · branch · short commit.</param>
 /// <param name="System">Gitberth itself or its tunnel.</param>
 public sealed record AppSummary(
     string Key, int? AppId, string Title, string Container, AppSource Source, ContainerRole Role, ImageOrigin Origin,
@@ -253,6 +253,9 @@ public sealed record AppSummary(
     /// otherwise.
     /// </summary>
     public string? RenamedTo { get; init; }
+
+    /// <summary>A Git app from a GitLab project rather than a GitHub repo: its source shows GitLab's mark.</summary>
+    public bool GitLab { get; init; }
 
     /// <summary>
     /// It's a database, cache or queue (<see cref="ContainerService.IsDatabase"/>, the one answer the backend uses for its

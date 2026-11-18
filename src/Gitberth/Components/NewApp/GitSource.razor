@@ -8,29 +8,40 @@
 @inject GitberthOptions Options
 @inject HostScanner Scanner
 @inject ContainerStatsCollector Stats
+@inject GitLabApi GitLab
 @inject NavigationManager Nav
 
 @*
-    New app › GitHub repository (architecture.md 3.7): the repository, what Gitberth detected and how it'll build it, then
-    its settings and Create and deploy. The steps and the backend are the ones New app always had (AppService.CreateAsync,
-    then a deploy); they look like the rest of New app now.
+    New app › Git repository (architecture.md 3.7): the repository (a github.com one, or a project on Gitberth's GitLab), what
+    Gitberth detected and how it'll build it, then its settings and Create and deploy. The steps and the backend are the ones
+    New app always had (AppService.CreateAsync, then a deploy); they look like the rest of New app now.
 *@
 <div class="gb-stack">
     <section class="gb-card gb-sec">
         <div class="gb-sec-head">
-            <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Custom.Brands.GitHub" /></span>
-            <div style="min-width:0"><div class="gb-h3">GitHub repository</div><p>Any github.com URL works, including links to a branch or a folder. Other Git hosts aren't supported yet.</p></div>
+            <span class="gb-sec-icon"><SvgIcon Icon="@HostIcon" /></span>
+            <div style="min-width:0">
+                <div class="gb-h3">Git repository<Tip Key="newapp.git.repo" /></div>
+                <p>A github.com repository, or a project on your GitLab (@GitLabHost), groups and subgroups too. A link to a branch or a folder works as well.</p>
+            </div>
         </div>
         <div class="gb-sec-body">
             <div class="gb-row gb-row--wrap" style="flex-wrap:nowrap">
                 <label class="gb-input gb-grow">
-                    <SvgIcon Icon="@Icons.Custom.Brands.GitHub" />
-                    <input placeholder="https://github.com/you/your-app" value="@url" @oninput="e => url = e.Value?.ToString() ?? string.Empty" @onkeydown="OnUrlKeyDown"
+                    <SvgIcon Icon="@HostIcon" />
+                    <input placeholder="https://github.com/you/your-app or @(gitLabInstance)/group/project" value="@url" @oninput="e => url = e.Value?.ToString() ?? string.Empty" @onkeydown="OnUrlKeyDown"
                            disabled="@Busy" aria-label="Repository URL" spellcheck="false" />
                 </label>
-                <Btn Kind="@(remote is null ? BtnKind.Primary : BtnKind.Secondary)" OnClick="CheckAsync" Busy="checking" Disabled="@(Busy || string.IsNullOrWhiteSpace(url))">Check</Btn>
+                <Btn Kind="@(remote is null ? BtnKind.Primary : BtnKind.Secondary)" OnClick="CheckAsync" Busy="checking" Disabled="@(Busy || string.IsNullOrWhiteSpace(url))" Tip="newapp.git.check">Check</Btn>
             </div>
-            @if (!hasToken)
+            @if (TypedGitLab)
+            {
+                @if (!hasGitLabToken)
+                {
+                    <Banner Tone="info" Title="Public projects only, for now">No GitLab token is saved yet. <a href="settings#gitlab">Add one in Settings › GitLab</a> for private ones.</Banner>
+                }
+            }
+            else if (!hasToken)
             {
                 <Banner Tone="info" Title="Public repositories only, for now">No GitHub token is saved yet. <a href="settings">Add one in Settings</a> for private ones.</Banner>
             }
@@ -41,7 +52,7 @@
             @if (remote is not null)
             {
                 <div class="gb-fgrid gb-fgrid--3">
-                    <Field Label="Branch" For="git-branch">
+                    <Field Label="Branch" For="git-branch" Tip="newapp.git.branch">
                         <select id="git-branch" class="gb-input" value="@branch" @onchange="e => branch = e.Value?.ToString() ?? branch">
                             @foreach (var b in remote.Branches)
                             {
@@ -49,10 +60,10 @@
                             }
                         </select>
                     </Field>
-                    <Field Label="Subfolder (optional)" For="git-sub">
+                    <Field Label="Subfolder (optional)" For="git-sub" Tip="newapp.git.subfolder">
                         <input id="git-sub" class="gb-input gb-input--mono" placeholder="src/api" value="@subdir" @onchange="e => subdir = e.Value?.ToString()" />
                     </Field>
-                    <div style="align-self:end"><Btn Icon="@Icons.Material.Outlined.Search" OnClick="() => AnalyzeAsync()" Busy="analyzing" Disabled="Busy">Analyze again</Btn></div>
+                    <div style="align-self:end"><Btn Icon="@Icons.Material.Outlined.Search" OnClick="() => AnalyzeAsync()" Busy="analyzing" Disabled="Busy" Tip="newapp.git.analyze">Analyze again</Btn></div>
                 </div>
             }
             @if (candidates.Count > 1)
@@ -84,18 +95,18 @@
             <div class="gb-sec-head">
                 <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" /></span>
                 <div style="min-width:0">
-                    <div class="gb-h3" id="gb-compose-title">This repo has a @composeFile with @Count(compose.Services.Count, "service")</div>
+                    <div class="gb-h3"><span id="gb-compose-title">This repo has a @composeFile with @Count(compose.Services.Count, "service")</span><Tip Key="newapp.git.compose" /></div>
                     <p>Deploy it with Compose, as one app with all its services, or build one container from the repo.</p>
                 </div>
             </div>
             <div class="gb-sec-body">
                 <div class="gb-choices" role="radiogroup" aria-label="How to deploy it">
-                    <button type="button" class="gb-choice @(useCompose ? "on" : null)" role="radio" aria-checked="@(useCompose ? "true" : "false")" disabled="@Busy" @onclick="() => UseComposeAsync(true)">
+                    <button type="button" class="gb-choice @(useCompose ? "on" : null)" role="radio" aria-checked="@(useCompose ? "true" : "false")" disabled="@Busy" data-tip="newapp.git.with-compose" @onclick="() => UseComposeAsync(true)">
                         <span class="gb-radio @(useCompose ? "on" : null)"></span>
                         <span style="min-width:0"><span class="gb-choice-title" style="display:block">With Compose</span>
                             <span class="gb-choice-sub">@string.Join(", ", compose.Services.Select(s => s.Name)): one app, deployed with docker compose</span></span>
                     </button>
-                    <button type="button" class="gb-choice @(useCompose ? null : "on")" role="radio" aria-checked="@(useCompose ? "false" : "true")" disabled="@Busy" @onclick="() => UseComposeAsync(false)">
+                    <button type="button" class="gb-choice @(useCompose ? null : "on")" role="radio" aria-checked="@(useCompose ? "false" : "true")" disabled="@Busy" data-tip="newapp.git.one-container" @onclick="() => UseComposeAsync(false)">
                         <span class="gb-radio @(useCompose ? null : "on")"></span>
                         <span style="min-width:0"><span class="gb-choice-title" style="display:block">As one container</span>
                             <span class="gb-choice-sub">@(detection.CanBuild ? detection.Title : "Nothing else was found to build: it needs a Dockerfile of its own")</span></span>
@@ -106,7 +117,7 @@
                     <div class="gb-fgrid">
                         @if (composeFiles.Count > 1)
                         {
-                            <Field Label="Compose file" For="git-compose-file">
+                            <Field Label="Compose file" For="git-compose-file" Tip="newapp.git.compose-file">
                                 <select id="git-compose-file" class="gb-input gb-input--mono" value="@composeFile" @onchange="e => PickComposeFileAsync(e.Value?.ToString())">
                                     @foreach (var f in composeFiles)
                                     {
@@ -115,7 +126,7 @@
                                 </select>
                             </Field>
                         }
-                        <Field Label="Web service" Help="Its container is the app's: its domains, LAN port, health URL and logs. The others stay inside the app.">
+                        <Field Label="Web service" Tip="newapp.web-service" Help="Its container is the app's: its domains, LAN port, health URL and logs. The others stay inside the app.">
                             <Seg T="string" Options="@(compose.Services.Select(s => new SegOption<string>(s.Name, s.Name)).ToList())" Value="composeWeb" ValueChanged="PickWebAsync" Label="Web service" />
                         </Field>
                     </div>
@@ -138,7 +149,7 @@
             <div class="gb-sec-head">
                 <span class="gb-sec-icon"><SvgIcon Icon="@(detection.CanBuild ? Icons.Material.Outlined.Layers : Icons.Material.Outlined.HelpOutline)" /></span>
                 <div style="min-width:0">
-                    <div class="gb-h3">How it will run: @detection.Title</div>
+                    <div class="gb-h3">How it will run: @detection.Title<Tip Key="newapp.git.detected" /></div>
                     <p>@(commit is not null ? $"At {commit.Sha[..7]} · {commit.Subject}" : "")</p>
                 </div>
             </div>
@@ -158,7 +169,7 @@
                 }
                 @if (detection.ProjectCandidates.Count > 1 && candidates.Count <= 1)
                 {
-                    <Field Label="Project to run" For="git-proj">
+                    <Field Label="Project to run" For="git-proj" Tip="newapp.git.project">
                         <select id="git-proj" class="gb-input gb-input--mono" value="@projectHint" @onchange="e => OnProjectChanged(e.Value?.ToString() ?? string.Empty)">
                             @foreach (var p in detection.ProjectCandidates)
                             {
@@ -167,7 +178,7 @@
                         </select>
                     </Field>
                 }
-                <SwitchRow Title="Customize the Dockerfile" Sub="Stored with the app and used as it is on every deploy." Value="customize" ValueChanged="v => customize = v" />
+                <SwitchRow Title="Customize the Dockerfile" Tip="newapp.git.customize" Sub="Stored with the app and used as it is on every deploy." Value="customize" ValueChanged="v => customize = v" />
                 @if (customize)
                 {
                     <textarea class="gb-input gb-input--mono gb-paste" rows="16" spellcheck="false" value="@customDockerfile" @onchange="e => customDockerfile = e.Value?.ToString()"></textarea>
@@ -197,36 +208,45 @@
                 </div>
                 <div class="gb-sec-body">
                     <div class="gb-fgrid">
-                        <Field Label="Name" For="git-name" Help="@NameHelp">
+                        <Field Label="Name" For="git-name" Tip="newapp.name" Help="@NameHelp">
                             <input id="git-name" class="gb-input" value="@model.Name" @oninput="e => SetNameAsync(e.Value?.ToString())" />
                         </Field>
-                        <Field Label="Health URL (optional)" For="git-health">
+                        <Field Label="Health URL (optional)" For="git-health" Tip="newapp.git.health-url">
                             <input id="git-health" class="gb-input gb-input--mono" placeholder="/health" value="@model.HealthCheckPath" @onchange="e => model.HealthCheckPath = e.Value?.ToString()" />
                         </Field>
                     </div>
                     @* The restart policy in the words Settings and Configure give it; a Compose app's services have their file's. *@
                     @if (!useCompose)
                     {
-                        <Field Label="Restart">
+                        <Field Label="Restart" Tip="newapp.restart">
                             <Seg T="string" Options="AppFacts.RestartOptions" Value="model.RestartPolicy" ValueChanged="v => model.RestartPolicy = v" Label="Restart policy" />
                         </Field>
                     }
-                    <SwitchRow Title="Deploy on push" Sub="A new commit on the branch deploys by itself." Value="model.AutoDeploy" ValueChanged="v => model.AutoDeploy = v" />
+                    <SwitchRow Title="Deploy on push" Tip="newapp.git.deploy-on-push" Sub="A new commit on the branch deploys by itself." Value="model.AutoDeploy" ValueChanged="v => model.AutoDeploy = v" />
                 </div>
                 <div class="gb-sec-head" style="border-top:1px solid var(--gb-line-1)">
                     <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" /></span>
-                    <div style="min-width:0"><div class="gb-h3">Ports</div><p>@(AfterDeploy() is { } after ? $"After the deploy: {after}." : "On the LAN by default, at a free host port.")</p></div>
-                    <div style="margin-left:auto"><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddPort">Add port</Btn></div>
+                    <div style="min-width:0"><div class="gb-h3">Ports<Tip Key="newapp.cfg.ports" /></div><p>@(AfterDeploy() is { } after ? $"After the deploy: {after}." : "On the LAN by default, at a free host port.")</p></div>
+                    <div style="margin-left:auto"><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddPort" Tip="newapp.cfg.add-port">Add port</Btn></div>
                 </div>
                 <PortsTable Draft="ports" Name="@Slug" LanHost="@lanHost" LanIpv4Only="lanIpv4Only" Problems="portProblems" Disabled="@Busy" Marks="false" OnChanged="PortsChanged" />
                 <div class="gb-sec-body">
-                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />@(useCompose ? "Variables (they fill the Compose file's ${…})" : "Environment variables")</div>
+                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />
+                        @if (useCompose)
+                        {
+                            <Tip Key="newapp.git.compose-vars">Variables (they fill the Compose file's ${…})</Tip>
+                        }
+                        else
+                        {
+                            <Tip Key="newapp.git.env">Environment variables</Tip>
+                        }
+                    </div>
                     <EnvEditor Rows="model.Env" />
                     @if (!useCompose)
                     {
-                        <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Storage" Size="sm" />Volumes</div>
+                        <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Storage" Size="sm" /><Tip Key="newapp.git.volumes">Volumes</Tip></div>
                         <VolumesEditor Rows="model.Volumes" Slug="@Slug" />
-                        <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Speed" Size="sm" />Resources</div>
+                        <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Speed" Size="sm" /><Tip Key="newapp.git.resources">Resources</Tip></div>
                         @* The same fields as its Settings tab and Configure; CreateAsync stores them as Settings would. *@
                         <ResourceFields Draft="resources" Create="true" HostCpus="HostCpus" />
                     }
@@ -238,7 +258,7 @@
                 <div class="gb-card-foot" style="justify-content:flex-end;gap:10px">
                     <span class="gb-help" style="margin-right:auto">@(useCompose ? $"Creates the Compose project gb-{Slug}, then builds and starts its services. The deploy's log shows every step." : $"Creates gb-{Slug}, then builds and deploys it. The deploy's log shows every step.")</span>
                     <Btn Kind="BtnKind.Ghost" Href="apps">Cancel</Btn>
-                    <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="Busy">Create and deploy</Btn>
+                    <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="Busy" Tip="newapp.git.create">Create and deploy</Btn>
                 </div>
             </section>
         }
@@ -253,9 +273,21 @@
 
     private string url = "";
     private bool checking, analyzing, creating, customize;
-    private bool hasToken = true;
+    private bool hasToken = true, hasGitLabToken = true;
+    // Gitberth's GitLab (Settings › GitLab): a URL on it is a GitLab project's.
+    private string gitLabInstance = GitLabRepoRef.DefaultInstance;
     private string? error;
-    private GitHubRepoRef? repo;
+    private RepoRef? repo;
+
+    private string GitLabHost => Uri.TryCreate(gitLabInstance, UriKind.Absolute, out var u) ? u.Authority : gitLabInstance;
+
+    // What's typed is on Gitberth's GitLab (or the checked repo is a GitLab project): its mark and its token's banner.
+    private bool TypedGitLab => repo is GitLabRepoRef && remote is not null || GitLabRepoRef.TryParse(url, gitLabInstance, out _, out _);
+
+    private string HostIcon => TypedGitLab ? GitberthIcons.GitLab : Icons.Custom.Brands.GitHub;
+
+    // Where the repo's own variables are kept, as a hint says it.
+    private string VariablesWhere => repo is GitLabRepoRef ? "Set in the project's GitLab CI/CD variables" : "Set in the repo's GitHub variables";
     private RemoteInfo? remote;
     private string branch = "";
     private string? subdir;
@@ -376,6 +408,8 @@
     protected override async Task OnInitializedAsync()
     {
         hasToken = await Settings.GetAsync(SettingKeys.GitHubToken) is not null;
+        hasGitLabToken = await Settings.GetAsync(SettingKeys.GitLabToken) is not null;
+        gitLabInstance = await GitLab.InstanceAsync();
         if (!string.IsNullOrWhiteSpace(PrefillUrl)) url = PrefillUrl;
         lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));
         try
@@ -445,7 +479,8 @@
         analyzedDir = lastAnalyzedDir = null;
         (composeFiles, composeTexts, composeFile, composeInfo, useCompose, composeWeb) = ([], new(StringComparer.Ordinal), null, null, false, "");
         await OnStage.InvokeAsync(NewAppStep.Source);
-        if (!GitHubRepoRef.TryParse(url, out var parsed, out var parseError))
+        // A github.com repository, or a project on Gitberth's GitLab.
+        if (!RepoUrls.TryParse(url, gitLabInstance, out var parsed, out var parseError))
         {
             error = parseError;
             return;
@@ -463,7 +498,7 @@
             }
             branch = remote.DefaultBranch ?? remote.Branches[0].Name;
             subdir = null;
-            if (repo.TreePath is not null && GitHubRepoRef.ResolveTreePath(repo.TreePath, remote.Branches.Select(b => b.Name)) is { } resolved)
+            if (repo.TreeOf is { } tree && GitHubRepoRef.ResolveTreePath(tree, remote.Branches.Select(b => b.Name)) is { } resolved)
             {
                 branch = resolved.Branch;
                 subdir = resolved.Subdirectory;
@@ -569,8 +604,8 @@
     private async Task PrefillAsync(string? sub)
     {
         var name = !string.IsNullOrWhiteSpace(model.Name) ? model.Name
-            : sub is null ? repo!.Repo
-            : $"{repo!.Repo}-{sub.Split('/')[^1]}";
+            : sub is null ? repo!.Name
+            : $"{repo!.Name}-{sub.Split('/')[^1]}";
         model = new AppSettingsModel { Name = name, RestartPolicy = model.RestartPolicy, AutoDeploy = model.AutoDeploy };
         (portProblems, triedCreate) = ([], false);
         await ChooseNameAsync();
@@ -578,12 +613,12 @@
         {
             // The web service's ports, and the variables the Compose file uses: empty ones take its defaults.
             await ComposePortsAsync();
-            var shared = (await RepoVars.GetAsync(repo!.Owner, repo.Repo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var shared = (await RepoVars.GetAsync(repo!.AppOwner, repo.AppRepo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var v in compose.Variables)
                 model.Env.Add(new EnvRow
                 {
                     Key = v.Name, Value = "", IsSecret = Security.Masking.IsSecret(v.Name, ""),
-                    Hint = shared.Contains(v.Name) ? "Set in the repo's GitHub variables"
+                    Hint = shared.Contains(v.Name) ? VariablesWhere
                         : v.Default is { Length: > 0 } d ? $"{composeFile} uses {d} when it's empty"
                         : v.Required ? $"{composeFile} needs it" : $"Used by {composeFile}",
                 });
@@ -594,15 +629,15 @@
         if (detection!.ContainerPort is int port) rules.Add(new PortRule(port, "tcp", PortAccess.Lan, await SuggestHostPortAsync(port)));
         ports = ContainerPortsDraft.ForNew(rules, detection.ContainerPort);
         model.Ports = ports.ToPortRows().ToList();
-        // A value set here wins over the repo's GitHub variables, so an example value never shadows one the repo already has.
-        var inGitHub = (await RepoVars.GetAsync(repo!.Owner, repo.Repo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // A value set here wins over the repo's GitHub (or GitLab) variables, so an example value never shadows one the repo already has.
+        var inGitHub = (await RepoVars.GetAsync(repo!.AppOwner, repo.AppRepo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var s in detection.EnvSuggestions)
         {
             var shared = inGitHub.Contains(s.Key);
             model.Env.Add(new EnvRow
             {
                 Key = s.Key, Value = shared ? "" : s.Value, IsSecret = s.IsSecret, BuildTime = s.BuildTime,
-                Hint = shared ? "Set in the repo's GitHub variables" : s.Source,
+                Hint = shared ? VariablesWhere : s.Source,
             });
         }
     }

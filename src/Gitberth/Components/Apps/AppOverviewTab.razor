@@ -8,11 +8,11 @@
 *@
 <div class="gb-split">
     <div>
-        <SectionCard Title="Addresses" Icon="@Icons.Material.Outlined.Link" Flush="true">
+        <SectionCard Title="Addresses" Icon="@Icons.Material.Outlined.Link" Flush="true" Tip="app.overview.addresses">
             <Actions>
                 @if (Connectable)
                 {
-                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Link" OnClick="OnConnect">Connect</Btn>
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Link" OnClick="OnConnect" Tip="app.connect">Connect</Btn>
                 }
                 <a class="gb-card-link" href="@($"{App.Href}/network")">Network<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
             </Actions>
@@ -35,11 +35,11 @@
                             <AddressValue Text="@a.Text" Href="@a.Href" Copy="@a.Copy" ShowCopy="@(a.Kind != AddressKind.Domain)" Live="a.Live" />
                             @if (a.Kind == AddressKind.Domain && a.Note == "Main")
                             {
-                                <span class="gb-tag gb-tag--accent">Main</span>
+                                <span class="gb-tag gb-tag--accent" data-tip="app.overview.main-domain">Main</span>
                             }
                             @if (a.Kind == AddressKind.Domain && a.Live)
                             {
-                                <span class="gb-pill2 gb-tone-good" style="height:22px"><i class="gb-st-dot gb-st-dot--running"></i>Live</span>
+                                <span class="gb-pill2 gb-tone-good" style="height:22px" data-tip="app.overview.domain-live"><i class="gb-st-dot gb-st-dot--running"></i>Live</span>
                             }
                         </span>
                         <span class="gb-addrrow-note">@NoteOf(a)</span>
@@ -53,7 +53,7 @@
             <ComposeServicesCard View="View" />
         }
 
-        <SectionCard Title="Resources" Icon="@Icons.Material.Outlined.Speed" Sub="@(longView ? "Last 6 hours · every 30 s" : "Last hour · every 5 s")">
+        <SectionCard Title="Resources" Icon="@Icons.Material.Outlined.Speed" Tip="app.overview.resources" Sub="@(longView ? "Last 6 hours · every 30 s" : "Last hour · every 5 s")">
             <Actions>
                 <Seg T="bool" Options="WindowOptions" Value="longView" ValueChanged="v => longView = v" Label="Time range" />
             </Actions>
@@ -77,10 +77,10 @@
                     var window = longView ? TimeSpan.FromHours(6) : TimeSpan.FromHours(1);
                     var gap = longView ? TimeSpan.FromSeconds(90) : TimeSpan.FromSeconds(15);
                     <div class="gb-grid-2">
-                        <TimeChart @key="@($"cpu-{longView}")" Title="CPU" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
+                        <TimeChart @key="@($"cpu-{longView}")" Title="CPU" Tip="app.overview.chart.cpu" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
                                    Series="@([new ChartSeries("CPU", 1, Points.Select(p => (double?)p.Cpu).ToArray())])" Current="[Points.LastOrDefault().Cpu]"
                                    ValueFormat="Format.Cpu" Floor="5" Area="true" Marks="Health.Marks" Down="Health.Down" MarkLabels="true" />
-                        <TimeChart @key="@($"memory-{longView}")" Title="Memory" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
+                        <TimeChart @key="@($"memory-{longView}")" Title="Memory" Tip="app.overview.chart.memory" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
                                    Series="@([new ChartSeries("Memory", 2, Points.Select(p => p.Memory).ToArray())])"
                                    Current="[Health.MemoryBytes is { } bytes ? (double)bytes : null]" ValueNote="@(Health.MemoryLimit is ulong limit and > 0 && limit < (HostMemory ?? ulong.MaxValue) ? $"of {Format.Memory(limit)}" : "no limit")"
                                    ValueFormat="Format.Memory" Floor="@(64.0 * 1024 * 1024)" BinaryAxis="true" Area="true" Marks="Health.Marks" Down="Health.Down" />
@@ -96,7 +96,7 @@
             </Foot>
         </SectionCard>
 
-        <SectionCard Title="@(View.Row?.IsCompose == true ? "Web service's container" : "Container")" Icon="@Icons.Material.Outlined.ViewInAr">
+        <SectionCard Title="@(View.Row?.IsCompose == true ? "Web service's container" : "Container")" Icon="@Icons.Material.Outlined.ViewInAr" Tip="app.overview.container">
             <Actions>
                 <a class="gb-card-link" href="@($"{App.Href}/settings")">Edit in Settings<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a>
             </Actions>
@@ -110,16 +110,16 @@
                 else
                 {
                     <dl class="gb-kv">
-                        <dt>Image</dt>
+                        <dt><Tip Key="app.overview.image">Image</Tip></dt>
                         <dd>
                             @* The app's own name for its image: after a roll back, the tag it follows rather than Docker's digest. *@
-                            <span class="gb-mono">@(App.TagMoved ? App.Image : d.Image)</span><span class="gb-t3 gb-mono" title="@d.ImageId">@ShortId(d.ImageId)</span>
+                            <span class="gb-mono">@(App.TagMoved ? App.Image : d.Image)</span><span class="gb-t3 gb-mono" data-tip-text="@d.ImageId">@ShortId(d.ImageId)</span>
                             @if (App.TagMoved)
                             {
-                                <span class="gb-t3" title="@TagMovedNote(App.Image)">the tag has moved on</span>
+                                <span class="gb-t3" data-tip="app.overview.tag-moved" data-tip-detail="@TagMovedNote(App.Image)">the tag has moved on</span>
                             }
                         </dd>
-                        <dt>Command</dt>
+                        <dt><Tip Key="app.overview.command">Command</Tip></dt>
                         <dd>
                             <span class="gb-mono" style="overflow-wrap:anywhere">@Command(d)</span>
                             @if (Settings is { Container: { Command: null, Entrypoint: null } })
@@ -129,17 +129,17 @@
                         </dd>
                         @if (d.WorkingDir is { Length: > 0 } dir)
                         {
-                            <dt>Working directory</dt>
+                            <dt><Tip Key="app.overview.workdir">Working directory</Tip></dt>
                             <dd><span class="gb-mono">@dir</span></dd>
                         }
                         @if (d.User is { Length: > 0 } user)
                         {
-                            <dt>User</dt>
+                            <dt><Tip Key="app.overview.user">User</Tip></dt>
                             <dd><span class="gb-mono">@user</span></dd>
                         }
-                        <dt>Restart policy</dt>
+                        <dt><Tip Key="app.overview.restart-policy">Restart policy</Tip></dt>
                         <dd>@AppFacts.RestartWords(d.RestartPolicy)@(d.RestartCount > 0 ? $" · restarted {d.RestartCount} times" : "")</dd>
-                        <dt>Health check</dt>
+                        <dt><Tip Key="app.overview.health-check">Health check</Tip></dt>
                         <dd>
                             @if (d.Health is { } health)
                             {
@@ -159,11 +159,11 @@
                                 }
                             }
                         </dd>
-                        <dt>Limits</dt>
+                        <dt><Tip Key="app.overview.limits">Limits</Tip></dt>
                         <dd>@Limits(d)</dd>
-                        <dt>Environment</dt>
+                        <dt><Tip Key="app.overview.environment">Environment</Tip></dt>
                         <dd>@d.Env.Count @(d.Env.Count == 1 ? "variable" : "variables")<a href="@($"{App.Href}/environment")">Edit</a></dd>
-                        <dt>Volumes</dt>
+                        <dt><Tip Key="app.overview.volumes">Volumes</Tip></dt>
                         <dd>
                             @if (d.Mounts.Count == 0)
                             {
@@ -179,7 +179,7 @@
                                 </span>
                             }
                         </dd>
-                        <dt>Networks</dt>
+                        <dt><Tip Key="app.overview.networks">Networks</Tip></dt>
                         <dd>
                             @{ var ownMode = d.NetworkMode is "host" or "none" || d.NetworkMode.StartsWith("container:", StringComparison.Ordinal); }
                             @if (ownMode)
@@ -194,11 +194,11 @@
                         </dd>
                         @if (d.Created is { } created)
                         {
-                            <dt>Created</dt>
+                            <dt><Tip Key="app.overview.created">Created</Tip></dt>
                             <dd>@Format.Local(created)<span class="gb-t3">@Format.Ago(created)</span></dd>
                         }
-                        <dt>Container ID</dt>
-                        <dd><span class="gb-mono" title="@d.Id">@ShortId(d.Id)</span><CopyButton Value="@d.Id" Label="the container ID" /></dd>
+                        <dt><Tip Key="app.overview.container-id">Container ID</Tip></dt>
+                        <dd><span class="gb-mono" data-tip-text="@d.Id">@ShortId(d.Id)</span><CopyButton Value="@d.Id" Label="the container ID" /></dd>
                     </dl>
                 }
             </ChildContent>
@@ -206,7 +206,7 @@
     </div>
 
     <div>
-        <SectionCard Title="Recent activity" Icon="@Icons.Material.Outlined.History">
+        <SectionCard Title="Recent activity" Icon="@Icons.Material.Outlined.History" Tip="app.overview.activity">
             <Actions><a class="gb-card-link" href="@($"{App.Href}/activity")">All<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
             <ChildContent>
                 @if (activity is null)
@@ -238,13 +238,13 @@
 
         @if (App.Source != AppSource.Git && App.Role != ContainerRole.Self && Update is { } update)
         {
-            <SectionCard Title="Updates" Icon="@Icons.Material.Outlined.CloudDownload">
+            <SectionCard Title="Updates" Icon="@Icons.Material.Outlined.CloudDownload" Tip="app.overview.updates">
                 <ChildContent>
                     <div class="gb-stack" style="gap:10px">
                         <div class="gb-row">
                             @if (update.Available)
                             {
-                                <span class="gb-pill2 gb-tone-accent"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Update available</span>
+                                <span class="gb-pill2 gb-tone-accent" data-tip="apps.row.update"><SvgIcon Icon="@Icons.Material.Outlined.CloudDownload" />Update available</span>
                             }
                             else
                             {
@@ -266,14 +266,14 @@
                         @if (update.Tracked is { } tracked)
                         {
                             <dl class="gb-kv" style="grid-template-columns:90px minmax(0,1fr);font-size:12.5px">
-                                <dt>Follows</dt><dd><span class="gb-mono">@tracked</span></dd>
+                                <dt><Tip Key="app.overview.update.follows">Follows</Tip></dt><dd><span class="gb-mono">@tracked</span></dd>
                                 @if (update.RunningDigest is { } running)
                                 {
-                                    <dt>Running</dt><dd><span class="gb-mono">@Digest(running)</span></dd>
+                                    <dt><Tip Key="app.overview.update.running">Running</Tip></dt><dd><span class="gb-mono" data-tip-text="@running">@Digest(running)</span></dd>
                                 }
                                 @if (update.LatestDigest is { } latest)
                                 {
-                                    <dt>Latest</dt><dd><span class="gb-mono">@Digest(latest)</span></dd>
+                                    <dt><Tip Key="app.overview.update.latest">Latest</Tip></dt><dd><span class="gb-mono" data-tip-text="@latest">@Digest(latest)</span></dd>
                                 }
                             </dl>
                         }
@@ -284,11 +284,10 @@
                     </div>
                 </ChildContent>
                 <Foot>
-                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Sync" OnClick="OnCheck" Busy="Checking">Check now</Btn>
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Sync" OnClick="OnCheck" Busy="Checking" Tip="app.overview.check-now">Check now</Btn>
                     @if (update.Previous is { } previous)
                     {
-                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Undo" OnClick="OnRollBack" Disabled="Busy"
-                             Title="Recreates it on the image it ran before its last update. Its data stays in its volumes.">Roll back to @previous</Btn>
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Undo" OnClick="OnRollBack" Disabled="Busy" Tip="app.update.rollback">Roll back to @previous</Btn>
                     }
                 </Foot>
             </SectionCard>
@@ -330,7 +329,8 @@
 
     private AppSummary App => View.Summary;
 
-    private static readonly IReadOnlyList<SegOption<bool>> WindowOptions = [new(false, "1 h"), new(true, "6 h")];
+    private static readonly IReadOnlyList<SegOption<bool>> WindowOptions =
+        [new(false, "1 h", Tip: "app.overview.range.hour"), new(true, "6 h", Tip: "app.overview.range.six-hours")];
 
     private IReadOnlyList<StatsPoint> Points => Health is null ? [] : longView ? Health.History : Health.Recent;
 

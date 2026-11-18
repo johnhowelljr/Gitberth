@@ -11,7 +11,7 @@
 <section class="gb-card @Class" aria-labelledby="gb-networks-title">
     <div class="gb-card-head">
         <div class="gb-card-title" id="gb-networks-title" tabindex="-1" @ref="title">
-            <SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks
+            <SvgIcon Icon="@Icons.Material.Outlined.Hub" />Networks<Tip Key="network.networks-card" />
             <span class="gb-card-sub" style="font-weight:400;letter-spacing:0">Names other containers use</span>
         </div>
     </div>
@@ -49,7 +49,7 @@
                                 <span class="gb-nrow-name">@n.Network</span>
                                 @if (n.Network == Networks.Shared)
                                 {
-                                    <span class="gb-tag gb-tag--outline">Shared network</span>
+                                    <span class="gb-tag gb-tag--outline" data-tip="network.tag.shared">Shared network</span>
                                 }
                                 @if (n.Note is { } netNote && netNote != "Shared network")
                                 {
@@ -63,11 +63,11 @@
                                 }
                                 @if (!n.Attached)
                                 {
-                                    <span class="gb-tag gb-tag--warn">@(IsApp ? "Joins with the next deploy" : "Joins again when it starts")</span>
+                                    <span class="gb-tag gb-tag--warn" data-tip="network.networks-card.pending">@(IsApp ? "Joins with the next deploy" : "Joins again when it starts")</span>
                                 }
                             </div>
                             <dl class="gb-kv">
-                                <dt>Names</dt>
+                                <dt><Tip Key="network.networks-card.names">Names</Tip></dt>
                                 <dd>
                                     @if (n.Names.Count > 0)
                                     {
@@ -83,17 +83,17 @@
                                 </dd>
                                 @if (n.IpAddress is { } ip)
                                 {
-                                    <dt>IP address</dt>
-                                    <dd><span class="gb-mono gb-t2" title="Changes when the container is recreated. Use the name.">@ip</span><span class="gb-t3" style="font-size:12px">changes on recreate; use the name</span></dd>
+                                    <dt><Tip Key="network.networks-card.ip">IP address</Tip></dt>
+                                    <dd><span class="gb-mono gb-t2" data-tip="network.networks-card.ip">@ip</span><span class="gb-t3" style="font-size:12px">changes on recreate; use the name</span></dd>
                                 }
                                 @if (members.TryGetValue(n.Network, out var others) && others.Count > 0)
                                 {
-                                    <dt>Also here</dt>
+                                    <dt><Tip Key="network.networks-card.also-here">Also here</Tip></dt>
                                     <dd>
                                         <span class="gb-alsohere">
                                             @foreach (var m in others.Take(4))
                                             {
-                                                <span title="@m.Container">
+                                                <span data-tip-text="@m.Container">
                                                     <AppLogo Name="@m.Container" Size="20" Dim="@(!m.Running)" Self="@(m.Container == "gitberth")" />
                                                     @if (m.Link is not null)
                                                     {
@@ -121,7 +121,7 @@
                         <div>
                             @if (n.LeaveRefusal is null && !ReadOnly)
                             {
-                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => LeaveAsync(n)" Disabled="@(busy || Busy is not null)">Leave…<span class="gb-sr"> @n.Network</span></Btn>
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => LeaveAsync(n)" Disabled="@(busy || Busy is not null)" Tip="network.networks-card.leave">Leave…<span class="gb-sr"> @n.Network</span></Btn>
                             }
                         </div>
                     </div>
@@ -150,7 +150,7 @@
                     </select>
                     <input class="gb-input gb-input--sm gb-input--mono gb-input--alias" placeholder="extra name" aria-label="Extra name (optional)" value="@alias"
                            @onchange="e => SetAliasAsync(e.Value?.ToString())" disabled="@(busy || Busy is not null || join is null)" />
-                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="JoinAsync" Disabled="@(busy || Busy is not null || join is null || plan?.Refusal is not null)">Join</Btn>
+                    <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="JoinAsync" Disabled="@(busy || Busy is not null || join is null || plan?.Refusal is not null)" Tip="network.networks-card.join">Join</Btn>
                 </div>
             }
             @* Always there, so screen readers announce what joining would do as soon as a network is picked. *@

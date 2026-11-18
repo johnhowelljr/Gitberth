@@ -30,30 +30,81 @@ any other: a [Compose app](compose-apps.md) whose settings, variables, services,
 | WordPress | The website and blog builder | A MariaDB of its own | Its first visitor installs it |
 
 Every template runs images pinned to the exact version Gitberth tested it with (Excalidraw publishes only `latest`, so
-it runs that), and each one is installed, started and checked by Gitberth's tests before a release.
+it runs that), and Gitberth's own tests install, start and check each one.
 
 ## Install one
 
-1. Open **New app** and choose **Templates**. Search by name or what it does, or pick a category.
-2. Click a template. Its page says what it is, links to its website and source, and lists what it needs: its database,
-   at least how much memory, its images, the secrets Gitberth makes for it, and the address it gets.
-3. Check its **Settings**: the app's name (the template's, or **Uptime Kuma 2** when that's taken), and whatever the
-   template asks, such as an admin's user name or a time zone. With [domains](domains.md) turned on, give it a **Domain**
-   too, or leave it empty to reach it on your network only.
-4. Click **Install**.
+```mermaid
+flowchart TD
+    pick["New app, Templates: pick one"] --> fill["Its name, its settings, and a domain"]
+    fill --> needs{"Needs Postgres, and there's no server?"}
+    needs -->|"yes"| server["Set up a Postgres server"]
+    server --> install["Install"]
+    needs -->|"no"| install
+    install --> app["A Compose app, with its settings and new secrets as variables"]
+    app --> db{"Its databases made?"}
+    db -->|"no"| undo["The app is taken away again"]
+    db -->|"yes"| domain["Its domain added, behind Access if anyone could claim it"]
+    domain --> deploy["First deploy: pull, start, check"]
+    deploy --> steps["The deploy's page: Open, and its first steps"]
+```
+
+1. Open **New app** and choose **Templates**. Search by name or what it does (**Search 20 templates**), or pick a
+   category.
+2. Click a template. Its page has **Website** and **Source** links, **What it is**, and **What it needs**: its
+   **Database**, at least how much **Memory**, its **Images**, the **Secrets** Gitberth makes for it, and the
+   **Address** it gets. **Once it's running** lists its first steps. **All templates** goes back to the gallery.
+3. Check its **Settings**: **Name** (the template's, or **Uptime Kuma 2** when that's taken), and whatever the template
+   asks, such as an admin's user name or a time zone. With [domains](domains.md) turned on, give it a **Domain** too, or
+   leave it empty to reach it on your network only.
+4. Click **Install** and the template's name, such as **Install Uptime Kuma**. What stops it shows in a **Not installed
+   yet** box.
 
 Gitberth then opens the app's first deploy, with its log as it pulls and starts. Once it's up, the page offers **Open**
-and the template's **first steps**, such as "the first account you make is the admin".
+and **First steps with …**, such as "the first account you make is the admin".
+
+![New app with Templates chosen: the search box, the category chips and the templates' cards](../images/template-gallery.webp)
+
+![The Miniflux template's page: what it is, its settings, what it needs, and Install Miniflux](../images/template-page.webp)
+
+![The first deploy of an app installed from the Uptime Kuma template: the Live box, and First steps with Uptime Kuma under it](../images/template-first-steps.webp)
+
 
 > **Note**
 > A template that needs Postgres gets its database from a Postgres server (see [Databases](databases.md#postgres-servers)).
-> When there's none yet, the template's page says so: **Set up a Postgres server** makes one for every app's databases,
-> as **Settings › Databases** does, and Install is ready once it's there. When there are several Gitberth can use and
-> none is chosen for new databases, it asks you to choose one in **Settings › Databases** instead.
+> When there's none yet, the template's page says **It needs a Postgres server**: **Set up a Postgres server** makes one
+> for every app's databases, as **Settings › Databases** does, and Install is ready once it's there. When there are
+> several Gitberth can use and none is chosen for new databases, it says **Choose its Postgres server**: make one the
+> default in **Settings › Databases**, then come back.
 
 An [AI agent](ai-agents.md) with an Admin token installs templates the same way: `list_templates` lists them with their
 inputs, `create_postgres_server` sets up the Postgres server when one is needed, and `create_app` with `source: template`
 installs one, with the same checks as this page.
+
+## What it needs
+
+A template's page sums up, under **What it needs**, what installing it makes or uses:
+
+| Line | What it says |
+|---|---|
+| **Database** | **Postgres, on postgres** (the server its database will go on) or **A Redis of its own**, each with the variable that gets its connection string, like `DATABASE_URL`. **None** when it needs none, or **None: it runs its own** when its Compose file has its database as a service of its own, as Ghost's and WordPress's do. |
+| **Memory** | The least memory it needs to run, like **At least 512 MB**. |
+| **Image** or **Images** | The images it runs, at the version Gitberth tested. |
+| **Secrets** | How many passwords and keys Gitberth makes for it at install, and their names, like **2 made for it**. They're kept as secret variables. |
+| **Address** | Where it will be reached: `https://` and the **Domain** you gave, or this host's LAN address and the free host port its web service gets, like `http://192.168.50.10:3001`. |
+
+What stops the install shows under it:
+
+- **It needs a Postgres server**: none Gitberth can use is there yet. **Set up a Postgres server** makes one for every
+  app's databases, from `postgres:18`, reached only by your apps, with a generated password kept secret (see
+  [Create a Postgres server](databases.md#create-a-postgres-server)). **Install** is ready once it's up.
+- **Choose its Postgres server**: Gitberth can use several, and none is the default for new databases. Make one the default
+  in **Settings › Databases**, then come back.
+- A problem with the **Name**, the **Domain** or one of its settings shows under that field. Anything else shows in a
+  **Not installed yet** box, such as data an earlier install of the same name left behind.
+
+The line under **Install** says what it will do: install it as a Compose app with the name shown, make its database, then
+pull and start it.
 
 ## A domain at install
 

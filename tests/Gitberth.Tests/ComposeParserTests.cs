@@ -432,7 +432,7 @@ public class ComposeParserTests
     public void Code_to_build_belongs_to_from_github()
     {
         var build = Service("build: .\nports: [\"3000:3000\"]");
-        Assert.Equal("Code to build: this service has build: and no image:. Use the GitHub repository source to build an app from its code.", Assert.Single(Errors(build)).Text);
+        Assert.Equal("Code to build: this service has build: and no image:. Use the Git repository source to build an app from its code.", Assert.Single(Errors(build)).Text);
 
         var both = Service("build: .\nimage: me/app:1");
         Assert.True(both.Ok);

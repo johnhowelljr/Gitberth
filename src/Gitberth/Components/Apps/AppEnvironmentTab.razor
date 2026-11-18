@@ -28,7 +28,7 @@ else
     var imageOpen = showImage || fromImage.Any(r => r.Changed);
     var git = View.Summary.Source == AppSource.Git;
     var compose = View.Row?.IsCompose == true;
-    <SectionCard Title="Environment" Icon="@Icons.Material.Outlined.Key" Id="sec-env"
+    <SectionCard Title="Environment" Icon="@Icons.Material.Outlined.Key" Id="sec-env" Tip="app.env"
                  Sub="@(compose ? $"What the Compose file's ${{…}} are filled with, also written to its .env for env_file: .env; build-time ones go to its builds too.{(git ? " Each is for every deploy, for production, or for previews." : "")}"
                      : git ? "Passed to the container when it starts; build-time ones to the build too. Each is for every deploy, for production, or for previews." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
         <Actions>
@@ -55,8 +55,8 @@ else
                 @if (fromImage.Count > 0)
                 {
                     <div class="gb-envrow gb-envrow--more" role="row">
-                        <span class="gb-row" style="gap:8px"><SvgIcon Icon="@Icons.Material.Outlined.Layers" Size="sm" Class="gb-t3" />@fromImage.Count from the image</span>
-                        <span class="gb-mono gb-t3 gb-ellipsis" style="font-size:12px" title="@string.Join(", ", fromImage.Select(r => r.Key))">@(imageOpen ? "Edit one to make it the container's own" : string.Join(", ", fromImage.Select(r => r.Key)))</span>
+                        <span class="gb-row" style="gap:8px"><SvgIcon Icon="@Icons.Material.Outlined.Layers" Size="sm" Class="gb-t3" /><Tip Key="app.env.from-image">@fromImage.Count from the image</Tip></span>
+                        <span class="gb-mono gb-t3 gb-ellipsis" style="font-size:12px" data-tip-text="@string.Join(", ", fromImage.Select(r => r.Key))">@(imageOpen ? "Edit one to make it the container's own" : string.Join(", ", fromImage.Select(r => r.Key)))</span>
                         <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" OnClick="() => showImage = !showImage" aria-expanded="@(imageOpen ? "true" : "false")" Disabled="@(fromImage.Any(r => r.Changed))">@(imageOpen ? "Hide" : "Show")</Btn>
                     </div>
                     @if (imageOpen)
@@ -74,7 +74,7 @@ else
             }
             <div class="gb-tbl-actions" style="margin-top:14px">
                 <Btn Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="ReadOnly">Add variable</Btn>
-                <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ContentPaste" OnClick="PasteAsync" Disabled="ReadOnly">Paste .env</Btn>
+                <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.ContentPaste" OnClick="PasteAsync" Disabled="ReadOnly" Tip="app.env.paste">Paste .env</Btn>
                 @if (Draft.EnvChanged)
                 {
                     <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Undo" OnClick="UndoAll">Undo every change here</Btn>
@@ -85,10 +85,10 @@ else
 
     @if (managed.Count > 0)
     {
-        <SectionCard Title="Set by Gitberth from its databases" Icon="@GitberthIcons.Database" Class="gb-mt" Id="sec-env-databases">
+        <SectionCard Title="Set by Gitberth from its databases" Icon="@GitberthIcons.Database" Class="gb-mt" Id="sec-env-databases" Tip="app.env.databases">
             <ChildContent>
                 <p class="gb-help" style="margin-bottom:14px">
-                    @(git ? "Each deploy sets these from the app's own databases, over a value of the same name above or in GitHub; masked in the log, and passed to the build as secrets."
+                    @(git ? $"Each deploy sets these from the app's own databases, over a value of the same name above or in {(View.Row is { FromGitLab: true } ? "GitLab" : "GitHub")}; masked in the log, and passed to the build as secrets."
                           : compose ? "Each deploy sets these from the app's own databases, over a value of the same name above, and each in parts too for a Compose file that wants them one by one; masked in the log."
                           : "Gitberth keeps these in the container's environment, from the app's own databases. They change only with the database.")
                 </p>
@@ -96,7 +96,7 @@ else
                     @foreach (var m in managed)
                     {
                         <div class="gb-envrow" role="row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)">
-                            <span class="gb-envkey" role="cell"><span>@m.Variable</span><span class="gb-tag" title="Masked wherever it's shown"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Secret</span></span>
+                            <span class="gb-envkey" role="cell"><span>@m.Variable</span><span class="gb-tag" data-tip="app.env.secret"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Secret</span></span>
                             <span class="gb-envval" role="cell" style="font-family:var(--gb-sans)">
                                 <span>From @DatabaseService.From(m)</span>
                                 @if (compose)
@@ -118,7 +118,7 @@ else
 
     @if (builtIns.Count > 0)
     {
-        <SectionCard Title="Set by Gitberth: where it's reached" Icon="@Icons.Material.Outlined.Public" Class="gb-mt" Id="sec-env-address">
+        <SectionCard Title="Set by Gitberth: where it's reached" Icon="@Icons.Material.Outlined.Public" Class="gb-mt" Id="sec-env-address" Tip="app.env.where-reached">
             <ChildContent>
                 <p class="gb-help" style="margin-bottom:14px">
                     Each deploy tells the app where it's reached, as its template's file asks: its main domain, or its address on the LAN without one.
@@ -128,7 +128,7 @@ else
                     @foreach (var (key, value) in builtIns)
                     {
                         <div class="gb-envrow" role="row" style="grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)">
-                            <span class="gb-envkey" role="cell"><span>@key</span>@if (BuiltInsOwn.Contains(key)) { <span class="gb-tag gb-tag--outline" title="Set above: the app gets that value, not this one.">Yours above</span> }</span>
+                            <span class="gb-envkey" role="cell"><span>@key</span>@if (BuiltInsOwn.Contains(key)) { <span class="gb-tag gb-tag--outline" data-tip="app.env.yours-above">Yours above</span> }</span>
                             <span class="gb-envval" role="cell"><span class="gb-mono">@value</span></span>
                         </div>
                     }
@@ -143,7 +143,7 @@ else
         <RepoVariablesEditor Owner="@row.Owner" Repo="@row.Repo" App="@row" />
         @if (vercel is not null)
         {
-            <SectionCard Title="Set by Gitberth, like on Vercel" Icon="@Icons.Material.Outlined.AutoAwesome" Class="gb-mt">
+            <SectionCard Title="Set by Gitberth, like on Vercel" Icon="@Icons.Material.Outlined.AutoAwesome" Class="gb-mt" Tip="app.env.vercel">
                 <ChildContent>
                     @if (vercel.Off)
                     {
@@ -153,7 +153,7 @@ else
                     {
                         <p class="gb-help" style="margin-bottom:14px">
                             Gitberth tells the app where it runs and what was deployed, with Vercel's names, when it runs and (except <code>VERCEL_ENV</code>
-                            and Auth.js's address) while it builds. A variable with the same name set above, or in GitHub, wins.
+                            and Auth.js's address) while it builds. A variable with the same name set above, or in @(row.FromGitLab ? "GitLab" : "GitHub"), wins.
                         </p>
                         <div class="gb-envtbl" role="table" aria-label="Variables Gitberth sets">
                             @foreach (var v in vercel.Added.Where(v => VercelPrefix is null || !v.Key.StartsWith(VercelPrefix, StringComparison.Ordinal)))
@@ -280,7 +280,7 @@ else
                 }
                 @if (secret)
                 {
-                    <span class="gb-tag" title="Masked wherever it's shown"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Secret</span>
+                    <span class="gb-tag" data-tip="app.env.secret"><SvgIcon Icon="@Icons.Material.Filled.Lock" />Secret</span>
                 }
                 @if (row.IsNew && row.Key.Length > 0)
                 {
@@ -288,23 +288,23 @@ else
                 }
                 else if (row.Original?.FromImage == true)
                 {
-                    <span class="gb-default-tag">image</span>
+                    <span class="gb-default-tag" data-tip="app.env.from-image">image</span>
                 }
                 @if (git && row.BuildTime)
                 {
-                    <span class="gb-tag gb-tag--accent" title="Passed to the build too">Build time</span>
+                    <span class="gb-tag gb-tag--accent" data-tip="app.env.build-time">Build time</span>
                 }
                 @if (git && row.Scope != EnvScope.All)
                 {
-                    <span class="gb-tag gb-tag--outline" title="@ScopeTitle(row.Scope)">@EnvScopes.Label(row.Scope)</span>
+                    <span class="gb-tag gb-tag--outline" data-tip="app.env.scope" data-tip-detail="@ScopeTitle(row.Scope)">@EnvScopes.Label(row.Scope)</span>
                 }
                 @if (gitberths)
                 {
-                    <span class="gb-tag gb-tag--accent" title="From its database: Settings › Databases adds and removes it.">Set by Gitberth</span>
+                    <span class="gb-tag gb-tag--accent" data-tip="app.env.set-by-gitberth">Set by Gitberth</span>
                 }
                 else if (replaced)
                 {
-                    <span class="gb-tag gb-tag--warn" title="@(replacedBy == row.Key ? $"Gitberth sets {row.Key} from the app's database, so production doesn't get this value." : $"Gitberth sets {row.Key} as a part of {replacedBy}, from the app's database, so the app doesn't get this value.")">Replaced by Gitberth</span>
+                    <span class="gb-tag gb-tag--warn" data-tip="app.env.replaced" data-tip-detail="@(replacedBy == row.Key ? $"Gitberth sets {row.Key} from the app's database, so production doesn't get this value." : $"Gitberth sets {row.Key} as a part of {replacedBy}, from the app's database, so the app doesn't get this value.")">Replaced by Gitberth</span>
                 }
             </span>
             <span class="gb-envval" role="cell">
@@ -322,7 +322,7 @@ else
             <span class="gb-envrow-actions" role="cell">
                 @if (git && !row.Removed && !ReadOnly && row.Original?.FromImage != true)
                 {
-                    <select class="gb-input gb-input--sm" style="width:auto;margin-right:4px" aria-label="@($"Which deploys get {row.Key}")" title="Which deploys get it"
+                    <select class="gb-input gb-input--sm" style="width:auto;margin-right:4px" aria-label="@($"Which deploys get {row.Key}")" data-tip-text="Which deploys get it"
                             value="@row.Scope" @onchange="e => SetScope(row, e.Value?.ToString())">
                         <option value="@EnvScope.All">All deploys</option>
                         <option value="@EnvScope.Production">Production</option>
@@ -331,7 +331,7 @@ else
                 }
                 @if (secret && !row.Removed)
                 {
-                    <button type="button" class="gb-iconbtn" title="@(masked ? "Show" : "Hide")" aria-label="@($"{(masked ? "Show" : "Hide")} {row.Key}")" @onclick="() => Reveal(row)">
+                    <button type="button" class="gb-iconbtn" data-tip-text="@(masked ? "Show" : "Hide")" aria-label="@($"{(masked ? "Show" : "Hide")} {row.Key}")" @onclick="() => Reveal(row)">
                         <SvgIcon Icon="@(masked ? Icons.Material.Outlined.Visibility : Icons.Material.Outlined.VisibilityOff)" />
                     </button>
                 }
@@ -339,22 +339,22 @@ else
                 @if (canMark)
                 {
                     <button type="button" class="gb-iconbtn gb-secretbtn @(secret ? "on" : null)" aria-pressed="@(secret ? "true" : "false")" aria-label="@($"Secret: {row.Key}")"
-                            disabled="@row.AlwaysSecret" title="@SecretTitle(row)" @onclick="() => ToggleSecret(row)">
+                            disabled="@row.AlwaysSecret" data-tip="app.env.secret-toggle" data-tip-detail="@SecretTitle(row)" @onclick="() => ToggleSecret(row)">
                         <SvgIcon Icon="@(secret ? Icons.Material.Filled.Lock : Icons.Material.Outlined.LockOpen)" />
                     </button>
                 }
                 @if (git && !row.Removed && !ReadOnly)
                 {
-                    <button type="button" class="gb-iconbtn gb-buildbtn" title="@(row.BuildTime ? "Not at build time" : "Pass to the build too")" aria-pressed="@(row.BuildTime ? "true" : "false")"
+                    <button type="button" class="gb-iconbtn gb-buildbtn" data-tip="app.env.build-toggle" data-tip-detail="@(row.BuildTime ? "Passed to the build now." : "Not passed to the build now.")" aria-pressed="@(row.BuildTime ? "true" : "false")"
                             aria-label="@($"Build time for {row.Key}")" @onclick="() => ToggleBuild(row)"><SvgIcon Icon="@Icons.Material.Outlined.Build" /></button>
                 }
                 @if (row.Changed && !row.IsNew)
                 {
-                    <button type="button" class="gb-iconbtn" title="Undo" aria-label="@($"Undo {row.Key}")" @onclick="() => Undo(row)"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
+                    <button type="button" class="gb-iconbtn" data-tip-text="Undo" aria-label="@($"Undo {row.Key}")" @onclick="() => Undo(row)"><SvgIcon Icon="@Icons.Material.Outlined.Undo" /></button>
                 }
                 @if (!row.Removed && !locked)
                 {
-                    <button type="button" class="gb-iconbtn" title="Remove" aria-label="@($"Remove {row.Key}")" @onclick="() => Remove(row)"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
+                    <button type="button" class="gb-iconbtn" data-tip-text="Remove" aria-label="@($"Remove {row.Key}")" @onclick="() => Remove(row)"><SvgIcon Icon="@Icons.Material.Outlined.Close" /></button>
                 }
             </span>
         </div>

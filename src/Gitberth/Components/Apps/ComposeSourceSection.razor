@@ -7,11 +7,11 @@
     service is the web one); an inline app's whole file is here, and saving it shows what changes, then deploys it. Saved on
     its own, like Previews: none of it is a field of the app's container.
 *@
-<SettingsSection Id="@Id" Title="Compose" Icon="@Icons.Material.Outlined.AccountTree" Changed="@Changed"
+<SettingsSection Id="@Id" Title="Compose" Icon="@Icons.Material.Outlined.AccountTree" Changed="@Changed" Tip="app.settings.compose"
                  Description="@(Inline ? "The Compose file Gitberth keeps for this app, and the service that's its web one. Saving deploys it with them." : "Which Compose file in the repo it's deployed with, and the service that's its web one. Saving deploys it again.")">
     @if (Inline)
     {
-        <Field Label="Compose file" For="set-compose-yaml" Changed="@(yaml != loadedYaml)" Error="@(problems.FirstOrDefault())"
+        <Field Label="Compose file" For="set-compose-yaml" Tip="app.settings.compose.file" Changed="@(yaml != loadedYaml)" Error="@(problems.FirstOrDefault())"
                Help="The whole file, as docker compose reads it. ${NAME} is filled from the app's variables (Environment).">
             <textarea id="set-compose-yaml" class="gb-input gb-input--mono gb-paste @(yaml != loadedYaml ? "gb-input--changed" : null)" rows="16" spellcheck="false"
                       value="@yaml" @oninput="YamlTyped"></textarea>
@@ -19,12 +19,12 @@
     }
     else
     {
-        <Field Label="Compose file" For="set-compose-file" Changed="@(file.Trim() != (View.Row?.ComposeFile ?? ""))" Was="@View.Row?.ComposeFile"
+        <Field Label="Compose file" For="set-compose-file" Tip="app.settings.compose.file" Changed="@(file.Trim() != (View.Row?.ComposeFile ?? ""))" Was="@View.Row?.ComposeFile"
                Help="@($"In {(View.Row?.Subdirectory is { } sub ? $"{sub}/" : "the repository's root")}, like compose.yaml or docker-compose.yml.")">
             <input id="set-compose-file" class="gb-input gb-input--mono" value="@file" @oninput="e => file = e.Value?.ToString() ?? string.Empty" spellcheck="false" />
         </Field>
     }
-    <Field Label="Web service" Changed="@(web != View.Row?.WebService)" Was="@View.Row?.WebService"
+    <Field Label="Web service" Tip="app.settings.compose.web" Changed="@(web != View.Row?.WebService)" Was="@View.Row?.WebService"
            Help="Its container is the app's: its domains, LAN port, health URL, logs and uptime checks. The others stay inside the app.">
         @if (Services.Count > 0)
         {
@@ -35,7 +35,7 @@
             <input class="gb-input gb-input--mono" value="@web" @oninput="e => web = e.Value?.ToString() ?? string.Empty" aria-label="Web service" spellcheck="false" />
         }
     </Field>
-    <SwitchRow Title="Put every service on Gitberth's network" Value="everyShared" ValueChanged="v => everyShared = v" Changed="@(everyShared != loadedShared)"
+    <SwitchRow Title="Put every service on Gitberth's network" Value="everyShared" ValueChanged="v => everyShared = v" Changed="@(everyShared != loadedShared)" Tip="app.settings.compose.shared"
                Sub="@($"So a worker or a cron service reaches the app's database and other apps by name, as its web service does. Only the web service is {View.Row?.Slug} there; the others have no name of their own.")" />
     @if (Changes.Count > 0)
     {
@@ -46,7 +46,7 @@
         {
             <Btn Kind="BtnKind.Ghost" OnClick="Reset" Disabled="saving">Undo</Btn>
         }
-        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="SaveAsync" Busy="saving" Disabled="@(!Changed || problems.Count > 0)">Save and deploy</Btn>
+        <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="SaveAsync" Busy="saving" Disabled="@(!Changed || problems.Count > 0)" Tip="app.settings.compose.save">Save and deploy</Btn>
     </div>
 </SettingsSection>
 

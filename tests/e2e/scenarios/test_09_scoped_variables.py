@@ -105,7 +105,7 @@ def env_rows(page):
             value_type=value.get_attribute("type") if value.count() else None,
             scope=picker.input_value() if picker.count() else None,
             options=picker.locator("option").evaluate_all("os => os.map(o => o.textContent.trim())") if picker.count() else [],
-            tag=text_of(tag) if tag.count() else None, tag_title=tag.get_attribute("title") if tag.count() else None,
+            tag=text_of(tag) if tag.count() else None, tag_title=tag.get_attribute("data-tip-detail") if tag.count() else None,
             tags=[text_of(t) for t in key_cell.locator(".gb-tag").all()], classes=row.get_attribute("class") or ""))
     return out
 
@@ -266,8 +266,8 @@ class TestScopes:
             assert r.tag_title == TAG_TITLES.get(r.scope), f"{r.key} ({r.scope})'s tag: {r.tag!r} titled {r.tag_title!r}"
             assert "New" not in r.tags and "gb-envrow--new" not in r.classes and "gb-envrow--changed" not in r.classes, (r.key, r.tags, r.classes)
             picker = r.row.locator("select")
-            assert (picker.get_attribute("aria-label"), picker.get_attribute("title")) == (f"Which deploys get {r.key}", "Which deploys get it"), \
-                (picker.get_attribute("aria-label"), picker.get_attribute("title"))
+            assert (picker.get_attribute("aria-label"), picker.get_attribute("data-tip-text")) == (f"Which deploys get {r.key}", "Which deploys get it"), \
+                (picker.get_attribute("aria-label"), picker.get_attribute("data-tip-text"))
         # Nothing is pending: what's listed is what's saved.
         assert apply_bar(page).count() == 0, text_of(apply_bar(page))
         assert not gitberth.errors(page), f"the browser reported errors: {gitberth.errors(page)}"

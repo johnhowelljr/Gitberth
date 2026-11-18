@@ -48,7 +48,7 @@ The image must have a tag, such as `backup-agent:1.0`. Images without one aren't
 - **Its first Updates choice** is **New apps from an image** in **Settings** › **Updates**, as for any new app that runs
   an image.
 - **An image Gitberth built for a Git app** can be run this way too, but the new app doesn't follow the repository. To deploy
-  from the repository, use [Deploy an app from GitHub](deploy-from-github.md).
+  from the repository, use [Deploy an app from GitHub or GitLab](deploy-from-github.md).
 
 ## Related
 

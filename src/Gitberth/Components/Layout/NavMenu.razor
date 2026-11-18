@@ -8,34 +8,34 @@
 <a href="" class="gb-brand"><Logo Size="28" /><span>Gitberth</span></a>
 
 @* The host every app runs on: its name, its LAN address, and whether Gitberth can read Docker. *@
-<a href="health" class="gb-hostcard" title="@(Stats.Current.Error is { } error ? $"Docker can't be read: {error}" : "The host's health")">
+<a href="health" class="gb-hostcard" data-tip="nav.host" data-tip-detail="@(Stats.Current.Error is { } error ? $"Docker can't be read: {error}" : null)">
     <span class="gb-hostcard-icon"><SvgIcon Icon="@Icons.Material.Outlined.Dns" /></span>
     <span style="min-width:0">
         <span class="gb-hostcard-name gb-ellipsis" style="display:block">@HostName</span>
         <span class="gb-hostcard-sub">@lanHost</span>
     </span>
-    <StatusDot State="@(Stats.Current.Error is null ? AppState.Running : AppState.Dead)" />
+    <StatusDot State="@(Stats.Current.Error is null ? AppState.Running : AppState.Dead)" Tip="" />
 </a>
 
 <nav aria-label="Pages" style="display:flex;flex-direction:column;gap:2px">
-    <NavLink class="gb-nav-item" href="" Match="NavLinkMatch.All"><SvgIcon Icon="@Icons.Material.Outlined.SpaceDashboard" />Dashboard</NavLink>
-    <NavLink class="gb-nav-item" href="apps" Match="NavLinkMatch.Prefix">
+    <NavLink class="gb-nav-item" href="" Match="NavLinkMatch.All" data-tip="nav.dashboard"><SvgIcon Icon="@Icons.Material.Outlined.SpaceDashboard" />Dashboard</NavLink>
+    <NavLink class="gb-nav-item" href="apps" Match="NavLinkMatch.Prefix" data-tip="nav.apps">
         <SvgIcon Icon="@Icons.Material.Outlined.GridView" />Apps
         @if (list.Apps.Count > 0)
         {
-            <span class="gb-nav-count" title="@($"{Running} running of {list.Apps.Count}")">@Running</span>
+            <span class="gb-nav-count" data-tip="nav.apps.running" data-tip-detail="@($"{Running} running of {list.Apps.Count}")">@Running</span>
         }
     </NavLink>
-    <NavLink class="gb-nav-item" href="network" Match="NavLinkMatch.Prefix"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />Network</NavLink>
-    <NavLink class="gb-nav-item" href="health" Match="NavLinkMatch.Prefix"><SvgIcon Icon="@Icons.Material.Outlined.MonitorHeart" />Health</NavLink>
-    <NavLink class="gb-nav-item" href="audit" Match="NavLinkMatch.Prefix"><SvgIcon Icon="@Icons.Material.Outlined.Policy" />Audit log</NavLink>
+    <NavLink class="gb-nav-item" href="network" Match="NavLinkMatch.Prefix" data-tip="nav.network"><SvgIcon Icon="@Icons.Material.Outlined.Lan" />Network</NavLink>
+    <NavLink class="gb-nav-item" href="health" Match="NavLinkMatch.Prefix" data-tip="nav.health"><SvgIcon Icon="@Icons.Material.Outlined.MonitorHeart" />Health</NavLink>
+    <NavLink class="gb-nav-item" href="audit" Match="NavLinkMatch.Prefix" data-tip="nav.audit"><SvgIcon Icon="@Icons.Material.Outlined.Policy" />Audit log</NavLink>
 </nav>
 
-<div class="gb-nav-sec">Pinned <SvgIcon Icon="@Icons.Material.Outlined.PushPin" /></div>
+<div class="gb-nav-sec"><Tip Key="nav.pinned">Pinned</Tip> <SvgIcon Icon="@Icons.Material.Outlined.PushPin" /></div>
 <nav aria-label="Pinned apps" style="display:flex;flex-direction:column;gap:1px">
     @foreach (var app in Pinned)
     {
-        <NavLink class="gb-nav-app" href="@app.Href" Match="NavLinkMatch.Prefix" title="@app.Title">
+        <NavLink class="gb-nav-app" href="@app.Href" Match="NavLinkMatch.Prefix" data-tip-text="@app.Title">
             <AppLogo Image="@app.Image" Name="@app.Container" Size="20" Self="@(app.Role == ContainerRole.Self)" Kind="@Kinds.GetValueOrDefault(app.Key)" Dim="@(!app.Running)" />
             <span>@app.Title</span>
             <StatusDot State="app.State" />
@@ -48,8 +48,9 @@
 </nav>
 
 <div class="gb-side-bottom">
-    <NavLink class="gb-nav-item" href="settings" Match="NavLinkMatch.Prefix"><SvgIcon Icon="@Icons.Material.Outlined.Settings" />Settings</NavLink>
-    <div class="gb-side-foot">Gitberth @Version@(Stats.Current.Host is { } host ? $" · Docker {host.ServerVersion}" : "")</div>
+    <NavLink class="gb-nav-item" href="settings" Match="NavLinkMatch.Prefix" data-tip="nav.settings"><SvgIcon Icon="@Icons.Material.Outlined.Settings" />Settings</NavLink>
+    <NavLink class="gb-nav-item" href="help" Match="NavLinkMatch.Prefix" data-tip="nav.help"><SvgIcon Icon="@Icons.Material.Outlined.HelpOutline" />Help</NavLink>
+    <div class="gb-side-foot"><Tip Key="nav.version">Gitberth @Version@(Stats.Current.Host is { } host ? $" · Docker {host.ServerVersion}" : "")</Tip></div>
 </div>
 
 @code {

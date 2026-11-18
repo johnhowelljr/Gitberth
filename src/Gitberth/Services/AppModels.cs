@@ -280,7 +280,9 @@ public static class Format
     public static string Trigger(DeployTrigger trigger, string? hookName) =>
         trigger == DeployTrigger.Hook && hookName is { Length: > 0 } name ? $"Deploy hook \"{name}\"" : Trigger(trigger);
 
-    public static string Trigger(Deployment d) => Trigger(d.Trigger, d.HookName);
+    /// <summary>What started a deploy, as its page says it: a GitLab project's push is "Push on GitLab".</summary>
+    public static string Trigger(Deployment d) =>
+        d.Trigger == DeployTrigger.Webhook && Audit.AuditText.WebhookHost(d) == "GitLab" ? "Push on GitLab" : Trigger(d.Trigger, d.HookName);
 
     /// <summary>
     /// Who asked for the deploy, when that says more than its trigger: "by admin", "by the token ci". Null for Gitberth's own
@@ -293,7 +295,7 @@ public static class Format
 
     /// <summary>The same in the middle of a line ("2 min ago · deploy hook "Contentful""): lower case, but never the hook's own name.</summary>
     public static string TriggerInLine(Deployment d) =>
-        d.Trigger == DeployTrigger.Hook && d.HookName is { Length: > 0 } name ? $"deploy hook \"{name}\"" : Trigger(d.Trigger).ToLowerInvariant();
+        d.Trigger == DeployTrigger.Hook && d.HookName is { Length: > 0 } name ? $"deploy hook \"{name}\"" : Trigger(d).ToLowerInvariant();
 
     /// <summary>Up to two initials for an app avatar.</summary>
     public static string Initials(string name)

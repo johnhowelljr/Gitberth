@@ -196,10 +196,18 @@ jobs:
           set -euo pipefail
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
           repo_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
-          releases="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --exclude-drafts --json tagName,isPrerelease \
-            --jq '.[] | "\(.tagName) \(.isPrerelease)"')"
-          while read -r tag pre; do
+          releases="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --exclude-drafts --json tagName,isPrerelease,createdAt \
+            --jq '.[] | "\(.tagName) \(.isPrerelease) \(.createdAt)"')"
+          now="$(date -u +%s)"
+          while read -r tag pre created; do
             [ -n "$tag" ] || continue
+            # A release's own run attaches its image. Another run (main's) only catches up a release older than two hours,
+            # so the two never attach the same files at once (the second one's upload used to fail).
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              [ "$tag" = "$GITHUB_REF_NAME" ] || continue
+            elif [ $(( now - $(date -u -d "$created" +%s) )) -lt 7200 ]; then
+              continue
+            fi
             version="${tag#v}"
             # Not built (yet): nothing to show.
             index="$(docker buildx imagetools inspect --raw "$image:$version" 2>/dev/null)" || continue

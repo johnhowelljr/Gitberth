@@ -1,0 +1,111 @@
+# Tips for the badges (Components/Shared): who reaches an address (AccessTag, badge.access.<kind>), where an app comes
+# from (SourceBadge, badge.source.<source>) and a Git app's auto-deploy (WatchBadge, badge.watch.*). The keys come from
+# Components/Shared/TipKeys.cs. See Help/TipCatalog.cs.
+
+# ---- Who reaches an address ----
+
+badge.access.lan:
+  title: LAN
+  text: >-
+    Published on every address of the host: every device on your LAN reaches it at the host's LAN address and this
+    port.
+  example: 192.168.50.10:5432
+  more: guides/networking#who-reaches-a-port-access
+
+badge.access.host-only:
+  title: Host only
+  text: >-
+    Published on `127.0.0.1` only: programs on the host itself reach it, such as the Cloudflare tunnel. The rest of
+    your LAN doesn't.
+  example: 127.0.0.1:5432
+  more: guides/networking#who-reaches-a-port-access
+
+badge.access.internal:
+  title: Internal
+  text: >-
+    Not published on the host. Only containers on the same Docker network reach it, by its name.
+  example: postgres:5432
+  more: guides/networking#reach-other-containers-by-name
+
+badge.access.domain:
+  title: Domain
+  text: >-
+    A public domain, through your Cloudflare Tunnel: anyone on the internet reaches the app there, unless the domain
+    asks visitors to sign in first.
+  example: https://app.example.com
+  more: guides/domains
+
+badge.access.own-lan:
+  title: Own LAN address
+  text: >-
+    The container's own address on your LAN, from the block in **Settings › Own LAN addresses**. It answers there on
+    every port it listens on, like a device of its own.
+  more: guides/networking#give-a-container-its-own-lan-address
+
+# ---- Where an app comes from ----
+
+badge.source.git:
+  title: Git
+  text: >-
+    Built by Gitberth from a GitHub repository or a GitLab project, and deployed again when its branch gets a new
+    commit.
+  more: guides/deploy-from-github
+
+badge.source.registry:
+  title: Registry
+  text: >-
+    Runs an image pulled from a registry, such as Docker Hub or ghcr.io. Gitberth can check it for newer images and
+    update it.
+  more: guides/run-a-registry-image
+
+badge.source.local:
+  title: Local image
+  text: >-
+    Runs an image that was already on this host, built here or loaded, with no pull.
+  more: guides/use-a-local-image
+
+badge.source.manual:
+  title: By hand
+  text: >-
+    Made in **New app** from a pasted `docker run` command or Compose service, or from a blank form.
+  more: guides/paste-docker-run-or-compose
+
+badge.source.compose:
+  title: Compose
+  text: >-
+    A whole Compose file, pasted or a template's, deployed as one app with all its services. Gitberth keeps the file
+    and runs it with `docker compose`.
+  more: guides/compose-apps
+
+badge.source.existing:
+  title: Existing
+  text: >-
+    A container started outside Gitberth, by hand or by another tool. Gitberth shows it and lets you manage it like
+    any other app.
+  more: guides/manage-apps#the-apps-list
+
+# ---- A Git app's auto-deploy ----
+
+badge.watch.on:
+  title: Auto-deploy on
+  text: >-
+    Gitberth checks the app's branch for new commits and deploys each one. **Check now** looks at once.
+  more: guides/deploys-and-rollbacks#automatic-deploys
+
+badge.watch.off:
+  title: Auto-deploy off
+  text: >-
+    **Deploy on push** is off in this app's **Settings**, so a new commit waits until you click **Deploy**.
+  more: guides/deploys-and-rollbacks#automatic-deploys
+
+badge.watch.paused:
+  title: Auto-deploy paused
+  text: >-
+    The app is stopped, and Gitberth doesn't watch the branch of a stopped app. Starting it watches again.
+  more: guides/deploys-and-rollbacks#automatic-deploys
+
+badge.watch.error:
+  title: Can't check the repo
+  text: >-
+    The last look at the repository failed; the line below says why. Gitberth tries again later by itself.
+  more: guides/troubleshooting#github-and-deploys

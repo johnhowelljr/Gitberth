@@ -1,10 +1,17 @@
-@* A switch with its title and one line under it: on/off settings that take effect as they're applied. *@
+@* A switch with its title and one line under it: on/off settings that take effect as they're applied. With a Tip, the title shows it. *@
 <div class="gb-switchrow @Class">
     <button type="button" role="switch" aria-checked="@(Value ? "true" : "false")" aria-label="@Title" class="gb-switch @(Value ? "on" : null)"
             disabled="@Disabled" @onclick="ToggleAsync"></button>
     <div style="min-width:0">
         <div class="gb-switchrow-t">
-            @Title
+            @if (Tip is not null)
+            {
+                <Tip Key="@Tip">@Title</Tip>
+            }
+            else
+            {
+                @Title
+            }
             @if (Changed)
             {
                 <span class="gb-changed-mark" style="margin-left:6px">Changed</span>
@@ -24,6 +31,8 @@
     [Parameter] public EventCallback<bool> ValueChanged { get; set; }
     [Parameter] public bool Disabled { get; set; }
     [Parameter] public bool Changed { get; set; }
+    /// <summary>The title's tip: its key in the catalog (Help/Tips). The title's words become its trigger.</summary>
+    [Parameter] public string? Tip { get; set; }
     [Parameter] public string? Class { get; set; }
 
     private async Task ToggleAsync()
