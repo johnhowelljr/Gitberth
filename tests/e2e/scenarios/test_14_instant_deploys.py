@@ -572,7 +572,7 @@ def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github
 
     gitberth.open(page, f"/apps/{app.key}")
     hero = page.locator(".gb-hero")
-    until(lambda: f"#{two['Id']}" in hero.inner_text() and "· push on github" in flat(hero.inner_text()), 30,
+    until(lambda: f"#{two['Id']}" in hero.inner_text() and "· push on GitHub" in flat(hero.inner_text()), 30,
           "the app page's last deploy to be the push", seen=hero.inner_text)
     assert not gitberth.errors(page), gitberth.errors(page)
 

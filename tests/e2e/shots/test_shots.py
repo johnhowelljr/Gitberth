@@ -836,13 +836,15 @@ def test_health_charts(gitberth, shooter):
     page = shooter.page()
     shooter.open(page, "/health")
     page.get_by_role("button", name="Show uptime-kuma's charts").click()
-    page.get_by_role("button", name="Hide uptime-kuma's charts").wait_for()
-    page.wait_for_timeout(2000)
-    # The row and its charts: the first box around the button that's tall enough to hold them.
-    page.get_by_role("button", name="Hide uptime-kuma's charts").evaluate("""b => { let e = b;
-        while (e.parentElement && e.getBoundingClientRect().height < 250) e = e.parentElement;
-        e.setAttribute('data-shot', 'health-charts'); }""")
-    shooter.detail(page, page.locator("[data-shot='health-charts']"), "health-charts", pad=10)
+    hide = page.get_by_role("button", name="Hide uptime-kuma's charts")
+    hide.wait_for()
+    # The row and its charts, found afresh at each step: the page redraws with every reading, so a mark set on one of
+    # its elements can be gone by the time the picture is taken.
+    row = page.locator(".gb-hitem.open").filter(has=hide)
+    # Its lines drawn (gitberth.js fills each chart's canvas), not the empty state of a container that just started.
+    row.locator(".gb-chart-canvas > *").first.wait_for(timeout=90_000)
+    page.wait_for_timeout(1500)
+    shooter.detail(page, row, "health-charts", pad=10)
 
 
 def test_network_page(shooter):
