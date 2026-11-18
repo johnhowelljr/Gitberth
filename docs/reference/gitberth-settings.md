@@ -275,7 +275,7 @@ What this Gitberth installation is talking to. Nothing here can be changed.
 | **Docker engine** | The engine's version and the docker CLI's, or **Not reachable** with the reason. |
 | **git** | The version of git Gitberth uses, or **Not found**. |
 | **Data folder** | Where Gitberth keeps its data inside its container, `/data` in the published image. |
-| **Version** | Gitberth's version, and the commit a published image was built from, like `1.3.1 (3f9c2ab)`. |
+| **Version** | Gitberth's version, and the commit a published image was built from, like `1.4.0 (3f9c2ab)`. |
 
 ## Related
 
