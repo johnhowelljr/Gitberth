@@ -293,9 +293,14 @@ public static class Format
             ? $"by {Audit.AuditActors.Describe(actor)}"
             : null;
 
-    /// <summary>The same in the middle of a line ("2 min ago · deploy hook "Contentful""): lower case, but never the hook's own name.</summary>
+    /// <summary>
+    /// The same in the middle of a line ("2 min ago · push on GitHub", "· deploy hook "Contentful""): its first letter in
+    /// lower case and nothing else, so a name in it keeps its own (GitHub, GitLab, the hook's).
+    /// </summary>
     public static string TriggerInLine(Deployment d) =>
-        d.Trigger == DeployTrigger.Hook && d.HookName is { Length: > 0 } name ? $"deploy hook \"{name}\"" : Trigger(d).ToLowerInvariant();
+        d.Trigger == DeployTrigger.Hook && d.HookName is { Length: > 0 } name ? $"deploy hook \"{name}\"" : LowerFirst(Trigger(d));
+
+    private static string LowerFirst(string text) => text.Length > 0 && char.IsUpper(text[0]) ? char.ToLowerInvariant(text[0]) + text[1..] : text;
 
     /// <summary>Up to two initials for an app avatar.</summary>
     public static string Initials(string name)

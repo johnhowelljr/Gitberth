@@ -364,23 +364,53 @@ public class AuditLog : IHostedService, IDisposable
         var suspects = new List<(AuditDraft Draft, Exception Error)>();
         for (var i = 0; i < entries.Count; i++)
         {
-            var failure = TryAppend([entries[i]]);
+            var failure = TryAfterSuspects(suspects, entries[i]);
             // A failure that passes is no reason to leave anything out: once more, a moment later.
-            if (failure is not null && !IsStoreFailure(failure) && !await DelayAsync(TimeSpan.FromSeconds(1))) failure = TryAppend([entries[i]]);
-            if (failure is null)
-            {
-                // The file took this one after refusing them: it's them it won't take, not the file failing.
-                foreach (var (draft, error) in suspects)
-                    _logger?.LogError(error, "The audit log's file takes other entries but refuses this one, so it's left out: {Action}: {Summary}", draft.Action, draft.Summary);
-                suspects.Clear();
-                continue;
-            }
+            if (failure is not null && !IsStoreFailure(failure) && !await DelayAsync(TimeSpan.FromSeconds(1))) failure = TryAfterSuspects(suspects, entries[i]);
+            if (failure is null) continue;
             if (IsStoreFailure(failure) || _closing.IsCancellationRequested || suspects.Count + 1 >= MostSuspects)
                 return [.. suspects.Select(s => s.Draft), .. entries.Skip(i)];
             suspects.Add((entries[i], failure));
         }
         // Refused, with nothing after them that the file took: they wait (the next entry recorded shows whether it's them).
         return [.. suspects.Select(s => s.Draft)];
+    }
+
+    /// <summary>
+    /// The suspects once more, in order, then the entry. A suspect the file takes now was refused for a moment by the file,
+    /// not for what it is, so it's written in its place; one it still refuses, right before it takes a later entry, is
+    /// what it won't take, and is left out, loudly. Without this, the file coming back between a suspect's last try and
+    /// the next entry's would leave the suspect out. The entry's failure; null once it's in.
+    /// </summary>
+    private Exception? TryAfterSuspects(List<(AuditDraft Draft, Exception Error)> suspects, AuditDraft entry)
+    {
+        var refused = new List<(AuditDraft Draft, Exception Error)>();
+        foreach (var suspect in suspects)
+        {
+            if (TryAppend([suspect.Draft]) is { } error)
+            {
+                refused.Add((suspect.Draft, error));
+                continue;
+            }
+            // The file took this one after refusing them: it's them it won't take, not the file failing.
+            LeaveOut(refused);
+            refused.Clear();
+        }
+        suspects.Clear();
+        suspects.AddRange(refused);
+        var failure = TryAppend([entry]);
+        if (failure is null)
+        {
+            LeaveOut(suspects);
+            suspects.Clear();
+        }
+        return failure;
+    }
+
+    private void LeaveOut(IEnumerable<(AuditDraft Draft, Exception Error)> refused)
+    {
+        foreach (var (draft, error) in refused)
+            _logger?.LogError(error, "The audit log's file takes other entries but refuses this one, so it's left out: {Action}: {Summary}", draft.Action, draft.Summary);
     }
 
     // Waits, unless the log is closing: true when it is.

@@ -303,6 +303,25 @@ public sealed class AuditLogTests : IDisposable
     }
 
     [Fact]
+    public async Task An_entry_refused_just_before_the_file_comes_back_is_written_in_its_place_not_left_out()
+    {
+        // The file refuses everything until entry 1's second try on its own (after three tries of them all), and takes
+        // everything from then on: it comes back between entry 1 being suspected and entry 2 being tried.
+        var calls = 0;
+        var refusing = new StrongBox<bool>(true);
+        var log = FileLog(retryCap: TimeSpan.FromMilliseconds(200), fault: d =>
+        {
+            Exception? error = Volatile.Read(ref refusing.Value) ? new SqliteException("no such table: entries", SQLitePCL.raw.SQLITE_ERROR) : null;
+            if (d.Summary == "Started app 1." && Interlocked.Increment(ref calls) == 5) Volatile.Write(ref refusing.Value, false);
+            return error;
+        });
+        for (var i = 1; i <= 5; i++) log.Record(new AuditEntry("app.started", $"Started app {i}."));
+        Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal(Enumerable.Range(1, 5).Select(i => $"Started app {i}."), log.Entries.Select(e => e.Summary));
+        Assert.True((await log.VerifyAsync()).Ok);
+    }
+
+    [Fact]
     public void A_full_failing_read_only_or_held_file_is_the_files_fault_never_an_entrys()
     {
         foreach (var code in new[] { SQLitePCL.raw.SQLITE_FULL, SQLitePCL.raw.SQLITE_IOERR, SQLitePCL.raw.SQLITE_READONLY, SQLitePCL.raw.SQLITE_CANTOPEN,
