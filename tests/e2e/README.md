@@ -149,7 +149,9 @@ jobs and about 25 minutes, leaving CT 101 free. It's on demand; nothing starts i
 
 The plan job's summary shows the plan; each job uploads its outputs (`junit.xml`, `report.txt`, screenshots, and
 Gitberth's and the stand-ins' logs) as an `e2e-<id>` artifact for 14 days; the summary job puts every job's results in
-one table. Docker Hub is reached through `mirror.gcr.io`. The repo is public, so the runners cost nothing.
+one table. A job's log and artifacts need a GitHub sign-in, so a failed job also turns each failure into an annotation
+(`impact.py annotate`: the scenario, its assertion and Gitberth's log during it), which anyone can read, the check-runs
+API included. Docker Hub is reached through `mirror.gcr.io`. The repo is public, so the runners cost nothing.
 
 The Build workflow's "E2E impact" job writes every push's and pull request's plan, with what it leaves for the full
 suite, to the run's summary; nothing runs in a rig there.

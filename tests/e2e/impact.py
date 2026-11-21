@@ -13,6 +13,8 @@
       --root: the head without --trees, and git's repo (default: this file's repo).
   impact.py check             the map against the tree: exit 1 on an error; warnings are printed
   impact.py report DIR...     the runs' junit.xml files: one Markdown table, the failures and the minutes
+  impact.py annotate DIR...   each failure in the runs' report.txt (or junit.xml) as a GitHub error annotation, which
+                              anyone can read (a job's log needs signing in)
   impact.py minutes DIR...    each group's measured minutes next to the map's, to refresh the map
 
 The change: --git BASE compares the working tree (uncommitted and untracked files too) with BASE's merge base; --trees
@@ -1883,6 +1885,85 @@ def cmd_report(args):
     return 0
 
 
+# GitHub shows 10 error annotations per step: past that, the rest are named in the last one. Each keeps the assertion's
+# first lines and the last of Gitberth's log, in at most ANNOTATION_CHARS characters.
+ANNOTATIONS = 10
+ANNOTATION_HEAD, ANNOTATION_TAIL, ANNOTATION_CHARS = 30, 30, 6000
+
+
+def _data(text):
+    """A workflow command's message, escaped as GitHub reads it."""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _prop(text):
+    """A workflow command's property (title=...), escaped as GitHub reads it."""
+    return _data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+def report_failures(path):
+    """report.txt's failures, as (what, text): each FAILED block (the scenario and when, then its assertion text, its
+    screenshots and Gitberth's log during it, indented under it), and the UNROUTED line."""
+    found, current = [], None
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("FAILED: "):
+            current = (line[len("FAILED: "):].strip(), [])
+            found.append(current)
+        elif line.startswith("UNROUTED"):
+            found.append(("calls no stand-in route answered", [line]))
+            current = None
+        elif current is not None and line.startswith("  "):
+            current[1].append(line[2:])
+        else:
+            current = None
+    return [(what, "\n".join(lines)) for what, lines in found]
+
+
+def _trim(text):
+    lines = text.splitlines()
+    if len(lines) > ANNOTATION_HEAD + ANNOTATION_TAIL:
+        lines = lines[:ANNOTATION_HEAD] + [f"... ({len(lines) - ANNOTATION_HEAD - ANNOTATION_TAIL} lines left out) ..."] + lines[-ANNOTATION_TAIL:]
+    text = "\n".join(lines)
+    if len(text) > ANNOTATION_CHARS:
+        half = ANNOTATION_CHARS // 2
+        text = text[:half] + "\n... (cut) ...\n" + text[-half:]
+    return text
+
+
+def cmd_annotate(args):
+    """The runs' failures as ::error commands: report.txt's when a run has one (it has Gitberth's log too), else
+    junit.xml's; a folder with neither is said too (its rig may not have come up)."""
+    found = []
+    for d in map(Path, args.dirs):
+        reports = sorted(d.rglob("report.txt")) if d.is_dir() else ([d] if d.name == "report.txt" else [])
+        covered = {r.parent for r in reports}
+        for r in reports:
+            name = r.parent.relative_to(d).as_posix() if d.is_dir() and r.parent != d else r.parent.name
+            found += [(name, what, text) for what, text in report_failures(r)]
+        junits = [(n, p) for n, p in junit_files([d]) if p.parent not in covered]
+        for name, path in junits:
+            cases = junit_cases(path)
+            if cases is None:
+                found.append((name, "junit.xml", "junit.xml doesn't parse."))
+                continue
+            for c in cases:
+                if c["outcome"] in ("failed", "error"):
+                    node = f"{c['module']}.py::" + (f"{c['class']}::" if c["class"] else "") + c["name"]
+                    found.append((name, node, c["message"] or c["outcome"]))
+        if not reports and not junits:
+            found.append((d.name, "no results", f"{d.as_posix()} has no report.txt or junit.xml: the scenarios didn't run "
+                                                "(the rig may not have come up). The job's log says why."))
+    shown = found[:ANNOTATIONS]
+    if len(found) > ANNOTATIONS:
+        rest = found[ANNOTATIONS - 1:]
+        shown[-1] = ("", f"{len(rest)} more failures", "\n".join(f"{n}: {w}" for n, w, _ in rest))
+    for name, what, text in shown:
+        title = f"E2E {name}: {what}" if name else f"E2E: {what}"
+        print(f"::error title={_prop(title)}::{_data(_trim(text))}")
+    print(f"{len(found)} failure(s) annotated" if found else "no failures found")
+    return 0
+
+
 def cmd_minutes(args):
     """Each group's measured minutes next to the map's. A run with test timings (the default) refreshes test_minutes,
     test_slow and [test_minutes]; one with production timings refreshes minutes, slow and [minutes]."""
@@ -1968,6 +2049,8 @@ def main(argv=None):
     rp = sub.add_parser("report", help="junit.xml files -> a Markdown table")
     rp.add_argument("dirs", nargs="+")
     rp.add_argument("--unit", default="")
+    an = sub.add_parser("annotate", help="report.txt or junit.xml failures -> GitHub error annotations")
+    an.add_argument("dirs", nargs="+")
     mn = sub.add_parser("minutes", help="measured minutes next to the map's")
     mn.add_argument("dirs", nargs="+")
     mn.add_argument("--timings", choices=("test", "production"), default="test",
@@ -1977,7 +2060,8 @@ def main(argv=None):
     except SystemExit as e:
         return int(e.code or 0)
     try:
-        return {"plan": cmd_plan, "check": cmd_check, "report": cmd_report, "minutes": cmd_minutes}[args.command](args)
+        return {"plan": cmd_plan, "check": cmd_check, "report": cmd_report, "annotate": cmd_annotate,
+                "minutes": cmd_minutes}[args.command](args)
     except Refused as e:
         print(f"impact.py: {e}", file=sys.stderr)
         return 2

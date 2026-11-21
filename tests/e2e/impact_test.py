@@ -582,6 +582,57 @@ class TestReport(unittest.TestCase):
         self.assertIn("`test_12_commit_statuses.py::test_one` (e2e-s1/a): AssertionError: no status", out)
         self.assertIn("Unit tests: **success**", out)
 
+    def test_failures_become_annotations(self):
+        tmp = Path(tempfile.mkdtemp(prefix="impact-annotate-"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        write(tmp, {
+            # A run with a report: its FAILED blocks (assertion, screenshots, Gitberth's log) and its UNROUTED line.
+            "out/a/report.txt": "SUMMARY: 1 passed, 1 failed in 60s; 1 call(s) found no stand-in route, which fails the run\n"
+                                "UNROUTED (each got a bare 404 or Cloudflare's 7003; the stand-ins need these routes): GET api.github.com/x\n"
+                                "PASSED: test_20_smoke.py::test_sign_in_and_out\n"
+                                "\n"
+                                "FAILED: test_36_disk.py::test_cleans_up (call)\n"
+                                "  AssertionError: 50% full, a: b\n"
+                                "  \n"
+                                "  screenshots: http://x -> shot.png\n"
+                                "  Gitberth's log during it:\n"
+                                "    warn: Disk cleanup failed\n",
+            "out/a/junit.xml": '<testsuites><testsuite><testcase classname="test_36_disk" name="test_cleans_up">'
+                               '<failure message="junit only">trace</failure></testcase></testsuite></testsuites>',
+            # A run with only junit.xml.
+            "out/b/junit.xml": '<testsuites><testsuite><testcase classname="test_15_refusals" name="test_one">'
+                               '<failure message="AssertionError: no banner">trace</failure></testcase></testsuite></testsuites>',
+            # The Logs step's files are no run.
+            "out/gitberth.log": "info: started\n",
+        })
+        code, out, _ = run("annotate", tmp / "out")
+        self.assertEqual(code, 0)
+        lines = out.splitlines()
+        self.assertEqual(lines, [
+            "::error title=E2E a%3A calls no stand-in route answered::UNROUTED (each got a bare 404 or Cloudflare's 7003; "
+            "the stand-ins need these routes): GET api.github.com/x",
+            "::error title=E2E a%3A test_36_disk.py%3A%3Atest_cleans_up (call)::AssertionError: 50%25 full, a: b%0A%0A"
+            "screenshots: http://x -> shot.png%0AGitberth's log during it:%0A  warn: Disk cleanup failed",
+            "::error title=E2E b%3A test_15_refusals.py%3A%3Atest_one::AssertionError: no banner",
+            "3 failure(s) annotated",
+        ])
+
+        # No run at all (the rig didn't come up): said, not silent.
+        (tmp / "empty").mkdir()
+        code, out, _ = run("annotate", tmp / "empty")
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("::error title=E2E empty%3A no results::"), out)
+
+        # Past ten, the last annotation names the rest.
+        many = {f"many/{i:02}/junit.xml": f'<testsuites><testsuite><testcase classname="test_01_a" name="t{i}">'
+                                          f'<failure message="m{i}">x</failure></testcase></testsuite></testsuites>'
+                for i in range(12)}
+        write(tmp, many)
+        code, out, _ = run("annotate", tmp / "many")
+        errors = [line for line in out.splitlines() if line.startswith("::error")]
+        self.assertEqual(len(errors), 10)
+        self.assertTrue(errors[-1].startswith("::error title=E2E%3A 3 more failures::09: test_01_a.py::t9%0A10: "), errors[-1])
+
 
 class TestRealMap(unittest.TestCase):
     def test_16_the_map_matches_the_tree(self):
