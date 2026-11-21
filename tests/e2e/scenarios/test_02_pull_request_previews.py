@@ -553,7 +553,10 @@ def test_while_githubs_pull_request_list_fails_nothing_is_removed_as_closed(page
     until(lambda: [c for c in repo.api_calls(mark, path=r"/pulls$", method="GET") if c["status"] == 200], 90,
           "Gitberth to read the pull requests again", seen=lambda: [(c["path"], c["status"]) for c in repo.api_calls(mark)])
     gitberth.wait_no_preview(app.id, pr=kept_n, timeout=60)
-    assert f"Preview PR #{kept_n} removed: the pull request was closed." in activity_texts(gitberth, app), activity_texts(gitberth, app)
+    # The parent's Activity says why just after the preview's row goes.
+    wanted = f"Preview PR #{kept_n} removed: the pull request was closed."
+    until(lambda: wanted in activity_texts(gitberth, app), 15, "the parent's Activity to say why the preview went",
+          seen=lambda: activity_texts(gitberth, app))
     assert not leftovers(engine, kept["Slug"]), leftovers(engine, kept["Slug"])
     wait_deployed(gitberth, moving["Id"], moving_sha3, after=second["Id"], timeout=240)
     # And the Previews tab no longer says they couldn't be read.

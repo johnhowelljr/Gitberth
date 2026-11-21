@@ -115,6 +115,8 @@ jobs:
           mkdir -p tests/e2e/out
           sh tests/e2e/run.sh logs gitberth 5000 > tests/e2e/out/gitberth.log 2>&1 || true
           sh tests/e2e/run.sh logs standin 5000 > tests/e2e/out/standin.log 2>&1 || true
+          # The rig's Docker data is on this disk: whether it got under Gitberth's lines (Settings > Disk) shows without a sign-in.
+          echo "::notice title=Runner disk after the run::$(df -h / | awk 'NR == 2 { print $4 " free of " $2 }')"
       - name: Failures as annotations
         # A job's log and artifacts need a GitHub sign-in; its annotations don't. Each failed scenario, with its assertion
         # and Gitberth's log during it (report.txt), or what stopped the run.

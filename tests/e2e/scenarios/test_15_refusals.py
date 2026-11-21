@@ -141,6 +141,10 @@ def test_a_refused_token_rests_the_feature_everywhere_until_its_saved_again(page
     app_one = apps.track(gitberth.create_git_app(page, one.url))
     app_two = apps.track(gitberth.create_git_app(page, two.url))
     last = {a.id: gitberth.wait_deploy(a.id, timeout=420)["Id"] for a in (app_one, app_two)}
+    # A deploy reports how it ended just after its row says so: both first deploys' reports land before GitHub starts
+    # refusing, or a late one takes the 401 and rests the feature before this test's own deploy asks.
+    for r, a in ((one, app_one), (two, app_two)):
+        wait_status(r, r.branch_sha(), context(a.name), "success", timeout=60)
 
     # GitHub answers Gitberth's statuses with 401, as for a token it no longer takes.
     rule = standins.fail(r"/statuses/[^/]+$", status=401, host="api.github.com", method="POST")
@@ -171,9 +175,13 @@ def test_a_refused_token_rests_the_feature_everywhere_until_its_saved_again(page
 def test_a_rate_limit_a_502_or_no_answer_in_time_fails_nothing_and_rests_nothing(page, gitberth, github, standins, apps, uniq):
     repo = github.create_repo(uniq("rl"), files={"marker.txt": "v1"})
     app = apps.track(gitberth.create_git_app(page, repo.url))
-    last = gitberth.wait_deploy(app.id, timeout=420)["Id"]
+    first = gitberth.wait_deploy(app.id, timeout=420)
+    last = first["Id"]
     ctx = context(app.name)
     statuses_path = r"/statuses/[^/]+$"
+    # A deploy reports how it ended just after its row says so: the first deploy's report lands before the one-time
+    # failures below are armed, or it takes one of them.
+    wait_status(repo, first["CommitSha"], ctx, "success", timeout=60)
 
     # The pending status hits the rate limit, the ending a 502: the deploy succeeds all the same.
     standins.fail(statuses_path, host="api.github.com", method="POST", rate_limit="primary", times=1)
@@ -181,7 +189,10 @@ def test_a_rate_limit_a_502_or_no_answer_in_time_fails_nothing_and_rests_nothing
     mark = standins.seq()
     sha, d = commit_and_deploy(gitberth, repo, app, "v2", last)
     last = d["Id"]
-    stays(lambda: [c["status"] for c in status_writes(repo, mark)] == [403, 502], 5, "two failed status calls")
+    # Its ending call comes just after its row says it succeeded: wait for it, then nothing more comes.
+    written = lambda: [c["status"] for c in status_writes(repo, mark)]  # noqa: E731
+    until(lambda: written() == [403, 502], 30, "the deploy's two failed status calls", seen=written)
+    stays(lambda: written() == [403, 502], 5, "two failed status calls")
     assert not repo.statuses(sha=sha, context=ctx)
 
     # The pending status gets no answer for 20 s: Gitberth gives up on it after 10, and the deploy goes on and reports

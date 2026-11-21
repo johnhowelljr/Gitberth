@@ -85,7 +85,7 @@ def test_new_app_from_github_deploys_and_answers(page, gitberth, github, engine,
     gitberth.open(page, f"/apps/{app.id}/deployments/{deploy['Id']}")
     log = page.locator(".gb-terminal-body")
     until(lambda: "Deploy succeeded" in log.inner_text(), 30, "the deploy log to show the deploy succeeded", seen=log.inner_text)
-    assert page.locator(".gb-banner", has_text="Live").is_visible()
+    page.locator(".gb-banner", has_text="Live").wait_for()
     assert not gitberth.errors(page), f"the browser reported errors: {gitberth.errors(page)}"
 
 

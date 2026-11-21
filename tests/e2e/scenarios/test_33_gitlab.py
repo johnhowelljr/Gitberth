@@ -508,7 +508,10 @@ class TestMergeRequestPreview:
         # Without a hook, the watcher's next list of the open merge requests notices (every 20 s with the rig's timings,
         # 5 minutes with production's): a merge moves no merge request's head.
         gitberth.wait_no_preview(mr.app.id, pr=n, timeout=PULLS_EVERY + 120)
-        assert f"Preview MR !{n} removed: the merge request was merged." in activity_texts(gitberth, mr.app), activity_texts(gitberth, mr.app)
+        # The parent's Activity says why just after the preview's row goes.
+        wanted = f"Preview MR !{n} removed: the merge request was merged."
+        until(lambda: wanted in activity_texts(gitberth, mr.app), 15, "the parent's Activity to say why the preview went",
+              seen=lambda: activity_texts(gitberth, mr.app))
         until(lambda: not leftovers(engine, slug), 60, f"the engine to forget {slug}", seen=lambda: leftovers(engine, slug))
         # The merge is a push to main: production deploys it.
         production = gitberth.wait_deploy(mr.app.id, after=before, timeout=300)
