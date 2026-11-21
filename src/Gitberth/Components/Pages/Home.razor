@@ -41,6 +41,9 @@
     <Banner Tone="critical" Title="Docker can't be read" Tip="apps.docker-error">@dockerError.TrimEnd('.'). Is /var/run/docker.sock mounted into the Gitberth container?</Banner>
 }
 
+@* What Gitberth's own jobs say needs someone (Docker's disk getting full, a token about to expire), worst first. *@
+<AttentionBanners />
+
 <div class="gb-hoststrip gb-kpis2" role="group" aria-label="Key figures">
     <a class="gb-hs" href="apps" data-tip="dashboard.kpi.apps">
         <span class="gb-hs-k"><SvgIcon Icon="@Icons.Material.Outlined.GridView" />Apps</span>
@@ -124,7 +127,7 @@
                     @if (disk is { TotalBytes: > 0 } d)
                     {
                         <div>
-                            <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k"><Tip Key="dashboard.host.disk">Disk</Tip></span><span class="gb-num" style="font-weight:600">@((d.FreeBytes / 1e9).ToString("0", CultureInfo.InvariantCulture)) GB free</span></div>
+                            <div class="gb-row" style="justify-content:space-between"><span class="gb-hs-k"><Tip Key="dashboard.host.disk">Disk</Tip></span><span class="gb-num" style="font-weight:600">@Gitberth.Disk.DiskText.Free(d)@if (d.Known && d.Low) {<span class="gb-text-warning">@(d.TooLow ? ": almost full" : ": getting low")</span>}</span></div>
                             <Meter Fraction="@((double)(d.TotalBytes - d.FreeBytes) / d.TotalBytes)" Large="true" />
                         </div>
                     }

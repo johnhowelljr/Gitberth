@@ -32,7 +32,8 @@ public sealed record CommitInfo(string Sha, string Author, DateTime Date, string
 /// Plain git (no GitHub or GitLab API) for checking access, listing branches and cloning, from github.com or from Gitberth's
 /// GitLab (its address and token in Settings › GitLab).
 /// </summary>
-public sealed class GitClient(GitberthOptions options, SettingsService settings)
+/// <param name="signals">Where a host turning the saved token away is reported, for the token watch; none in tests that don't need it.</param>
+public sealed class GitClient(GitberthOptions options, SettingsService settings, Credentials.CredentialSignals? signals = null)
 {
     /// <summary>The most a diff's list of files may take; a longer one counts as unknown, so the commit is built.</summary>
     internal const int DiffLimit = 8 * 1024 * 1024;
@@ -86,19 +87,22 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
 
     /// <summary>Where git reaches a repo, and the header that carries its host's token (Settings), if one is saved.</summary>
     /// <param name="Instance">Gitberth's GitLab's address, for a GitLab project; null for GitHub.</param>
-    private sealed record Remote(string Url, string? HeaderKey, string? HeaderValue, string? Instance);
+    /// <param name="Repo">The repo as sentences name it (acme/web), for what a refusal says Gitberth was doing.</param>
+    /// <param name="TokenHash">The GitLab token's SHA-256, for the token watch; GitHub's is read with each command.</param>
+    private sealed record Remote(string Url, string? HeaderKey, string? HeaderValue, string? Instance, string Repo = "", string? TokenHash = null);
 
     // A GitHub repo: github.com, with the GitHub token. A GitLab project: on Settings' GitLab, with its token, as GitLab
     // takes it over HTTPS (user oauth2, the token as the password).
     private async Task<Remote> RemoteAsync(RepoRef repo, CancellationToken ct)
     {
-        if (repo is GitHubRepoRef github) return new Remote(github.CloneUrl, null, null, null);
+        if (repo is GitHubRepoRef github) return new Remote(github.CloneUrl, null, null, null, repo.FullName);
         var project = (GitLabRepoRef)repo;
         var instance = GitLabRepoRef.NormalizeInstance(await settings.GetAsync(SettingKeys.GitLabUrl, ct), out _) ?? GitLabRepoRef.DefaultInstance;
         var token = await settings.GetSecretAsync(SettingKeys.GitLabToken, ct);
-        if (string.IsNullOrEmpty(token)) return new Remote(project.CloneUrl(instance), null, null, instance);
+        if (string.IsNullOrEmpty(token)) return new Remote(project.CloneUrl(instance), null, null, instance, repo.FullName);
         var basic = Convert.ToBase64String(Encoding.UTF8.GetBytes("oauth2:" + token));
-        return new Remote(project.CloneUrl(instance), $"http.{instance}/.extraheader", "AUTHORIZATION: basic " + basic, instance);
+        return new Remote(project.CloneUrl(instance), $"http.{instance}/.extraheader", "AUTHORIZATION: basic " + basic, instance, repo.FullName,
+            Credentials.CredentialSignals.Hash(token));
     }
 
     /// <summary>
@@ -263,6 +267,7 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
         };
         foreach (var (key, value) in extraEnv ?? new Dictionary<string, string>()) env[key] = value;
         bool hasToken;
+        var tokenHash = remote?.TokenHash;
         if (remote is { Instance: not null })
         {
             // Passed as env-based git config, like GitHub's below: the token never lands in .git/config, the remote URL, or the
@@ -287,21 +292,38 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
                 env["GIT_CONFIG_COUNT"] = "1";
                 env["GIT_CONFIG_KEY_0"] = "http.https://github.com/.extraheader";
                 env["GIT_CONFIG_VALUE_0"] = "AUTHORIZATION: basic " + basic;
+                tokenHash = Credentials.CredentialSignals.Hash(token!);
             }
         }
 
+        ProcessResult result;
         try
         {
             var processOptions = new ProcessOptions { WorkingDirectory = workDir, Environment = env, OnLine = onLine, MaxCapture = maxCapture };
-            var result = Runner is not null
+            result = Runner is not null
                 ? await Runner(args, processOptions, ct)
                 : await ProcessRunner.RunAsync(options.GitPath, ["-c", "credential.helper=", .. args], processOptions, ct);
-            return (result, hasToken);
         }
         catch (System.ComponentModel.Win32Exception)
         {
             throw new GitException($"git isn't installed or isn't on PATH ('{options.GitPath}').");
         }
+        // The host turned the saved token away: the token watch checks it at once, and says so when it's the token itself.
+        if (!result.Ok && hasToken && remote is not null && signals is not null && AuthFailed(result.ErrorText, remote.Instance is not null))
+            signals.Report(new Credentials.CredentialAnswer(remote.Instance is null ? Credentials.CredentialWatch.GitHubKey : Credentials.CredentialWatch.GitLabKey,
+                tokenHash, Credentials.CredentialVerdict.Refused, Credentials.CredentialText.GitDoing(args[0], remote.Repo)));
+        return (result, hasToken);
+    }
+
+    /// <summary>
+    /// Whether git's error says the host turned the credentials away, or wanted some and got none ("Authentication
+    /// failed", "could not read Username…"; GitLab's "HTTP Basic: Access denied").
+    /// </summary>
+    internal static bool AuthFailed(string stderr, bool gitLab)
+    {
+        bool Has(string text) => stderr.Contains(text, StringComparison.OrdinalIgnoreCase);
+        return Has("could not read Username") || Has("terminal prompts disabled") || Has("Authentication failed") || Has("invalid credentials")
+            || gitLab && Has("HTTP Basic: Access denied");
     }
 
     /// <param name="instance">Gitberth's GitLab's address, for a GitLab project.</param>
@@ -311,8 +333,7 @@ public sealed class GitClient(GitberthOptions options, SettingsService settings)
         bool Has(string text) => s.Contains(text, StringComparison.OrdinalIgnoreCase);
         var gitLab = repo.Host == GitHost.GitLab;
 
-        if (Has("could not read Username") || Has("terminal prompts disabled") || Has("Authentication failed") || Has("invalid credentials")
-            || gitLab && Has("HTTP Basic: Access denied"))
+        if (AuthFailed(s, gitLab))
         {
             return (gitLab, hasToken) switch
             {

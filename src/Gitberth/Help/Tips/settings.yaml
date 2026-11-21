@@ -1,5 +1,6 @@
 # Tips for the Settings page (Components/Pages/SettingsPage.razor, and the sections it holds: Shared/GitLabSection,
-# NotificationsSection, UptimeSection, DatabaseServersSection, ApiTokensSection, AuditLogSection, BuildCacheRow).
+# NotificationsSection, UptimeSection, KeepRunningSection, DiskSection, DatabaseServersSection, ApiTokensSection,
+# AuditLogSection, BuildCacheRow).
 # The section keys (settings.github, ...) are used by the section's title and by its link in the list on the left.
 # See Help/TipCatalog.cs for the rules.
 
@@ -45,9 +46,17 @@ settings.github.remove-token:
 settings.github.expires:
   title: Token expiry
   text: >-
-    The day GitHub stops taking this token. In its last 14 days it's highlighted with **renew it soon**: make a new
-    token on GitHub and save it here before then, or private repos stop deploying.
+    The day GitHub stops taking this token. In its last 3 weeks it's highlighted with **renew it soon**, and Gitberth
+    warns on the dashboard then, a week and a day before: make a new token on GitHub and save it here before then, or
+    private repos stop deploying.
   more: reference/gitberth-settings#github-access
+
+settings.github.check:
+  title: Check the token
+  text: >-
+    Asks GitHub now whether it takes the saved token, whose it is and when it expires. Gitberth asks by itself every 6
+    hours, and at once when GitHub turns the token away; use this after you change the token on GitHub.
+  more: guides/troubleshooting#tokens-and-sign-ins
 
 # ---- GitHub integration ----
 
@@ -193,9 +202,9 @@ settings.gitlab.remove-token:
 settings.gitlab.expires:
   title: Token expiry
   text: >-
-    The day GitLab stops taking this token. In its last 14 days it's highlighted with **renew it soon**: make a new
-    token on GitLab and save it here before then.
-  more: guides/gitlab-integration#the-tokens-scopes
+    The day GitLab stops taking this token. In its last 3 weeks it's highlighted with **renew it soon**, and Gitberth
+    warns on the dashboard then, a week and a day before: make a new token on GitLab and save it here before then.
+  more: guides/gitlab-integration#when-the-token-expires
 
 settings.gitlab.scopes:
   title: Scopes
@@ -262,8 +271,9 @@ settings.gitlab.trigger:
 settings.notifications:
   title: Notifications
   text: >-
-    Messages about failed deploys, crashes, failing health checks, apps that go down and certificates about to expire,
-    sent to every destination you add: email, Discord, Slack, ntfy or a webhook. Nothing is sent until you add one.
+    Messages about failed deploys, crashes, failing health checks, apps that go down or that Gitberth brings back,
+    certificates and tokens about to expire, and Docker's disk getting full, sent to every destination you add: email,
+    Discord, Slack, ntfy or a webhook. Nothing is sent until you add one.
   more: guides/notifications
 
 settings.notifications.add:
@@ -340,6 +350,16 @@ settings.notifications.down:
   default: "On"
   more: guides/uptime-and-status-page#when-an-app-goes-down
 
+settings.notifications.brought-back:
+  title: Gitberth brings an app back
+  text: >-
+    An app that's meant to run stopped by itself, and Gitberth started it again: it crashed and its restart policy
+    doesn't start it, it stopped when Docker or the host restarted, or its container was gone. One message once it runs
+    again (apps brought back together after a Docker restart share one), one if Gitberth stops trying after 4 tries, and
+    one if it comes back after that.
+  default: "On"
+  more: guides/health-and-monitoring#when-an-app-stops-by-itself
+
 settings.notifications.certificate:
   title: A certificate is about to expire
   text: >-
@@ -347,6 +367,24 @@ settings.notifications.certificate:
     before that, so this rarely sends anything.
   default: "On"
   more: guides/notifications#what-youre-told-about
+
+settings.notifications.tokens:
+  title: A token is about to expire or is refused
+  text: >-
+    GitHub's, GitLab's or Cloudflare's token, a registry sign-in, or an API token in use: you're told 3 weeks, a week
+    and a day before it expires (an API token a week and a day before), once it has, and as soon as its service refuses
+    it. A registry never says when a sign-in expires, so only its refusal is told.
+  default: "On"
+  more: guides/troubleshooting#tokens-and-sign-ins
+
+settings.notifications.disk-low:
+  title: Docker's disk gets full
+  text: >-
+    Free space on the disk Docker keeps images, build cache and volumes on drops under the warning line, and again when
+    it's so low that Gitberth stops pulling images, each time after Gitberth cleared what it could by itself. One more
+    message says when there's room again.
+  default: "On"
+  more: guides/troubleshooting#dockers-disk-is-filling-up
 
 settings.notifications.previews:
   title: Previews too
@@ -570,8 +608,10 @@ settings.registries.save:
 settings.registries.state:
   title: Sign-in state
   text: >-
-    When Gitberth last signed in with it. **needs its password again** means Gitberth can't read the saved password
-    any more (its keys were lost): type the registry, user name and password below, then **Verify and save**.
+    When Gitberth last signed in with it. **refused on** a day means the registry turned it away in an update check,
+    and again when Gitberth signed in to make sure; **needs its password again** means Gitberth can't read the saved
+    password any more (its keys were lost). Either way, type the registry, user name and password below, then **Verify
+    and save**.
   more: reference/gitberth-settings#registries
 
 settings.registries.remove:
@@ -671,6 +711,21 @@ settings.domains.save-token:
     Finds the cloudflared container on this host, checks the token against its tunnel, saves it encrypted, and routes
     every app's domains. Routes you already made in Cloudflare that go to an app become its domains.
   more: guides/domains#turn-on-domains
+
+settings.domains.expires:
+  title: Token expiry
+  text: >-
+    The day Cloudflare stops taking the API token, as Cloudflare said when it was saved or last checked. In its last 3
+    weeks it's highlighted with **renew it soon**: make a new token in Cloudflare and save it here before then, or
+    domains can't be added, moved or removed.
+  more: guides/domains#when-the-token-expires
+
+settings.domains.check-token:
+  title: Check the token
+  text: >-
+    Asks Cloudflare now whether it takes the saved token, and when it expires. Gitberth asks by itself every 6 hours
+    while domains are on, and at once when Cloudflare refuses the token.
+  more: guides/domains#when-the-token-expires
 
 settings.domains.remove-token:
   title: Remove the token
@@ -778,6 +833,46 @@ settings.uptime.save:
     beside it links the page on your LAN, and on the internet when it has a host name.
   more: guides/uptime-and-status-page#the-status-page
 
+# ---- Keep apps running (Shared/KeepRunningSection.razor) ----
+
+settings.keep:
+  title: Keep apps running
+  text: >-
+    Gitberth starts again an app that's meant to run but stopped by itself: it crashed and its restart policy doesn't
+    start it, it stopped when Docker or the host restarted, or its container is gone. An app you stopped, in Gitberth or
+    with `docker stop`, stays stopped.
+  more: reference/gitberth-settings#keep-apps-running
+
+settings.keep.enabled:
+  title: Bring apps back by themselves
+  text: >-
+    Every 30 seconds Gitberth looks at each app that's meant to run, and starts again one that stopped by itself: at
+    once, then 1, 5 and 15 minutes after the try before. After 4 tries it tells you, and tries only every 6 hours. Off,
+    every stopped app is left as it is.
+  default: "On"
+  more: guides/health-and-monitoring#when-an-app-stops-by-itself
+
+settings.keep.gave-up:
+  title: Gitberth stopped bringing these back
+  text: >-
+    Apps that kept stopping after Gitberth started them again 4 times. It still tries each every 6 hours, quietly, and
+    tells you if one comes back. Start one once it's fixed: its tries count from the first again.
+  more: guides/health-and-monitoring#when-it-keeps-stopping
+
+settings.keep.start:
+  title: Start
+  text: >-
+    Starts the app as the Start button on its page does. Gitberth brings it back by itself again the next time it stops
+    by itself.
+  more: guides/health-and-monitoring#when-it-keeps-stopping
+
+settings.keep.recent:
+  title: Brought back lately
+  text: >-
+    How many times Gitberth started an app again, or made its container again, in the last 24 hours, and which apps.
+    Each app's Activity tab has every try.
+  more: guides/health-and-monitoring#where-it-says-so
+
 # ---- Network ----
 
 settings.network:
@@ -869,8 +964,7 @@ settings.own-lan.turn-off:
 settings.deploys:
   title: Deploys
   text: >-
-    How often Gitberth looks for new commits on every Git app's branch, and Docker's build cache, which keeps builds
-    quick.
+    How often Gitberth looks for new commits on every Git app's branch. Docker's build cache is under Disk.
   more: reference/gitberth-settings#deploys
 
 settings.deploys.interval:
@@ -885,15 +979,84 @@ settings.deploys.build-cache:
   title: Build cache
   text: >-
     The room Docker's build cache takes on this host. It keeps each step of every app's builds, so a step whose files
-    didn't change isn't run again.
-  more: reference/gitberth-settings#deploys
+    didn't change isn't run again. The line after it says how much of it the next cleanup removes.
+  more: reference/gitberth-settings#disk
 
 settings.deploys.clear-cache:
   title: Clear build cache
   text: >-
     Asks first, then deletes all of Docker's build cache and says how much it freed. Nothing that runs changes, but
-    each app's next build runs every step again, so it takes longer. Refused while a build runs.
-  more: reference/gitberth-settings#deploys
+    each app's next build runs every step again, so it takes longer. Refused while a build or a cleanup runs, and it
+    says which.
+  more: reference/gitberth-settings#disk
+
+# ---- Disk (Shared/DiskSection.razor; the build cache's row, Shared/BuildCacheRow.razor, keeps its settings.deploys keys) ----
+
+settings.disk:
+  title: Disk
+  text: >-
+    The disk Docker keeps images, build cache and volumes on: how full it is, what takes the room, and what Gitberth
+    cleans up by itself so that it doesn't fill up.
+  more: reference/gitberth-settings#disk
+
+settings.disk.free:
+  title: Free space
+  text: >-
+    What's free on the disk Docker keeps its images, build cache and volumes on, read on Gitberth's data folder. Under
+    the warning line Gitberth says the disk is getting low; under the lower line it pulls no image until there's room.
+  more: guides/troubleshooting#dockers-disk-is-filling-up
+
+settings.disk.images:
+  title: Images
+  text: >-
+    What every image on this host takes, each layer counted once: apps' images, the ones kept for Roll back, and any
+    other. Only images of Gitberth's own builds that nothing keeps are ever removed by the cleanup.
+  more: reference/gitberth-settings#disk
+
+settings.disk.auto:
+  title: Clean up by itself
+  text: >-
+    Once a day Gitberth removes build cache no build used for a while, untagged images of its old builds and leftover
+    images of deleted apps; more of the cache when the disk is low. Nothing an app runs, rolls back to or builds with is
+    removed. Off, it only warns.
+  default: "On"
+  more: reference/gitberth-settings#disk
+
+settings.disk.keep-days:
+  title: Keep unused build cache for
+  text: >-
+    How many days the build cache a build hasn't used is kept, from 1 to 90. Longer keeps rare builds quick; shorter
+    frees room sooner. A low disk clears what no build used for a day, whatever this says.
+  default: 7 days
+  more: reference/gitberth-settings#disk
+
+settings.disk.last:
+  title: Last cleanup
+  text: >-
+    When the disk was last cleaned up, by Gitberth or by someone with **Clean up now**, what it freed, and what was
+    free after it. Each cleanup that removed something is in the audit log too.
+  more: reference/gitberth-settings#disk
+
+settings.disk.clean-now:
+  title: Clean up now
+  text: >-
+    Runs the daily cleanup now and says what it freed, or what Docker said when it failed. Refused while a build runs
+    or the build cache is being cleared, since it holds builds off while it works, and while another cleanup runs.
+  more: reference/gitberth-settings#disk
+
+settings.disk.deleted-apps:
+  title: Images of deleted apps
+  text: >-
+    Images of apps that are gone: kept when the app was deleted with **Also delete its images** unticked, or waiting
+    for a container that still uses one. Gitberth removes the waiting ones by itself once nothing uses them.
+  more: reference/gitberth-settings#disk
+
+settings.disk.remove-deleted:
+  title: Remove these images
+  text: >-
+    Asks first, listing them, then removes those: an app deleted meanwhile keeps its own until they're listed too. One a
+    container still uses stays, and Gitberth removes it once nothing does.
+  more: reference/gitberth-settings#disk
 
 # ---- Databases ----
 
@@ -1033,6 +1196,14 @@ settings.agents.last-used:
   text: >-
     When a request last came with this token, and from which address. **Never** means nothing has used it yet.
   more: guides/ai-agents#make-a-token
+
+settings.agents.expires-soon:
+  title: Expires soon
+  text: >-
+    This token stops working within the week, and whatever uses it can't reach Gitberth after that. Make a new token,
+    give it to that agent or script, and revoke this one. A token that's in use is warned about on the dashboard a week
+    and a day before.
+  more: guides/ai-agents#when-a-token-expires
 
 settings.agents.revoke:
   title: Revoke

@@ -21,19 +21,19 @@ public sealed partial class AppActions
     public static string ReleaseKey(int deploymentId) => "#" + deploymentId.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     // A deploy without a build: the release a deploy ran (Roll back's, or the one that runs now), with the app's settings.
-    private async Task<int> RecreateComposeAsync(GitberthDb db, AppDefinition app, DeployTrigger trigger, int? fromDeploymentId, CancellationToken ct)
+    // Null when nothing ran yet or its files are gone: then it's deployed again from its source (RecreateAsync).
+    private async Task<int?> RecreateComposeAsync(GitberthDb db, AppDefinition app, DeployTrigger trigger, int? fromDeploymentId, CancellationToken ct)
     {
         var from = fromDeploymentId is int id
             ? await db.Deployments.FirstAsync(d => d.Id == id && d.AppId == app.Id, ct)
             : await db.Deployments.Where(d => d.AppId == app.Id && d.Status == DeployStatus.Succeeded).OrderByDescending(d => d.Id).FirstOrDefaultAsync(ct);
-        // Nothing ran yet, or its files are gone: it's deployed again from its source.
         if (from is null || ComposeReleases.For(options, app.Slug).ResolvedOf(from.Id) is null)
         {
-            await db.DisposeAsync();
             if (fromDeploymentId is not null) throw new InvalidOperationException($"The files of deploy #{fromDeploymentId} aren't kept any more, so it can't run again.");
-            return await DeployAsync(app.Id, trigger, ct);
+            return null;
         }
-        app.DesiredState = DesiredState.Running;
+        // The keep-running check's deploy never makes the app meant to run: a Stop that came meanwhile stays.
+        if (trigger != DeployTrigger.Recover) app.DesiredState = DesiredState.Running;
         var dep = new Deployment
         {
             AppId = app.Id, Trigger = trigger, ImageTag = from.ImageTag, Images = from.Images, CommitSha = from.CommitSha, CommitMessage = from.CommitMessage,
@@ -87,19 +87,22 @@ public sealed partial class AppActions
         return null;
     }
 
-    /// <summary>Whether every service of the current release has its container.</summary>
+    /// <summary>
+    /// Whether every service the current release brought up has its container: one Compose never creates (behind a profile,
+    /// or with no replicas) isn't missing.
+    /// </summary>
     internal async Task<bool> CompleteAsync(AppDefinition app, CancellationToken ct = default)
     {
-        IReadOnlyDictionary<string, string> images;
+        IReadOnlyList<string> brought;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
-            images = DeployPipeline.ParseImages(await db.Deployments.AsNoTracking().Where(d => d.AppId == app.Id && d.Status == DeployStatus.Succeeded)
-                .OrderByDescending(d => d.Id).Select(d => d.Images).FirstOrDefaultAsync(ct));
-        if (images.Count == 0) return await docker.ContainerExistsAsync(app.ContainerName, ct);
+            brought = ComposeImages.Parse(await db.Deployments.AsNoTracking().Where(d => d.AppId == app.Id && d.Status == DeployStatus.Succeeded)
+                .OrderByDescending(d => d.Id).Select(d => d.Images).FirstOrDefaultAsync(ct)).BroughtUp;
+        if (brought.Count == 0) return await docker.ContainerExistsAsync(app.ContainerName, ct);
         var (containers, error) = await docker.ListContainersAsync(managedOnly: true, ct);
         if (error is not null) return false;
         var services = containers.Where(c => c.Labels.GetValueOrDefault("gitberth.app") == app.Slug)
             .Select(c => c.Labels.GetValueOrDefault(ComposeNames.ServiceLabel)).OfType<string>().ToHashSet(StringComparer.Ordinal);
-        return images.Keys.All(services.Contains);
+        return brought.All(services.Contains);
     }
 
     // docker compose stop or restart, for the whole project, under the app's lock.
@@ -143,7 +146,12 @@ public sealed partial class AppActions
             var (needed, ids, inUse) = await PulledFactsAsync(app, app.IsPreview ? ComposeImages.None : used);
             foreach (var image in ImagesToRemove(app, own, used, needed, ids, inUse)) await docker.RemoveImageAsync(image);
             await docker.PruneDanglingImagesAsync(app.Slug);
+            // A tag of its own a container still uses stays: the disk cleanup removes it once nothing does.
+            if ((await docker.ListImageTagsUnderAsync($"gitberth/{app.Slug}/")).Count > 0)
+                await Disk.DiskLeftovers.RecordAsync(dbFactory, $"gitberth/{app.Slug}/", prefix: true, DateTime.UtcNow);
         }
+        // Its images kept on purpose: an earlier app's leftovers under the slug no longer take any of them.
+        else await Disk.DiskLeftovers.ForgetAsync(dbFactory, app.Slug);
         var releases = ComposeReleases.For(options, app.Slug);
         if (volumes) DeployPaths.TryDeleteDirectory(releases.Root);
         else if (Directory.Exists(releases.Root))

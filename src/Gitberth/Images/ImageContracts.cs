@@ -176,10 +176,34 @@ public sealed class PullJob
     internal void Finished() => Changed?.Invoke();
 }
 
+/// <summary>How full Docker's disk is: room, getting low (warned), or so low that Gitberth pulls no image.</summary>
+public enum DiskLevel { Ok, Low, TooLow }
+
+/// <summary>
+/// The free space on Docker's disk, and its two lines, which every place that shows the disk goes by: under
+/// <see cref="RefuseBelow"/> Gitberth pulls no image, and under <see cref="WarnBelow"/> it's getting low. The warning line is
+/// always at least twice the refusal line, so it comes first on every size of disk.
+/// </summary>
 public sealed record DiskSpace(long FreeBytes, long TotalBytes)
 {
-    public bool TooLow => FreeBytes < 5L * 1024 * 1024 * 1024 || FreeBytes < TotalBytes / 20;
-    public bool Low => FreeBytes < 15L * 1024 * 1024 * 1024;
+    private const long GiB = 1L << 30;
+
+    /// <summary>No pulls under this: 5 GiB, or 5% of a disk over 100 GiB.</summary>
+    public long RefuseBelow => Math.Max(5 * GiB, TotalBytes / 20);
+
+    /// <summary>"Getting low" under this: twice the refusal line at least, else 15 GiB, or a quarter of a small disk.</summary>
+    public long WarnBelow => Math.Max(2 * RefuseBelow, Math.Min(15 * GiB, TotalBytes / 4));
+
+    public bool TooLow => FreeBytes < RefuseBelow;
+    public bool Low => FreeBytes < WarnBelow;
+
+    public DiskLevel Level => TooLow ? DiskLevel.TooLow : Low ? DiskLevel.Low : DiskLevel.Ok;
+
+    /// <summary>It was read: not the stand-in for a disk that couldn't be (which reads as plenty, so nothing is refused on a guess).</summary>
+    public bool Known => TotalBytes > 0 && TotalBytes < long.MaxValue / 8;
+
+    /// <summary>Back to fine only with this much more than the warning line, so a disk that hovers at it isn't told again and again.</summary>
+    public bool RoomAgain => FreeBytes >= WarnBelow + Math.Max(1 * GiB, TotalBytes / 50);
 
     /// <summary>"Only 3.1 GB free on Docker's disk." when it's low, else "41.2 GB free on Docker's disk."</summary>
     public string Text => $"{(Low ? "Only " : "")}{Gb(FreeBytes)} free on Docker's disk.";

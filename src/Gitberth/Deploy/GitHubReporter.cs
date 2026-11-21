@@ -170,12 +170,16 @@ public sealed class GitHubReporter(
 
     public Task StartedAsync(DeployReport report, CancellationToken ct)
     {
+        // The keep-running check building again the commit an app ran: nobody pushed it just now, and its status stays the
+        // one its own deploy gave it.
+        if (report.Trigger == DeployTrigger.Recover) return Task.CompletedTask;
         _started[report.DeploymentId] = 0;
         return ReportAsync(report, ended: false, ct);
     }
 
     public Task FinishedAsync(DeployReport report, CancellationToken ct)
     {
+        if (report.Trigger == DeployTrigger.Recover) return Task.CompletedTask;
         var started = _started.TryRemove(report.DeploymentId, out _);
         // A skipped commit never started a build: it gets its success status, and a preview's comment stays as it is,
         // still about the version that runs.

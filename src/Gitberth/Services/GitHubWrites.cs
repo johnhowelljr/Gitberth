@@ -14,15 +14,23 @@ public enum GitHubFeature { Statuses, Comments, Webhooks }
 /// <summary>A Git host refused, or failed, something Gitberth told it or asked it to do: GitHub's or GitLab's.</summary>
 /// <param name="missingPermission">The host refused on this repo (403 or 404): the token lacks the permission there, or can't see the repo. Asking again there won't help for a while; other repos may be fine.</param>
 /// <param name="badToken">The host refused the token itself (401): nothing works with it until it's replaced.</param>
-public abstract class HostWriteException(string message, bool missingPermission = false, bool badToken = false) : Exception(message)
+/// <param name="retrySoon">It failed for a moment: the host didn't answer in time, couldn't be reached, or failed itself (a 5xx). What was asked may even have been done, its answer lost on the way. Asked again soon, it likely works; a refusal or a rate limit never is this.</param>
+/// <param name="rateLimited">The host's rate limit for the token is used up: every call with it fails until it's reset, not only this one.</param>
+public abstract class HostWriteException(string message, bool missingPermission = false, bool badToken = false, bool retrySoon = false, bool rateLimited = false)
+    : Exception(message)
 {
     public bool MissingPermission { get; } = missingPermission;
     public bool BadToken { get; } = badToken;
+    public bool RetrySoon { get; } = retrySoon;
+    public bool RateLimited { get; } = rateLimited;
 }
 
 /// <param name="missingPermission">GitHub refused on this repo (403 or 404): the token lacks the permission there, or can't see the repo. Asking again there won't help for a while; other repos may be fine.</param>
 /// <param name="badToken">GitHub refused the token itself (401): nothing works with it until it's replaced.</param>
-public sealed class GitHubWriteException(string message, bool missingPermission = false, bool badToken = false) : HostWriteException(message, missingPermission, badToken);
+/// <param name="retrySoon">GitHub failed for a moment (see <see cref="HostWriteException"/>).</param>
+/// <param name="rateLimited">GitHub's rate limit for the token is used up (a 429, or a 403 that says so).</param>
+public sealed class GitHubWriteException(string message, bool missingPermission = false, bool badToken = false, bool retrySoon = false, bool rateLimited = false)
+    : HostWriteException(message, missingPermission, badToken, retrySoon, rateLimited);
 
 /// <summary>A commit status: pending, success, failure or error, with a line of text and a link, under a context of its own.</summary>
 public sealed record CommitStatus(string State, string Description, string Context, string? TargetUrl);
@@ -135,11 +143,12 @@ public sealed class GitHubWrites(IHttpClientFactory httpFactory)
         }
         catch (HttpRequestException ex)
         {
-            throw new GitHubWriteException($"api.github.com couldn't be reached ({ex.Message}).");
+            throw new GitHubWriteException($"api.github.com couldn't be reached ({ex.Message}).", retrySoon: true);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new GitHubWriteException("api.github.com didn't answer in time.");
+            // The client gave up: GitHub may still have done it, and only its answer was lost.
+            throw new GitHubWriteException("api.github.com didn't answer in time.", retrySoon: true);
         }
     }
 
@@ -150,12 +159,32 @@ public sealed class GitHubWrites(IHttpClientFactory httpFactory)
     {
         if (response.IsSuccessStatusCode) return;
         if (IsRateLimited(response))
-            throw new GitHubWriteException($"GitHub's API rate limit for this token is used up, so Gitberth couldn't {doing}. It tries again with the next deploy.");
+            throw new GitHubWriteException($"GitHub's API rate limit for this token is used up, so Gitberth couldn't {doing}. It tries again with the next deploy.", rateLimited: true);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
             throw new GitHubWriteException("GitHub says the token is invalid or expired. Update it in Settings.", badToken: true);
         if (response.StatusCode is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
             throw new GitHubWriteException(MissingPermissionText(feature, doing), missingPermission: true);
-        throw new GitHubWriteException($"GitHub didn't let Gitberth {doing}: {await ErrorMessageAsync(response, ct)} (HTTP {(int)response.StatusCode}).");
+        var status = (int)response.StatusCode;
+        // GitHub failing itself (a 5xx) is for a moment; so is its "Hook already exists" for a webhook an earlier request
+        // made whose answer was lost: the next try finds that one by its payload URL.
+        var soon = status >= 500 || (feature == GitHubFeature.Webhooks && status == 422 && await HookExistsAsync(response, ct));
+        throw new GitHubWriteException($"GitHub didn't let Gitberth {doing}: {await ErrorMessageAsync(response, ct)} (HTTP {status}).", retrySoon: soon);
+    }
+
+    // GitHub's 422 for a second webhook with the same URL and an event in common: "Hook already exists on this repository".
+    private static async Task<bool> HookExistsAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+            return doc.RootElement.TryGetProperty("errors", out var errors) && errors.ValueKind == JsonValueKind.Array
+                && errors.EnumerateArray().Any(e => e.ValueKind == JsonValueKind.Object && e.TryGetProperty("message", out var m)
+                    && m.ValueKind == JsonValueKind.String && m.GetString()!.Contains("already exists", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>What to tell someone whose token can't do this on a repo: the permission it needs, for either kind of token.</summary>

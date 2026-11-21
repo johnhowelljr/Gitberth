@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -237,15 +236,20 @@ public sealed class AgentGuardTests : IDisposable
         Enumerable.Range(0, count).Select(i => $"2026-11-16T10:00:{i % 60:00}.123456789Z GET /api/items?page={i} 200 12ms ok").ToList();
 
     [Fact]
-    public void A_grep_that_would_backtrack_for_ever_runs_over_5000_lines_in_under_2_seconds()
+    public async Task A_grep_that_would_backtrack_for_ever_runs_without_backtracking_over_5000_lines()
     {
+        // What makes it safe: the expression never backtracks (its time grows with the line, never exponentially), and a
+        // line that still takes too long is given up on.
+        var regex = AppReadTools.GrepRegex("(.+)+!");
+        Assert.True(regex.Options.HasFlag(System.Text.RegularExpressions.RegexOptions.NonBacktracking), regex.Options.ToString());
+        Assert.Equal(TimeSpan.FromMilliseconds(200), regex.MatchTimeout);
+
+        // So 5000 lines of it end; with backtracking they wouldn't, this side of the guard against a hang (the 200 ms a line
+        // alone would come to over 16 minutes).
         var lines = LogLinesOf(5000);
-        var sw = Stopwatch.StartNew();
-        var shown = AppReadTools.Filter(lines, AppReadTools.Matcher("/(.+)+!/"), CancellationToken.None);
-        sw.Stop();
+        var shown = await Task.Run(() => AppReadTools.Filter(lines, AppReadTools.Matcher("/(.+)+!/"), CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Empty(shown);
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"It took {sw.Elapsed}.");
-        // It still matches what it should, as quickly.
+        // It still matches what it should.
         Assert.Equal(5000, AppReadTools.Filter(lines, AppReadTools.Matcher("/(.+)+ OK$/"), CancellationToken.None).Count);
         Assert.Single(AppReadTools.Filter(lines, AppReadTools.Matcher("page=4999 "), CancellationToken.None));
     }

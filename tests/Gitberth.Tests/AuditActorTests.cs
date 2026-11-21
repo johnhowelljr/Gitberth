@@ -124,9 +124,9 @@ public sealed class AuditActorTests
         // The person's page is the first to queue: the worker starts inside their scope.
         using (AuditScope.Begin(Admin))
             queue.Enqueue(new DeployRequest(rig.ObsId, hooked, Build: true));
-        await WaitAsync(() => seen.ContainsKey(hooked));
+        await Eventually.UntilAsync(() => seen.ContainsKey(hooked), "the queue's worker to run the hook's deploy");
         queue.Enqueue(new DeployRequest(rig.ObsId, polled, Build: true));
-        await WaitAsync(() => seen.ContainsKey(polled));
+        await Eventually.UntilAsync(() => seen.ContainsKey(polled), "the queue's worker to run the polled deploy");
 
         Assert.Equal(new AuditActor(AuditActorKind.DeployHook, "cms", AuditVia.Hook, "203.0.113.7"), seen[hooked]);
         Assert.Equal(AuditActor.System(AuditVia.Watcher), seen[polled]);
@@ -180,7 +180,7 @@ public sealed class AuditActorTests
         }
 
         queue.Enqueue(new DeployRequest(preview, deployment, Build: true));
-        await WaitAsync(() => log.Entries.Any(e => e.Action == "app.deploy.failed"));
+        await log.RecordedAsync(e => e.Action == "app.deploy.failed" && e.DeploymentId == deployment);
 
         var entries = log.Entries.Where(e => e.DeploymentId == deployment).ToList();
         Assert.Equal(["app.deploy.started", "app.deploy.failed"], entries.Select(e => e.Action));
@@ -294,12 +294,6 @@ public sealed class AuditActorTests
     private sealed class NoHttp : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => throw new InvalidOperationException("No HTTP here.");
-    }
-
-    private static async Task WaitAsync(Func<bool> done)
-    {
-        for (var i = 0; i < 200 && !done(); i++) await Task.Delay(25);
-        Assert.True(done(), "It didn't happen in time.");
     }
 
     // ---- Sign-ins ----

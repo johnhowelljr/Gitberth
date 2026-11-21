@@ -40,7 +40,8 @@ public sealed partial class ZeroDowntimeTests
         {
             StableFor = TimeSpan.FromMilliseconds(40),
             StatePoll = TimeSpan.FromMilliseconds(5),
-            TunnelWait = TimeSpan.FromSeconds(5),
+            // A wait on the fake cloudflared's own confirmation, which comes: long, as in ZeroDowntimeTests.
+            TunnelWait = Eventually.Limit,
             ListenWait = TimeSpan.Zero,
         };
         int id;

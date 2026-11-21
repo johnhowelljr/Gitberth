@@ -314,7 +314,8 @@ public class ImageServiceTests : IDisposable
     [InlineData(3_330_000_000L, 264_000_000_000L, true, true, "Only 3.1 GB free on Docker's disk. Free some space first.")]
     [InlineData(12_000_000_000L, 200_000_000_000L, false, true, "Only 11.2 GB free on Docker's disk.")]
     [InlineData(12_000_000_000L, 264_000_000_000L, true, true, "Only 11.2 GB free on Docker's disk. Free some space first.")]
-    [InlineData(20_000_000_000L, 1_000_000_000_000L, true, false, "18.6 GB free on Docker's disk. Free some space first.")]
+    // A big disk warns before pulls stop: its warning line is twice its refusal line.
+    [InlineData(20_000_000_000L, 1_000_000_000_000L, true, true, "Only 18.6 GB free on Docker's disk. Free some space first.")]
     [InlineData(172_000_000_000L, 264_000_000_000L, false, false, null)]
     public void Guards_dockers_disk(long free, long total, bool tooLow, bool low, string? problem)
     {

@@ -470,6 +470,159 @@ public sealed class GitLabIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_project_hook_gitlab_failed_to_add_for_a_moment_is_tried_again_once_gitlab_is_surely_done_with_it()
+    {
+        await HooksOnAsync();
+        var failing = true;
+        _gitlab.Respond = r => r.Method != HttpMethod.Post ? null
+            : failing ? GitLabStub.Json(HttpStatusCode.BadGateway, """{"message":"502 Bad Gateway"}""") : GitLabStub.Json(HttpStatusCode.Created, """{"id":21}""");
+        var now = new DateTime(2026, 11, 9, 12, 0, 0, DateTimeKind.Utc);
+        var keeper = Keeper();
+        keeper.Now = () => now;
+
+        await keeper.EnsureAllAsync();
+        var hook = Assert.Single(_state.Hooks);
+        Assert.False(hook.Ok);
+        // GitLab may still be adding the hook it was asked for, and asked again before that's done it adds a second one:
+        // a minute, not 15 seconds as GitHub's webhook.
+        Assert.EndsWith("(HTTP 502). Gitberth tries again in a minute.", hook.Text);
+        Assert.False(_state.Paused(GitHubFeature.Webhooks, "acme/web", now));
+        Assert.Equal(WebhookKeeper.GitLabAfterLostPost, keeper.NextLook());
+
+        failing = false;
+        now += keeper.NextLook();
+        await keeper.RetryDueAsync();
+        Assert.Equal(("acme/web", true, "Webhook added"), (Assert.Single(_state.Hooks).Repo, _state.Hooks[0].Ok, _state.Hooks[0].Text));
+        Assert.Equal(21, (await KeptAsync())["acme/web"].Id);
+        Assert.Equal(WebhookKeeper.Every - WebhookKeeper.GitLabAfterLostPost, keeper.NextLook());
+    }
+
+    private const string HookUrl = "https://hooks.example.com/hooks/gitlab";
+
+    private static string Hooks(params long[] ids) =>
+        "[" + string.Join(",", ids.Select(id => $$"""{"id":{{id}},"url":"{{HookUrl}}","push_events":true,"merge_requests_events":true}""")) + """,{"id":3,"url":"https://ci.example.com/x"}]""";
+
+    [Fact]
+    public async Task A_second_copy_of_gitberths_project_hook_is_removed_so_each_push_deploys_once()
+    {
+        await HooksOnAsync();
+        // Two hooks with Gitberth's URL (a lost add GitLab made after all, and the next try's), and someone else's.
+        _gitlab.Respond = r => r.Method == HttpMethod.Get ? GitLabStub.Json(HttpStatusCode.OK, Hooks(21, 22))
+            : r.Method == HttpMethod.Delete ? new HttpResponseMessage(HttpStatusCode.NoContent) : GitLabStub.Json(HttpStatusCode.OK, """{"id":21}""");
+        var log = new AuditLog();
+        var keeper = new WebhookKeeper(_db, _settings, new GitHubWrites(new GitLabStub.Factory(_github)), _githubState, NullLogger<WebhookKeeper>.Instance,
+            audit: log, gitLab: _api, gitLabState: _state);
+
+        await keeper.EnsureAllAsync();
+
+        Assert.Equal([$"GET /api/v4/projects/{WebId}/hooks?per_page=100&page=1", $"PUT /api/v4/projects/{WebId}/hooks/21", $"DELETE /api/v4/projects/{WebId}/hooks/22"],
+            _gitlab.Calls);
+        Assert.Equal(21, (await KeptAsync())["acme/web"].Id);
+        var removed = Assert.Single(log.Entries, e => e.Action == "gitlab.webhook.removed");
+        Assert.Equal(("acme/web", "Removed a second copy of Gitberth's webhook from acme/web on GitLab, so each push deploys once."), (removed.Target, removed.Summary));
+        // Done: the next look asks GitLab nothing.
+        await keeper.EnsureAllAsync();
+        Assert.Equal(3, _gitlab.Calls.Count);
+    }
+
+    [Fact]
+    public async Task A_lost_add_gitlab_makes_after_the_next_try_added_another_is_found_and_removed_at_the_next_look()
+    {
+        await HooksOnAsync();
+        var hooks = "[]";
+        var posts = 0;
+        _gitlab.Respond = r => r.Method == HttpMethod.Get ? GitLabStub.Json(HttpStatusCode.OK, hooks)
+            : r.Method == HttpMethod.Post ? Interlocked.Increment(ref posts) == 1 ? GitLabStub.Json(HttpStatusCode.GatewayTimeout, """{"message":"504 Gateway Timeout"}""")
+                : GitLabStub.Json(HttpStatusCode.Created, """{"id":22}""")
+            : r.Method == HttpMethod.Delete ? new HttpResponseMessage(HttpStatusCode.NoContent) : GitLabStub.Json(HttpStatusCode.OK, """{"id":22}""");
+        var now = new DateTime(2026, 11, 9, 12, 0, 0, DateTimeKind.Utc);
+        var keeper = Keeper();
+        keeper.Now = () => now;
+        await keeper.EnsureAllAsync();
+
+        // A minute on, GitLab still shows no hook: it's added again.
+        now += keeper.NextLook();
+        await keeper.RetryDueAsync();
+        Assert.Equal(22, (await KeptAsync())["acme/web"].Id);
+        Assert.Equal("Webhook added", Assert.Single(_state.Hooks).Text);
+
+        // GitLab made the first one after all: the next full look finds the copy, and removes it.
+        hooks = Hooks(21, 22);
+        now += WebhookKeeper.Every;
+        var before = _gitlab.Calls.Count;
+        await keeper.EnsureAllAsync();
+        Assert.Equal([$"GET /api/v4/projects/{WebId}/hooks?per_page=100&page=1", $"PUT /api/v4/projects/{WebId}/hooks/22", $"DELETE /api/v4/projects/{WebId}/hooks/21"],
+            _gitlab.Calls.Skip(before).ToList());
+        Assert.Equal(22, (await KeptAsync())["acme/web"].Id);
+        // Done then.
+        before = _gitlab.Calls.Count;
+        await keeper.EnsureAllAsync();
+        Assert.Equal(before, _gitlab.Calls.Count);
+    }
+
+    [Fact]
+    public async Task The_keepers_quick_try_asks_only_about_what_failed_for_a_moment_never_a_host_that_rate_limited_it()
+    {
+        await HooksOnAsync();
+        await _settings.SetSecretAsync(SettingKeys.GitHubToken, "ghp_test");
+        await _settings.SetSecretAsync(SettingKeys.GitHubWebhookSecret, "gh-s3cret");
+        await using (var db = _db.CreateDbContext())
+        {
+            db.Apps.Add(new AppDefinition { Name = "Api", Slug = "api", Owner = "acme", Repo = "api", Branch = "main", CurrentImage = "gitberth/api:1" });
+            await db.SaveChangesAsync();
+        }
+        // GitHub's rate limit for the token is used up; GitLab fails the hook's add for a moment, then takes it (and lists it).
+        _github.Respond = _ => GitLabStub.Json(HttpStatusCode.TooManyRequests, """{"message":"API rate limit exceeded"}""");
+        var (posts, listed) = (0, "[]");
+        HttpResponseMessage Added()
+        {
+            listed = Hooks(21);
+            return GitLabStub.Json(HttpStatusCode.Created, """{"id":21}""");
+        }
+        _gitlab.Respond = r => r.Method == HttpMethod.Get ? GitLabStub.Json(HttpStatusCode.OK, listed)
+            : r.Method == HttpMethod.Put ? GitLabStub.Json(HttpStatusCode.OK, """{"id":21}""")
+            : Interlocked.Increment(ref posts) == 1 ? GitLabStub.Json(HttpStatusCode.ServiceUnavailable, """{"message":"503 Service Unavailable"}""") : Added();
+        var clock = new HeldClock();
+        var keeper = new WebhookKeeper(_db, _settings, new GitHubWrites(new GitLabStub.Factory(_github)), _githubState, NullLogger<WebhookKeeper>.Instance,
+            gitLab: _api, gitLabState: _state) { Time = clock };
+        var list = $"GET /api/v4/projects/{WebId}/hooks?per_page=100&page=1";
+        string[] gitLabLook = [list, $"POST /api/v4/projects/{WebId}/hooks"];
+
+        await keeper.StartAsync(CancellationToken.None);
+        try
+        {
+            var start = await clock.NextWaitAsync();
+            Assert.Equal(keeper.FirstLookAfter, start.Due);
+            clock.Advance(start.Due);
+
+            // The first look: the rate limit ends GitHub's part; GitLab's add is tried again a minute later.
+            var quick = await clock.NextWaitAsync();
+            Assert.Equal(WebhookKeeper.GitLabAfterLostPost, quick.Due);
+            Assert.Equal(["GET /repos/acme/api/hooks?per_page=100"], _github.Calls);
+            Assert.Equal(gitLabLook, _gitlab.Calls);
+
+            // The quick try: GitLab's project, and nothing else. Then the full look is due, 10 minutes after the first.
+            clock.Advance(quick.Due);
+            var full = await clock.NextWaitAsync();
+            Assert.Single(_github.Calls);
+            Assert.Equal([.. gitLabLook, .. gitLabLook], _gitlab.Calls);
+            Assert.Equal(21, (await KeptAsync())["acme/web"].Id);
+            Assert.Equal(WebhookKeeper.Every - WebhookKeeper.GitLabAfterLostPost, full.Due);
+
+            // The full look asks GitHub again, and looks at GitLab's project once more (an add that followed a lost one
+            // may yet have a copy): only its hook is there, so it's done.
+            clock.Advance(full.Due);
+            Assert.Equal(WebhookKeeper.Every, (await clock.NextWaitAsync()).Due);
+            Assert.Equal(2, _github.Calls.Count);
+            Assert.Equal([.. gitLabLook, .. gitLabLook, list, $"PUT /api/v4/projects/{WebId}/hooks/21"], _gitlab.Calls);
+        }
+        finally
+        {
+            await keeper.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task A_project_gitlab_refuses_says_so_and_rests_and_a_refused_token_stops_them_all()
     {
         await HooksOnAsync();

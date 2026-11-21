@@ -100,7 +100,14 @@ public sealed class GitLabSettings(SettingsService settings, GitLabApi api, GitL
     {
         if (await settings.GetSecretAsync(SettingKeys.GitLabToken, ct) is not { } token) return new GitLabSave(false, "No GitLab token is saved.");
         var check = await api.CheckTokenAsync(await api.InstanceAsync(ct), token, ct);
-        await KeepCheckAsync(check, ct);
+        // Only what GitLab answered replaces what's known. Who the token is, when it said so (GET /user); its scopes and
+        // expiry only when it also said which token it is (personal_access_tokens/self): a refusal (which the token watch
+        // says), GitLab out of reach, or self failing for a moment leaves the rest as it was.
+        if (check.Valid && check.Username is not null)
+        {
+            if (check.Warning is null) await KeepCheckAsync(check, ct);
+            else await settings.SetAsync(SettingKeys.GitLabLogin, check.Username, ct);
+        }
         if (check.Valid) state.Clear();
         return new GitLabSave(check.Valid, check.Valid ? $"GitLab took the token{(check.Username is null ? "" : $": it's {check.Username}'s")}." : check.Warning ?? "GitLab refused the token.", check);
     }

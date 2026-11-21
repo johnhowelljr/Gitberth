@@ -66,40 +66,90 @@ Nothing else is lost: apps, tokens and secrets stay as they were.
 ## Docker's disk is filling up
 
 Images, build caches, containers and volumes all live on Docker's disk. Gitberth reads how much of it is free on the disk
-that holds its own data volume, which is in Docker's storage, so it's the same disk. It shows it in three places:
+that holds its own data volume, which is in Docker's storage, so it's the same disk. It goes by two lines:
 
-- **Disk** in the strip at the top of the **Apps** list: what's used of its size, and how much is free. Under 15 GB free
-  it adds **getting low**; under 5 GB, or 5% of the disk, **too little to pull images**.
-- **Disk** in the dashboard's **This host** card: how much is free, with a bar for the part in use.
-- **Disk** on a new app's review: what's free of the disk's size, with **Getting low** under 15 GB free, or **Too little
-  to pull** when its image has to be pulled and the disk is below the limit.
+- Under 5 GB free, or under 5% of the disk when that's more, Gitberth won't pull an image, so a pull never fills the disk
+  halfway through: the disk is **almost full**.
+- Under 15 GB free, or a quarter of a small disk, the disk is **getting low**; on a big disk the line is at twice the
+  first one, so the warning always comes first. On a 64 GB disk that's 15 GB and 5 GB; on 1 TB, about 102 GB and 51 GB.
+  **Settings › Disk** says where both lines are on this host.
 
-Under 5 GB free, or under 5% of the disk when that's more, Gitberth won't pull an image, so a pull never fills the disk
-halfway through.
+It shows the disk in these places:
+
+- **Disk** in the strip at the top of the **Apps** list: what's used of its size, and how much is free, with **getting
+  low** or **too little to pull images**.
+- **Disk** in the dashboard's **This host** card: how much is free, with a bar for the part in use, and **getting low**
+  or **almost full**.
+- A banner on the dashboard, **Docker's disk is getting low** or **Docker's disk is almost full** (then a pill in the
+  top bar on every page too), with **See what takes the room**. [AI agents](ai-agents.md) hear it in `get_health`.
+- A [notification](notifications.md), with **Docker's disk gets full** on: once when the disk is getting low (not again
+  within a day), once when it's almost full, and once when there's room again.
+- **Disk** on a new app's review: what's free of the disk's size, with **Getting low**, or **Too little to pull** when
+  its image has to be pulled and the disk is almost full.
+- **Settings › Disk**: the free space and its lines, the build cache, the images, and what Gitberth cleaned up.
+
+Gitberth cleans up by itself (**Clean up by itself** in **Settings › Disk**, on unless you turn it off). Once a day it
+removes the build cache no build used for 7 days (**Keep unused build cache for**) and keeps the cache under a tenth of
+the disk, removes the untagged images of its own old builds and the leftover images of deleted apps, and each app's
+images beyond the ones it keeps for **Roll back**. When the disk is getting low it also removes the build cache no build
+used for a day, at most once an hour; when it's almost full, all the build cache no build is using, at most every 30
+minutes. The next builds take longer, but they don't fail for want of room. It never removes an image an app runs or
+rolls back to, one a container uses, an image that isn't from a build of Gitberth's (`postgres:18`, say), nor anything a
+running build uses: a deploy that gets to its build while a cleanup runs waits for it, and its log says
+"Waiting for the disk cleanup to finish…". Each cleanup that removed something is in the [audit log](audit-log.md).
 
 | Message or symptom | Cause | Fix |
 |---|---|---|
 | **Not enough disk to pull it** on a new app's review, with "Only … free on Docker's disk. Free some space first.", and **Create and start** can't be clicked | The image isn't on the host yet, and the disk is below the limit. An app whose image is on the host already can still be created. | Make room (below), then click **Change settings** and **Review and create** again. |
 | "Only … free on Docker's disk. Free some space first." when you update an app, click **Pull it**, or set up a Postgres server | The same limit, for every pull. An automatic update isn't made either: Gitberth tries again at its next look in the update window. | Make room, then try again. |
-| "Only … free on Docker's disk." as a note on a new app's review | Under 15 GB free: the pull still goes ahead. | Nothing yet, but make room soon. |
+| "Only … free on Docker's disk." as a note on a new app's review | The disk is getting low: the pull still goes ahead. | Nothing yet, but make room soon. |
 | "Docker's disk is full: free some space, then try again. Docker said: …" | The disk filled up while Docker was pulling. | Make room, then try again. |
 | A build or a Compose app's deploy fails with Docker's `no space left on device` | Those aren't checked beforehand: the disk filled up on the way. A failed build leaves the running version as it was. | Make room, then click **Deploy**. |
 
 To make room:
 
-1. See what takes the space: `docker system df` on the host lists images, containers, local volumes and the build cache,
-   with how much of each could be freed.
-2. Clear Docker's build cache with **Clear build cache** in **Settings › Deploys**, which says how big it is. The next
-   build of each app runs every step again. See [Gitberth settings](../reference/gitberth-settings.md#deploys).
+1. See what takes the space: **Settings › Disk** shows the build cache and the images, and `docker system df` on the
+   host lists images, containers, local volumes and the build cache, with how much of each could be freed.
+2. Click **Clean up now** in **Settings › Disk**: it runs the daily cleanup at once and says what it freed. For more,
+   **Clear build cache** there deletes all of it; the next build of each app runs every step again. See
+   [Gitberth settings](../reference/gitberth-settings.md#disk).
 3. Remove the apps you don't use, with **Also delete its image** (**Also delete its images** for a Git or Compose app)
-   ticked. See [Remove an app](manage-apps.md#remove-an-app).
+   ticked. See [Remove an app](manage-apps.md#remove-an-app). Images of apps you deleted with it unticked are listed
+   under **Images of deleted apps** in **Settings › Disk**, with **Remove these images**.
 4. Remove images on the host. `docker image prune` removes the ones with no name left, and `docker image prune -a` every
    one no container uses. Either also removes the image an app ran before its last update, so **Roll back** isn't
    offered for that app any more; `-a` also removes the images Gitberth keeps of each Git app's last 3 successful deploys,
    so it can't roll back to those.
 
-Gitberth tidies up as it goes: a Git app keeps the images of its last 3 successful deploys and no more, and an update keeps
-the image it replaced, for **Roll back**, and removes the one from the update before when nothing uses it.
+Gitberth tidies up as it goes, too: a Git app keeps the images of its last 3 successful deploys and no more, and an
+update keeps the image it replaced, for **Roll back**, and removes the one from the update before when nothing uses it.
+
+## Tokens and sign-ins
+
+Gitberth watches the tokens and sign-ins it uses: the GitHub token, the GitLab token, the Cloudflare API token (while
+domains are on), registry sign-ins, and its own API tokens that something used in the last 30 days. It asks GitHub,
+GitLab and Cloudflare about theirs every 6 hours, and hears what each service says of a token every time Gitberth calls
+it anyway. A token about to expire gets a banner on the dashboard and in its section of Settings 3 weeks, a week and a
+day before (an API token a week and a day before). A token that has expired, or that its service turned away, gets a red
+banner, a pill in the top bar on every page, and an entry in the audit log. Each also sends a notice when **A token is
+about to expire or is refused** is on in [Notifications](notifications.md), once per warning.
+
+A refusal counts only when the service's own check refuses the token too, made at once: a single call turned away, say
+during an outage of the service, never says the token is dead. A check that couldn't be made (no answer, a server error,
+a rate limit) changes nothing.
+
+| Banner | What stops | Fix |
+|---|---|---|
+| **The GitHub token expires in …**, **The GitHub token has expired** or **GitHub refused the token** | Private repos don't deploy, and commit statuses, pull request comments, webhooks and repo variables stop. | Make a new token at [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) with the same permissions, and save it in **Settings › GitHub access**. |
+| **The GitLab token expires in …**, **The GitLab token has expired** or **GitLab refused the token** | Private projects don't deploy, and GitLab hears nothing from Gitberth. When GitLab said why, the banner has its word: "GitLab says it was revoked." | Make a new token in your GitLab's **Access tokens** (the banner's **Make a new token** opens it), and save it in **Settings › GitLab**. |
+| **The Cloudflare API token expires in …**, **The Cloudflare API token has expired** or **Cloudflare refused Gitberth's API token** | Domains can't be added, moved or removed, and their routes can't change. The routes already in your tunnel keep working. | Make a new token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) with the permissions **Settings › Domains** lists, and save it there. |
+| **ghcr.io refused the sign-in** (or another registry) | Apps on that registry's private images can't be pulled or checked for updates. Its row in **Settings › Registries** says **refused on** the day. | Enter the registry, user name and password or token again in **Settings › Registries**, then **Verify and save**. |
+| **The API token … expires in …** or **The API token … has expired** | Whatever uses it can't reach Gitberth any more. The banner says when it was last used, and from which address. | Make a new token in **Settings › AI agents and API**, give it to that agent or script, and revoke the old one. |
+
+Saving a new token, or removing the token, takes its banner away at once. A banner of a token that expires in a few
+weeks or days can be dismissed: it stays hidden until the next warning, or until a new token is saved. The last day's
+banner, an expired token's and a refused one's can't be dismissed. **Check the token** in **Settings › GitHub access**,
+**GitLab** and **Domains** asks the service at once; what it says counts straight away.
 
 ## GitHub and deploys
 
@@ -108,7 +158,7 @@ A failed deploy's page shows **The deploy failed**, or **Rolled back: the old ve
 | Message | Cause | Fix |
 |---|---|---|
 | "… needs a GitHub token. Add one in Settings (Contents: Read-only on this repo)." | The repo is private and no token is saved. | Add one in **Settings › GitHub access** (see [Deploy from GitHub](deploy-from-github.md)). |
-| "GitHub rejected the token. Check that it hasn't expired and update it in Settings." | The token expired or was revoked. **Settings › GitHub access** shows its expiry, and **renew it soon** in its last 14 days. | Create a new token and click **Replace token**. |
+| "GitHub rejected the token. Check that it hasn't expired and update it in Settings." | The token expired or was revoked. **Settings › GitHub access** shows its expiry, and **renew it soon** in its last 3 weeks; a refused token also has its banner (see [Tokens and sign-ins](#tokens-and-sign-ins)). | Create a new token and click **Replace token**. |
 | "GitHub can't find …, or your token can't see it. Check the URL, and that the token has Contents: Read-only access to this repo." | A typo in the URL, or a fine-grained token that doesn't include this repo. | Edit the token on GitHub and add the repo under its repository access. |
 | "Branch '…' doesn't exist in …" | The app's branch was deleted or renamed. | Set the branch in the app's **Settings › Source**. |
 | "Can't reach github.com. Check the host's internet connection and DNS." | The host can't resolve or reach GitHub. | Check the host's network and DNS. |
@@ -152,7 +202,7 @@ These show in the change dialog, in the **Ports** card, or as a banner on the ap
 
 | Message | Cause | Fix |
 |---|---|---|
-| "Can't check: sign-in failed." | The registry refused the saved sign-in. Gitberth tries again after 24 hours. | Fix the sign-in in **Settings › Registries**. |
+| "Can't check: sign-in failed." | The registry refused the saved sign-in. Gitberth tries again after 24 hours; when signing in again is refused too, **Settings › Registries** has a banner for it (see [Tokens and sign-ins](#tokens-and-sign-ins)). | Fix the sign-in in **Settings › Registries**. |
 | "Only on this host: no registry has it." | No registry has this image, or it's private and there's no sign-in for it. | For a private image, add a sign-in in **Settings › Registries**. |
 | "Not checked yet." | No check has run for this image. | Click **Check now** on the **Updates** card. |
 | "It's pinned to a digest, so there's nothing to update. Give it a tag in Settings to follow one." | The app runs `name@sha256:…`. | Set a tag in **Settings › Image** if it should update. |
@@ -175,7 +225,8 @@ These show in the change dialog, in the **Ports** card, or as a banner on the ap
 | "The cloudflared container … doesn't run its tunnel from a token Gitberth can read (a credentials file, say), so Gitberth can't tell which tunnel it is." | cloudflared runs a tunnel from a credentials file. | Run it with `--token`, `TUNNEL_TOKEN` or a token file. |
 | "The tunnel Gitberth's Cloudflare token was saved for isn't running on this host." | The cloudflared container stopped, or now runs another tunnel. | Start it, or save the token again for the tunnel that runs. |
 | "cloudflared (…) can't reach Gitberth's apps: it's on neither the host's network nor the shared network gitberth, and joining gitberth failed (…)." | Gitberth couldn't join cloudflared to its network. | Run cloudflared with `--network host`, or join it to `gitberth` on its Network tab. |
-| "Cloudflare didn't let Gitberth's token …. The token needs Account › Cloudflare Tunnel › Edit, Zone › DNS › Edit and Zone › Zone › Read." | The token lacks a permission, or isn't valid. | Edit the token in Cloudflare, then **Replace token**. |
+| "Cloudflare didn't let Gitberth's token …. The token needs Account › Cloudflare Tunnel › Edit, Zone › DNS › Edit and Zone › Zone › Read." | The token lacks a permission. | Edit the token in Cloudflare, then **Replace token**. |
+| "Cloudflare refused Gitberth's API token itself, so it couldn't …: the token has expired, or was disabled or deleted. Save a new one in Settings › Domains." | Cloudflare doesn't take the token at all any more. | Make a new token (see [Tokens and sign-ins](#tokens-and-sign-ins)), then **Replace token**. |
 | "Cloudflare's API rate limit was reached while trying to …. It clears within minutes: Gitberth tries again on the app's next deploy, and every 15 minutes for a domain it's removing." | Too many requests to Cloudflare at once. | Wait a few minutes, then click **Fix** on the domain, or leave a removal to the retry. |
 | "…: … Gitberth tries again every 15 minutes until it's done." | A removed domain's route or DNS record couldn't be taken out of Cloudflare, for example because Cloudflare couldn't be reached. The domain is gone from the app, and no other app takes its route meanwhile. | Nothing, usually: Gitberth tries again every 15 minutes while domains are on. If it keeps failing, fix what the message says. |
 | "Enter a domain, like app.example.com." or "\"…\" isn't a domain Gitberth can route. Use a name like app.example.com." | What you typed isn't a host name. | Type the name only, like `app.example.com`. |
@@ -221,7 +272,7 @@ A domain marked **Not working** says why under its name; [When a domain isn't wo
 | Message | Cause | Fix |
 |---|---|---|
 | "… needs a GitLab token. Add one in Settings › GitLab (read_api and read_repository scopes)." | The project is private and no GitLab token is saved. | Save one in **Settings › GitLab** (see [GitLab](gitlab-integration.md#the-tokens-scopes)). |
-| "GitLab rejected the token, or it can't read this project. …" or "GitLab says the token is invalid, expired or revoked. Update it in Settings › GitLab." | The token expired, was revoked, or lacks a scope. **Settings › GitLab** shows its expiry and scopes. | Make a new token and click **Replace token**, or **Check the token** after you changed its scopes. |
+| "GitLab rejected the token, or it can't read this project. …" or "GitLab says the token is invalid, expired or revoked. Update it in Settings › GitLab." | The token expired, was revoked, or lacks a scope. **Settings › GitLab** shows its expiry and scopes, with **renew it soon** in its last 3 weeks, and a refused token's banner (see [Tokens and sign-ins](#tokens-and-sign-ins)). | Make a new token and click **Replace token**, or **Check the token** after you changed its scopes. |
 | "GitLab can't find …, or your token can't see it. …" | A typo in the URL, or the token's user isn't a member of the project. | Check the URL, and the user's role on the project. |
 | "Gitberth deploys from github.com and from its GitLab, …. For another GitLab, set its address in Settings › GitLab." | The URL isn't on github.com or on the GitLab set in **Settings › GitLab**. | Set **GitLab address** in **Settings › GitLab** first. |
 | "Can't reach …. Check its address in Settings › GitLab, and the host's network and DNS." | The host can't reach your GitLab. | Check the address, and the host's network. |
@@ -257,7 +308,7 @@ A domain marked **Not working** says why under its name; [When a domain isn't wo
 | Message | Cause | Fix |
 |---|---|---|
 | "That isn't a Gitberth token: they start with gbt_." or "The token isn't known: …" (401) | The header doesn't carry a token Gitberth made. | Copy the token again, or make a new one in **Settings › AI agents and API**. |
-| "The token … was revoked." or "… expired on …" (401) | What it says. | Make a new token. |
+| "The token … was revoked." or "… expired on …" (401) | What it says. A token in use is warned about on the dashboard a week and a day before it expires. | Make a new token. |
 | "The token … has Read access, and … needs Operate. …" (403) | The tool needs more access than the token has. | Make a token with that access, if the agent should have it. |
 | "Requests from a browser page (with an Origin header) aren't accepted here. …" (403) | The call came from a web page. | Call it from an MCP client, a script or `curl`. |
 | "Too many requests with a bad token from this address. …" (429) | 10 bad tokens from one address in 15 minutes. | Wait a few minutes, then use a good token. |

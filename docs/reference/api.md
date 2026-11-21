@@ -151,7 +151,7 @@ Access: **Read** · read-only
 
 ### `get_health`
 
-How this host is doing: the Docker engine (version, CPUs, memory), the disk Docker uses, Gitberth's version, and the problems worth knowing about now: apps crashed, unhealthy, missing or down, deploys failing, a full disk.
+How this host is doing: the Docker engine (version, CPUs, memory), the disk Docker uses, Gitberth's version, and the problems worth knowing about now: apps crashed, unhealthy, missing or down, deploys failing, a full disk, and what the dashboard's banners warn about.
 
 Access: **Read** · read-only
 
@@ -568,7 +568,10 @@ Access: **Admin** · idempotent
 | `crashed` | boolean | no | When an app crashes. |
 | `unhealthy` | boolean | no | When a health check fails (and passes again). |
 | `down` | boolean | no | When an uptime check finds an app down (and back up). |
+| `brought_back` | boolean | no | When Gitberth brings back an app that stopped by itself (and when it stops trying). |
 | `certificate_expiring` | boolean | no | When a domain's certificate is about to expire. |
+| `token_expiring` | boolean | no | When a token Gitberth uses is about to expire or is refused. |
+| `disk_low` | boolean | no | When Docker's disk gets full (and has room again). |
 | `previews` | boolean | no | About previews' deploys too. |
 
 ### `set_update_settings`

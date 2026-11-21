@@ -242,7 +242,7 @@ public sealed class AppSettingsServiceTests
         Assert.Equal(0, _apps.CallsAtAdoption);
         Assert.Contains("TZ=UTC", _engine.Get("sample-index").Config["Env"]!.AsArray().Select(e => (string)e!));
         // Once it's done, the row follows the new container, and the domains its ports.
-        for (var i = 0; i < 100 && !_apps.Log.Contains("domains 7"); i++) await Task.Delay(20);
+        await Eventually.UntilAsync(() => _apps.Log.Contains("domains 7"), "the row and the domains to follow the new container");
         Assert.Equal(["adopt sample-index", "sync 7", "domains 7"], _apps.Log.Where(l => !l.StartsWith("activity", StringComparison.Ordinal)));
         // Its record in Activity is the engine's journal row: the service writes none of its own.
         Assert.DoesNotContain(_apps.Log, l => l.StartsWith("activity", StringComparison.Ordinal));

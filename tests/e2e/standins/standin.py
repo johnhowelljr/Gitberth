@@ -786,11 +786,13 @@ def c_cf_token(req):
 
 @route("PATCH", "/cloudflare/tokens/(?P<token>[^/]+)")
 def c_cf_token_change(req, token):
+    """A token changed as in Cloudflare's dashboard: its permissions, status (active, disabled), kind, or end date
+    (expires_on, ISO 8601 UTC; null for none)."""
     t = CF.tokens.get(token)
     if t is None:
         raise ApiError(404, "No such token")
     b = body_of(req)
-    for k in ("permissions", "status", "kind"):
+    for k in ("permissions", "status", "kind", "expires_on"):
         if k in b:
             t[k] = b[k]
     return {k: v for k, v in t.items() if k != "token"}

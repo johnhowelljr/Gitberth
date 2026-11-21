@@ -1,8 +1,8 @@
 # Gitberth's settings
 
-The **Settings** page holds the settings for Gitberth as a whole: GitHub, GitLab and registry access, notifications, image updates, domains, uptime checks and the status page, the network, deploys, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
+The **Settings** page holds the settings for Gitberth as a whole: GitHub, GitLab and registry access, notifications, image updates, domains, uptime checks and the status page, keeping apps running, the network, deploys, Docker's disk, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
 
-The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **GitLab**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Network**, **Own LAN addresses**, **Deploys**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
+The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **GitLab**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Keep apps running**, **Network**, **Own LAN addresses**, **Deploys**, **Disk**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
 
 ![The Settings page](../images/settings.webp)
 
@@ -18,9 +18,12 @@ For private repositories, and the repo variables apps keep their environment in.
 |---|---|
 | **Token** (**Replace the token** once one is saved) | A GitHub personal access token. A fine-grained token needs **Contents: Read-only** and **Variables: Read and write** on the repositories you deploy, and for [GitHub integration](#github-integration) **Commit statuses: Read and write**, **Pull requests: Read and write** and **Webhooks: Read and write**; a classic token needs the **repo** and **admin:repo_hook** scopes. Gitberth never changes your code. |
 | **Save token** / **Replace token** | Asks GitHub who owns the token, then saves it encrypted. An invalid or expired token isn't saved. |
+| **Check the token** | Asks GitHub now whether it takes the saved token, whose it is and when it expires: "GitHub took the token: it's …'s, and it expires on Dec 1, 2026.", "GitHub refused the token: it has expired or was revoked. Save a new one." or "Couldn't ask GitHub: …. Nothing changed." |
 | **Remove** | Forgets the token. Private repos can't be cloned until you add one again. |
 
-Once saved, the section shows **Token saved**, the GitHub account it belongs to, and when it expires. In its last 14 days the expiry is highlighted with **renew it soon**. Without a token it shows **No token** and **Private repositories can't be cloned yet.** Public repos need no token.
+Once saved, the section shows **Token saved**, the GitHub account it belongs to, and when it expires. In its last 3 weeks the expiry is highlighted with **renew it soon**, and once it has passed it says **expired** in red; its tip says when Gitberth last checked the token. Without a token it shows **No token** and **Private repositories can't be cloned yet.** Public repos need no token.
+
+Gitberth checks the token with GitHub every 6 hours, and at once when GitHub turns it away. A banner at the top of the section (and on the dashboard) says when the token expires within 3 weeks, a week or a day, when it has expired, and when GitHub refused it: see [Tokens and sign-ins](../guides/troubleshooting.md#tokens-and-sign-ins).
 
 Default: no token. Saving a token makes Gitberth check every repo again right away, and try again whatever GitHub refused the last token. See [Deploy from GitHub](../guides/deploy-from-github.md) for how to create one.
 
@@ -51,17 +54,17 @@ values under **Instant deploys**.
 | **GitLab address** | gitlab.com, or your own GitLab's address, with the path it's served under if it has one (`https://gitlab.example.com`, or `http://192.168.50.10:8929/gitlab` for one on this host). GitLab apps follow it: a project is kept by its path, never with the address. | `https://gitlab.com` |
 | **Token** (**Replace the token** once one is saved) | A personal, project or group access token. **api** does everything; **read_api** and **read_repository** alone deploy, preview and read the variables, and report nothing. Kept encrypted, never shown again. | None: public projects only |
 | **Save** / **Save token** / **Replace token** | Saves the address and, when one is typed, the token, once GitLab took it (it's asked who the token is and which scopes it has). A token GitLab refuses isn't saved. | |
-| **Check the token** | Asks GitLab again who the token is, its scopes and when it expires. | |
+| **Check the token** | Asks GitLab again who the token is, its scopes and when it expires. A token GitLab refuses gets its banner at once. | |
 | **Remove token** | Asks first, then forgets the token. Project hooks Gitberth added stay on GitLab. | |
 | **Commit statuses** | Each deploy that builds a commit marks it on GitLab: running while it builds, then success (linking to the app) or failed (linking to the deploy log); canceled when it was. Named **Gitberth: &lt;app&gt;** and **Gitberth preview: &lt;app&gt;**. Needs **api**. | On |
 | **Comments on merge requests** | A preview of a merge request keeps one comment on it up to date: its state, address, commit and time. Needs **api**. | On |
 | **URL**, **Secret token**, **Trigger** | Shown while there's a host name for webhooks (**GitHub integration › Instant deploys**): what GitLab's project hook needs, to add it by hand when the token can't (no **api**, or no Maintainer role). **Show** reveals the secret token; the copy buttons copy. | |
 
-Once saved, the section shows **Token saved**, whose it is, on which GitLab, when it expires (**renew it soon** in its last 14 days) and its scopes, and a banner naming each scope it lacks and what for. When GitLab refuses something on a project, a banner says so (for example **Commit statuses aren't set on you/website**) and Gitberth stops asking on that project for an hour, or until a token is saved again; a token GitLab refuses outright stops it everywhere. A list under the hook's values says, per project, **Webhook added**, **Webhook set up** or why not.
+Once saved, the section shows **Token saved**, whose it is, on which GitLab, when it expires (**renew it soon** in its last 3 weeks, **expired** after) and its scopes, and a banner naming each scope it lacks and what for. As for GitHub's, a banner says when the token expires within 3 weeks, a week or a day, when it has expired, and when GitLab refused it ([Tokens and sign-ins](../guides/troubleshooting.md#tokens-and-sign-ins)). When GitLab refuses something on a project, a banner says so (for example **Commit statuses aren't set on you/website**) and Gitberth stops asking on that project for an hour, or until a token is saved again; a token GitLab refuses outright stops it everywhere. A list under the hook's values says, per project, **Webhook added**, **Webhook set up** or why not.
 
 ## Notifications
 
-Failed deploys, crashes, failing health checks and apps that go down, by email, Discord, Slack, ntfy or a webhook. See [Notifications](../guides/notifications.md).
+Failed deploys, crashes, failing health checks, apps that go down, tokens about to expire and a disk getting full, by email, Discord, Slack, ntfy or a webhook. See [Notifications](../guides/notifications.md).
 
 ![Settings, Notifications with a Discord channel and an ntfy topic, each with its last delivery, then Add a destination and Tell me when](../images/settings-notifications.webp)
 
@@ -78,7 +81,10 @@ The events are switches under **Tell me when**. With no destination the section 
 | **An app crashes** | An error exit or running out of memory, of any container. A crash loop sends one message, then a count every 30 minutes. | On |
 | **A health check fails** | Docker marks an app unhealthy, and again once it passes. | On |
 | **An app goes down** | Its [uptime check](../guides/uptime-and-status-page.md) fails twice in a row, and again once it's back up. | On |
+| **Gitberth brings an app back** | An app meant to run stopped by itself and Gitberth started it again (see [Keep apps running](#keep-apps-running)): once it runs again, once more if Gitberth stops trying after 4 tries, and if its try every 6 hours after that brings it back. | On |
 | **A certificate is about to expire** | A domain's certificate expires within 14 days, and again within 3. | On |
+| **A token is about to expire or is refused** | A GitHub, GitLab or Cloudflare token, a registry sign-in or an API token in use: 3 weeks, a week and a day before it expires (an API token a week and a day before), once it has, and the moment its service refuses it. | On |
+| **Docker's disk gets full** | Free space drops under the warning line (see [Disk](#disk)), again when it's so low Gitberth stops pulling images, and once there's room again. | On |
 | **Previews too** | Deploys of previews as well. | Off |
 
 Each destination's row shows where it goes without its secret (`https://discord.com/…`), and how its last message went: **Sent 2 min ago** or **Failed 2 min ago** with the reason. An app's own **Notifications** switch (its Settings tab, **General**) leaves it out; the line under the switches counts the apps left out.
@@ -97,7 +103,7 @@ Sign-ins for private images, used to pull them and to check them for updates. Pu
 | **Verify and save** | Signs in once through Docker to check it works, then saves it encrypted. For a registry that already has a sign-in, the new one replaces it once it's verified. If the registry refuses, the **Not saved** banner says why and nothing is saved. |
 | **Remove** | Asks first. Apps on that registry's private images can't be pulled or checked for updates until you add a sign-in again. Nothing that runs changes. |
 
-Each saved sign-in shows its registry, user name, when it was added, and **signed in …** with when it was last verified (or **saved**). When Gitberth can't read its saved password any more, for example because its keys were lost, it says **needs its password again: enter it below**: type the registry, user name and password again and click **Verify and save**. There's one sign-in per registry. Default: none.
+Each saved sign-in shows its registry, user name, when it was added, and **signed in …** with when it was last verified (or **saved**). When Gitberth can't read its saved password any more, for example because its keys were lost, it says **needs its password again: enter it below**: type the registry, user name and password again and click **Verify and save**. When the registry turned the sign-in away in an update check, and again when Gitberth signed in with it at once, it says **refused on …: enter its password again**, with a banner at the top of the section and on the dashboard; entering it again takes them away. A registry never says when a sign-in expires, so only its refusal is told. There's one sign-in per registry. Default: none.
 
 **New app** also uses a registry's sign-in to read an image's ports, volumes and health check before it's pulled.
 
@@ -126,11 +132,14 @@ Optional: apps on their own domains through the Cloudflare Tunnel on the host. S
 | **Manage app domains through Cloudflare** | Off by default. Off, Gitberth doesn't contact Cloudflare or read your tunnel's settings, and your tunnel and DNS stay exactly as you set them. Turned on with a token saved, Gitberth routes every app's domains right away. |
 | **Cloudflare API token** (**Replace the API token** once one is saved) | A custom Cloudflare API token with **Account › Cloudflare Tunnel › Edit, Zone › DNS › Edit and Zone › Zone › Read**, for your account and your domains' zones, and **Account › Access: Apps and Policies › Edit** plus **Account › Access: Organizations, Identity Providers, and Groups › Read** to protect domains. |
 | **Save token** / **Replace token** | Finds the cloudflared container on the host, checks the token against its tunnel, saves it encrypted, and routes the domains. Routes you already made in Cloudflare that go to an app become its domains. |
+| **Check the token** | Asks Cloudflare now whether it takes the saved token, and when it expires: "Cloudflare took the token, and it expires on Dec 1, 2026." (or "and it doesn't expire."), "Cloudflare refused the token: it has expired, or was disabled or deleted. Save a new one." or "Couldn't ask Cloudflare: …. Nothing changed." |
 | **Remove** | Forgets the token. Routes already in your tunnel stay as they are. |
 | **Who may sign in** (under **Protection**, once a token is saved) | The email addresses that may sign in to protected domains through Cloudflare Access, one per line. **Save** updates every protected domain's Access application. It refuses an address that isn't one, and an empty list while a domain is protected. Default: nobody. |
 | **Check again** | Asks Cloudflare again whether protection is ready. |
 
-With domains on, the section shows **Token saved** or **No token**, and the tunnel Gitberth uses, like **Tunnel 1a2b3c4d from the cloudflared container**, or why it can't use one. Notes under the help text say what the last sync did, and what needs attention. With domains off and a token saved, it shows **Token saved** with **Not used while domains are off.**
+With domains on, the section shows **Token saved** or **No token**, when a token with an end date expires (**token expires Dec 1, 2026**, with **renew it soon** in its last 3 weeks), and the tunnel Gitberth uses, like **Tunnel 1a2b3c4d from the cloudflared container**, or why it can't use one. Notes under the help text say what the last sync did, and what needs attention. With domains off and a token saved, it shows **Token saved** with **Not used while domains are off.**
+
+While domains are on, Gitberth checks the token with Cloudflare every 6 hours, and at once when Cloudflare turns it away. A banner at the top of the section (and on the dashboard) says when the token expires within 3 weeks, a week or a day, when it has expired, and **Cloudflare refused Gitberth's API token** when it did: domains can't be added, moved or removed until a new token is saved, though the routes already in the tunnel keep working. See [Tokens and sign-ins](../guides/troubleshooting.md#tokens-and-sign-ins).
 
 **Protection** is tagged **Ready** (with where visitors sign in, like **Visitors sign in at homelab.cloudflareaccess.com.**, and how many domains are protected) or **Not set up**, with a **Protection isn't ready** banner saying what's missing. A domain is protected with its **Protected** switch on the app's Network tab; see [Protect a domain](../guides/domains.md#protect-a-domain).
 
@@ -153,6 +162,21 @@ How often every app is checked from outside, and the public status page. See
 | **Save status page** | Saves the status page's settings. The line next to it links the page on your network and on the internet, or says **Off: /status answers 404.** | |
 
 Every change is recorded in the audit log.
+
+## Keep apps running
+
+Apps that stop by themselves, and containers that go missing, are started again: an app that's meant to run but crashed
+and that its restart policy doesn't start, stopped when Docker or the host restarted, or lost its container. An app you
+stopped, in Gitberth or with `docker stop`, stays stopped. See
+[When an app stops by itself](../guides/health-and-monitoring.md#when-an-app-stops-by-itself).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Bring apps back by themselves** | Every 30 seconds Gitberth looks at every app that's meant to run and brings back one that stopped by itself: up to 4 tries in a row (at once, then 1, 5 and 15 minutes after the try before), then it tells you and only tries every 6 hours. Off, every stopped app is left as it is. Saved at once. | On |
+| **Gitberth stopped bringing these back** | Shown only when there are some: each app it gave up on, why, and when. **Start** starts it as its own Start button does; its tries count from the first again. | |
+| The line under them | How many times Gitberth brought an app back in the last 24 hours, and which apps, like **Brought back 3 times in the last 24 hours: orders-api and website.** | |
+
+Every change of the switch is recorded in the audit log.
 
 ## Network
 
@@ -189,7 +213,7 @@ While it's on, the section shows the **Block**, the **Containers** that have an 
 
 ## Deploys
 
-How often Gitberth looks for new commits, and Docker's build cache.
+How often Gitberth looks for new commits. Docker's build cache is under [Disk](#disk).
 
 ![Settings, Deploys](../images/settings-deploys.webp)
 
@@ -199,13 +223,26 @@ How often Gitberth looks for new commits, and Docker's build cache.
 
 Click **Save** to save it. Gitberth checks right away with the new interval.
 
-**Build cache** shows how much room Docker's build cache takes on the host, such as **1.2 GiB on this host**. The cache
-keeps each step of every app's builds, so a step whose files didn't change isn't run again and builds are quick.
+## Disk
 
-**Clear build cache** asks first, then deletes all of it. Nothing that runs changes, but the next build of each app runs
-every step again, so it takes longer. Afterwards Gitberth says how much it freed. While a build runs, it's refused:
-clear it once the build is done. To build one app without the cache instead, use **Deploy without the build cache**; see
-[Deploys and rollbacks](../guides/deploys-and-rollbacks.md#without-the-build-cache).
+Docker's disk: how full it is, what takes the room, and what Gitberth cleans up by itself so that it doesn't fill up. See
+[Docker's disk is filling up](../guides/troubleshooting.md#dockers-disk-is-filling-up).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Free space** | What's free of the disk's size, like **41.2 GB free of 64.0 GB**, with a bar, and **Getting low** or **Almost full**. The line under it says where the two lines are on this disk: "Gitberth warns under 15.0 GB free and stops pulling images under 5.0 GB." It's measured on Gitberth's data folder, which is on Docker's disk. | |
+| **Build cache** | How much room Docker's build cache takes on the host, such as **1.2 GB on this host**, and how much of it no build used for the days below: what the next cleanup removes. The cache keeps each step of every app's builds, so a step whose files didn't change isn't run again and builds are quick. | |
+| **Clear build cache** | Asks first, then deletes all of the build cache. Nothing that runs changes, but the next build of each app runs every step again, so it takes longer. Afterwards Gitberth says how much it freed. While a build or a cleanup runs, it's refused, and says which: clear it once that's done. To build one app without the cache instead, use **Deploy without the build cache**; see [Deploys and rollbacks](../guides/deploys-and-rollbacks.md#without-the-build-cache). | |
+| **Images** | What every image on the host takes, each layer counted once. Not shown on Docker engines older than 23 (API 1.42). | |
+| **Clean up by itself** | Once a day Gitberth removes the build cache no build used for the days below, keeps the cache under a tenth of the disk (2 to 20 GB), removes the untagged images of its own old builds and the images of deleted apps it was asked to remove, and each app's images beyond the ones it keeps for **Roll back**. When the disk is getting low it also removes the build cache no build used for a day; when it's almost full, all the build cache no build is using. It never removes an image an app runs, names, rolls back to or a container uses, nor anything a build uses: it holds builds off while it runs, and a deploy that gets to its build waits for it. A cleanup Docker fails or refuses is tried again a few minutes later. Off, it only warns. | On |
+| **Keep unused build cache for** | How many days the build cache a build hasn't used is kept, 1 to 90. **Save** saves it. | 7 days |
+| **Last cleanup** | When the disk was last cleaned up and by whom, what it freed, and what was free after it, like **Today 04:12, by Gitberth: 2.1 GB freed (build cache 2.0 GB, 3 images). 41.2 GB free after.** | |
+| **Clean up now** | Runs the daily cleanup now, as you, and says what it freed: **Cleaned up: 2.1 GB freed.** or **Nothing to clean up.** When Docker fails or refuses it, it says what Docker said. Refused while a build runs or the build cache is being cleared, and while another cleanup does. | |
+| **Images of deleted apps** | Shown only when there are some: each deleted app's images still on the host, with how many and about how much room they take. **Kept when the app was deleted** when it was deleted with **Also delete its images** unticked; **Waiting to be removed: a container uses it** when its deletion asked for them to go, and Gitberth removes them once nothing uses them. An image another app names (an app made from a local image, say) isn't listed: it's that app's. | |
+| **Remove these images** | Asks first, listing them, then removes the images it listed: an app deleted meanwhile keeps its own until they're listed and asked about too. One a container still uses stays, and Gitberth removes it once nothing does. | |
+
+Every change of the switch or the days, and every cleanup that removed something, is recorded in the
+[audit log](../guides/audit-log.md).
 
 ## Databases
 
@@ -245,7 +282,7 @@ Tokens for AI agents (over MCP, at `/mcp`) and scripts (the HTTP API, at `/api/v
 | **Create token** | Makes it and shows it once (`gbt_` and 43 characters), with a copy button and the setup for **Claude Code**, **VS Code**, **Cursor**, **Claude Desktop**, **Other MCP clients** and the **HTTP API (curl)**. Gitberth keeps only its SHA-256 and its first characters. | |
 | **Revoke** | Ends the token at once: every request with it gets 401. It stays in the list, marked **Revoked**. | |
 
-The fields are under **Create a token**. Each token in the list shows its name, access, first characters (`gbt_AbCd1234…`), when it was **Created**, when and from which address it was **Last used**, and when it **Expires** (or **Expired**). The section also shows the **MCP server**'s and the **HTTP API**'s addresses, with copy buttons, and where the OpenAPI description is (`/api/v1/openapi.json`).
+The fields are under **Create a token**. Each token in the list shows its name, access, first characters (`gbt_AbCd1234…`), when it was **Created**, when and from which address it was **Last used**, and when it **Expires** (or **Expired**), with **expires in 5 days** (or **tomorrow**, **today**) by its name in its last week. A token something used in the last 30 days is also warned about with a banner, here and on the dashboard, a week and a day before it expires and once it has (see [When a token expires](../guides/ai-agents.md#when-a-token-expires)). The section also shows the **MCP server**'s and the **HTTP API**'s addresses, with copy buttons, and where the OpenAPI description is (`/api/v1/openapi.json`).
 
 No tool makes, lists or revokes tokens, changes the admin password, or turns off the audit log's recording of changes made outside Gitberth. That's a promise about the tools: for a Read or Operate token it's the whole story, but an Admin token can create an app whose container reaches the whole host, and from there those too. Making and revoking a token, and its expiry, are recorded in the audit log, by name and access, never the token.
 

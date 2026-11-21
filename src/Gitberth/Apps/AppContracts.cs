@@ -363,12 +363,20 @@ public sealed record NewContainerRequest
     /// is refused such a volume: it may hold another major version's data.
     /// </summary>
     public bool UseExistingData { get; init; }
+
+    /// <summary>
+    /// Asked under the container's lock right before it's created: why it isn't wanted any more (its app stopped, deleted or
+    /// forgotten meanwhile), or null to go on. None for a create someone asked for just now.
+    /// </summary>
+    public Func<CancellationToken, Task<string?>>? Wanted { get; init; }
 }
 
 // ---- Activity ----
 
+// Stored as strings: only ever added. BroughtBack and GaveUp are the keep-running check's: a try to bring back an app that
+// stopped by itself, and its giving up after the last one.
 public enum ActivityKind { Created, Adopted, Settings, Live, Recreated, Updated, RolledBack, Started, Stopped, Restarted, Removed,
-    UpdateFound, RecreatedOutside, Deploy, Change, Event }
+    UpdateFound, RecreatedOutside, Deploy, Change, Event, BroughtBack, GaveUp }
 
 public enum ActivityTone { Neutral, Good, Warning, Danger }
 

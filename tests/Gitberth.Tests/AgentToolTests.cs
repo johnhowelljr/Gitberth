@@ -227,6 +227,32 @@ public sealed class AgentToolTests : IDisposable
     }
 
     [Fact]
+    public async Task An_agent_chooses_every_notification_settings_offers()
+    {
+        // Every switch of Settings › Notifications is an argument of its own, and previews too.
+        var args = AgentDocs.Arguments(ToolCatalog.Find("set_notifications")!.InputSchema).Select(a => a.Name).ToList();
+        Assert.Equal(NotificationSettings.Choosable.Length + 1, args.Count);
+        var (status, body) = await CallAsync("set_notifications", new { brought_back = false, token_expiring = false, disk_low = false }, Admin);
+        Assert.Equal(200, status);
+        var events = JsonNode.Parse(body)!["events"]!;
+        Assert.Equal((false, false, false, true), ((bool)events["BroughtBack"]!, (bool)events["TokenExpiring"]!, (bool)events["DiskLow"]!, (bool)events["Down"]!));
+        Assert.Contains(_agents.Audit.Entries, e => e.Summary == "No more notifications when Docker's disk gets full.");
+    }
+
+    [Fact]
+    public async Task Get_health_tells_what_the_dashboards_banners_warn_about()
+    {
+        _agents.Attention.Set(new AttentionItem("disk", "disk", AttentionLevel.Warn, "Docker's disk is getting low", "12.3 GB free of 64.0 GB."));
+        _agents.Attention.Set(new AttentionItem("credential:github", "credentials", AttentionLevel.Info, "The GitHub token expires in 3 weeks", "Make a new one."));
+        var (status, body) = await CallAsync("get_health", null, Admin);
+        Assert.Equal(200, status);
+        var problems = JsonNode.Parse(body)!["problems"]!.AsArray().Select(p => p!.GetValue<string>()).ToList();
+        Assert.Contains("Docker's disk is getting low: 12.3 GB free of 64.0 GB.", problems);
+        // Three weeks ahead is a banner, not a problem yet.
+        Assert.DoesNotContain(problems, p => p.Contains("GitHub token", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task A_deploy_a_token_asked_for_is_queued_as_the_tokens()
     {
         var (status, body) = await CallAsync("deploy_app", new { app = "orb" }, Operator);
@@ -343,6 +369,7 @@ internal sealed class AgentsRig : IDisposable
         s.AddSingleton(monitor);
         s.AddSingleton(new StatusPage(rig.Db, store, monitor, uptimeSettings));
         s.AddSingleton(notifications);
+        s.AddSingleton(Attention);
         s.AddSingleton(new ComposeApps(rig.Db, rig.Apps, rig.Actions, rig.Protector, rig.Cli, rig.Health, rig.Stats, rig.Options, NullLogger<ComposeApps>.Instance));
         s.AddSingleton(new DeployHooks(rig.Db, rig.Protector, rig.Catalog, Audit));
         s.AddSingleton(new DatabaseServers(rig.Cli, rig.Settings, rig.Options, NullLogger<DatabaseServers>.Instance));
@@ -363,6 +390,8 @@ internal sealed class AgentsRig : IDisposable
 
     public AppsRig Rig { get; } = new();
     public AuditLog Audit { get; } = new();
+    /// <summary>What the dashboard's banners say, which get_health tells too.</summary>
+    public AttentionBoard Attention { get; } = new();
     public ServiceProvider Services { get; }
 
     public void Dispose()

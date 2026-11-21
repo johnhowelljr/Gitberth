@@ -520,7 +520,7 @@ public sealed partial class DeployPipeline
 
     private async Task GatedAsync(DeployLog log, Func<Task> build, CancellationToken ct)
     {
-        if (_buildGate.CurrentCount == 0) log.Step("Waiting for another build to finish…");
+        if (_buildGate.CurrentCount == 0) log.Step(WaitLine);
         await _buildGate.WaitAsync(ct);
         try
         {
@@ -912,25 +912,30 @@ public sealed partial class DeployPipeline
 
     /// <summary>
     /// Keeps the releases (and the images Gitberth built for them) of the last <see cref="ComposeReleases.Kept"/> successful
-    /// deploys and the one that runs, for rollback; the rest go. The kept data folder always stays.
+    /// deploys and the one that runs, for rollback, and the files of a deploy still under way; the rest go. The kept data
+    /// folder always stays. Returns the tags it removed.
     /// </summary>
-    internal async Task PruneComposeAsync(GitberthDb db, AppDefinition app, int running)
+    internal async Task<List<string>> PruneComposeAsync(GitberthDb db, AppDefinition app, int running)
     {
+        var removed = new List<string>();
         try
         {
             var history = await db.Deployments.AsNoTracking().Where(d => d.AppId == app.Id).Select(d => new { d.Id, d.Status, d.Images }).ToListAsync();
             var keep = ComposeReleases.ToKeep(history.Select(d => (d.Id, d.Status)), running);
+            // A deploy queued or running meanwhile keeps its release and its files: the disk cleanup prunes while others deploy.
+            keep.UnionWith(history.Where(d => d.Status is DeployStatus.Queued or DeployStatus.Cloning or DeployStatus.Building or DeployStatus.Starting).Select(d => d.Id));
             ComposeReleases.For(options, app.Slug).Prune(keep);
             // The kept deploys' built images and the pins of the images they pulled stay; any other tag of the app's own goes.
             var kept = history.Where(d => keep.Contains(d.Id)).Select(d => ComposeImages.Parse(d.Images)).ToList();
             var images = kept.SelectMany(i => i.Refs.Values.Concat(i.PinTags(app.Slug))).ToHashSet(StringComparer.Ordinal);
             foreach (var tag in await docker.ListImageTagsUnderAsync($"gitberth/{app.Slug}/"))
-                if (!images.Contains(tag)) await docker.RemoveImageAsync(tag);
+                if (!images.Contains(tag) && (await docker.RemoveImageAsync(tag)).Ok) removed.Add(tag);
             await docker.PruneDanglingImagesAsync(app.Slug);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Release cleanup failed for {App}", app.Slug);
         }
+        return removed;
     }
 }

@@ -156,10 +156,16 @@ public sealed partial class ContainerService(
     /// (60 s for a database that doesn't say). Null when it worked, else what went wrong.
     /// </summary>
     /// <param name="database">It's a database Gitberth recognizes, whose old copy mustn't start next to it.</param>
-    internal async Task<string?> RunContainerAsync(string name, bool database, ContainerAction action, CancellationToken ct = default)
+    /// <param name="unless">
+    /// Asked under the lock before anything is done: why not after all (the keep-running check's start of an app that was
+    /// stopped or removed meanwhile), or null to go on.
+    /// </param>
+    internal async Task<string?> RunContainerAsync(string name, bool database, ContainerAction action, CancellationToken ct = default,
+        Func<CancellationToken, Task<string?>>? unless = null)
     {
         using var held = await _locks.TryAcquireAsync(name);
         if (held is null) return $"Gitberth is already changing {name}. Try again when that's done.";
+        if (unless is not null && await unless(ct) is { } after) return after;
         if (changer is not null && await (action is ContainerAction.Start or ContainerAction.Restart
                 ? changer.Value.WhyNotStartAsync(name, ct)
                 : changer.Value.BusyWithAsync(name, ct)) is { } why)

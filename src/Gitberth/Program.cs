@@ -2,14 +2,17 @@ using Gitberth;
 using Gitberth.Agents;
 using Gitberth.Apps;
 using Gitberth.Components;
+using Gitberth.Credentials;
 using Gitberth.Data;
 using Gitberth.Deploy;
 using Gitberth.Detection;
+using Gitberth.Disk;
 using Gitberth.Docker;
 using Gitberth.Domains;
 using Gitberth.Git;
 using Gitberth.Health;
 using Gitberth.Images;
+using Gitberth.Keeper;
 using Gitberth.Network;
 using Gitberth.Notifications;
 using Gitberth.Security;
@@ -230,7 +233,9 @@ builder.Services.AddSingleton<Gitberth.Uptime.UptimeSettings>();
 builder.Services.AddSingleton<Gitberth.Public.StatusPage>();
 builder.Services.AddSingleton<Gitberth.Public.PublicPages>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Gitberth.Uptime.UptimeMonitor>());
-builder.Services.AddHostedService<StartupTasks>();
+// One instance, as a service too: the keep-running check (AddAppKeeper) waits for StartupTasks' own recovery to be done.
+builder.Services.AddSingleton<StartupTasks>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<StartupTasks>());
 // Before the event watcher, so they hear its first starts.
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DownWatcher>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NetworkKeeper>());
@@ -256,6 +261,13 @@ builder.Services.AddGitberthAgents();
 // ---- Help (1.4): the docs, built in (/help), and the tips on the UI's labels, both read from the assembly once.
 builder.Services.AddSingleton(_ => Gitberth.Help.HelpDocs.Bundled);
 builder.Services.AddSingleton(_ => Gitberth.Help.TipCatalog.Bundled);
+// ---- Stability: what needs someone's attention (the dashboard's banners, the top bar's pill, get_health), then each job
+// that keeps items there, registered by its own folder: apps that should run brought back (Keeper), Docker's disk kept
+// from filling up (Disk), and the tokens Gitberth uses watched before they expire (Credentials).
+builder.Services.AddSingleton<AttentionBoard>();
+builder.Services.AddAppKeeper();
+builder.Services.AddDiskCare();
+builder.Services.AddCredentialWatch();
 
 var app = builder.Build();
 

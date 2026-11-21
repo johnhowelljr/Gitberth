@@ -343,6 +343,37 @@ app.banner.settling:
     A change of this app is still under way, and it can't start until that's over. The page follows by itself.
   more: guides/manage-apps#banners
 
+# The keep-running check's banners (Components/Apps/KeeperBanner.razor); the dashboard's banner of an app Gitberth gave
+# up on uses app.banner.keeper-gave-up too.
+
+app.banner.keeper-soon:
+  title: Gitberth brings it back in a moment
+  text: >-
+    The app is meant to run but stopped by itself, and Docker won't start it again, so Gitberth will: up to 4 times in a
+    row, at once and then 1, 5 and 15 minutes after the try before. **Start now** doesn't wait.
+  more: guides/health-and-monitoring#when-an-app-stops-by-itself
+
+app.banner.keeper-gave-up:
+  title: Gitberth stopped bringing it back
+  text: >-
+    It kept stopping after Gitberth started it again 4 times, so something in it needs fixing: its **Logs** tab says
+    what. Gitberth still tries every 6 hours. **Start** it once it's fixed, and its tries count from the first again.
+  more: guides/health-and-monitoring#when-it-keeps-stopping
+
+app.banner.keeper-left:
+  title: It stopped without a crash
+  text: >-
+    Someone stopped it outside Gitberth (with `docker stop`, say), its program ended by itself with exit code 0, or
+    someone cancelled the deploy that was to bring it back, so Gitberth leaves it as it is rather than fight that.
+    **Start** starts it.
+  more: guides/health-and-monitoring#what-it-leaves-alone
+
+app.banner.keeper-off:
+  title: Gitberth doesn't bring apps back by itself
+  text: >-
+    **Keep apps running** is off in Settings, so an app that stops by itself stays stopped until you start it.
+  more: reference/gitberth-settings#keep-apps-running
+
 app.change.keep-new:
   title: Keep the new one
   text: >-
@@ -1345,13 +1376,15 @@ app.settings.restart-policy:
 app.settings.restart.no:
   title: Never
   text: >-
-    It stays down after a crash or a host reboot until you start it.
-  more: reference/app-settings#restart
+    Docker doesn't start it again after a crash or a host reboot. Gitberth does, up to 4 times, while Keep apps running is
+    on in Settings; once you stop it, it stays down.
+  more: guides/health-and-monitoring#when-an-app-stops-by-itself
 
 app.settings.restart.on-failure:
   title: On failure
   text: >-
-    It comes back after a crash, but not after a host reboot or when you stop it.
+    It comes back after a crash, but not after a host reboot or when you stop it. When it crashes and this doesn't
+    start it again, Gitberth does, up to 4 times.
   more: reference/app-settings#restart
 
 app.settings.restart.unless-stopped:

@@ -9,7 +9,8 @@ This page covers the list, the app page, and what each action does.
 
 Click **Apps** in the sidebar. The strip at the top shows how many apps are running, the host's CPU, the memory the apps
 use, and the disk. If any app is in trouble (crashed, unhealthy, or missing its container), a box says so; click
-**Show them** to list only those.
+**Show them** to list only those. When Docker's disk is getting low the strip says so, and the dashboard has a banner
+that leads to **Settings › Disk**.
 
 ![The Apps list with apps from GitHub, registries and by hand](../images/apps-list.webp)
 
@@ -172,7 +173,17 @@ A banner under the header says when something needs you:
   **Forget…** drops the record. For a Git app, the banner says what **Start** will do: make the container again from its
   last image, without a build, or, when that image isn't on the host any more, build the branch again and deploy it. A
   container started outside Gitberth that was removed can only be forgotten here: start it again the way it was started.
+  A sentence after it says whether Gitberth makes the container again by itself, and when.
 - **Renamed outside Gitberth**: its container runs under another name now. Open that one, or forget this record.
+- When an app that's meant to run is down (see
+  [When an app stops by itself](health-and-monitoring.md#when-an-app-stops-by-itself)):
+  - **Gitberth brings it back in a moment**: it crashed, or stopped when Docker or the host restarted, and Gitberth
+    starts it again shortly, with which try it is. **Start now** doesn't wait.
+  - **Gitberth stopped bringing it back**: it kept stopping after 4 tries. **Logs** shows why; **Start** it once it's
+    fixed. The dashboard shows it too, and the top bar on every page.
+  - **It stopped without a crash**: it was stopped from outside Gitberth, or its program ended by itself, so Gitberth
+    leaves it stopped. **Start** starts it.
+  - **Gitberth doesn't bring apps back by itself**: **Keep apps running** is off in Settings.
 
 ## Start, stop and restart
 

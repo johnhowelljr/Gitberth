@@ -338,12 +338,15 @@ class Cloudflare:
         """Cloudflare's API as the stand-in answers it: rest("GET", "zones?name=example.com", token)."""
         return rest("https://api.cloudflare.com/client/v4/", verb, path.lstrip("/"), token, body)
 
-    def token(self, permissions=None, kind="user"):
+    def token(self, permissions=None, kind="user", expires_on=None):
         """An API token Cloudflare accepts, with these permission groups (Cloudflare.ALL by default; see AS_SETTINGS_ASKS
-        for the one a user makes from Settings). Returns the token."""
+        for the one a user makes from Settings), and an end date when expires_on (ISO 8601 UTC, "2026-12-01T00:00:00Z")
+        says one: verify says it, and Cloudflare refuses the token from then on. Returns the token."""
         body = {"kind": kind}
         if permissions is not None:
             body["permissions"] = list(permissions)
+        if expires_on is not None:
+            body["expires_on"] = expires_on
         return self.s.api("POST", "/cloudflare/tokens", body)["token"]
 
     def settings_token(self):
@@ -381,6 +384,8 @@ class Cloudflare:
                                                                           "client_ip": client_ip, "signed_in_as": signed_in_as}.items() if v is not None})
 
     def change_token(self, token, **changes):
+        """status="disabled" (or "active"), expires_on="2026-12-01T00:00:00Z" (None for no end date), permissions=[...],
+        kind="account": the token as someone changed it in Cloudflare's dashboard."""
         return self.s.api("PATCH", f"/cloudflare/tokens/{token}", changes)
 
     def zone(self, name, status="active", total_tls=False):

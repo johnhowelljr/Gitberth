@@ -8,6 +8,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Gitberth.Images;
 
+/// <summary>A saved sign-in as the token watch knows it: its registry, its user name, and a stamp of its stored secret (never the secret).</summary>
+internal sealed record RegistryStamp(string Host, string Username, string Stamp);
+
 /// <summary>
 /// Sign-ins for registries, for pulls and update checks: one per registry host, verified with Docker (POST /auth) before
 /// it's saved, the secret stored encrypted (<see cref="SecretProtector"/>) and never handed back. Docker gets it per call
@@ -118,6 +121,52 @@ public sealed partial class RegistryService
         if (row is not null)
             _audit?.Record(new Audit.AuditEntry("settings.registry.removed", $"Removed the sign-in for {NameOf(row.Host)} ({row.Username}).") { Target = NameOf(row.Host) });
     }
+
+    /// <summary>
+    /// Each saved sign-in whose secret can be read (the ones pulls and update checks send), with a stamp of its stored
+    /// secret, for the token watch: a hash of the encrypted text, so it changes with every save and says nothing of the
+    /// secret.
+    /// </summary>
+    internal async Task<IReadOnlyList<RegistryStamp>> StampsAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.Registries.AsNoTracking().ToListAsync(ct);
+        return rows.Where(r => _protector.TryUnprotect(r.ProtectedSecret).Length > 0)
+            .OrderBy(r => r.Host, StringComparer.Ordinal)
+            .Select(r => new RegistryStamp(r.Host, r.Username, Credentials.CredentialSignals.Stamp(r.ProtectedSecret)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Signs in again with the host's saved sign-in (POST /auth, as saving it did), to confirm a refusal an update check met:
+    /// true when the registry took it, false when it refused it, null when it couldn't be asked (Docker or the registry out
+    /// of reach) or there's no sign-in it can send.
+    /// </summary>
+    internal async Task<bool?> ConfirmAsync(string host, CancellationToken ct = default)
+    {
+        RegistryCredential? row;
+        await using (var db = await _dbFactory.CreateDbContextAsync(ct))
+            row = await db.Registries.AsNoTracking().FirstOrDefaultAsync(r => r.Host == host, ct);
+        if (row is null || _protector.TryUnprotect(row.ProtectedSecret) is not { Length: > 0 } secret) return null;
+        try
+        {
+            await _engine.AuthAsync(new JsonObject { ["username"] = row.Username, ["password"] = secret, ["serveraddress"] = ServerAddress(host) }, ct);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return SignInRefused(ex) ? false : null;
+        }
+    }
+
+    /// <summary>
+    /// Whether Docker's /auth failed because the registry turned the sign-in away (401: "unauthorized: incorrect username
+    /// or password"), rather than because Docker or the registry couldn't be reached.
+    /// </summary>
+    internal static bool SignInRefused(Exception ex) =>
+        ex is DockerApiException { Status: 401 }
+        || ex.Message.Contains("unauthorized", StringComparison.OrdinalIgnoreCase)
+        || ex.Message.Contains("incorrect username or password", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>X-Registry-Auth for the reference (base64url JSON), or null for none.</summary>
     /// <param name="registryId">

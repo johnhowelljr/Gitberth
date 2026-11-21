@@ -224,6 +224,9 @@ public sealed partial class PortChanger
             steps.Done(StepKind.Ports);
         }
         ct.ThrowIfCancellationRequested();
+        // Still wanted, asked under the lock right before anything is made: an app stopped, deleted or forgotten while this
+        // create waited gets no container.
+        if (request.Wanted is { } wanted && await wanted(ct) is { } unwanted) return Nothing($"Nothing was created: {unwanted}");
 
         // 2. Created, not started. From here on nothing is cancelled: what's made is either kept or removed.
         var since = _time.GetUtcNow().UtcDateTime;

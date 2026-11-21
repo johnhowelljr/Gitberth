@@ -13,8 +13,12 @@ at that repo at once instead of at its next check (the rig's watcher looks every
   it, never behind Access, and the host gets its DNS record. The keeper adds Gitberth's webhook to each deployed repo (the payload
   URL, the secret Settings shows, push, pull_request and delete) and records it; GitHub's ping for it is answered. The
   page shows the payload URL, content type, secret (Show, Hide, copy) and events, and each repo's webhook.
-- A signed push deploys at once, with the trigger "Push on GitHub" (on its deploy page, Activity and the app page):
-  measured from the delivery to the deploy's start, against the look before it and the 10-second poll.
+- A webhook whose POST's answer is lost (GitHub made it, but Gitberth's client gave up first) is found by its payload
+  URL at the keeper's quick retry, 15 seconds later, and recorded as added: never a second one.
+- A signed push deploys at once, with the trigger "Push on GitHub" (on its deploy page, Activity and the app page): the
+  watcher looked because of the delivery, and the deploy started before the next poll was due. The scenarios that say
+  "at once" set the watcher to look once a minute meanwhile, so no load on the server makes a poll beat the delivery;
+  the seconds each took are reported, never asserted.
 - A pull request delivery makes its preview at once, and a delete delivery removes a branch's preview at once; a push
   to a branch makes its preview at once too.
 - The host only ever answers with a status code: ping 200; 204 for another event or for a repo Gitberth doesn't deploy
@@ -63,6 +67,12 @@ TURNED_ON = "GitHub's webhooks reach Gitberth at {} now."
 TURNED_OFF = "Instant deploys are off."
 # A route of another service's, as someone made it in Cloudflare's dashboard: nothing listens there, so it answers 502 at once.
 THEIR_SERVICE = "http://localhost:9"
+# The watcher's interval while a scenario checks that something happened at once: a minute, rather than the rig's 10
+# seconds. "Before the next poll" is then a window no load on the server closes, while a change that waits for a poll
+# still waits most of a minute, so a broken instant path can't pass.
+SLOW_POLL = 60
+# Gitberth's GitHub client gives up after 15 seconds; a POST the stand-in answers later has its answer lost.
+LOST_ANSWER_MS = 16_000
 
 
 # ---- small things ----
@@ -172,9 +182,9 @@ def kept_hooks(gitberth):
     return {k: (v["Id"], v["Url"]) for k, v in json.loads(raw).items()} if raw else {}
 
 
-def wait_kept(gitberth, expected, timeout=30):
+def wait_kept(gitberth, expected, timeout=30, seen=None):
     until(lambda: kept_hooks(gitberth) == expected, timeout, f"Gitberth to record {expected} as its webhooks",
-          seen=lambda: kept_hooks(gitberth))
+          seen=seen or (lambda: kept_hooks(gitberth)))
 
 
 def delivery_through(repo, since, hook_id, event):
@@ -190,30 +200,59 @@ def reached_gitberth(record, host):
     return bool(record.get("via_tunnel")) and cf.get("rule_host") == host and cf.get("rule_path") == PATH_RULE and cf.get("service") == OWN_SERVICE
 
 
-def look_at(repo, standins, timeout=60):
-    """Waits for the watcher's next look at the repo (its ls-remote), and returns that call: from then on the next poll
-    is a whole interval away."""
-    return repo.wait_watcher_passes(1, since=standins.seq(), timeout=timeout)
+def quiet_look(repo, since, quiet=3):
+    """The watcher's first look at the repo (its ls-remote) after the marker, or the one after it when another follows
+    within `quiet` seconds: a pass under way when the interval was saved looks once more right after. From the look this
+    returns, the next poll is a whole interval away. A GitHub repo or a GitLab project (its path for a name)."""
+    name = getattr(repo, "full_name", None) or repo.path
+    looked = repo.wait_watcher_passes(1, since=since, timeout=SLOW_POLL + 30)
+    for _ in range(5):
+        try:
+            stays(lambda: not repo.ls_remote_attempts(looked["seq"]), quiet, f"the watcher to stay away from {name}")
+            return looked
+        except AssertionError:
+            looked = repo.ls_remote_attempts(looked["seq"])[-1]
+    raise AssertionError(f"the watcher kept looking at {name}, though it was set to look every {SLOW_POLL} seconds")
 
 
-def first_look_after(repo, seq, timeout=20):
+@pytest.fixture
+def slow_polls(gitberth, new_page, baseline):
+    """The watcher looking once a minute during the scenario, and every 10 seconds again after it, whatever happened.
+    slow_polls(repo, standins) saves the minute (which makes the watcher look at once) and returns its look at the repo:
+    from then on the next poll is a minute away."""
+    page = new_page()
+    saved = []
+
+    def look(repo, standins):
+        mark = standins.seq()
+        gitberth.save_watch_interval(page, SLOW_POLL)
+        saved.append(SLOW_POLL)
+        return quiet_look(repo, mark)
+
+    yield look
+    if saved:
+        gitberth.save_watch_interval(page, baseline["watch_seconds"])
+
+
+def first_look_after(repo, seq, timeout=SLOW_POLL):
     return until(lambda: (repo.ls_remote_attempts(seq) or [None])[0], timeout, f"the watcher's next look at {repo.full_name}")
 
 
-def at_once(request, repo, looked, record, at, interval, what):
-    """Checks `at` (when something happened) came right after the delivery, well before the poll after the look before
-    it could have; and that the watcher looked at the repo right after the delivery, and not between that look and the
-    delivery. Reports the timings, and returns them said."""
+def at_once(request, repo, looked, record, at, what, interval=SLOW_POLL):
+    """Checks what made `at` (when something happened) come: the watcher looked at the repo after the delivery and before
+    the poll after the look before it was due, and not between that look and the delivery, and `at` came before that poll
+    was due too. So the delivery made it happen, never a poll. The seconds each took are reported, never asserted: a busy
+    server stretches them, and the poll a minute away leaves room for that. Returns the timings, said."""
     delivered = record["at"]
-    first = first_look_after(repo, record["seq"])
+    due = looked["at"] + interval
+    first = first_look_after(repo, record["seq"], timeout=interval + 15)
     between = [c for c in repo.ls_remote_attempts(looked["seq"]) if c["seq"] < record["seq"]]
     timing = (f"the delivery came {delivered - looked['at']:.2f}s after the watcher's look; it looked again {first['at'] - delivered:.2f}s "
-              f"after the delivery; {what} {at - delivered:.2f}s after it; the next poll was due {looked['at'] + interval - delivered:.2f}s after it")
+              f"after the delivery; {what} {at - delivered:.2f}s after it; the next poll was due {due - delivered:.2f}s after it")
     report(request, timing)
     assert not between, f"the watcher looked at {repo.full_name} between the push and its delivery, so a poll may have found it: {between}"
-    assert first["at"] - delivered < 2, f"the watcher didn't look at the repo as the delivery came: {timing}"
-    assert at - delivered < 3, f"not at once: {timing}"
-    assert at < looked["at"] + interval, f"no sooner than the next poll would have: {timing}"
+    assert first["at"] < due, f"the watcher didn't look at the repo before the poll was due, so the delivery didn't wake it: {timing}"
+    assert at < due, f"no sooner than the next poll would have: {timing}"
     return timing
 
 
@@ -399,6 +438,10 @@ def test_turning_on_routes_only_the_hook_path_and_adds_the_webhook_to_each_repo(
 
     with domains_turned_on(gitberth, new_page, cloudflare):
         mark = standins.seq()
+        # The second repo's webhook is made, but its answer comes after Gitberth's client gave up (16 s > its 15): the
+        # keeper's quick retry has to find it by its payload URL rather than add another. Both ways run in every pass.
+        lost = repos[1]
+        standins.fail(rf"^/repos/{re.escape(lost.full_name)}/hooks$", host="api.github.com", method="POST", delay_ms=LOST_ANSWER_MS, times=1)
         with instant_deploys(gitberth, new_page, host) as (settings, said):
             assert said == TURNED_ON.format(host), said
 
@@ -416,8 +459,11 @@ def test_turning_on_routes_only_the_hook_path_and_adds_the_webhook_to_each_repo(
             for note in (f"Routed https://{host}/hooks/github, /hooks/gitlab and /hooks/deploy/… to Gitberth, for GitHub's and GitLab's webhooks "
                          "and deploy hooks", f"Added a DNS record sending {host} to the tunnel"):
                 assert note in shown, shown
-            assert all(not (li.get_attribute("style") or "") for li in settings.locator(f"{SECTION} ul.gb-dnotes li").all()), \
-                "a line shows as a problem"
+            # What the change did is no problem (each repo's webhook line comes as the keeper gets to it, and the lost
+            # answer's says so until its retry: checked below).
+            lines = [(flat(li.inner_text()), li.get_attribute("style") or "") for li in settings.locator(f"{SECTION} ul.gb-dnotes li").all()]
+            assert not [text for text, style in lines if style and not any(text.startswith(f"{r.full_name}:") for r in repos)], \
+                f"a line shows as a problem: {lines}"
             section = settings.locator(SECTION)
             assert section.locator("#hook-host").input_value() == host
             assert section.get_by_role("button", name="Save", exact=True).is_disabled(), "Save works for the name already saved"
@@ -443,21 +489,30 @@ def test_turning_on_routes_only_the_hook_path_and_adds_the_webhook_to_each_repo(
             # ---- GitHub: Gitberth's webhook on each deployed repo, with the payload URL, Settings' secret and its three
             # events, made through the API with the saved token; the other service's stays as it was.
             hooks = {r.full_name: wait_hook(r, host) for r in repos}
+            # Gitberth records them, so they follow the host name when it changes: the second at the keeper's quick
+            # retry, 15 seconds after its client gave up.
+            wait_kept(gitberth, {r.full_name: (hooks[r.full_name]["id"], url) for r in repos}, timeout=90,
+                      seen=lambda: {"kept": kept_hooks(gitberth), "settings": notes(settings), "calls": {r.full_name: hook_calls(r, mark) for r in repos}})
             for r in repos:
                 hook = hooks[r.full_name]
                 assert (hook["name"], hook["active"], sorted(hook["events"])) == ("web", True, sorted(EVENTS)), hook
                 assert hook["config"] == {"url": url, "content_type": "json", "insecure_ssl": "0", "secret": secret}, hook["config"]
-                assert hook_calls(r, mark) == [("GET", "hooks", 200), ("POST", "hooks", 201)], r.api_calls(mark)
-                made_it = r.api_calls(mark, path=r"/hooks$", method="POST")[0]
-                assert made_it["body"] == {"name": "web", "active": True, "events": EVENTS,
-                                           "config": {"url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"}}, made_it["body"]
-                assert made_it["token"] == baseline["token"]
+                # Listed, then made: the lost answer's repo listed again, found its webhook by the payload URL and set it
+                # up (PATCH). Exactly one POST each, so never a second webhook.
+                expected = [("GET", "hooks", 200), ("POST", "hooks", 201)]
+                if r is lost:
+                    expected += [("GET", "hooks", 200), ("PATCH", f"hooks/{hook['id']}", 200)]
+                assert hook_calls(r, mark) == expected, r.api_calls(mark)
+                made_it = r.api_calls(mark, path=r"/hooks$", method="POST")
+                assert len(made_it) == 1, made_it
+                assert made_it[0]["body"] == {"name": "web", "active": True, "events": EVENTS,
+                                              "config": {"url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"}}, made_it[0]["body"]
+                assert made_it[0]["token"] == baseline["token"]
                 theirs = foreign[r.full_name]
                 assert unchanged(r, theirs), f"the other service's webhook changed: {theirs} -> {r.hooks()}"
                 assert not r.api_calls(scenario.seq, path=rf"/hooks/{theirs['id']}$"), "Gitberth called the other service's webhook"
                 assert len(r.hooks()) == 2, r.hooks()
-            # Gitberth records them, so they follow the host name when it changes.
-            wait_kept(gitberth, {r.full_name: (hooks[r.full_name]["id"], url) for r in repos})
+            # Both were added, the lost answer's too.
             for r in repos:
                 wait_hook_line(settings, r, "Webhook added")
 
@@ -525,7 +580,8 @@ def test_githubs_ping_for_a_webhook_gitberth_adds_is_answered(request, page, new
                 assert ping["response_body"] == "", ping
 
 
-def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github, cloudflare, standins, engine, apps, uniq, baseline):
+def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github, cloudflare, standins, engine, apps, uniq, baseline,
+                                       slow_polls):
     audited = last_id()
     zone = f"{uniq('ip')}.test"
     host = f"hooks.{zone}"
@@ -540,8 +596,8 @@ def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github
         hook = wait_hook(repo, host)
         cloudflare.wait_runs()
 
-        # Pushed right after a look at the repo, so the next poll is a whole interval away.
-        looked = look_at(repo, standins)
+        # Pushed right after a look at the repo, so the next poll is a whole interval (a minute) away.
+        looked = slow_polls(repo, standins)
         pushed = repo.commit({"marker.txt": "push v2"}, message="Pushed for an instant deploy")
         record = delivery_through(repo, looked["seq"], hook["id"], "push")
         assert (record["status"], record["response_body"], record["error"]) == (202, "", None), record
@@ -552,7 +608,7 @@ def test_a_signed_push_deploys_at_once(request, page, new_page, gitberth, github
         # "Push on GitHub" (Webhook): only the watcher's pass that took the delivery's poke starts one so, never a poll.
         assert (two["CommitSha"], two["Trigger"]) == (pushed["sha"], "Webhook"), two
         # Timed from the delivery to the deploy's start, against the look before the push and the poll that look made due.
-        at_once(request, repo, looked, record, epoch(two["StartedAt"]), baseline["watch_seconds"], "the deploy started")
+        at_once(request, repo, looked, record, epoch(two["StartedAt"]), "the deploy started")
         assert gitberth.wait_answers(lan, "/")["marker"] == "push v2"
 
     # ---- What the pages say: "Push on GitHub".
@@ -678,7 +734,7 @@ def test_bad_signatures_from_one_sender_are_throttled_but_its_signed_ones_get_th
 
 
 def test_changing_the_host_name_moves_gitberths_webhook_and_route(page, new_page, gitberth, github, cloudflare, standins, apps, uniq,
-                                                                  scenario):
+                                                                  scenario, slow_polls):
     zone = f"{uniq('wm')}.test"
     first, second, other = f"hooks.{zone}", f"gh.{zone}", f"ci.{zone}"
     cloudflare.zone(zone)
@@ -729,7 +785,7 @@ def test_changing_the_host_name_moves_gitberths_webhook_and_route(page, new_page
 
             # ---- A push goes to the new name and deploys at once; theirs still answer for their host.
             cloudflare.wait_runs()
-            looked = look_at(repo, standins)
+            looked = slow_polls(repo, standins)
             pushed = repo.commit({"marker.txt": "move v2"}, message="Pushed after the move")
             record = delivery_through(repo, looked["seq"], hook["id"], "push")
             assert (record["url"], record["status"]) == (payload_url(second), 202) and reached_gitberth(record, second), record
@@ -813,7 +869,7 @@ def test_turning_off_takes_the_route_away_and_leaves_the_webhooks(page, new_page
 
 
 def test_a_pull_request_delivery_makes_its_preview_at_once(request, page, new_page, gitberth, github, cloudflare, standins, apps, uniq,
-                                                           baseline):
+                                                           slow_polls):
     zone = f"{uniq('wp')}.test"
     host = f"hooks.{zone}"
     cloudflare.zone(zone)
@@ -831,23 +887,24 @@ def test_a_pull_request_delivery_makes_its_preview_at_once(request, page, new_pa
         hook = wait_hook(repo, host)
         cloudflare.wait_runs()
 
-        looked = look_at(repo, standins)
+        looked = slow_polls(repo, standins)
         number = repo.open_pull("feature", title="Preview me at once")["number"]
         record = delivery_through(repo, looked["seq"], hook["id"], "pull_request")
         assert (record["action"], record["status"], record["response_body"]) == ("opened", 202, ""), record
         assert reached_gitberth(record, host), record["route"]
-        preview = gitberth.wait_preview(app.id, pr=number, timeout=30)
+        preview = gitberth.wait_preview(app.id, pr=number, timeout=SLOW_POLL)
         assert preview["Slug"] == f"{app.slug}-pr-{number}", preview
-        at_once(request, repo, looked, record, epoch(preview["PreviewCreatedAt"]), baseline["watch_seconds"], "the preview was made")
-        listed = until(lambda: repo.api_calls(record["seq"], path=r"/pulls$", method="GET"), 20, "Gitberth to ask GitHub for the pull requests")[0]
-        assert listed["at"] - record["at"] < 2, f"the pull requests were asked for {listed['at'] - record['at']:.2f}s after the delivery"
+        at_once(request, repo, looked, record, epoch(preview["PreviewCreatedAt"]), "the preview was made")
+        due = looked["at"] + SLOW_POLL
+        listed = until(lambda: repo.api_calls(record["seq"], path=r"/pulls$", method="GET"), SLOW_POLL, "Gitberth to ask GitHub for the pull requests")[0]
+        report(request, f"the pull requests were asked for {listed['at'] - record['at']:.2f}s after the delivery")
+        assert listed["at"] < due, f"the pull requests were asked for only at the poll, {listed['at'] - record['at']:.2f}s after the delivery"
 
         deploy = gitberth.wait_deploy(preview["Id"], timeout=420)
         assert (deploy["CommitSha"], deploy["Trigger"]) == (sha, "Webhook"), deploy
         started = epoch(deploy["StartedAt"])
         report(request, f"the preview's deploy started {started - record['at']:.2f}s after the delivery")
-        assert started - record["at"] < 5 and started < looked["at"] + baseline["watch_seconds"], \
-            f"its deploy started {started - record['at']:.2f}s after the delivery, the poll was due {looked['at'] + baseline['watch_seconds'] - record['at']:.2f}s after it"
+        assert started < due, f"its deploy started {started - record['at']:.2f}s after the delivery, the poll was due {due - record['at']:.2f}s after it"
 
     gitberth.open(page, f"/apps/{preview['Id']}/deployments/{deploy['Id']}")
     meta = page.locator(".gb-hero-meta")
@@ -858,7 +915,7 @@ def test_a_pull_request_delivery_makes_its_preview_at_once(request, page, new_pa
 
 
 def test_a_delete_delivery_removes_the_branch_preview_at_once(request, page, new_page, gitberth, github, cloudflare, standins, engine, apps,
-                                                              uniq, baseline):
+                                                              uniq, slow_polls):
     zone = f"{uniq('wb')}.test"
     host = f"hooks.{zone}"
     cloudflare.zone(zone)
@@ -878,28 +935,28 @@ def test_a_delete_delivery_removes_the_branch_preview_at_once(request, page, new
         cloudflare.wait_runs()
 
         # ---- A push to the branch: its preview, at once.
-        looked = look_at(repo, standins)
+        looked = slow_polls(repo, standins)
         sha = repo.commit({"marker.txt": "doomed work"}, branch="doomed", message="Work on a branch that goes")["sha"]
         record = delivery_through(repo, looked["seq"], hook["id"], "push")
         assert (record["status"], record["payload"]["ref"]) == (202, "refs/heads/doomed"), record
-        preview = gitberth.wait_preview(app.id, branch="doomed", timeout=30)
-        at_once(request, repo, looked, record, epoch(preview["PreviewCreatedAt"]), baseline["watch_seconds"], "the preview was made")
+        preview = gitberth.wait_preview(app.id, branch="doomed", timeout=SLOW_POLL)
+        at_once(request, repo, looked, record, epoch(preview["PreviewCreatedAt"]), "the preview was made")
         deploy = gitberth.wait_deploy(preview["Id"], timeout=420)
         assert (deploy["CommitSha"], deploy["Trigger"]) == (sha, "Webhook"), deploy
         container = f"gb-{preview['Slug']}"
         assert engine.running(container)
 
         # ---- The branch deleted: the preview goes, at once. GitHub sends delete, and a push saying the branch is gone.
-        looked = look_at(repo, standins)
+        looked = slow_polls(repo, standins)
         sent = repo.delete_branch("doomed")["deliveries"]
         assert sorted((d["event"], d["status"]) for d in sent if d["hook_id"] == hook["id"]) == [("delete", 202), ("push", 202)], sent
         record = delivery_through(repo, looked["seq"], hook["id"], "delete")
         assert (record["payload"]["ref"], record["payload"]["ref_type"]) == ("doomed", "branch") and reached_gitberth(record, host), record
-        gone = until(lambda: time.time() if not engine.exists(container) else None, 30, f"the preview's container {container} to go",
+        gone = until(lambda: time.time() if not engine.exists(container) else None, SLOW_POLL, f"the preview's container {container} to go",
                      interval=0.2, seen=lambda: (engine.inspect(container) or {}).get("State"))
         # Timed from the first of the two to reach Gitberth: either wakes the watcher.
         earliest = min(record, delivery_through(repo, looked["seq"], hook["id"], "push"), key=lambda d: d["seq"])
-        at_once(request, repo, looked, earliest, gone, baseline["watch_seconds"], "its container was gone")
+        at_once(request, repo, looked, earliest, gone, "its container was gone")
         gitberth.wait_no_preview(app.id, branch="doomed", timeout=30)
         entry = until(lambda: next((a for a in gitberth.db.activity(app.id) if a["Text"].startswith("Preview doomed removed")), None), 30,
                       "the parent's Activity to say the preview went", seen=lambda: [a["Text"] for a in gitberth.db.activity(app.id)][-5:])
@@ -907,7 +964,7 @@ def test_a_delete_delivery_removes_the_branch_preview_at_once(request, page, new
 
 
 def test_a_webhook_on_an_earlier_host_name_that_gitberth_never_recorded_is_left_alone(page, new_page, gitberth, github, cloudflare, standins,
-                                                                                    apps, uniq, baseline):
+                                                                                    apps, uniq, baseline, slow_polls):
     zone = f"{uniq('we')}.test"
     first, second = f"hooks.{zone}", f"gh.{zone}"
     cloudflare.zone(zone)
@@ -954,7 +1011,7 @@ def test_a_webhook_on_an_earlier_host_name_that_gitberth_never_recorded_is_left_
             # A push: the other Gitberth's webhook goes to the old name (which leads nowhere here now); Gitberth's own
             # reaches it, and it deploys at once.
             cloudflare.wait_runs()
-            looked = look_at(one, standins)
+            looked = slow_polls(one, standins)
             pushed = one.commit({"marker.txt": "earlier a, again"}, message="Pushed past another Gitberth's webhook")
             mine = delivery_through(one, looked["seq"], ours[one.full_name]["id"], "push")
             assert mine["status"] == 202 and reached_gitberth(mine, second), mine
@@ -1043,7 +1100,7 @@ def paste_hook(repo, url, secret, events, content_type):
 
 
 def test_a_webhook_added_by_hand_is_taken_up_and_recorded(request, page, new_page, gitberth, github, cloudflare, standins, apps, uniq,
-                                                          baseline):
+                                                          baseline, slow_polls):
     """Someone added Gitberth's webhook by hand, with only Pushes ticked and GitHub's own default content type (form data).
     When the keeper next looks (here: the token saved again in Settings › GitHub access) it takes that webhook up rather
     than add a second: Gitberth's values set on it, and its ID recorded. Its pushes then deploy at once."""
@@ -1075,17 +1132,17 @@ def test_a_webhook_added_by_hand_is_taken_up_and_recorded(request, page, new_pag
 
         # Its pushes come as JSON now, and deploy at once.
         cloudflare.wait_runs()
-        looked = look_at(repo, standins)
+        looked = slow_polls(repo, standins)
         pushed = repo.commit({"marker.txt": "by hand v2"}, message="Pushed through the webhook taken up")
         record = delivery_through(repo, looked["seq"], pasted["id"], "push")
         assert (record["headers"]["Content-Type"], record["status"]) == ("application/json", 202) and reached_gitberth(record, host), record
         two = gitberth.wait_deploy(app.id, after=one["Id"], timeout=300)
         assert (two["CommitSha"], two["Trigger"]) == (pushed["sha"], "Webhook"), two
-        at_once(request, repo, looked, record, epoch(two["StartedAt"]), baseline["watch_seconds"], "the deploy started")
+        at_once(request, repo, looked, record, epoch(two["StartedAt"]), "the deploy started")
 
 
 def test_a_push_through_a_webhook_added_by_hand_as_form_data_deploys_at_once(request, page, new_page, gitberth, github, cloudflare, standins,
-                                                                             apps, uniq, baseline):
+                                                                             apps, uniq, slow_polls):
     """Gitberth's webhook added by hand on GitHub from what Settings shows, but with GitHub's own default content type:
     form data, the JSON in a payload= field, signed as it's sent. A push through it is a signed push to a repo Gitberth
     deploys, so it deploys at once (202), as one sent as JSON does, rather than being taken (204) and left to the poll."""
@@ -1104,7 +1161,7 @@ def test_a_push_through_a_webhook_added_by_hand_as_form_data_deploys_at_once(req
         pasted = paste_hook(repo, url, secret, EVENTS, "form")
         cloudflare.wait_runs()
 
-        looked = look_at(repo, standins)
+        looked = slow_polls(repo, standins)
         pushed = repo.commit({"marker.txt": "form v2"}, message="Pushed through a webhook sending form data")
         record = delivery_through(repo, looked["seq"], pasted["id"], "push")
         assert record["headers"]["Content-Type"] == "application/x-www-form-urlencoded" and reached_gitberth(record, host), record
@@ -1113,16 +1170,16 @@ def test_a_push_through_a_webhook_added_by_hand_as_form_data_deploys_at_once(req
         assert two["CommitSha"] == pushed["sha"], two
         what = (f"Gitberth answered the signed push {record['status']}, and '{two['Trigger']}' started its deploy "
                 f"{epoch(two['StartedAt']) - record['at']:.1f}s after the delivery (the poll after the push was due "
-                f"{looked['at'] + baseline['watch_seconds'] - record['at']:.1f}s after it)")
+                f"{looked['at'] + SLOW_POLL - record['at']:.1f}s after it)")
         report(request, what)
         assert (record["status"], two["Trigger"]) == (202, "Webhook"), what
-        at_once(request, repo, looked, record, epoch(two["StartedAt"]), baseline["watch_seconds"], "the deploy started")
+        at_once(request, repo, looked, record, epoch(two["StartedAt"]), "the deploy started")
         assert [h["id"] for h in repo.hooks()] == [pasted["id"]], repo.hooks()
 
 
 @pytest.mark.slow
 def test_a_repo_deployed_later_gets_the_webhook_at_the_keepers_own_next_look(request, page, new_page, gitberth, github, cloudflare, standins,
-                                                                             apps, uniq, baseline):
+                                                                             apps, uniq, slow_polls):
     """Nothing in Settings changes after the app is made: the keeper's own look, every 10 minutes, adds the webhook to a
     repo Gitberth starts deploying after instant deploys were turned on. This waits for it, up to 10 minutes."""
     zone = f"{uniq('wl')}.test"
@@ -1151,10 +1208,10 @@ def test_a_repo_deployed_later_gets_the_webhook_at_the_keepers_own_next_look(req
         assert ping["status"] == 200 and reached_gitberth(ping, host), ping
 
         # And a push deploys at once.
-        looked = look_at(repo, standins)
+        looked = slow_polls(repo, standins)
         pushed = repo.commit({"marker.txt": "later v2"}, message="Pushed once the keeper added the webhook")
         record = delivery_through(repo, looked["seq"], hook["id"], "push")
         assert record["status"] == 202, record
         two = gitberth.wait_deploy(app.id, after=one["Id"], timeout=300)
         assert (two["CommitSha"], two["Trigger"]) == (pushed["sha"], "Webhook"), two
-        at_once(request, repo, looked, record, epoch(two["StartedAt"]), baseline["watch_seconds"], "the deploy started")
+        at_once(request, repo, looked, record, epoch(two["StartedAt"]), "the deploy started")

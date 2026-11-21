@@ -406,7 +406,9 @@ public sealed partial class ZeroDowntimeTests : IAsyncLifetime
         {
             StableFor = TimeSpan.FromMilliseconds(40),
             StatePoll = TimeSpan.FromMilliseconds(5),
-            TunnelWait = TimeSpan.FromSeconds(5),
+            // A wait on the fake cloudflared's own confirmation (ConfirmAfter), which comes: long, so a busy machine's late
+            // one never breaks the timeline's order.
+            TunnelWait = Eventually.Limit,
             // Nothing listens in the in-memory docker.
             ListenWait = TimeSpan.Zero,
         };
@@ -701,17 +703,12 @@ public sealed partial class ZeroDowntimeTests : IAsyncLifetime
         Assert.NotNull(await _domains.SetMainAsync(_appId, "elsewhere.example.com"));
     }
 
-    private async Task<Deployment> FinishedAsync(int deploymentId)
+    private Task<Deployment> FinishedAsync(int deploymentId) => Eventually.UntilAsync(async () =>
     {
-        for (var i = 0; i < 400; i++)
-        {
-            await using var db = _db.CreateDbContext();
-            var dep = await db.Deployments.AsNoTracking().SingleAsync(d => d.Id == deploymentId);
-            if (!dep.IsActive) return dep;
-            await Task.Delay(25);
-        }
-        throw new TimeoutException($"Deploy {deploymentId} didn't finish.");
-    }
+        await using var db = _db.CreateDbContext();
+        var dep = await db.Deployments.AsNoTracking().SingleAsync(d => d.Id == deploymentId);
+        return dep.IsActive ? null : dep;
+    }, $"deploy {deploymentId} to finish");
 
     [Fact]
     public async Task A_scheduled_restart_recreates_the_app_without_downtime_once_it_has_been_up_long_enough()
@@ -1392,13 +1389,11 @@ public sealed partial class ZeroDowntimeTests : IAsyncLifetime
     /// <summary>Waits until the deploy's new version runs next to the old one, then until no deploy is queued or running.</summary>
     private async Task WhileTheNewVersionRunsAsync(Func<Task> click)
     {
-        var until = DateTime.UtcNow.AddSeconds(20);
-        while (!HasContainer("gb-web_next") && DateTime.UtcNow < until) await Task.Delay(5);
-        Assert.True(HasContainer("gb-web_next"));
+        // gb-web_next runs from its start until cloudflared has run the route back to gb-web: two of the fake's
+        // confirmations (300 ms each), far longer than a look takes.
+        await Eventually.UntilAsync(() => HasContainer("gb-web_next"), "the new version to run next to the old one");
         await click();
-        until = DateTime.UtcNow.AddSeconds(30);
-        while (AnyDeployActive() && DateTime.UtcNow < until) await Task.Delay(20);
-        Assert.False(AnyDeployActive());
+        await Eventually.UntilAsync(() => !AnyDeployActive(), "every deploy to end");
     }
 
     // S1: a new version goes out through the queue (a rollback to gitberth/web:2 stands in for a build's swap), and while it

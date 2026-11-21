@@ -50,7 +50,7 @@ Besides answering the UI, Gitberth runs these in its own process:
 | Webhook keeper | Adds Gitberth's webhook to each GitHub repo and GitLab project it deploys while instant deploys are on, and moves it when the host name changes. |
 | Uptime monitor | Checks every app from outside every minute by default, keeps the history in `uptime.db`, and says when an app goes down and comes back. |
 | Down watcher | Sends a domain to the down page while its app can't be served, and back to the app once it runs. |
-| Notifier | Sends [notifications](../guides/notifications.md) of failed deploys, crashes, failing health checks, apps going down and certificates about to expire. |
+| Notifier | Sends [notifications](../guides/notifications.md) of failed deploys, crashes, failing health checks, apps going down or brought back, certificates and tokens about to expire, and Docker's disk getting full. |
 | Audit log | Writes every entry to `audit.db` in order, records Docker changes made outside Gitberth, and removes entries older than you keep, once a day. |
 | Deploy queue | Runs one deploy at a time per app; a newer request replaces one that's still waiting. One image build runs at a time across all apps. |
 | Update watcher | Checks images for a newer digest, every 6 hours by default (apps set to **When I ask** are left out), and runs automatic updates in their window. |
@@ -61,6 +61,9 @@ Besides answering the UI, Gitberth runs these in its own process:
 | App sync | Notices when a container is recreated outside Gitberth, and reads its settings again. |
 | Job and restart schedulers | Run Git apps' scheduled jobs from `vercel.json`, and scheduled restarts of any container. |
 | Startup tasks | After a restart: mark interrupted deploys as failed, finish or undo container changes that were cut short, start apps whose containers are missing, and remove leftover temporary containers. |
+| Keep-running check | Every 30 seconds starts again an app that's meant to run but crashed with no restart policy left, stopped when Docker restarted, or lost its container: up to 4 times in a row, then it says so and tries again only every 6 hours. Leaves alone an app someone stopped. |
+| Disk cleanup | Once a day removes build cache no build used for a week (and more when the disk is low), untagged images of old builds and leftover images of deleted apps, and says when Docker's disk is getting full. |
+| Token checks | Every 6 hours checks the GitHub, GitLab and Cloudflare tokens with their services, and any of them or a registry sign-in at once when its service refuses it; says 3 weeks, a week and a day before one of those tokens expires (a week and a day before an API token in use does), once it has, and when one is refused. |
 
 ## How an app is reached
 

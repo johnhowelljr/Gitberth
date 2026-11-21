@@ -1,0 +1,230 @@
+@using Gitberth.Disk
+@inject DiskCleanup Cleanup
+@inject DiskSettings Choices
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@* Settings › Disk: Docker's disk, how full it is, what takes the room, and what Gitberth cleans up by itself (src/Gitberth/Disk). *@
+<section class="gb-card gb-sec" id="disk" aria-labelledby="disk-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Storage" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3"><span id="disk-t">Disk</span><Tip Key="settings.disk" /></div>
+            <p>Docker's disk: how full it is, what takes the room, and what Gitberth cleans up by itself.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        @if (report is null)
+        {
+            <p class="gb-help">@(readProblem is { } problem ? $"Settings › Disk couldn't be read: {problem.TrimEnd('.')}." : "Reading Docker's disk…")</p>
+        }
+        else
+        {
+            var d = report.Disk;
+            <div class="gb-stack" id="disk-free" style="gap:6px">
+                <div class="gb-row gb-row--wrap" style="justify-content:space-between;gap:6px 12px">
+                    <span class="gb-label" style="margin:0"><Tip Key="settings.disk.free">Free space</Tip></span>
+                    @if (d.Known)
+                    {
+                        <span class="gb-num" style="font-weight:600">
+                            @DiskText.FreeOf(d)
+                            @if (d.TooLow)
+                            {
+                                <span class="gb-tag gb-tag--critical">Almost full</span>
+                            }
+                            else if (d.Low)
+                            {
+                                <span class="gb-tag gb-tag--warn">Getting low</span>
+                            }
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="gb-t3">Docker's disk couldn't be read.</span>
+                    }
+                </div>
+                @if (d.Known)
+                {
+                    <Meter Fraction="@((double)(d.TotalBytes - d.FreeBytes) / d.TotalBytes)" Large="true" />
+                    <span class="gb-help" style="margin:0">@DiskText.Lines(d) It's measured on Gitberth's data folder, which is on Docker's disk.</span>
+                }
+            </div>
+
+            <BuildCacheRow @ref="cacheRow" KeepDays="report.KeepDays" />
+
+            @if (report.ImagesSize is { } images)
+            {
+                <div class="gb-row gb-row--wrap" id="disk-images" style="justify-content:space-between;gap:6px 12px">
+                    <span class="gb-label" style="margin:0"><Tip Key="settings.disk.images">Images</Tip></span>
+                    <span class="gb-help" style="margin:0">@DiskText.Size(images), every image on this host.</span>
+                </div>
+            }
+
+            <SwitchRow @key="@($"auto{switchKey}")" Title="Clean up by itself" Value="@report.Auto" ValueChanged="SetAutoAsync" Disabled="busy" Tip="settings.disk.auto"
+                       Sub="@DiskText.AutoSub(report.KeepDays, DiskRules.CacheCap(d.TotalBytes))" />
+
+            <div class="gb-setrow">
+                <Field Label="Keep unused build cache for" For="disk-keep-days" Tip="settings.disk.keep-days" Help="1 to 90 days.">
+                    <label class="gb-input"><input id="disk-keep-days" type="number" min="1" max="90" value="@keepDays" @onchange="e => keepDays = int.TryParse(e.Value?.ToString(), out var n) ? n : keepDays" /><span class="gb-input-suffix">days</span></label>
+                </Field>
+                <div style="padding-bottom:22px"><Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveDaysAsync" Disabled="busy">Save</Btn></div>
+            </div>
+
+            <div class="gb-row gb-row--wrap" id="disk-last" style="justify-content:space-between;gap:10px 18px">
+                <div class="gb-stack" style="gap:2px">
+                    <span class="gb-label" style="margin:0"><Tip Key="settings.disk.last">Last cleanup</Tip></span>
+                    <span class="gb-help" style="margin:0">@DiskText.Last(report.Last, DateTime.UtcNow)</span>
+                </div>
+                <Btn Icon="@Icons.Material.Outlined.CleaningServices" OnClick="CleanNowAsync" Busy="cleaning" Disabled="@(busy || cleaning)" Tip="settings.disk.clean-now">Clean up now</Btn>
+            </div>
+
+            @if (report.Deleted.Count > 0)
+            {
+                <div class="gb-h3" style="margin-top:6px">Images of deleted apps<Tip Key="settings.disk.deleted-apps" /></div>
+                <div class="gb-reglist" role="list" aria-label="Images of deleted apps">
+                    @foreach (var g in report.Deleted)
+                    {
+                        <div class="gb-notirow" role="listitem" @key="g.Slug">
+                            <span class="gb-notirow-icon"><SvgIcon Icon="@Icons.Material.Outlined.Layers" /></span>
+                            <div style="min-width:0">
+                                <div class="gb-regrow-t">@g.Slug</div>
+                                <div class="gb-regrow-s">@DiskText.Group(g.Tags.Count, g.Size) · @(g.Waiting ? DiskText.Waiting : DiskText.Kept)</div>
+                                <div class="gb-regrow-s gb-mono">@string.Join(", ", g.Tags)</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="gb-row gb-row--wrap">
+                    <Btn Icon="@Icons.Material.Outlined.Delete" OnClick="RemoveDeletedAsync" Busy="removing" Disabled="@(busy || removing)" Tip="settings.disk.remove-deleted">Remove these images</Btn>
+                </div>
+            }
+        }
+    </div>
+</section>
+
+@code {
+    private DiskReport? report;
+    private string? readProblem;
+    private BuildCacheRow? cacheRow;
+    private int keepDays = DiskRules.DefaultKeepDays;
+    private bool busy, cleaning, removing;
+    private int switchKey;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Cleanup.Changed += Refresh;
+        Choices.Changed += Refresh;
+        await ReadAsync();
+    }
+
+    public void Dispose()
+    {
+        Cleanup.Changed -= Refresh;
+        Choices.Changed -= Refresh;
+    }
+
+    private void Refresh() => _ = InvokeAsync(async () =>
+    {
+        await ReadAsync();
+        StateHasChanged();
+    });
+
+    // A read that fails (Gitberth's database, say) is said in the section, never a broken page.
+    private async Task ReadAsync()
+    {
+        try
+        {
+            report = await Cleanup.ReportAsync();
+            keepDays = report.KeepDays;
+            readProblem = null;
+        }
+        catch (Exception ex)
+        {
+            readProblem = ex.Message;
+        }
+    }
+
+    private async Task SetAutoAsync(bool on)
+    {
+        busy = true;
+        try
+        {
+            await Choices.SetOnAsync(on);
+            Snackbar.Add(on ? "Gitberth cleans up Docker's disk by itself now." : "Gitberth no longer cleans up Docker's disk by itself.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save it: {ex.Message}", Severity.Error);
+            // The switch goes back to what's saved.
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveDaysAsync()
+    {
+        busy = true;
+        try
+        {
+            var problem = await Choices.SetKeepDaysAsync(keepDays);
+            Snackbar.Add(problem ?? $"Saved: unused build cache is kept for {DiskText.Days(keepDays)}.", problem is null ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save it: {ex.Message.TrimEnd('.')}.", Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task CleanNowAsync()
+    {
+        cleaning = true;
+        try
+        {
+            var answer = await Cleanup.CleanNowAsync();
+            Snackbar.Add(answer.Message, answer.Ok ? Severity.Success : Severity.Warning);
+            await ReadAsync();
+            if (cacheRow is not null) await cacheRow.RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't clean up: {ex.Message.TrimEnd('.')}.", Severity.Error);
+        }
+        finally
+        {
+            cleaning = false;
+        }
+    }
+
+    private async Task RemoveDeletedAsync()
+    {
+        if (report is null) return;
+        var tags = report.Deleted.SelectMany(g => g.Tags).ToList();
+        if (await Dialogs.ShowMessageBoxAsync("Remove the images of deleted apps?",
+                $"Docker removes {DiskText.Count(tags.Count, "image")} of apps that are gone: {string.Join(", ", tags)}. One a container still uses stays, and Gitberth removes it once nothing does.",
+                yesText: "Remove these images", cancelText: "Cancel") != true) return;
+        removing = true;
+        try
+        {
+            // Only what the dialog listed: an app deleted since keeps its images until they're listed and confirmed too.
+            var answer = await Cleanup.RemoveDeletedAppsImagesAsync(tags);
+            Snackbar.Add(answer.Message, answer.Ok ? Severity.Success : Severity.Warning);
+            await ReadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't remove them: {ex.Message.TrimEnd('.')}.", Severity.Error);
+        }
+        finally
+        {
+            removing = false;
+        }
+    }
+}

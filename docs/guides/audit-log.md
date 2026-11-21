@@ -30,10 +30,10 @@ flowchart TD
 | Area | What it records |
 |---|---|
 | **Sign-ins** | Each sign-in that worked, failed (a wrong password, an unknown user name) or was refused after too many failed attempts, with the browser's address; signing out; changing the admin password. |
-| **Apps** | A new app and where it came from (a template too); a settings change, with each field before and after; ports, and the ports noted for a container; variables added, changed or removed, and the repo's variables saved to or deleted from GitHub or GitLab on an app's **Environment** tab; start, stop and restart; a rename; removal; deploy hooks made and deleted; networks joined and left; an own LAN address; previews and update settings; a scheduled job run by hand; **Keep the new one** or **Put the original back** after a change that needed your decision; [databases](databases.md) added and removed (with their data kept or deleted), and each preview's own made and dropped, by name only. |
+| **Apps** | A new app and where it came from (a template too); a settings change, with each field before and after; ports, and the ports noted for a container; variables added, changed or removed, and the repo's variables saved to or deleted from GitHub or GitLab on an app's **Environment** tab; start, stop and restart; an app that stopped by itself and that Gitberth [brought back](health-and-monitoring.md#when-an-app-stops-by-itself) (`app.recovered`, each try), or stopped bringing back (`app.recovery.stopped`); a rename; removal; deploy hooks made and deleted; networks joined and left; an own LAN address; previews and update settings; a scheduled job run by hand; **Keep the new one** or **Put the original back** after a change that needed your decision; [databases](databases.md) added and removed (with their data kept or deleted), and each preview's own made and dropped, by name only. |
 | **Deploys** | Each deploy when it's queued, when it starts, and how it ended: succeeded, failed, rolled back, cancelled (a queued one too, when stopping or deleting the app cancels it) or skipped. Image updates found, applied, failed and rolled back. |
-| **Domains** | An app's domains added, removed, made its main one, protected or not; what Gitberth changed in Cloudflare for them (DNS records, Access applications, the tunnel's routes); turning domains on or off. |
-| **Settings** | Every section of the Settings page: GitHub access and integration, GitLab, notification destinations, registries, updates, uptime checks and the status page, the network, own LAN addresses, deploys, clearing the build cache, the default Postgres server and setting one up (**Databases**), API tokens made, revoked and expired (by name and access, never the token), and the audit log's own settings. |
+| **Domains** | An app's domains added, removed, made its main one, protected or not; what Gitberth changed in Cloudflare for them (DNS records, Access applications, the tunnel's routes); turning domains on or off; the Cloudflare token expiring, refused by Cloudflare, or taken again. |
+| **Settings** | Every section of the Settings page: GitHub access and integration, GitLab, notification destinations, registries, updates, uptime checks and the status page, keeping apps running, the network, own LAN addresses, deploys, Docker's disk (each cleanup that removed something, by Gitberth or with **Clean up now**, its choices, and the images of deleted apps removed), clearing the build cache, the default Postgres server and setting one up (**Databases**), API tokens made, revoked and expired (by name and access, never the token), and the audit log's own settings. Also, as Gitberth's own: the GitHub or GitLab token expiring, refused by its service, or taken again, and a registry sign-in refused or taken again ([Tokens and sign-ins](troubleshooting.md#tokens-and-sign-ins)). |
 | **Outside Gitberth** | Docker changes Gitberth didn't make: see [below](#changes-made-outside-gitberth). |
 
 An entry has:
@@ -55,7 +55,7 @@ An entry has:
 | **An API token**, by its name, through MCP or the API, from the caller's address | What an [AI agent or a script](ai-agents.md) does with that token, and the calls it was refused. |
 | **A deploy hook**, by its name, from the caller's address | The deploys and updates a [deploy hook](deploy-hooks.md) call starts. |
 | **GitHub** or **GitLab**, through a webhook | The deploys a push starts when [instant deploys](github-integration.md#instant-deploys) are on. |
-| **Gitberth**, through one of its jobs: the repo watcher, a schedule, startup, the update checks, the health checks, a sync | What Gitberth does by itself: a new commit deployed, a scheduled restart, an automatic update, apps created again when it starts, domains and webhooks kept in step. |
+| **Gitberth**, through one of its jobs: the repo watcher, a schedule, startup, the update checks, the health checks, a sync, the keep-running check, the disk cleanup | What Gitberth does by itself: a new commit deployed, a scheduled restart, an automatic update, apps created again when it starts, domains and webhooks kept in step, an app that stopped by itself started again, old build cache and images removed. |
 | **Docker**, outside Gitberth | A change to Docker that Gitberth didn't make. |
 
 A deploy is told against whoever asked for it, from the moment it's queued to how it ended. The deploy's page and the
@@ -117,7 +117,7 @@ make. **Close**, a click outside the panel, or Esc puts it away.
 |---|---|
 | **When** | The day and time in Gitberth's time zone, and the exact time in UTC, like `2026-11-14T09:30:12.345Z`. |
 | **Who** | The actor by name, and what it is: **Person**, **API token**, **Deploy hook**, **GitHub**, **GitLab**, **Docker**, **Cloudflare** or **Gitberth**. |
-| **Through** | How the change came in: **the UI**, **an AI agent (MCP)**, **the API**, **a webhook** or **a deploy hook**; one of Gitberth's own jobs (**the repo watcher**, **a schedule**, **startup**, **the update checks**, **the health checks**, **a sync**); or **Docker's events**, for a change made outside Gitberth. |
+| **Through** | How the change came in: **the UI**, **an AI agent (MCP)**, **the API**, **a webhook** or **a deploy hook**; one of Gitberth's own jobs (**the repo watcher**, **a schedule**, **startup**, **the update checks**, **the health checks**, **a sync**, **the keep-running check**, **the disk cleanup**); or **Docker's events**, for a change made outside Gitberth. |
 | **From** | The address the request came from, when there is one: the browser's, the agent's or the caller's. |
 | **App** | The app it's about, a link to its page, with the container's own name when the app goes by another, and **All its changes**: the log filtered to that app. |
 | **Target** | What the change was made to besides the app: a domain, a variable's name, a token's name, a network. |
@@ -182,7 +182,8 @@ wrong box. A plain variable's value is kept, cut short after 100 characters.
 Gitberth runs. Recording never holds anything up: entries go into a queue that one writer stores in order, and whatever
 is still queued is written when Gitberth stops. While the file can't be written (a full disk, a failing one, a file made
 read-only), entries wait in that queue, in order, however long it takes, and go in once it can be written again;
-Gitberth's own log says so meanwhile. Back it up with the rest of the volume (see
+Gitberth's own log says so meanwhile. An entry the file refuses for a moment goes in a moment later. Back it up with
+the rest of the volume (see
 [Backups and restore](backups-and-restore.md)). If the file is missing, Gitberth starts a new one.
 
 ## Related

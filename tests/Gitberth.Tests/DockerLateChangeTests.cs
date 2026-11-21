@@ -18,10 +18,25 @@ public sealed class DockerLateChangeTests
     /// <summary>A stand-in engine whose changes happen at once but whose answers to them never come (until cancelled).</summary>
     private sealed class SlowEngine : HttpMessageHandler
     {
+        private int _changes;
+        private int _checkedAfter = -1;
+
         public JsonObject? Container { get; set; }
         public List<string> Calls { get; } = [];
         public bool AnswerChanges { get; set; }
         public Func<HttpRequestMessage, HttpResponseMessage?>? Refuse { get; set; }
+
+        /// <summary>How many changes were asked for so far.</summary>
+        public int Changes => Volatile.Read(ref _changes);
+
+        /// <summary>Held while the container is read for an answer, and while a test changes it, so a read never meets half a change.</summary>
+        public object Gate { get; } = new();
+
+        /// <summary>
+        /// Whether the API has started checking on a change asked for after the first <paramref name="changes"/>: it gave up
+        /// waiting for that change's answer and reads the container (or network) to see whether Docker did it.
+        /// </summary>
+        public bool CheckingOn(int changes) => Volatile.Read(ref _checkedAfter) > changes;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
@@ -30,12 +45,17 @@ public sealed class DockerLateChangeTests
             if (path == "/version") return Answer(DockerFixtures.Text("version.json"));
             if (request.Method == HttpMethod.Get)
             {
-                if (path.StartsWith("/v1.56/networks/", StringComparison.Ordinal))
-                    return Container?["NetworkSettings"]?["Networks"]?["web"] is not null && path.EndsWith("/web", StringComparison.Ordinal)
-                        ? Answer("""{"Id":"6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e","Name":"web"}""")
-                        : Answer("""{"message":"network not found"}""", HttpStatusCode.NotFound);
-                return Container is null ? Answer("""{"message":"No such container"}""", HttpStatusCode.NotFound) : Answer(Container.ToJsonString());
+                Volatile.Write(ref _checkedAfter, Changes);
+                lock (Gate)
+                {
+                    if (path.StartsWith("/v1.56/networks/", StringComparison.Ordinal))
+                        return Container?["NetworkSettings"]?["Networks"]?["web"] is not null && path.EndsWith("/web", StringComparison.Ordinal)
+                            ? Answer("""{"Id":"6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e","Name":"web"}""")
+                            : Answer("""{"message":"network not found"}""", HttpStatusCode.NotFound);
+                    return Container is null ? Answer("""{"message":"No such container"}""", HttpStatusCode.NotFound) : Answer(Container.ToJsonString());
+                }
             }
+            Interlocked.Increment(ref _changes);
             if (Refuse?.Invoke(request) is { } refused) return refused;
             // The change happens now; its answer is late.
             if (AnswerChanges) return Answer("{}");
@@ -47,7 +67,17 @@ public sealed class DockerLateChangeTests
     private static HttpResponseMessage Answer(string body, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
-    private static DockerApi Api(SlowEngine engine, double settleSeconds = 2) => new("unix:///var/run/docker.sock", engine)
+    // Docker does it (what `done` changes) only once the API has given up on its answer and is checking on it: the change
+    // counts all the same, however long the machine took to get there.
+    private static async Task DoneWhileCheckedOnAsync(SlowEngine engine, int changesBefore, Action done)
+    {
+        await Eventually.UntilAsync(() => engine.CheckingOn(changesBefore), "the API to check on the change whose answer is late");
+        lock (engine.Gate) done();
+    }
+
+    // The settle wait of the tests where Docker does it in the end: long, since a busy machine may take a while to get
+    // there, and a passing test never waits it out. The tests where Docker never does it keep a short one.
+    private static DockerApi Api(SlowEngine engine, double settleSeconds = 30) => new("unix:///var/run/docker.sock", engine)
     {
         ChangeTimeout = TimeSpan.FromMilliseconds(150),
         SettleWait = TimeSpan.FromSeconds(settleSeconds),
@@ -74,9 +104,8 @@ public sealed class DockerLateChangeTests
         var engine = new SlowEngine();
         using var api = Api(engine);
         var create = api.CreateContainerAsync("web-next", new JsonObject { ["Image"] = "nginx:1.27" });
-        await Task.Delay(400);
         // The engine made it while its answer was still on the way.
-        engine.Container = Container(Now());
+        await DoneWhileCheckedOnAsync(engine, 0, () => engine.Container = Container(Now()));
         Assert.Equal(Id, await create);
         Assert.Contains(engine.Calls, c => c == "GET /v1.56/containers/web-next/json");
     }
@@ -105,15 +134,14 @@ public sealed class DockerLateChangeTests
         var engine = new SlowEngine { Container = Container(Now(60)) };
         using var api = Api(engine);
         var start = api.StartContainerAsync(Id);
-        await Task.Delay(300);
-        engine.Container = Container(Now(60), running: true, startedAt: Now());
+        await DoneWhileCheckedOnAsync(engine, 0, () => engine.Container = Container(Now(60), running: true, startedAt: Now()));
         await start;
 
         // Started and already stopped again (it crashed at once): it did start.
         engine.Container = Container(Now(60), running: false, startedAt: Now(120));
+        var changes = engine.Changes;
         var again = api.StartContainerAsync(Id);
-        await Task.Delay(300);
-        engine.Container = Container(Now(60), running: false, startedAt: Now());
+        await DoneWhileCheckedOnAsync(engine, changes, () => engine.Container = Container(Now(60), running: false, startedAt: Now()));
         await again;
     }
 
@@ -139,29 +167,30 @@ public sealed class DockerLateChangeTests
 
         // Updated: its HostConfig says what was asked (Docker reads 0 as unchanged).
         var policy = new JsonObject { ["Name"] = "always", ["MaximumRetryCount"] = 0 };
+        var changes = engine.Changes;
         var update = api.UpdateRestartPolicyAsync(Id, policy);
-        await Task.Delay(300);
-        engine.Container!["HostConfig"]!["RestartPolicy"] = policy.DeepClone();
+        await DoneWhileCheckedOnAsync(engine, changes, () => engine.Container!["HostConfig"]!["RestartPolicy"] = policy.DeepClone());
         await update;
         var resources = await api.UpdateContainerAsync(Id, new JsonObject { ["RestartPolicy"] = policy.DeepClone(), ["Memory"] = 0L });
         Assert.Empty((JsonArray)resources["Warnings"]!);
 
         // Joined: the container is on the network.
+        changes = engine.Changes;
         var join = api.ConnectNetworkAsync("web", Id, new JsonObject());
-        await Task.Delay(300);
-        engine.Container!["NetworkSettings"]!["Networks"]!["web"] = new JsonObject { ["NetworkID"] = "6e6e6e6e6e6e6e6e6e6e" };
+        await DoneWhileCheckedOnAsync(engine, changes,
+            () => engine.Container!["NetworkSettings"]!["Networks"]!["web"] = new JsonObject { ["NetworkID"] = "6e6e6e6e6e6e6e6e6e6e" });
         await join;
 
         // Left: it isn't on it any more.
+        changes = engine.Changes;
         var leave = api.DisconnectNetworkAsync("web", Id);
-        await Task.Delay(300);
-        ((JsonObject)engine.Container!["NetworkSettings"]!["Networks"]!).Remove("web");
+        await DoneWhileCheckedOnAsync(engine, changes, () => ((JsonObject)engine.Container!["NetworkSettings"]!["Networks"]!).Remove("web"));
         await leave;
 
         // Removed: it's gone.
+        changes = engine.Changes;
         var remove = api.RemoveContainerAsync(Id, force: true);
-        await Task.Delay(300);
-        engine.Container = null;
+        await DoneWhileCheckedOnAsync(engine, changes, () => engine.Container = null);
         await remove;
     }
 
@@ -185,8 +214,9 @@ public sealed class DockerLateChangeTests
         var started = DateTime.UtcNow;
         var refused = await Assert.ThrowsAsync<DockerApiException>(() => api.CreateContainerAsync("web-next", new JsonObject { ["Image"] = "nginx:1.27" }));
         Assert.Equal(409, refused.Status);
-        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(5));
+        // Never checked on, and never waited the 30 s out: what proves it isn't how quick a busy machine was.
         Assert.DoesNotContain(engine.Calls, c => c.StartsWith("GET /v1.56/containers/", StringComparison.Ordinal));
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(20));
     }
 
     [Fact]

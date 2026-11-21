@@ -143,6 +143,9 @@ public sealed class PathPattern
     /// <summary>Whether the path (from the repo's root, with / between folders) is the pattern's, or under a folder that is.</summary>
     public bool Matches(string path) => _regex.IsMatch(path);
 
+    /// <summary>How its expression runs: without backtracking, so its time grows with the path's length, never faster.</summary>
+    internal RegexOptions Options => _regex.Options;
+
     /// <summary>Why the pattern can't be used ("doesn't name a file or folder."), or null.</summary>
     public static string? Problem(string pattern)
     {

@@ -783,6 +783,11 @@ public sealed class NetworkServiceTests : IDisposable
         using (var db = _db.CreateDbContext()) Assert.Equal(("media", "db"), db.AppNetworks.AsNoTracking().AsEnumerable().Select(n => (n.Network, n.Alias)).Single());
     }
 
+    // How many handlers the watcher's Started has: an event's subscribers can't be read from outside it, so its field is.
+    private static int StartListeners(ContainerEventWatcher events) =>
+        (typeof(ContainerEventWatcher).GetField(nameof(ContainerEventWatcher.Started), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(events) as Delegate)?.GetInvocationList().Length ?? 0;
+
     private NetworkKeeper Keeper(NetworkService service, ContainerEventWatcher? events = null, ContainerLocks? locks = null)
     {
         var api = new DockerApi("unix:///var/run/docker.sock", _engine);
@@ -837,6 +842,10 @@ public sealed class NetworkServiceTests : IDisposable
         await keeper.StartAsync(default);
         try
         {
+            // The keeper listens for starts from its ExecuteAsync, which BackgroundService runs on the thread pool after
+            // StartAsync has returned: a start heard before then would go by it (as one does in Gitberth until its next look).
+            await Eventually.UntilAsync(() => StartListeners(events) > 0, "the keeper to listen for starts");
+
             // While Gitberth starts it, it's looked at once that's done.
             var start = await locks.AcquireAsync("sample-bun-hono");
             var now = DateTime.UtcNow;
@@ -845,7 +854,8 @@ public sealed class NetworkServiceTests : IDisposable
             Assert.DoesNotContain(_engine.Writes.Skip(1), w => w.Path.EndsWith("/connect", StringComparison.Ordinal));
             start.Dispose();
 
-            for (var i = 0; i < 200 && _engine.Writes.Count < 2; i++) await Task.Delay(25);
+            // The join again is a write of its own: the last write alone would be the first join's, which is the same.
+            await Eventually.UntilAsync(() => _engine.Writes.Count >= 2, "the join once the start is done");
             Assert.Equal(("/v1.56/networks/media/connect", """{"Container":"sample-bun-hono","EndpointConfig":{"GwPriority":-1}}"""), _engine.Writes[^1]);
         }
         finally

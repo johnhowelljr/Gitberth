@@ -3,18 +3,33 @@ using Gitberth.Services;
 
 namespace Gitberth.Deploy;
 
-/// <summary>What clearing the build cache did, as Settings › Deploys says it.</summary>
+/// <summary>What clearing the build cache did, as Settings › Disk says it.</summary>
 /// <param name="Freed">The bytes Docker freed; 0 when it was refused or failed.</param>
 public sealed record BuildCacheCleared(bool Ok, string Message, long Freed = 0);
 
+/// <summary>The build cache for Settings › Disk: its size, and how much of it no build used for the days the cleanup keeps.</summary>
+/// <param name="Stale">The records (not shared, not in use) no build used for <paramref name="KeepDays"/> days: what the next cleanup removes.</param>
+public sealed record BuildCacheReport(BuildCacheUsage Usage, long Stale, int KeepDays);
+
 /// <summary>
-/// Docker's build cache, for Settings › Deploys: how big it is, and clearing it. Clearing is refused while a build runs,
+/// Docker's build cache, for Settings › Disk: how big it is, and clearing it. Clearing is refused while a build runs,
 /// and a build that gets to its turn meanwhile waits for it, so no build ever loses its cache halfway through.
 /// </summary>
 public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<BuildCache> logger, Audit.AuditLog? audit = null)
 {
     /// <summary>The cache's size as Docker adds it up.</summary>
     public Task<BuildCacheUsage> UsageAsync(CancellationToken ct = default) => api.BuildCacheAsync(ct);
+
+    /// <summary>The cache's size, and how much of it no build used for <paramref name="keepDays"/> days, from one read of its records.</summary>
+    public async Task<BuildCacheReport> ReportAsync(int keepDays, DateTime now, CancellationToken ct = default)
+    {
+        var records = await api.BuildCacheRecordsAsync(ct);
+        return new BuildCacheReport(DockerApi.Usage(records), StaleBytes(records, TimeSpan.FromDays(keepDays), now), keepDays);
+    }
+
+    /// <summary>What the cleanup's age prune would remove: the records nobody shares or uses that no build touched for <paramref name="unusedFor"/>.</summary>
+    internal static long StaleBytes(IReadOnlyList<BuildCacheRecord> records, TimeSpan unusedFor, DateTime now) =>
+        records.Where(r => !r.Shared && !r.InUse && r.Touched is { } at && at <= now - unusedFor).Sum(r => Math.Max(0, r.Size));
 
     /// <summary>Every record of the build cache goes: the next build of every app runs each step again.</summary>
     public async Task<BuildCacheCleared> ClearAsync(CancellationToken ct = default)
@@ -29,10 +44,17 @@ public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<B
         return cleared;
     }
 
+    /// <summary>What a run of the disk cleanup is told while the cache is cleared.</summary>
+    public const string Clearing = "The build cache is being cleared";
+
     private async Task<BuildCacheCleared> ClearCoreAsync(CancellationToken ct)
     {
-        using var hold = pipeline.TryHoldBuilds();
-        if (hold is null) return new BuildCacheCleared(false, "A build is running, so the cache wasn't cleared. Clear it once the build is done.");
+        using var hold = pipeline.TryHoldBuilds("the build cache to be cleared", Clearing);
+        // Whatever holds builds off says so: a build, or the disk cleanup.
+        if (hold is null)
+            return new BuildCacheCleared(false, pipeline.Holder is { } holder
+                ? $"{holder}, so the cache wasn't cleared. Clear it once that's done."
+                : "A build is running, so the cache wasn't cleared. Clear it once the build is done.");
         try
         {
             var freed = await api.PruneBuildCacheAsync(ct);

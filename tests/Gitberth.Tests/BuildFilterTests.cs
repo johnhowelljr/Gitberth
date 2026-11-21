@@ -102,13 +102,14 @@ public sealed class BuildFilterTests
         Assert.Equal(matches, PathPattern.Parse(pattern).Matches(path));
 
     [Fact]
-    public void A_long_pattern_of_stars_matches_quickly()
+    public async Task A_long_pattern_of_stars_matches_without_backtracking()
     {
+        // What makes it safe: the expression never backtracks, so its time grows with the path's length, never exponentially.
         var pattern = PathPattern.Parse(string.Concat(Enumerable.Repeat("*a", 99)) + "b");
+        Assert.True(pattern.Options.HasFlag(System.Text.RegularExpressions.RegexOptions.NonBacktracking), pattern.Options.ToString());
+        // So it ends; with backtracking it wouldn't, this side of the guard against a hang.
         var path = new string('a', 5000);
-        var watch = System.Diagnostics.Stopwatch.StartNew();
-        Assert.False(pattern.Matches(path));
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+        Assert.False(await Task.Run(() => pattern.Matches(path)).WaitAsync(TimeSpan.FromSeconds(30)));
     }
 
     [Fact]

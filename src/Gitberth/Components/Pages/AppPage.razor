@@ -705,7 +705,7 @@ else
             var git = app.Source == AppSource.Git || Deployed;
             <Banner Tone="@(missing ? "critical" : "info")" Title="@(missing ? "Its container is gone" : git ? "Not deployed yet" : "Not created yet")"
                     Tip="@(missing ? TipKey(Tip: "app.banner.gone") : git ? TipKey(Tip: "app.banner.not-deployed") : TipKey(Tip: "app.banner.not-created"))">
-                <ChildContent>@MissingLine(app, lastImage?.There == true, view?.Row?.Branch)</ChildContent>
+                <ChildContent>@MissingLine(app, lastImage?.There == true, view?.Row?.Branch)<KeeperBanner App="app" Row="view?.Row" Inline="true" /></ChildContent>
                 <Actions>
                     @if (git || app.Source != AppSource.Existing)
                     {
@@ -726,6 +726,11 @@ else
         else if (whyNotStart is { } why && !app.Running)
         {
             <Banner Tone="info" Title="Waiting for a change to settle" Tip="app.banner.settling">@why</Banner>
+        }
+        else if (!app.Running && app.State is not (AppState.Deploying or AppState.Changing or AppState.NeedsDecision))
+        {
+            @* Meant to run but down: whether the keep-running check brings it back, gave up, or leaves it. *@
+            <KeeperBanner App="app" Row="view?.Row" BaseHref="@BaseHref" Busy="busy" OnStart="() => RunAsync(ContainerAction.Start)" />
         }
     </text>;
 
@@ -783,7 +788,8 @@ else
         busy = true;
         try
         {
-            var report = await Catalog.ForgetAsync(row.Id);
+            // Through the app's actions: while it's forgotten, the keep-running check doesn't make its container again.
+            var report = await Actions.ForgetAsync(row.Id);
             var trouble = report.Notes.FirstOrDefault(n => n.Problem);
             Snackbar.Add(trouble is null ? $"Forgot {app.Title}." : $"Forgot {app.Title}. {trouble.Text}", trouble is null ? Severity.Success : Severity.Warning);
             Nav.NavigateTo(app.RenamedTo is { } renamed ? $"apps/{Uri.EscapeDataString(renamed)}" : "apps");

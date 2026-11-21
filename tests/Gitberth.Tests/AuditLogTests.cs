@@ -29,8 +29,9 @@ public sealed class AuditLogTests : IDisposable
         }
     }
 
-    // The log Gitberth runs: its file in the data folder, its writer in the background.
-    private AuditLog FileLog(TimeSpan? retryCap = null, Func<Task>? beforeBatch = null, Func<AuditDraft, Exception?>? fault = null)
+    // The log Gitberth runs: its file in the data folder, its writer in the background. With a clock, the writer's waits
+    // before a try again are that clock's (HeldClock holds each until the test lets it go; FakeClock passes them at once).
+    private AuditLog FileLog(TimeSpan? retryCap = null, Func<Task>? beforeBatch = null, Func<AuditDraft, Exception?>? fault = null, TimeProvider? time = null)
     {
         Directory.CreateDirectory(_dir);
         var log = new AuditLog(new GitberthOptions { DataDir = _dir }, NullLogger<AuditLog>.Instance)
@@ -38,12 +39,38 @@ public sealed class AuditLogTests : IDisposable
             RetryCap = retryCap ?? TimeSpan.FromSeconds(30),
             BeforeBatch = beforeBatch,
             StoreFault = fault,
+            Time = time ?? TimeProvider.System,
         };
         _logs.Add(log);
         return log;
     }
 
     private string DbPath => Path.Combine(_dir, "audit.db");
+
+    // The disk fails: the file is still there, but no write of it works (SQLite says it isn't a database, as it says a full
+    // or failing disk's write failed). Returns the file as it was, to put back.
+    private async Task<byte[]> BreakFileAsync()
+    {
+        var good = await File.ReadAllBytesAsync(DbPath);
+        await File.WriteAllBytesAsync(DbPath, Enumerable.Repeat((byte)'x', good.Length).ToArray());
+        return good;
+    }
+
+    // The disk works again. Only ever while the writer is parked in a held wait: no try of it can have the file open.
+    private async Task RestoreFileAsync(byte[] good)
+    {
+        foreach (var extra in new[] { "-wal", "-shm" }) File.Delete(DbPath + extra);
+        await File.WriteAllBytesAsync(DbPath, good);
+    }
+
+    // The writer's next wait, once it's parked in it: asserted to be as long as the schedule says, with nothing left out.
+    private static async Task<HeldClock.Wait> ParkedAsync(HeldClock clock, AuditLog log, TimeSpan due, long pending)
+    {
+        var wait = await clock.NextWaitAsync();
+        Assert.True(wait.Due == due, $"Wait {wait.Number} was {wait.Due.TotalMilliseconds} ms, not {due.TotalMilliseconds} ms.");
+        Assert.True(log.Pending == pending, $"At wait {wait.Number}, {log.Pending} entries waited, not {pending}.");
+        return wait;
+    }
 
     private void Tamper(string sql)
     {
@@ -203,26 +230,27 @@ public sealed class AuditLogTests : IDisposable
     [Fact]
     public async Task Nothing_is_lost_while_the_file_cant_be_written_for_long_and_all_of_it_goes_in_in_order_after()
     {
+        var clock = new HeldClock();
         var gate = Task.CompletedTask;
-        var log = FileLog(retryCap: TimeSpan.FromSeconds(2), beforeBatch: () => gate);
+        var log = FileLog(retryCap: TimeSpan.FromSeconds(2), beforeBatch: () => gate, time: clock);
         log.Record(new AuditEntry("app.created", "Before the disk failed."));
         Assert.True(await log.FlushAsync());
-        var good = await File.ReadAllBytesAsync(DbPath);
 
-        // The disk fails, and stays failing for longer than the writer once took to give up on an entry (about 40 s): the
-        // file is still there, but no write of it works (SQLite says it isn't a database, as it says a full or failing
-        // disk's write failed). Thirty entries come meanwhile, all in one batch, as they do when many come at once.
+        // The disk fails. Thirty entries come meanwhile, all in one batch, as they do when many come at once.
         var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         gate = hold.Task;
-        await File.WriteAllBytesAsync(DbPath, Enumerable.Repeat((byte)'x', good.Length).ToArray());
+        var good = await BreakFileAsync();
         for (var i = 1; i <= 30; i++) log.Record(new AuditEntry("app.started", $"Started app {i}."));
         hold.SetResult();
-        await Task.Delay(TimeSpan.FromSeconds(45));
-        Assert.Equal(30, log.Pending);
 
-        // The disk works again: every entry goes in, in order, and the chain checks out.
-        foreach (var extra in new[] { "-wal", "-shm" }) File.Delete(DbPath + extra);
-        await File.WriteAllBytesAsync(DbPath, good);
+        // It stays failing for longer than the writer once took to give up on an entry (about 40 s): 25 tries, 2 s apart
+        // (the cap), and all thirty still wait after each.
+        for (var i = 0; i < 25; i++) clock.Advance((await ParkedAsync(clock, log, TimeSpan.FromSeconds(2), pending: 30)).Due);
+
+        // The disk works again: at the next try every entry goes in, in order, and the chain checks out.
+        var last = await ParkedAsync(clock, log, TimeSpan.FromSeconds(2), pending: 30);
+        await RestoreFileAsync(good);
+        clock.Advance(last.Due);
         Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
         var entries = log.Entries;
         Assert.Equal(["Before the disk failed.", .. Enumerable.Range(1, 30).Select(i => $"Started app {i}.")], entries.Select(e => e.Summary));
@@ -234,22 +262,27 @@ public sealed class AuditLogTests : IDisposable
     [Fact]
     public async Task Stopping_tries_what_waits_again_at_once_rather_than_after_its_wait()
     {
-        var log = FileLog();
+        var clock = new HeldClock();
+        var log = FileLog(time: clock);
         log.Record(new AuditEntry("app.created", "Before the disk failed."));
         Assert.True(await log.FlushAsync());
-        var good = await File.ReadAllBytesAsync(DbPath);
-        await File.WriteAllBytesAsync(DbPath, Enumerable.Repeat((byte)'x', good.Length).ToArray());
+        var good = await BreakFileAsync();
         log.Record(new AuditEntry("app.started", "While it failed."));
-        // Tried at once, 2 s and 6 s later: the next try is 6 s away when the disk works again and Gitberth stops.
-        await Task.Delay(TimeSpan.FromSeconds(7));
-        foreach (var extra in new[] { "-wal", "-shm" }) File.Delete(DbPath + extra);
-        await File.WriteAllBytesAsync(DbPath, good);
 
-        var stopping = System.Diagnostics.Stopwatch.StartNew();
-        await log.StopAsync(CancellationToken.None);
-        Assert.True(stopping.Elapsed < TimeSpan.FromSeconds(4), $"Stopping took {stopping.Elapsed}.");
+        // Tried at once, then 2 s and 4 s later; the next try is 6 s away when the disk works again and Gitberth stops.
+        clock.Advance((await ParkedAsync(clock, log, TimeSpan.FromSeconds(2), pending: 1)).Due);
+        clock.Advance((await ParkedAsync(clock, log, TimeSpan.FromSeconds(4), pending: 1)).Due);
+        var third = await ParkedAsync(clock, log, TimeSpan.FromSeconds(6), pending: 1);
+        await RestoreFileAsync(good);
+
+        await log.StopAsync(CancellationToken.None).WaitAsync(Eventually.Limit);
+
+        // The stop cut the wait short (that's "at once"): it never fired, and the entry is in.
+        Assert.True(third.Cancelled && !third.Fired, third.ToString());
         Assert.Equal(0, log.Pending);
         Assert.Equal(["Before the disk failed.", "While it failed."], log.Entries.Select(e => e.Summary));
+        var check = await log.VerifyAsync();
+        Assert.True(check.Ok, check.Message);
     }
 
     [Fact]
@@ -267,20 +300,34 @@ public sealed class AuditLogTests : IDisposable
         Assert.True((await log.VerifyAsync()).Ok);
     }
 
+    private static readonly TimeSpan Pause = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan SecondTry = TimeSpan.FromSeconds(1);
+
     [Fact]
     public async Task An_entry_the_file_refuses_while_it_takes_the_others_is_the_only_one_left_out()
     {
-        var log = FileLog(retryCap: TimeSpan.FromMilliseconds(200),
+        var clock = new HeldClock();
+        var hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = hold.Task;
+        var log = FileLog(retryCap: Pause, beforeBatch: () => gate, time: clock,
             fault: d => d.Summary.StartsWith("Refused", StringComparison.Ordinal) ? new SqliteException("datatype mismatch", SQLitePCL.raw.SQLITE_MISMATCH) : null);
         foreach (var summary in new[] { "One.", "Refused one.", "Two.", "Three." }) log.Record(new AuditEntry("app.started", summary));
+        hold.SetResult();
+        // Tried as a whole three times (200 ms apart), then one by one: the refused one twice, a second apart. What the one
+        // by one goes through stops waiting when it's done.
+        clock.Advance((await ParkedAsync(clock, log, Pause, pending: 4)).Due);
+        clock.Advance((await ParkedAsync(clock, log, Pause, pending: 4)).Due);
+        clock.Advance((await ParkedAsync(clock, log, SecondTry, pending: 4)).Due);
         Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
         Assert.Equal(["One.", "Two.", "Three."], log.Entries.Select(e => e.Summary));
 
         // Refused with nothing after it, it waits: the next entry shows the file works, and only then is it left out.
         log.Record(new AuditEntry("app.started", "Refused last."));
-        Assert.False(await log.FlushAsync(TimeSpan.FromSeconds(3)));
-        Assert.Equal(1, log.Pending);
+        var waiting = await ParkedAsync(clock, log, Pause, pending: 1);
         log.Record(new AuditEntry("app.started", "Four."));
+        clock.Advance(waiting.Due);
+        clock.Advance((await ParkedAsync(clock, log, Pause, pending: 2)).Due);
+        clock.Advance((await ParkedAsync(clock, log, SecondTry, pending: 2)).Due);
         Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
         Assert.Equal(["One.", "Two.", "Three.", "Four."], log.Entries.Select(e => e.Summary));
         Assert.True((await log.VerifyAsync()).Ok);
@@ -289,17 +336,35 @@ public sealed class AuditLogTests : IDisposable
     [Fact]
     public async Task When_the_file_refuses_every_entry_it_is_the_file_and_nothing_is_left_out()
     {
+        var clock = new HeldClock();
         var refusing = new StrongBox<bool>(true);
-        var log = FileLog(retryCap: TimeSpan.FromMilliseconds(200),
-            fault: _ => Volatile.Read(ref refusing.Value) ? new SqliteException("no such table: entries", SQLitePCL.raw.SQLITE_ERROR) : null);
+        var refused = new StrongBox<string?>();
+        var log = FileLog(retryCap: Pause, time: clock, fault: d =>
+        {
+            if (!Volatile.Read(ref refusing.Value)) return null;
+            Volatile.Write(ref refused.Value, d.Summary);
+            return new SqliteException("no such table: entries", SQLitePCL.raw.SQLITE_ERROR);
+        });
         for (var i = 1; i <= 5; i++) log.Record(new AuditEntry("app.started", $"Started app {i}."));
-        // Long enough for the entries to be tried one by one several times over.
-        Assert.False(await log.FlushAsync(TimeSpan.FromSeconds(12)));
-        Assert.Equal(5, log.Pending);
 
+        // Two whole rounds: tried as a whole three times (200 ms apart), then one by one, each a second time a second
+        // later, until two in a row are refused with none taken: it's the file, so nothing is left out, ever.
+        TimeSpan[] round = [Pause, Pause, SecondTry, SecondTry, Pause];
+        foreach (var due in round.Concat(round)) clock.Advance((await ParkedAsync(clock, log, due, pending: 5)).Due);
+
+        // The third round, at entry 2's second try (entry 1 a suspect): the file comes back while the writer waits.
+        clock.Advance((await ParkedAsync(clock, log, Pause, pending: 5)).Due);
+        clock.Advance((await ParkedAsync(clock, log, Pause, pending: 5)).Due);
+        clock.Advance((await ParkedAsync(clock, log, SecondTry, pending: 5)).Due);
+        var second = await ParkedAsync(clock, log, SecondTry, pending: 5);
+        Assert.Equal("Started app 2.", Volatile.Read(ref refused.Value));
         Volatile.Write(ref refusing.Value, false);
+        clock.Advance(second.Due);
+
         Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
         Assert.Equal(Enumerable.Range(1, 5).Select(i => $"Started app {i}."), log.Entries.Select(e => e.Summary));
+        var check = await log.VerifyAsync();
+        Assert.True(check.Ok, check.Message);
     }
 
     [Fact]
@@ -309,7 +374,7 @@ public sealed class AuditLogTests : IDisposable
         // everything from then on: it comes back between entry 1 being suspected and entry 2 being tried.
         var calls = 0;
         var refusing = new StrongBox<bool>(true);
-        var log = FileLog(retryCap: TimeSpan.FromMilliseconds(200), fault: d =>
+        var log = FileLog(retryCap: Pause, time: new FakeClock(), fault: d =>
         {
             Exception? error = Volatile.Read(ref refusing.Value) ? new SqliteException("no such table: entries", SQLitePCL.raw.SQLITE_ERROR) : null;
             if (d.Summary == "Started app 1." && Interlocked.Increment(ref calls) == 5) Volatile.Write(ref refusing.Value, false);
@@ -319,6 +384,72 @@ public sealed class AuditLogTests : IDisposable
         Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
         Assert.Equal(Enumerable.Range(1, 5).Select(i => $"Started app {i}."), log.Entries.Select(e => e.Summary));
         Assert.True((await log.VerifyAsync()).Ok);
+    }
+
+    [Fact]
+    public async Task An_entry_refused_by_a_file_that_comes_back_between_two_tries_goes_in_after_and_isnt_left_out()
+    {
+        // Entry 1 is refused three times with the others, twice on its own, and once more right before entry 2 is tried:
+        // the file comes back exactly then, so it takes entry 2. Entry 1 was refused by the file, not for what it is.
+        var calls = 0;
+        var refusing = new StrongBox<bool>(true);
+        var log = FileLog(retryCap: Pause, time: new FakeClock(), fault: d =>
+        {
+            if (d.Summary == "Started app 1.") Interlocked.Increment(ref calls);
+            if (d.Summary == "Started app 2.") Volatile.Write(ref refusing.Value, false);
+            return Volatile.Read(ref refusing.Value) ? new SqliteException("no such table: entries", SQLitePCL.raw.SQLITE_ERROR) : null;
+        });
+        for (var i = 1; i <= 5; i++) log.Record(new AuditEntry("app.started", $"Started app {i}."));
+
+        Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
+        // Tried once more right after the file took entry 2, it goes in then: one place late, never left out.
+        Assert.Equal(7, Volatile.Read(ref calls));
+        Assert.Equal(["Started app 2.", "Started app 1.", "Started app 3.", "Started app 4.", "Started app 5."], log.Entries.Select(e => e.Summary));
+        Assert.Equal(0, log.Pending);
+        var check = await log.VerifyAsync();
+        Assert.True(check.Ok, check.Message);
+    }
+
+    [Fact]
+    public async Task Two_entries_refused_on_their_own_with_none_taken_wait_in_order_rather_than_land_behind_the_next()
+    {
+        // The file refuses its first 11 writes, whatever they hold, and takes everything after: entries 1 and 2 are each
+        // refused on their own before it does. Two in a row with none taken is the file, so they wait, in order.
+        var calls = 0;
+        var log = FileLog(retryCap: Pause, time: new FakeClock(), fault: _ =>
+            Interlocked.Increment(ref calls) <= 11 ? new SqliteException("no such table: entries", SQLitePCL.raw.SQLITE_ERROR) : null);
+        for (var i = 1; i <= 5; i++) log.Record(new AuditEntry("app.started", $"Started app {i}."));
+
+        Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal(Enumerable.Range(1, 5).Select(i => $"Started app {i}."), log.Entries.Select(e => e.Summary));
+        var check = await log.VerifyAsync();
+        Assert.True(check.Ok, check.Message);
+    }
+
+    [Theory]
+    // The file fails itself on the suspect's try before the next entry: nothing goes in past it, all of it in its place.
+    [InlineData(5, "1 2 3 4 5")]
+    // Right after it took the next entry: the suspect goes in next, one place late, never behind the entries after.
+    [InlineData(6, "2 1 3 4 5")]
+    public async Task An_entry_the_file_fails_on_while_it_flaps_never_lands_more_than_one_place_late(int refusedTries, string order)
+    {
+        // Entry 1: refused for what it might be (its first tries), then the file itself fails on it (full, twice), then it's taken.
+        var tries = 0;
+        var log = FileLog(retryCap: Pause, time: new FakeClock(), fault: d =>
+        {
+            if (d.Summary != "Started app 1.") return null;
+            var n = Interlocked.Increment(ref tries);
+            return n <= refusedTries ? new SqliteException("no such table: entries", SQLitePCL.raw.SQLITE_ERROR)
+                : n <= refusedTries + 2 ? new SqliteException("database or disk is full", SQLitePCL.raw.SQLITE_FULL)
+                : null;
+        });
+        for (var i = 1; i <= 5; i++) log.Record(new AuditEntry("app.started", $"Started app {i}."));
+
+        Assert.True(await log.FlushAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal(order, string.Join(' ', log.Entries.Select(e => e.Summary["Started app ".Length..^1])));
+        Assert.Equal(0, log.Pending);
+        var check = await log.VerifyAsync();
+        Assert.True(check.Ok, check.Message);
     }
 
     [Fact]

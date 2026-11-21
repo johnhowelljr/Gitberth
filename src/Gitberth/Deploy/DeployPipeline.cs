@@ -104,18 +104,41 @@ public sealed partial class DeployPipeline(
     private static bool Secret(EnvVar v, string value) => v.IsSecret || Masking.IsSecret(v.Key, value);
 
     /// <summary>
-    /// Holds builds off while the build cache is cleared (<see cref="BuildCache"/>), or null when a build runs now. A deploy
-    /// that gets to its build meanwhile waits for it, as it waits for another build.
+    /// Holds builds off while the build cache is cleared (<see cref="BuildCache"/>) or the disk cleaned up, or null when a
+    /// build (or another holder) has the gate now. A deploy that gets to its build meanwhile waits for it, as it waits for
+    /// another build, and its log says what for: "Waiting for " and <paramref name="why"/> ("the disk cleanup to finish"),
+    /// or for another build when there's none. <paramref name="holder"/> is what another holder that's refused meanwhile
+    /// is told ("The disk cleanup is running"): see <see cref="Holder"/>.
     /// </summary>
-    public IDisposable? TryHoldBuilds() => _buildGate.Wait(0) ? new GateHold(_buildGate) : null;
+    public IDisposable? TryHoldBuilds(string? why = null, string? holder = null)
+    {
+        if (!_buildGate.Wait(0)) return null;
+        (_holdWhy, _holder) = (why, holder);
+        return new GateHold(this);
+    }
 
-    private sealed class GateHold(SemaphoreSlim gate) : IDisposable
+    // What holds builds off now, when it isn't a build: the wait line says it, and a refused holder is told who has it.
+    private volatile string? _holdWhy;
+    private volatile string? _holder;
+
+    /// <summary>What a deploy's log says while it waits for the build gate.</summary>
+    internal string WaitLine => $"Waiting for {_holdWhy ?? "another build to finish"}…";
+
+    /// <summary>
+    /// What holds builds off now, as the start of a sentence ("The disk cleanup is running"); null while a build has the
+    /// gate, or nothing does.
+    /// </summary>
+    public string? Holder => _holder;
+
+    private sealed class GateHold(DeployPipeline pipeline) : IDisposable
     {
         private int _released;
 
         public void Dispose()
         {
-            if (Interlocked.Exchange(ref _released, 1) == 0) gate.Release();
+            if (Interlocked.Exchange(ref _released, 1) != 0) return;
+            (pipeline._holdWhy, pipeline._holder) = (null, null);
+            pipeline._buildGate.Release();
         }
     }
 
@@ -999,7 +1022,7 @@ public sealed partial class DeployPipeline(
         args.AddRange(values.Args);
         var processEnv = values.Environment;
 
-        if (_buildGate.CurrentCount == 0) log.Step("Waiting for another build to finish…");
+        if (_buildGate.CurrentCount == 0) log.Step(WaitLine);
         await _buildGate.WaitAsync(ct);
         try
         {
@@ -1891,10 +1914,11 @@ public sealed partial class DeployPipeline(
 
     /// <summary>
     /// Keeps the images of the last <see cref="KeepImages"/> different successful deploys, for rollback. Counted by image,
-    /// so restarts and settings changes that reuse the current one don't push older images out.
+    /// so restarts and settings changes that reuse the current one don't push older images out. Returns the tags it removed.
     /// </summary>
-    internal async Task PruneImagesAsync(GitberthDb db, AppDefinition app)
+    internal async Task<List<string>> PruneImagesAsync(GitberthDb db, AppDefinition app)
     {
+        var removed = new List<string>();
         try
         {
             var keep = await db.Deployments.AsNoTracking()
@@ -1909,7 +1933,7 @@ public sealed partial class DeployPipeline(
             if (app.CurrentImage is not null) keepSet.Add(app.CurrentImage);
             foreach (var tag in await docker.ListImageTagsAsync(app.ImageRepository))
             {
-                if (!keepSet.Contains(tag)) await docker.RemoveImageAsync(tag);
+                if (!keepSet.Contains(tag) && (await docker.RemoveImageAsync(tag)).Ok) removed.Add(tag);
             }
             await docker.PruneDanglingImagesAsync(app.Slug);
         }
@@ -1917,6 +1941,7 @@ public sealed partial class DeployPipeline(
         {
             logger.LogWarning(ex, "Image cleanup failed for {App}", app.Slug);
         }
+        return removed;
     }
 
     private static async Task SetStatusAsync(GitberthDb db, Deployment dep, DeployStatus status)

@@ -408,9 +408,11 @@ public sealed class OneActivityRecordTests : IDisposable
 
         var outcome = await service.ApplyAsync(await service.PlanAsync("sample-index", edit));
         var result = await outcome.Job!.Completion;
-        await Task.Delay(200);
 
         Assert.True(result.Ok, result.Message);
+        // Its record may be written a moment after the job ends: waited for, then a moment more for a second, which never comes.
+        await Eventually.UntilAsync(async () => (await ItemsAsync("sample-index")).Count > 0, "the live change's record");
+        await Task.Delay(200);
         var item = Assert.Single(await ItemsAsync("sample-index"));
         Assert.Equal((ActivityKind.Live, "Changed the memory limit, live: no restart."), (item.Kind, item.Text));
     }

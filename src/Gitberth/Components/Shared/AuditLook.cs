@@ -76,6 +76,8 @@ public static class AuditLook
         AuditVia.Health => "the health checks",
         AuditVia.Docker => "Docker's events",
         AuditVia.Sync => "a sync",
+        AuditVia.KeepRunning => "the keep-running check",
+        AuditVia.Cleanup => "the disk cleanup",
         _ => "Gitberth",
     };
 

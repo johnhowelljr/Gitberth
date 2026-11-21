@@ -10,8 +10,9 @@ namespace Gitberth.Audit;
 /// memory and one writer stores them in order, in batches, each hashed onto the one before (<see cref="AuditHash"/>), so a
 /// changed or removed entry shows when the log is checked (<see cref="VerifyAsync"/>). Nothing is lost because the file
 /// fails: while it can't be written (a full disk, an I/O error, a read-only file), entries wait in memory, in order, and
-/// are written once it works again; the log says so meanwhile. Only an entry the file refuses while it takes the others
-/// is ever left out, and loudly.
+/// are written once it works again; the log says so meanwhile. An entry the file refused for a moment goes in a moment
+/// later, in its place or right after the next entry, never further. Only an entry the file still refuses right after it
+/// took the next one is ever left out, and loudly.
 /// <para>
 /// <c>new AuditLog()</c> is an in-memory log for unit tests: it stores each entry at once, so <see cref="Entries"/> and the
 /// queries see it as soon as <see cref="Record"/> returns.
@@ -263,16 +264,21 @@ public class AuditLog : IHostedService, IDisposable
         init => _store.Fault = value;
     }
 
+    /// <summary>
+    /// The clock of the writer's waits before a try again, so a test can hold each one and let it go: its retry schedule
+    /// is then asserted wait by wait instead of slept through. The waits for the file (FlushAsync, StopAsync, Dispose)
+    /// keep real time.
+    /// </summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
+
     // How many times what waits is tried as a whole before each entry is tried on its own, when what failed isn't the file.
     private const int WholeAttempts = 3;
-
-    // How many entries in a row may be refused on their own, with none taken, before it's taken to be the file after all.
-    private const int MostSuspects = 3;
 
     // The entries waiting are written in one go, in order, and tried again until they're in. What's recorded meanwhile
     // joins them, after them, so a file that's down for a while takes everything at once when it's back. Nothing is given
     // up on because the file fails (IsStoreFailure): it waits, however long. When what failed isn't plainly the file, each
-    // entry is tried on its own (IsolateAsync), and only one the file refuses while it takes another after it is left out.
+    // entry is tried on its own (IsolateAsync), and only one the file still refuses right after it took another after it
+    // is left out.
     private async Task WriteLoopAsync()
     {
         var reader = _queue!.Reader;
@@ -321,14 +327,14 @@ public class AuditLog : IHostedService, IDisposable
     {
         if (_stopping)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(500), _closing.Token);
+            await Task.Delay(TimeSpan.FromMilliseconds(500), Time, _closing.Token);
             return;
         }
         var delay = TimeSpan.FromSeconds(2 * Math.Clamp(attempt, 1, 1000));
         using var either = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token, _hurry.Token);
         try
         {
-            await Task.Delay(delay < RetryCap ? delay : RetryCap, either.Token);
+            await Task.Delay(delay < RetryCap ? delay : RetryCap, Time, either.Token);
         }
         catch (OperationCanceledException) when (!_closing.IsCancellationRequested)
         {
@@ -354,71 +360,87 @@ public class AuditLog : IHostedService, IDisposable
 
     /// <summary>
     /// The entries one at a time, in order, after writes of them all failed for something that isn't plainly the file.
-    /// One the file refuses on its own (twice, a moment apart) is a suspect; once the file takes a later entry, the
-    /// suspects before it are what it won't take, and they're left out, loudly. A failure of the file itself, or several
-    /// refused in a row with none taken (the entries without the first one fail too), means it's the file after all:
-    /// nothing is left out, and what's left waits, in order. Returns what's left to write.
+    /// One the file refuses on its own (twice, a moment apart) is the suspect, and only one entry at a time is: the next
+    /// is tried after it. Once the file takes that next one, the suspect is tried once more, and only if the file still
+    /// refuses it then is it what the file won't take, and left out, loudly. A failure of the file itself (on the suspect
+    /// or the entry), or the next entry refused too with none taken (the entries without the first one fail too), means
+    /// it's the file after all: nothing is left out, and what's left waits, in order, the suspect first. So an entry goes
+    /// in at its place or right after the next one, never further: with two suspects at once, or a suspect left waiting
+    /// while later entries went in, the file coming back would put it two places late or more. Returns what's left to write.
     /// </summary>
     private async Task<List<AuditDraft>> IsolateAsync(List<AuditDraft> entries)
     {
-        var suspects = new List<(AuditDraft Draft, Exception Error)>();
+        AuditDraft? suspect = null;
         for (var i = 0; i < entries.Count; i++)
         {
-            var failure = TryAfterSuspects(suspects, entries[i]);
+            var (failure, left) = TryAfterSuspect(suspect, entries[i]);
             // A failure that passes is no reason to leave anything out: once more, a moment later.
-            if (failure is not null && !IsStoreFailure(failure) && !await DelayAsync(TimeSpan.FromSeconds(1))) failure = TryAfterSuspects(suspects, entries[i]);
-            if (failure is null) continue;
-            if (IsStoreFailure(failure) || _closing.IsCancellationRequested || suspects.Count + 1 >= MostSuspects)
-                return [.. suspects.Select(s => s.Draft), .. entries.Skip(i)];
-            suspects.Add((entries[i], failure));
+            if (failure is not null && !IsStoreFailure(failure) && !await DelayAsync(TimeSpan.FromSeconds(1))) (failure, left) = TryAfterSuspect(left, entries[i]);
+            suspect = left;
+            if (failure is null)
+            {
+                // The file took the entry, then failed itself on the suspect: it goes in next, with everything after it.
+                if (suspect is not null) return [suspect, .. entries.Skip(i + 1)];
+                continue;
+            }
+            if (IsStoreFailure(failure) || _closing.IsCancellationRequested || suspect is not null)
+                return [.. suspect is null ? Array.Empty<AuditDraft>() : [suspect], .. entries.Skip(i)];
+            suspect = entries[i];
         }
-        // Refused, with nothing after them that the file took: they wait (the next entry recorded shows whether it's them).
-        return [.. suspects.Select(s => s.Draft)];
+        // Refused, with nothing after it that the file took: it waits (the next entry recorded shows whether it's it).
+        return suspect is null ? [] : [suspect];
     }
 
     /// <summary>
-    /// The suspects once more, in order, then the entry. A suspect the file takes now was refused for a moment by the file,
-    /// not for what it is, so it's written in its place; one it still refuses, right before it takes a later entry, is
-    /// what it won't take, and is left out, loudly. Without this, the file coming back between a suspect's last try and
-    /// the next entry's would leave the suspect out. The entry's failure; null once it's in.
+    /// The suspect once more, then the entry. A suspect the file takes now was refused for a moment by the file, not for
+    /// what it is, so it's written in its place. Once the file takes the entry, a suspect it refused just before is tried
+    /// once more (<see cref="TakeLateOrLeaveOut"/>): without that, the file coming back between the two tries would leave
+    /// the suspect out. A failure of the file itself on the suspect ends the try there: nothing goes in past it. The
+    /// entry's failure (null once it's in), and the suspect still waiting (null once it's in, or left out).
     /// </summary>
-    private Exception? TryAfterSuspects(List<(AuditDraft Draft, Exception Error)> suspects, AuditDraft entry)
+    private (Exception? Failure, AuditDraft? Suspect) TryAfterSuspect(AuditDraft? suspect, AuditDraft entry)
     {
-        var refused = new List<(AuditDraft Draft, Exception Error)>();
-        foreach (var suspect in suspects)
+        if (suspect is not null && TryAppend([suspect]) is { } error)
         {
-            if (TryAppend([suspect.Draft]) is { } error)
-            {
-                refused.Add((suspect.Draft, error));
-                continue;
-            }
-            // The file took this one after refusing them: it's them it won't take, not the file failing.
-            LeaveOut(refused);
-            refused.Clear();
+            if (IsStoreFailure(error)) return (error, suspect);
         }
-        suspects.Clear();
-        suspects.AddRange(refused);
+        else
+        {
+            suspect = null;
+        }
         var failure = TryAppend([entry]);
-        if (failure is null)
-        {
-            LeaveOut(suspects);
-            suspects.Clear();
-        }
-        return failure;
+        if (failure is null && suspect is not null) suspect = TakeLateOrLeaveOut(suspect);
+        return (failure, suspect);
     }
 
-    private void LeaveOut(IEnumerable<(AuditDraft Draft, Exception Error)> refused)
+    /// <summary>
+    /// The file has just taken the entry after the suspect, which it refused right before: the suspect is tried once more.
+    /// Taken now, it was refused by a file that came back between the two tries, not for what it is: it goes in now, one
+    /// place late (its own time kept, and the chain doesn't mind). Still refused, it's what the file won't take, and is left
+    /// out, loudly. One the file itself fails on now (<see cref="IsStoreFailure"/>) isn't the entry's fault: it's
+    /// returned, to wait, and goes in next.
+    /// </summary>
+    private AuditDraft? TakeLateOrLeaveOut(AuditDraft suspect)
     {
-        foreach (var (draft, error) in refused)
-            _logger?.LogError(error, "The audit log's file takes other entries but refuses this one, so it's left out: {Action}: {Summary}", draft.Action, draft.Summary);
+        if (TryAppend([suspect]) is not { } error)
+        {
+            _logger?.LogInformation("An audit entry the file refused for a moment went in after the one recorded after it: {Action}", suspect.Action);
+            return null;
+        }
+        if (IsStoreFailure(error)) return suspect;
+        LeaveOut(suspect, error);
+        return null;
     }
+
+    private void LeaveOut(AuditDraft draft, Exception error) =>
+        _logger?.LogError(error, "The audit log's file takes other entries but refuses this one, so it's left out: {Action}: {Summary}", draft.Action, draft.Summary);
 
     // Waits, unless the log is closing: true when it is.
     private async Task<bool> DelayAsync(TimeSpan delay)
     {
         try
         {
-            await Task.Delay(delay, _closing.Token);
+            await Task.Delay(delay, Time, _closing.Token);
             return false;
         }
         catch (OperationCanceledException)

@@ -33,9 +33,10 @@
         @if (Disk is { TotalBytes: > 0 } disk)
         {
             var used = disk.TotalBytes - disk.FreeBytes;
-            <span class="gb-hs-v">@Gb(used) <small>of @Gb(disk.TotalBytes) GB</small></span>
+            @* In the units the disk's lines are said in (Settings › Disk, the dashboard), so a figure is under a line when it says so. *@
+            <span class="gb-hs-v">@Gitberth.Disk.DiskText.WholeGb(used) <small>of @Gitberth.Disk.DiskText.WholeGb(disk.TotalBytes) GB</small></span>
             <Meter Fraction="@((double)used / disk.TotalBytes)" Large="true" Title="The host's disk in use" />
-            <span class="gb-hs-sub" style="@(disk.Low ? "color:#ffd98a" : null)">@Gb(disk.FreeBytes) GB free@(disk.TooLow ? ": too little to pull images" : disk.Low ? ": getting low" : "")</span>
+            <span class="gb-hs-sub" style="@(disk.Low ? "color:#ffd98a" : null)">@Gitberth.Disk.DiskText.Free(disk)@(disk.TooLow ? ": too little to pull images" : disk.Low ? ": getting low" : "")</span>
         }
         else
         {
@@ -88,6 +89,4 @@
         .Select(c => $"{Apps.FirstOrDefault(a => a.Container == c.Name)?.Title ?? c.Name} {AppFacts.Percent(c.Recent[^1].Cpu / Cpus)}"));
 
     private static string Gib(double bytes) => (bytes / (1L << 30)).ToString(bytes >= 10L << 30 ? "0" : "0.0", CultureInfo.InvariantCulture);
-
-    private static string Gb(long bytes) => (bytes / 1e9).ToString("0", CultureInfo.InvariantCulture);
 }

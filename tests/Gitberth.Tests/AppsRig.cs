@@ -258,6 +258,15 @@ internal sealed class HostEngine : HttpMessageHandler
     /// <summary>The volumes `docker volume ls` lists.</summary>
     public HashSet<string> Volumes { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// The image tags `docker image ls` lists ("gitberth/orb:1d2948c"), and `docker image rm` of one takes away unless
+    /// <see cref="Failing"/> says it fails. None unless a test adds them.
+    /// </summary>
+    public List<string> Tags { get; } = [];
+
+    /// <summary>When a `docker start` or `docker restart` says the container started (its State.StartedAt); a fixed time of the fixtures' when null.</summary>
+    public DateTime? StartsAt { get; set; }
+
     public JsonObject Inspect(string name)
     {
         lock (_gate) return _inspects[name];
@@ -327,6 +336,54 @@ internal sealed class HostEngine : HttpMessageHandler
         Know(listed, inspect);
         return id;
     }
+
+    /// <summary>
+    /// A container that stopped as a crash, a stop or a failed start leaves it: its exit code and when, whether it ran out
+    /// of memory, what Docker said when it couldn't start it, and its restart policy ("no", "on-failure:3"; as it was when
+    /// null). <see cref="SetState"/> only writes an exit with 0 and no time.
+    /// </summary>
+    public void SetExited(string name, int exitCode, DateTime finishedAt, bool oom = false, string? error = null, string? policy = null)
+    {
+        lock (_gate)
+        {
+            var inspect = _inspects[name];
+            var listed = _listed.Single(l => (string)l["Id"]! == (string)inspect["Id"]!);
+            listed["State"] = "exited";
+            listed["Status"] = $"Exited ({exitCode.ToString(CultureInfo.InvariantCulture)}) 1 minute ago";
+            inspect["State"] = new JsonObject
+            {
+                ["Status"] = "exited", ["Running"] = false, ["ExitCode"] = exitCode, ["OOMKilled"] = oom, ["Error"] = error ?? "",
+                ["StartedAt"] = ContainerPorts.Str(inspect["State"], "StartedAt") ?? "2026-11-07T01:00:00.123456789Z", ["FinishedAt"] = Stamp(finishedAt),
+            };
+            if (policy is not null)
+            {
+                var parts = policy.Split(':');
+                inspect["HostConfig"]!["RestartPolicy"] = new JsonObject
+                {
+                    ["Name"] = parts[0], ["MaximumRetryCount"] = parts.Length > 1 ? int.Parse(parts[1], CultureInfo.InvariantCulture) : 0,
+                };
+            }
+        }
+    }
+
+    /// <summary>A container someone started at <paramref name="startedAt"/>; Docker keeps when it last stopped.</summary>
+    public void SetRunning(string name, DateTime startedAt)
+    {
+        lock (_gate)
+        {
+            var inspect = _inspects[name];
+            var listed = _listed.Single(l => (string)l["Id"]! == (string)inspect["Id"]!);
+            listed["State"] = "running";
+            listed["Status"] = "Up 1 second";
+            inspect["State"] = new JsonObject
+            {
+                ["Status"] = "running", ["Running"] = true, ["ExitCode"] = 0, ["OOMKilled"] = false, ["Error"] = "",
+                ["StartedAt"] = Stamp(startedAt), ["FinishedAt"] = ContainerPorts.Str(inspect["State"], "FinishedAt") ?? "0001-01-01T00:00:00Z",
+            };
+        }
+    }
+
+    private static string Stamp(DateTime at) => at.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'", CultureInfo.InvariantCulture);
 
     private void Know(JsonObject listed, JsonObject inspect)
     {
@@ -419,6 +476,15 @@ internal sealed class HostEngine : HttpMessageHandler
         Writes.Add("docker " + line);
         if (Failing.FirstOrDefault(f => line.StartsWith(f.Key, StringComparison.Ordinal)) is { Key: not null } failing) return new ProcessResult(1, "", failing.Value);
         var name = args[^1];
+        // The tags a test gave: listed by repository (or all of them), and taken away by a removal that works.
+        if (args is ["image", "ls", var what, ..])
+            return Ok(string.Concat(Tags.Where(t => what.StartsWith("--", StringComparison.Ordinal) || t.StartsWith(what + ":", StringComparison.Ordinal))
+                .Select(t => t + "\n")));
+        if (args is ["image", "rm", var tag])
+        {
+            Tags.Remove(tag);
+            return Ok("Untagged: " + tag + "\n");
+        }
         switch (args[0])
         {
             case "rm":
@@ -431,6 +497,7 @@ internal sealed class HostEngine : HttpMessageHandler
             case "start" or "restart":
                 if (!_inspects.TryGetValue(name, out var started)) return Missing(name);
                 SetState(_listed.Single(l => (string)l["Id"]! == (string)started["Id"]!), started, "running");
+                if (StartsAt is { } at) started["State"]!["StartedAt"] = Stamp(at);
                 return Ok(name + "\n");
             case "stop":
                 if (!_inspects.TryGetValue(name, out var stopped)) return Missing(name);

@@ -46,6 +46,7 @@ The app page's **More** menu has **On the Health page**, which opens the page at
 | **Settings applied** | A deploy applied saved settings |
 | **Rollback #12**, **Rolled back** | A rollback, or the previous version running again after a failed deploy |
 | **Scheduled restart** | A scheduled restart |
+| **Brought back** | Gitberth made the container again because it was gone ([When an app stops by itself](#when-an-app-stops-by-itself)) |
 | **Recreated** | A new container took its place |
 | **Started**, **Stopped**, **Restarted** | Started, stopped, or restarted by Docker or by hand |
 | **Exited** | Its process ended with exit code 0 |
@@ -119,6 +120,73 @@ The field shows for Git apps and for apps with a web port.
 - **Rolls back when they fail.** If the new container reports unhealthy, never reports healthy in time, or the health URL doesn't answer, the old container keeps running (or comes back), and the deploy log or change dialog says which check failed.
 
 Gitberth doesn't restart a container that turns unhealthy later. To restart an app now and then, give it a scheduled restart (see [Scheduled jobs and restarts](scheduled-jobs-and-restarts.md)).
+
+## When an app stops by itself
+
+Docker starts a crashed container again only as its restart policy says (**When it stops** on the app's Settings tab,
+under **Restart**): never with **Never**, a few times with **On failure**. Every 30 seconds Gitberth looks at every app
+that's meant to run, and brings one back that stopped by itself:
+
+- **It crashed and Docker won't start it again**: it exited with an error, or ran out of memory, whatever its restart
+  policy (**Never** included).
+- **Docker couldn't start it**: a port was taken, or a folder it mounts wasn't there yet when the host booted.
+- **It stopped when Docker or the host restarted**, and its restart policy didn't start it again.
+- **A deploy stopped it and couldn't start it again.** Not a `docker stop` someone ran while the deploy was building:
+  Gitberth heard that one, knew it wasn't its own, and leaves it.
+- **Its container is gone**: Gitberth makes it again. A Git or Compose app gets a deploy without a build from its last
+  image (or its current release); with that image gone too (Docker says so), the commit it ran is built again on its
+  branch, never a newer one. An app from a registry, a local image or by hand is made again from its saved settings. A
+  Compose service that Compose never creates (behind a profile, or with no replicas) isn't missing.
+
+It waits until the app has been down for 30 seconds (a missing container: two looks in a row), so Docker's own restarts
+and a `docker restart` are over first. It never starts an app while a deploy, a change, a deletion or a Forget has it,
+nor when Docker doesn't answer, and a Stop that comes while it brings an app back wins.
+
+### What it leaves alone
+
+- **An app you stopped**: with **Stop** in Gitberth, or with `docker stop` or `docker kill` outside it. Gitberth reads the
+  stop from Docker's events, or from its exit code (130, 137 and 143) when it wasn't watching. It remembers a stop it
+  left, so the app stays stopped after Gitberth restarts, even once Docker's events of it are gone.
+- **A program that ended by itself with exit code 0**, as a one-shot job does.
+- **An app whose deploy to bring it back you cancelled**: Gitberth leaves it as it is, without trying every 6 hours,
+  until you start, stop or deploy it.
+- **A container someone adopted that's gone**: Gitberth doesn't make it again by itself. Start it to make it again from
+  its saved settings, or forget the app.
+- **Gitberth itself.**
+
+The app's Activity says once why it was left, and its page shows **It stopped without a crash** (or **Gitberth leaves it
+as it is**, after a cancelled deploy).
+
+### When it keeps stopping
+
+Gitberth tries up to 4 times in a row: at once, then 1, 5 and 15 minutes after the try before. An app that then stays up
+for 10 minutes is fine again, and its next stop counts from the first try. A build counts as all 4 tries: if building it
+again doesn't work, Gitberth stops at once.
+
+After the 4th try, Gitberth stops bringing it back and tells you. It still tries every 6 hours, quietly, and tells you
+only if the app comes back. Start or deploy the app once it's fixed: from then on a stop counts from the first try again.
+A deploy that changed nothing that runs (a commit the build filters skip, or one cancelled before it ran) doesn't count
+as one. A try counts even when Gitberth can't write it down (a full disk, say), so the back-off holds.
+
+### Where it says so
+
+- **The app's page**: a banner while a try is coming (**Gitberth brings it back in a moment**, with **Start now**), and once
+  Gitberth gave up (**Gitberth stopped bringing it back**, with **Start** and **Logs**).
+- **The dashboard and the top bar**: an app Gitberth gave up on shows as a banner, and as a pill on every page.
+  [AI agents](../reference/api.md) see it in `get_health`'s problems.
+- **Activity**: each try, and the give-up (the **Starts and stops** filter).
+- **The audit log**: `app.recovered` for each try and `app.recovery.stopped` for the give-up, by Gitberth through the
+  keep-running check (see [Audit log](audit-log.md)).
+- **Notifications**: with **Gitberth brings an app back** on in **Settings › Notifications**, the first try of each
+  incident (once the app runs), one notice for all the apps brought back after Docker or the host restarted, and the
+  give-up (see [Notifications](notifications.md)). Its own deploys aren't told as deploys, however they end, nor posted
+  to GitHub or GitLab as commit statuses: the commit they build ran already.
+- **Settings › Keep apps running**: the apps Gitberth gave up on, with **Start**, and what it brought back in the last 24
+  hours. Turn **Bring apps back by themselves** off there to have Gitberth leave every stopped app as it is.
+
+Two things to know: a `docker stop` of an app in the same minute as Gitberth's own container stops looks like Docker
+restarting, so that app comes back with Gitberth; and Gitberth running outside a container (while developing it) can't
+tell a Docker restart from a stop.
 
 ## Related
 

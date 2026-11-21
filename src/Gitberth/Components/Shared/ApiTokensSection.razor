@@ -1,5 +1,7 @@
 @using Gitberth.Agents
+@using Gitberth.Credentials
 @inject ApiTokens Tokens
+@inject CredentialWatch Credentials
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -21,6 +23,7 @@
         </div>
     </div>
     <div class="gb-sec-body">
+        <AttentionBanners Where="@(i => i.Key.StartsWith(CredentialWatch.BoardKey(CredentialWatch.ApiTokenPrefix), StringComparison.Ordinal))" Here="settings#agents" />
         @if (created is { Token: { } made, Secret: { } secret })
         {
             <Banner Tone="good" Title="@($"Token {made.Name} is ready: copy it now")" OnDismiss="Dismiss">
@@ -70,6 +73,10 @@
                             else if (t.ExpiredAt(now))
                             {
                                 <span class="gb-tag gb-tag--warn">Expired</span>
+                            }
+                            else if (ExpiresSoon(t, now) is { } soon)
+                            {
+                                <span class="gb-tag gb-tag--warn" data-tip="settings.agents.expires-soon">@soon</span>
                             }
                             <span class="gb-mono gb-t3" data-tip="settings.agents.prefix">@t.Shown</span>
                             <span class="gb-db-actions">
@@ -178,6 +185,16 @@
         new(30, "30 days"), new(90, "90 days"), new(365, "1 year"), new(0, "Never"),
     ];
 
+    /// <summary>
+    /// "expires in 5 days" for an active token that expires within the week (when the token watch's first warning about one
+    /// in use comes), "expires tomorrow", "expires today"; null for any other.
+    /// </summary>
+    internal static string? ExpiresSoon(TokenView token, DateTime now)
+    {
+        if (!token.ActiveAt(now) || token.ExpiresAt is not { } at || at - now > TimeSpan.FromDays(ExpiryRule.ApiToken[0])) return null;
+        return "expires " + CredentialText.When(new DateTimeOffset(DateTime.SpecifyKind(at, DateTimeKind.Utc)), new DateTimeOffset(DateTime.SpecifyKind(now, DateTimeKind.Utc)));
+    }
+
     private static string AccessTone(ApiAccess a) => a switch
     {
         ApiAccess.Admin => "gb-tag--serious",
@@ -239,6 +256,8 @@
         {
             if (await Tokens.RevokeAsync(token.Id))
                 Snackbar.Add($"Token {token.Name} is revoked.", Severity.Success);
+            // A revoked token is warned about no more.
+            Credentials.Poke();
             if (created?.Token?.Id == token.Id) created = null;
             await LoadAsync();
         }

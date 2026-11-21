@@ -1,4 +1,5 @@
-# Tips for the top bar (Components/Layout/MainLayout.razor, TopSearch.razor, DockerStatus.razor). See Help/TipCatalog.cs.
+# Tips for the top bar (Components/Layout/MainLayout.razor, TopSearch.razor, DockerStatus.razor, AttentionPill.razor).
+# See Help/TipCatalog.cs.
 
 topbar.search:
   title: Search
@@ -13,6 +14,13 @@ topbar.docker:
     The Docker Engine on this host, which Gitberth drives through its socket, and its version. **Docker offline**
     means Gitberth can't reach it, so no app can be started or changed. It's checked every 30 seconds.
   more: guides/troubleshooting#docker
+
+topbar.attention:
+  title: Something needs you
+  text: >-
+    Something Gitberth can't put right by itself and that needs you now, like a token its service refused. Click it to
+    go where it's put right (the dashboard, when there's more than one); it goes away by itself once it's dealt with.
+  more: getting-started/first-steps#the-dashboard
 
 topbar.new-app:
   title: New app

@@ -101,7 +101,7 @@
         "deploys" => i.Kind == ActivityKind.Deploy,
         "changes" => i.Kind is ActivityKind.Settings or ActivityKind.Live or ActivityKind.Change or ActivityKind.Recreated or ActivityKind.RecreatedOutside
             or ActivityKind.Updated or ActivityKind.UpdateFound or ActivityKind.RolledBack or ActivityKind.Created or ActivityKind.Adopted,
-        "docker" => i.Kind is ActivityKind.Started or ActivityKind.Stopped or ActivityKind.Restarted or ActivityKind.Event,
+        "docker" => i.Kind is ActivityKind.Started or ActivityKind.Stopped or ActivityKind.Restarted or ActivityKind.Event or ActivityKind.BroughtBack or ActivityKind.GaveUp,
         _ => true,
     }).ToList();
 

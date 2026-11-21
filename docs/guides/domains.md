@@ -33,6 +33,18 @@ cloudflared on the host's network (`--network host`, as above) reaches apps thro
 
 Routes you already made in Cloudflare that go to an app become that app's domains (see [Domains made in Cloudflare](#domains-made-in-cloudflare)). If anything needs attention, the notes under the token say what. When the token can't be saved, the message says why: no cloudflared container, more than one tunnel, a tunnel run from a credentials file, or a token without the permissions above. [Troubleshooting](troubleshooting.md#domains) lists them.
 
+### When the token expires
+
+A token made with an end date (Cloudflare calls it **TTL**) shows **token expires** and the day next to **Token saved**,
+as Cloudflare says when it's saved. While domains are on, Gitberth asks Cloudflare about the token every 6 hours, and
+says on the dashboard and in **Settings › Domains (Cloudflare)** when it's 3 weeks, a week and a day away, and when it has
+expired. When Cloudflare turns the token away (it expired, or was disabled or deleted), and again when Gitberth checks it
+at once, the banner says **Cloudflare refused Gitberth's API token** and the top bar has a pill until a new token is saved.
+Meanwhile domains can't be added, moved or removed, but the routes already in your tunnel keep working. Each of these
+sends a notice too (see [Notifications](notifications.md)). **Check the token** asks Cloudflare at once. While domains are
+off, Gitberth doesn't contact Cloudflare, so it doesn't check the token either. See
+[Tokens and sign-ins](troubleshooting.md#tokens-and-sign-ins).
+
 ## Add a domain to an app
 
 1. Open the app's page and click the **Network** tab.

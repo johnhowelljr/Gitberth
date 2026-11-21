@@ -1,0 +1,109 @@
+@using Gitberth.Keeper
+@inject AppKeeper Keeper
+@inject KeeperSettings Switch
+@inject AppActions Actions
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@* Settings › Keep apps running: whether Gitberth brings apps back by itself (src/Gitberth/Keeper), the apps it stopped bringing back, and what it brought back lately. *@
+<section class="gb-card gb-sec" id="keep" aria-labelledby="keep-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Autorenew" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3"><span id="keep-t">Keep apps running</span><Tip Key="settings.keep" /></div>
+            <p>Apps that stop by themselves, and containers that go missing, are started again.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        <SwitchRow @key="@($"keep{switchKey}")" Title="Bring apps back by themselves" Value="@on" ValueChanged="SetAsync" Disabled="busy" Tip="settings.keep.enabled"
+                   Sub="Every 30 seconds Gitberth looks at every app that's meant to run. One that crashed and that Docker won't restart, one that stopped when Docker or the host restarted, or one whose container is gone is started again: up to 4 times in a row, then Gitberth stops and tells you. An app you stopped, in Gitberth or with docker stop, stays stopped." />
+        @if (Keeper.GaveUp.Count > 0)
+        {
+            <div class="gb-h3" style="margin-top:6px">Gitberth stopped bringing these back<Tip Key="settings.keep.gave-up" /></div>
+            <div class="gb-reglist" role="list" aria-label="Apps Gitberth stopped bringing back">
+                @foreach (var g in Keeper.GaveUp)
+                {
+                    <div class="gb-notirow" role="listitem" @key="g.AppId">
+                        <span class="gb-notirow-icon"><SvgIcon Icon="@Icons.Material.Outlined.ErrorOutline" /></span>
+                        <div style="min-width:0">
+                            <div class="gb-regrow-t"><a href="@($"apps/{Uri.EscapeDataString(g.Key)}")">@g.Name</a></div>
+                            <div class="gb-regrow-s">@KeepText.GaveUpLine(g.Reason, g.Tries, g.Over, g.At, DateTime.UtcNow)</div>
+                        </div>
+                        <div class="gb-row gb-row--wrap gb-notirow-go">
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => StartAsync(g)" Busy="@(starting == g.Key)"
+                                 Disabled="@(starting is not null)" Label="@($"Start {g.Name}")" Tip="settings.keep.start">Start</Btn>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        <p class="gb-help"><Tip Key="settings.keep.recent">@KeepText.Recent(recent.Times, recent.Apps)</Tip></p>
+    </div>
+</section>
+
+@code {
+    private bool on = true, busy;
+    private string? starting;
+    private int switchKey;
+    private (int Times, IReadOnlyList<string> Apps) recent = (0, []);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Keeper.Changed += Refresh;
+        Switch.Changed += Refresh;
+        await ReadAsync();
+    }
+
+    public void Dispose()
+    {
+        Keeper.Changed -= Refresh;
+        Switch.Changed -= Refresh;
+    }
+
+    private void Refresh() => _ = InvokeAsync(async () =>
+    {
+        await ReadAsync();
+        StateHasChanged();
+    });
+
+    private async Task ReadAsync()
+    {
+        on = await Switch.OnAsync();
+        recent = await Keeper.RecentAsync(DateTime.UtcNow);
+    }
+
+    private async Task SetAsync(bool value)
+    {
+        busy = true;
+        try
+        {
+            await Switch.SetAsync(value);
+            on = value;
+            Snackbar.Add(value ? "Gitberth brings apps back by themselves now." : "Gitberth no longer brings apps back by themselves.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save it: {ex.Message}", Severity.Error);
+            // The switch goes back to what's saved.
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task StartAsync(KeepGaveUp app)
+    {
+        starting = app.Key;
+        try
+        {
+            var error = await Actions.StartAsync(app.Key);
+            Snackbar.Add(error is null ? $"Started {app.Name}." : $"Couldn't start {app.Name}: {error}", error is null ? Severity.Success : Severity.Error);
+        }
+        finally
+        {
+            starting = null;
+        }
+    }
+}

@@ -174,6 +174,7 @@ public static class EventMarks
                 DeployTrigger.ConfigChange => new(MarkKind.Deploy, "Settings applied", $"Restarted with its new settings (deploy #{deployment})", MarkTone.Neutral),
                 DeployTrigger.Created => new(MarkKind.Deploy, $"Deploy #{deployment}", $"First deploy (#{deployment})", MarkTone.Neutral),
                 DeployTrigger.Start => new(MarkKind.Start, "Started", $"Started from Gitberth (deploy #{deployment})", MarkTone.Good),
+                DeployTrigger.Recover => new(MarkKind.Start, "Brought back", $"Brought back by Gitberth (deploy #{deployment})", MarkTone.Warning),
                 _ => new(MarkKind.Deploy, $"Deploy #{deployment}", $"{Format.Trigger(t)}: deploy #{deployment}", MarkTone.Neutral),
             }
             : new(MarkKind.Deploy, $"Deploy #{deployment}", $"Deploy #{deployment}", MarkTone.Neutral);
@@ -209,6 +210,9 @@ public static class EventMarks
         Why.Exited when events[i].ExitCode is { } code and not (0 or 130 or 143) => (true, false),
         _ => (false, false),
     };
+
+    /// <summary>Whether someone asked the container in the die at <paramref name="i"/> to stop: a kill before it, or Docker's stop after it.</summary>
+    public static bool AskedToStop(IReadOnlyList<ContainerEvent> events, int i) => WhyDied(events, i) == Why.Stopped;
 
     /// <summary>Why the container in a die event stopped: asked to (a kill before it, or the stop Docker reports after it), out of memory, or on its own.</summary>
     private static Why WhyDied(IReadOnlyList<ContainerEvent> events, int i)

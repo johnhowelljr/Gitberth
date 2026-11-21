@@ -95,7 +95,9 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
     private async Task<int> QueueAsync(GitberthDb db, AppDefinition app, int appId, DeployTrigger trigger, string? expectedSha, string? gitRef, string? commit,
         string? promotedOver, CancellationToken ct, bool noCache = false, string? hookName = null)
     {
-        app.DesiredState = DesiredState.Running;
+        // The keep-running check's deploy never makes the app meant to run: a Stop that came meanwhile stays, and the
+        // deploy's swap reads it and starts nothing.
+        if (trigger != DeployTrigger.Recover) app.DesiredState = DesiredState.Running;
         // A promote's commit isn't its branch's: a promote that never runs, or fails, leaves what the watcher knows about
         // the branch as it was, so a rollback stays.
         if (expectedSha is not null && trigger != DeployTrigger.Promote) app.LastAttemptedCommit = expectedSha;
@@ -160,6 +162,19 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = await db.Apps.FirstAsync(a => a.Id == appId, ct);
         if (!app.Deployed) throw NotGit(app);
+        if (await RecreateCoreAsync(db, app, trigger, fromDeploymentId, ct) is int id) return id;
+        // Nothing to run again without a build (no image yet, or the release's files are gone): it's deployed again from its source.
+        await db.DisposeAsync();
+        return await DeployAsync(appId, trigger, ct);
+    }
+
+    /// <summary>
+    /// A deploy without a build, queued for <paramref name="app"/> as <paramref name="db"/> tracks it; null when there's
+    /// nothing to run again without one. It never waits on the deploy gate, so the keep-running check queues one under it.
+    /// </summary>
+    private async Task<int?> RecreateCoreAsync(GitberthDb db, AppDefinition app, DeployTrigger trigger, int? fromDeploymentId, CancellationToken ct)
+    {
+        var appId = app.Id;
         if (app.IsCompose) return await RecreateComposeAsync(db, app, trigger, fromDeploymentId, ct);
         string? image = app.CurrentImage, sha = app.CurrentCommit, message = null, author = null;
         if (fromDeploymentId is int fromId)
@@ -177,13 +192,10 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
             message = current?.CommitMessage;
             author = current?.CommitAuthor;
         }
-        if (image is null)
-        {
-            await db.DisposeAsync();
-            return await DeployAsync(appId, trigger, ct);
-        }
+        if (image is null) return null;
 
-        app.DesiredState = DesiredState.Running;
+        // The keep-running check's deploy never makes the app meant to run: a Stop that came meanwhile stays.
+        if (trigger != DeployTrigger.Recover) app.DesiredState = DesiredState.Running;
         var dep = new Deployment
         {
             AppId = appId, Trigger = trigger, ImageTag = image, CommitSha = sha, CommitMessage = message, CommitAuthor = author,
@@ -539,7 +551,12 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
             {
                 foreach (var tag in await docker.ListImageTagsAsync(app.ImageRepository)) await docker.RemoveImageAsync(tag);
                 await docker.PruneDanglingImagesAsync(app.Slug);
+                // A tag a container still uses stays: the disk cleanup removes it once nothing does.
+                if ((await docker.ListImageTagsAsync(app.ImageRepository)).Count > 0)
+                    await Disk.DiskLeftovers.RecordAsync(dbFactory, app.ImageRepository, prefix: false, DateTime.UtcNow);
             }
+            // Its images kept on purpose: an earlier app's leftovers under the slug no longer take any of them.
+            else await Disk.DiskLeftovers.ForgetAsync(dbFactory, app.Slug);
             if (removeVolumes)
             {
                 // One another app has too stays: it's that app's data as well (VolumeOwners).
@@ -630,7 +647,7 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
         var app = await RowAsync(key, ct);
         if (app is { Deployed: true })
             return new RemoveResult(true, $"{app.Name} is deleted.", await DeleteAsync(app.Id, removeImages: options.Image, removeVolumes: options.Volumes, removeDatabases: options.Databases));
-        return await RemoveOtherAsync(key, app, options, ct);
+        return await WhileRemovingAsync(app, () => RemoveOtherAsync(key, app, options, ct));
     }
 
     // An app's databases as it goes (Settings › Databases): never a reason to keep the app.
@@ -792,10 +809,13 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
 
     /// <summary>
     /// Creates a missing app's container again from its saved settings, through the change engine (which starts it, checks
-    /// it, and removes it again if it fails). Null when the create started; it runs on its own.
+    /// it, and removes it again if it fails). Null when the create started; it runs on its own, and asks again under the
+    /// container's lock, right before it creates anything, whether the app is still meant to run (a Stop, a deletion or a
+    /// Forget that came meanwhile wins).
     /// </summary>
     internal async Task<string?> CreateAgainAsync(AppDefinition app, CancellationToken ct)
     {
+        var appId = app.Id;
         if (catalog is null || (changer is null && Create is null)) return $"{app.ContainerName} is missing, and Gitberth can't create it again from here.";
         // Renamed outside Gitberth, it's still there, on the same volumes: a second one next to it is never made.
         if (await RenamedToAsync(app, ct) is { } other)
@@ -813,6 +833,7 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
             HealthPath = app.HealthCheckPath,
             WebPort = PortRules.WebOf(app.Ports)?.ContainerPort,
             SecretKeys = GitAppSettings.SecretKeysOf(app),
+            Wanted = async c => await NotWantedAsync(appId, c) ? NotWanted(app.Name) : null,
         };
         // Its first start is Gitberth's, not a recreate made outside it (AppSync).
         catalog.Creating(app.ContainerName);

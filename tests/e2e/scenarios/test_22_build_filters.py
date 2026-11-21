@@ -156,7 +156,8 @@ def test_settings_shows_the_build_cache_and_asks_before_clearing_it(page, gitber
     gitberth.open(page, "/settings")
     row = page.locator("#build-cache")
     row.wait_for()
-    until(lambda: re.search(r"[\d.]+ (B|KiB|MiB|GiB|TiB) on this host", row.inner_text()), 60, "the build cache's size", seen=row.inner_text)
+    # In Settings › Disk's own units, as its free space and lines say them.
+    until(lambda: re.search(r"[\d.]+ (KB|MB|GB) on this host", row.inner_text()), 60, "the build cache's size", seen=row.inner_text)
     row.get_by_role("button", name="Clear build cache").click()
     dialog = page.locator(".mud-dialog")
     dialog.wait_for()

@@ -56,8 +56,9 @@ apps.host.memory:
 apps.host.disk:
   title: Disk
   text: >-
-    Docker's disk, where its images, build caches and volumes live: what's used, of its size. Below 15 GB free it's
-    **getting low**; below 5 GB, or 5% of the disk, Gitberth won't pull images until you make room.
+    Docker's disk, where its images, build caches and volumes live: what's used, of its size. Below 15 GB free (less on
+    a small disk, more on a big one) it's **getting low**; below 5 GB, or 5% of the disk, Gitberth won't pull images
+    until you make room.
   more: guides/troubleshooting#dockers-disk-is-filling-up
 
 # ---- The toolbar ----

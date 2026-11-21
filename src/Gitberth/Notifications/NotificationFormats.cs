@@ -83,6 +83,8 @@ public static class NotificationFormats
             ["trigger"] = n.Trigger,
             ["hook"] = n.Hook,
             ["address"] = n.Address,
+            ["credential"] = n.Credential,
+            ["expires"] = n.Expires?.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
             ["time"] = n.At.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture),
         };
         var headers = new List<KeyValuePair<string, string>> { new("X-Gitberth-Event", EventName(n.Event)) };
@@ -111,6 +113,12 @@ public static class NotificationFormats
         NotifyEvent.Down => "uptime.down",
         NotifyEvent.BackUp => "uptime.up",
         NotifyEvent.CertificateExpiring => "certificate.expiring",
+        NotifyEvent.DiskLow => "disk.low",
+        NotifyEvent.DiskOk => "disk.ok",
+        NotifyEvent.BroughtBack => "app.brought-back",
+        NotifyEvent.GaveUp => "app.gave-up",
+        NotifyEvent.TokenExpiring => "token.expiring",
+        NotifyEvent.TokenRefused => "token.refused",
         _ => "test",
     };
 

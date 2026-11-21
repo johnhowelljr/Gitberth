@@ -238,11 +238,11 @@ public sealed class DeployHookTests : IDisposable
         Assert.All(answers, a => Assert.Equal(201, a.Status));
         var newest = answers.Select(a => Json(a).GetProperty("deployment").GetInt32()).Max();
         // The newest wins the slot; the ones it took the place of are cancelled as superseded.
-        var settled = await UntilAsync(async () =>
+        var settled = await Eventually.UntilAsync(async () =>
         {
             var hooked = (await DeploymentsAsync(_rig.ObsId)).Where(d => d.Trigger == DeployTrigger.Hook).ToList();
             return hooked.Count(d => d.Status == DeployStatus.Cancelled) == 4 ? hooked : null;
-        });
+        }, "the four superseded deploys to be cancelled");
         Assert.Equal(newest, Assert.Single(settled, d => d.Status == DeployStatus.Queued).Id);
         Assert.All(settled.Where(d => d.Id != newest), d => Assert.Equal("Superseded by a newer deploy", d.Error));
         var active = (await DeploymentsAsync(_rig.ObsId)).Where(d => d.IsActive).ToList();
@@ -444,17 +444,5 @@ public sealed class DeployHookTests : IDisposable
         Assert.Null(endpoint.Metadata.GetMetadata<IHttpMethodMetadata>());
         Assert.NotNull(endpoint.Metadata.GetMetadata<IAllowAnonymous>());
         Assert.False(endpoint.Metadata.GetMetadata<IAntiforgeryMetadata>()!.RequiresValidation);
-    }
-
-    // Polls until a condition holds, for what settles in the background (a superseded deploy marked cancelled).
-    private static async Task<T> UntilAsync<T>(Func<Task<T?>> check, int timeoutMs = 10_000) where T : class
-    {
-        var until = DateTime.UtcNow.AddMilliseconds(timeoutMs);
-        while (true)
-        {
-            if (await check() is { } done) return done;
-            if (DateTime.UtcNow > until) throw new TimeoutException("It didn't settle in time.");
-            await Task.Delay(25);
-        }
     }
 }

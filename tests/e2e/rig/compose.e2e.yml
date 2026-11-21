@@ -32,9 +32,10 @@ services:
       # name: the scenarios' zones (<uniq>.test) resolve nowhere else. Host and TLS server name stay the domain's.
       GITBERTH_UPTIME_CONNECT_TO: "${E2E_STANDIN_IP}:443"
       # The rig's shorter waits (src/Gitberth/TestTimings.cs): a new container stays up 3 s instead of 15, pull requests
-      # are listed every 20 s instead of 5 min, a restart schedule's minute lasts 20 s and is looked at every 2 s. Unset:
-      # these. Set but empty (E2E_TEST_TIMINGS=, or E2E_TIMINGS=production with run.sh): as an install runs.
-      GITBERTH_TEST_TIMINGS: "${E2E_TEST_TIMINGS-stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2}"
+      # are listed every 20 s instead of 5 min, a restart schedule's minute lasts 20 s and is looked at every 2 s, and the
+      # keep-running check looks every 3 s instead of 30 (a stopped app waits 3 s too, and the first look comes 3 s after
+      # start). Unset: these. Set but empty (E2E_TEST_TIMINGS=, or E2E_TIMINGS=production with run.sh): as an install runs.
+      GITBERTH_TEST_TIMINGS: "${E2E_TEST_TIMINGS-stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2,keepEvery=3}"
     volumes:
       - gbe2e-trust:/e2e-trust:ro
     networks:
