@@ -45,9 +45,9 @@ Gitberth is a small, single-container tool that deploys private GitHub repos as 
 - [x] Any container reached straight from the LAN, at the host's address: each port is LAN, Host only or Internal, as a real Docker binding. A standalone container is published through a recreate that keeps everything else and rolls back by itself, and a Compose one gets the change for its Compose file. Containers join the shared network `gitberth` and stay on it after a recreate. A Network page lists every host port and Docker network, and a container can have its own LAN address
 - [x] 6 hours of Health history kept on disk across restarts of Gitberth, with deploys, restarts, stops, crashes and health changes marked on the charts (from Docker's events), and stopped containers kept on the page
 - [x] Bounded automatic retries for failed builds: once 15 minutes later and once after each Gitberth update; rolled-back deploys and manual rollbacks are left alone
-- [ ] Reconciler every 30 seconds that restarts apps that should be running (today this only happens at startup)
-- [ ] Weekly `docker builder prune` and disk usage on the dashboard
-- [ ] Token-expiry warning banner (the expiry date is already shown in Settings)
+- [x] Reconciler every 30 seconds that brings back apps that should be running but stopped by themselves or lost their container, up to 4 tries and then it says so; an app someone stopped stays stopped (before, this only happened at startup)
+- [x] Daily disk cleanup (build cache no build used for a week, untagged images of old builds, leftover images of deleted apps; more when the disk is low) and disk usage on the dashboard, with a warning before Docker's disk is full
+- [x] Token-expiry warning banners and notifications, and a clear message the moment a token is refused
 - [ ] Notifications (ntfy or Discord) when a deploy fails
 - [x] Scheduled restarts for any container (every N minutes, hours or days), without downtime for apps with a domain
 

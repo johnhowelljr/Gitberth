@@ -405,7 +405,7 @@ public sealed class AppReadTools(AgentContext ctx, AppCatalog catalog, AppSettin
             Regex regex;
             try
             {
-                regex = new Regex(grep[1..^1], RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(200));
+                regex = GrepRegex(grep[1..^1]);
             }
             catch (NotSupportedException)
             {
@@ -423,6 +423,10 @@ public sealed class AppReadTools(AgentContext ctx, AppCatalog catalog, AppSettin
         }
         return line => line.Contains(grep, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>A grep's regular expression (what's between its slashes): case-insensitive, without backtracking, 200 ms a line at most.</summary>
+    internal static Regex GrepRegex(string pattern) =>
+        new(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(200));
 
     /// <summary>The lines a grep matches, stopping as soon as the call is cancelled (its caller hung up).</summary>
     internal static List<string> Filter(IEnumerable<string> lines, Func<string, bool> match, CancellationToken ct)

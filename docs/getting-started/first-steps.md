@@ -18,10 +18,11 @@ The sidebar on the left holds:
 - **Dashboard**, **Apps**, **Network**, **Health** and **Audit log**. The number next to **Apps** is how many apps are
   running.
 - **Pinned**: the apps you've pinned, with their state.
-- **Settings**, **Help**, and the versions of Gitberth and Docker, like `Gitberth v1.4.0 · Docker 28.5.1`, at the bottom.
+- **Settings**, **Help**, and the versions of Gitberth and Docker, like `Gitberth v1.5.0 · Docker 28.5.1`, at the bottom.
 
 The top bar has a search box, the Docker engine's version (or **Docker offline**), the **?** button for help, the
-**New app** button and the account menu. Press **Ctrl K** to jump to the search. It finds apps by name, image, port or
+**New app** button and the account menu. While something needs you now, such as a token its service refused, a pill
+before the **?** says what; click it to go where it's put right. Press **Ctrl K** to jump to the search. It finds apps by name, image, port or
 address; **Enter** opens the one highlighted, and **All matches in Apps** opens the Apps list filtered by what you typed.
 
 ## Get help in Gitberth
@@ -56,6 +57,13 @@ The dashboard shows the whole host at a glance:
 Below these are the apps that need attention, your pinned apps, **This host** (CPU, the memory the apps use, and disk),
 and **Recent deploys** of every app. The **Live** pill at the top says the figures are current; they're read every 5
 seconds. **All apps** opens the Apps list.
+
+Above the figures, a banner says when something needs your attention, such as Docker's disk getting full or a token
+about to expire, and its buttons lead to where it's put right. It goes by itself once it's dealt with. One that can
+wait has a dismiss button: dismissed, it stays hidden until it has something new to say. The GitHub, GitLab and
+Cloudflare tokens get one 3 weeks, a week and a day before they expire (an API token in use, a week and a day before),
+and a red one with a pill in the top bar on every page once one has expired, or its service refused it, as for a
+registry sign-in (see [Tokens and sign-ins](../guides/troubleshooting.md#tokens-and-sign-ins)).
 
 ![The dashboard with apps running, pinned apps and recent deploys](../images/dashboard.webp)
 

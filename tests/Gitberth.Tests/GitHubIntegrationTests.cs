@@ -812,26 +812,205 @@ public sealed class GitHubIntegrationTests : IDisposable
         Assert.True(Assert.Single(_state.Hooks).Ok);
     }
 
+    private static readonly DateTime Noon = new(2026, 11, 9, 12, 0, 0, DateTimeKind.Utc);
+
     [Fact]
-    public async Task A_webhook_github_couldnt_save_for_a_moment_is_shown_and_tried_again_on_the_next_run()
+    public async Task A_webhook_github_couldnt_save_for_a_moment_is_shown_and_tried_again_soon()
     {
         await WebhookReadyAsync();
         var failing = true;
         _github.Respond = r => r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, "[]")
             : failing ? Json(HttpStatusCode.BadGateway, """{"message":"Server Error"}""") : Json(HttpStatusCode.Created, """{"id":4}""");
+        var now = Noon;
         var keeper = Keeper();
+        keeper.Now = () => now;
 
         await keeper.EnsureAllAsync();
 
         var shown = Assert.Single(_state.Hooks);
-        Assert.Equal((false, "GitHub didn't let Gitberth add a webhook to acme/web: Server Error (HTTP 502)."), (shown.Ok, shown.Text));
+        Assert.Equal((false, "GitHub didn't let Gitberth add a webhook to acme/web: Server Error (HTTP 502). Gitberth tries again in 15 seconds."), (shown.Ok, shown.Text));
         Assert.Empty(await RecordedHooksAsync());
-        // Not a refusal: the repo doesn't rest, and the next run tries again.
-        Assert.False(_state.Paused(GitHubFeature.Webhooks, "acme/web", DateTime.UtcNow));
+        // Not a refusal: the repo doesn't rest, and the keeper's next look is 15 seconds away rather than 10 minutes.
+        Assert.False(_state.Paused(GitHubFeature.Webhooks, "acme/web", now));
+        Assert.Equal(TimeSpan.FromSeconds(15), keeper.NextLook());
         failing = false;
+        now += keeper.NextLook();
         await keeper.EnsureAllAsync();
         Assert.Equal((true, "Webhook added"), (Assert.Single(_state.Hooks).Ok, _state.Hooks[0].Text));
         Assert.Equal(4, (await RecordedHooksAsync())["acme/web"]);
+        Assert.Equal(WebhookKeeper.Every, keeper.NextLook());
+    }
+
+    [Fact]
+    public async Task A_webhook_whose_answer_never_came_is_found_at_the_quick_retry_and_never_added_twice()
+    {
+        await WebhookReadyAsync();
+        // GitHub makes the webhook, and its answer never reaches Gitberth: the client gives up first (its timeout).
+        const string Made = """[{"id":77,"active":true,"events":["push","pull_request","delete"],"config":{"url":"https://hooks.example.com/hooks/github"}}]""";
+        _github.Respond = r => r.Method == HttpMethod.Post ? throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 15 seconds elapsing.")
+            : r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, _github.Calls.Contains("POST /repos/acme/web/hooks") ? Made : "[]")
+            : Json(HttpStatusCode.OK, """{"id":77}""");
+        var log = new Gitberth.Audit.AuditLog();
+        var now = Noon;
+        var keeper = new WebhookKeeper(_db, _settings, new GitHubWrites(new Factory(_github)), _state, NullLogger<WebhookKeeper>.Instance, audit: log) { Now = () => now };
+
+        await keeper.EnsureAllAsync();
+        var shown = Assert.Single(_state.Hooks);
+        Assert.Equal((false, "api.github.com didn't answer in time. Gitberth tries again in 15 seconds."), (shown.Ok, shown.Text));
+        Assert.Equal(TimeSpan.FromSeconds(15), keeper.NextLook());
+
+        now += keeper.NextLook();
+        await keeper.EnsureAllAsync();
+
+        // Listed first, found by its payload URL and set up: one POST in all, and it says it was added.
+        Assert.Equal(["GET /repos/acme/web/hooks", "POST /repos/acme/web/hooks", "GET /repos/acme/web/hooks", "PATCH /repos/acme/web/hooks/77"], _github.Calls);
+        Assert.Equal(77, (await RecordedHooksAsync())["acme/web"]);
+        Assert.Equal((true, "Webhook added"), (Assert.Single(_state.Hooks).Ok, _state.Hooks[0].Text));
+        Assert.Equal(
+            [
+                (Gitberth.Audit.AuditOutcome.Failed, "Couldn't set up Gitberth's webhook on acme/web: api.github.com didn't answer in time."),
+                (Gitberth.Audit.AuditOutcome.Succeeded, "Added Gitberth's webhook to acme/web on GitHub: pushes reach Gitberth at https://hooks.example.com/hooks/github."),
+            ], log.Entries.Where(e => e.Action == "github.webhook.added").Select(e => (e.Outcome, e.Summary)));
+        Assert.Equal(WebhookKeeper.Every, keeper.NextLook());
+    }
+
+    [Fact]
+    public async Task A_webhook_github_made_without_saying_which_is_looked_up_soon_by_its_url_and_recorded()
+    {
+        await WebhookReadyAsync();
+        _github.Respond = r => r.Method == HttpMethod.Post ? Json(HttpStatusCode.Created, "{}")
+            : r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, _github.Calls.Contains("POST /repos/acme/web/hooks")
+                ? """[{"id":31,"config":{"url":"https://hooks.example.com/hooks/github"}}]""" : "[]")
+            : Json(HttpStatusCode.OK, """{"id":31}""");
+        var log = new Gitberth.Audit.AuditLog();
+        var now = Noon;
+        var keeper = new WebhookKeeper(_db, _settings, new GitHubWrites(new Factory(_github)), _state, NullLogger<WebhookKeeper>.Instance, audit: log) { Now = () => now };
+
+        await keeper.EnsureAllAsync();
+        Assert.Equal((true, "Webhook added"), (Assert.Single(_state.Hooks).Ok, _state.Hooks[0].Text));
+        Assert.Empty(await RecordedHooksAsync());
+        Assert.Equal(TimeSpan.FromSeconds(15), keeper.NextLook());
+
+        now += keeper.NextLook();
+        await keeper.EnsureAllAsync();
+        Assert.Equal(["GET /repos/acme/web/hooks", "POST /repos/acme/web/hooks", "GET /repos/acme/web/hooks", "PATCH /repos/acme/web/hooks/31"], _github.Calls);
+        Assert.Equal(31, (await RecordedHooksAsync())["acme/web"]);
+        Assert.Equal("Webhook added", Assert.Single(_state.Hooks).Text);
+        Assert.Single(log.Entries, e => e.Action == "github.webhook.added");
+        Assert.Equal(WebhookKeeper.Every, keeper.NextLook());
+    }
+
+    [Fact]
+    public async Task A_webhook_that_keeps_failing_for_a_moment_is_tried_after_15_and_30_seconds_then_1_2_and_5_minutes_then_every_10()
+    {
+        await WebhookReadyAsync();
+        var failing = true;
+        _github.Respond = r => r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, "[]")
+            : failing ? Json(HttpStatusCode.ServiceUnavailable, """{"message":"Service Unavailable"}""") : Json(HttpStatusCode.Created, """{"id":4}""");
+        var now = Noon;
+        var keeper = Keeper();
+        keeper.Now = () => now;
+
+        var waits = new List<(TimeSpan, string)>();
+        for (var i = 0; i < 7; i++)
+        {
+            await keeper.EnsureAllAsync();
+            var text = Assert.Single(_state.Hooks).Text;
+            waits.Add((keeper.NextLook(), text[(text.IndexOf("tries again in ", StringComparison.Ordinal) + "tries again in ".Length)..]));
+            now += waits[^1].Item1;
+        }
+        Assert.Equal(
+            [
+                (TimeSpan.FromSeconds(15), "15 seconds."), (TimeSpan.FromSeconds(30), "30 seconds."), (TimeSpan.FromMinutes(1), "a minute."),
+                (TimeSpan.FromMinutes(2), "2 minutes."), (TimeSpan.FromMinutes(5), "5 minutes."), (WebhookKeeper.Every, "10 minutes."), (WebhookKeeper.Every, "10 minutes."),
+            ], waits);
+
+        // A success clears it: a failure after starts again at 15 seconds.
+        failing = false;
+        await keeper.EnsureAllAsync();
+        Assert.Equal(WebhookKeeper.Every, keeper.NextLook());
+        failing = true;
+        await AddAppAsync("api");
+        await keeper.EnsureAllAsync();
+        Assert.Equal(TimeSpan.FromSeconds(15), keeper.NextLook());
+        now += keeper.NextLook();
+        await keeper.EnsureAllAsync();
+        Assert.Equal(TimeSpan.FromSeconds(30), keeper.NextLook());
+
+        // So does a new host name: its webhook is another one.
+        await _settings.SetAsync(SettingKeys.GitHubWebhookHost, "gh.example.com");
+        await keeper.EnsureAllAsync();
+        Assert.Equal(TimeSpan.FromSeconds(15), keeper.NextLook());
+    }
+
+    [Fact]
+    public async Task A_quick_try_asks_only_about_the_repo_due_it_and_a_rate_limit_ends_every_quick_try()
+    {
+        await WebhookReadyAsync();
+        await AddAppAsync("api");
+        // acme/api's webhook isn't taken for a reason another try won't change; acme/web's failed for a moment.
+        _github.Respond = r => r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, "[]")
+            : r.RequestUri!.AbsolutePath.Contains("/acme/api/", StringComparison.Ordinal)
+                ? Json(HttpStatusCode.UnprocessableEntity, """{"message":"Validation Failed","errors":[{"resource":"Hook","code":"custom","message":"Config must contain url"}]}""")
+                : Json(HttpStatusCode.BadGateway, """{"message":"Server Error"}""");
+        var now = Noon;
+        var keeper = Keeper();
+        keeper.Now = () => now;
+        await keeper.EnsureAllAsync();
+        Assert.Equal(TimeSpan.FromSeconds(15), keeper.NextLook());
+
+        // The quick try 15 seconds later is acme/web's alone: acme/api waits for the 10-minute look.
+        now += keeper.NextLook();
+        var before = _github.Calls.Count;
+        await keeper.RetryDueAsync();
+        Assert.Equal(["GET /repos/acme/web/hooks", "POST /repos/acme/web/hooks"], _github.Calls.Skip(before).ToList());
+        Assert.Equal(TimeSpan.FromSeconds(30), keeper.NextLook());
+        // With no try due, a quick look asks GitHub nothing.
+        await keeper.RetryDueAsync();
+        Assert.Equal(before + 2, _github.Calls.Count);
+
+        // The token's rate limit, met on acme/api at the next full look: GitHub is asked nothing more, acme/web's quick
+        // try included, before the one after.
+        _github.Respond = r => r.RequestUri!.AbsolutePath.Contains("/acme/api/", StringComparison.Ordinal)
+            ? Json(HttpStatusCode.TooManyRequests, """{"message":"API rate limit exceeded"}""")
+            : r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, "[]") : Json(HttpStatusCode.BadGateway, """{"message":"Server Error"}""");
+        now += WebhookKeeper.Every;
+        before = _github.Calls.Count;
+        await keeper.EnsureAllAsync();
+        Assert.Equal(["GET /repos/acme/api/hooks"], _github.Calls.Skip(before).ToList());
+        Assert.Equal(WebhookKeeper.Every, keeper.NextLook());
+        Assert.Contains("rate limit", _state.Hooks.Single(h => h.Repo == "acme/api").Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_rate_limit_or_a_refusal_waits_for_the_next_look_never_a_quick_try()
+    {
+        await WebhookReadyAsync();
+        var keeper = Keeper();
+        keeper.Now = () => Noon;
+        foreach (var answer in new[]
+                 {
+                     Json(HttpStatusCode.TooManyRequests, """{"message":"API rate limit exceeded"}"""),
+                     Json(HttpStatusCode.UnprocessableEntity, """{"message":"Validation Failed","errors":[{"resource":"Hook","code":"custom","message":"Config must contain url"}]}"""),
+                     Json(HttpStatusCode.NotFound, """{"message":"Not Found"}"""),
+                     Json(HttpStatusCode.Unauthorized, """{"message":"Bad credentials"}"""),
+                 })
+        {
+            _state.Clear();
+            _github.Respond = r => r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, "[]") : answer;
+            await keeper.EnsureAllAsync();
+            var shown = Assert.Single(_state.Hooks);
+            Assert.False(shown.Ok);
+            Assert.DoesNotContain("tries again in", shown.Text);
+            Assert.Equal(WebhookKeeper.Every, keeper.NextLook());
+        }
+        // GitHub's "Hook already exists" is a webhook made by a request whose answer was lost: soon, it's found by its URL.
+        _state.Clear();
+        _github.Respond = r => r.Method == HttpMethod.Get ? Json(HttpStatusCode.OK, "[]")
+            : Json(HttpStatusCode.UnprocessableEntity, """{"message":"Validation Failed","errors":[{"resource":"Hook","code":"custom","message":"Hook already exists on this repository"}]}""");
+        await keeper.EnsureAllAsync();
+        Assert.EndsWith("Gitberth tries again in 15 seconds.", Assert.Single(_state.Hooks).Text);
+        Assert.Equal(TimeSpan.FromSeconds(15), keeper.NextLook());
     }
 
     [Fact]

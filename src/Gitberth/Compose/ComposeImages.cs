@@ -41,6 +41,13 @@ public sealed record ComposeImages(IReadOnlyDictionary<string, string> Refs, IRe
         ["ids"] = new JsonObject(Ids.Select(p => KeyValuePair.Create(p.Key, (JsonNode?)p.Value))),
     }.ToJsonString();
 
+    /// <summary>
+    /// The services this deploy brought up, by name: the ones whose container it found once they were up. A service Compose
+    /// never creates (one behind a profile, or with no replicas) has none, so it isn't a container gone. A deploy recorded
+    /// before the IDs were kept names every service of its file.
+    /// </summary>
+    public IReadOnlyList<string> BroughtUp => (Ids.Count > 0 ? Ids.Keys : Refs.Keys).Order(StringComparer.Ordinal).ToList();
+
     /// <summary>The app's own tag for the image a service ran: gitberth/&lt;slug&gt;/&lt;service&gt;:pin-&lt;first 12 of its ID&gt;.</summary>
     public static string PinTag(string slug, string service, string id)
     {

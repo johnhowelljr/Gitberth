@@ -8,8 +8,9 @@ public enum DockerfileMode { Auto, Custom }
 public enum DesiredState { Running, Stopped }
 
 // Stored as strings: values are only ever added, never renamed. Webhook: started by GitHub telling Gitberth about a push;
-// Promote: a preview's commit made the production version. Hook: a deploy hook's URL was called.
-public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart, Webhook, Promote, Hook }
+// Promote: a preview's commit made the production version. Hook: a deploy hook's URL was called. Recover: the keep-running
+// check made an app's container again (or built it again) because it was gone.
+public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart, Webhook, Promote, Hook, Recover }
 
 // Skipped: a new commit that changed only files the app's build filters leave out, or that asked not to be deployed;
 // the running version stays, and nothing was built.

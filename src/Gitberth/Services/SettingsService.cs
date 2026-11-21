@@ -92,6 +92,19 @@ public static class SettingKeys
     /// </summary>
     public const string BuildSecretsKey = "build.secretsKey";
 
+    // ---- Disk (1.4) ----
+    /// <summary>"false" when Gitberth doesn't clean up Docker's disk by itself; on when unset.</summary>
+    public const string DiskCleanup = "disk.cleanup";
+    /// <summary>How many days of no use the build cache is kept (1 to 90); 7 when unset.</summary>
+    public const string DiskKeepDays = "disk.keepDays";
+    /// <summary>
+    /// The images of deleted apps and previews whose removal was asked for but didn't go (a container still used them), as
+    /// a JSON list of repositories or prefixes: the disk cleanup removes them once nothing does.
+    /// </summary>
+    public const string DiskLeftovers = "disk.leftovers";
+    /// <summary>The disk cleanup's own record, as JSON: its last run of each kind, what it last told, and its last result for Settings.</summary>
+    public const string DiskState = "disk.state";
+
     // ---- Notifications (1.2) ----
     /// <summary>Where notifications go: a JSON list of channels, encrypted (webhook URLs, tokens and the mail password are keys).</summary>
     public const string NotifyDestinations = "notify.destinations";
@@ -101,6 +114,15 @@ public static class SettingKeys
     public const string NotifyPreviews = "notify.previews";
     /// <summary>The containers whose apps are left out of notifications, as a JSON list of names.</summary>
     public const string NotifyMuted = "notify.muted";
+
+    // ---- Keep apps running (1.4) ----
+    /// <summary>"false" when Gitberth doesn't bring apps that stopped by themselves back; on when unset.</summary>
+    public const string KeepEnabled = "keep.enabled";
+    /// <summary>
+    /// The keep-running check's own record, as JSON by app: the tries of an app's last incident, when it gave up on one and
+    /// when it tries again, so a restart of Gitberth neither forgets nor repeats them.
+    /// </summary>
+    public const string KeepState = "keep.state";
 
     // ---- Uptime checks, the status page and the down page (1.3) ----
     /// <summary>How often each app is checked from outside, in seconds (30 to 900); 60 when unset.</summary>

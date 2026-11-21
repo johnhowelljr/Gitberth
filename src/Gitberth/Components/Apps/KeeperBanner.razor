@@ -1,0 +1,103 @@
+@using Gitberth.Keeper
+@inject AppKeeper Keeper
+@implements IDisposable
+
+@*
+    What the keep-running check (src/Gitberth/Keeper) says of an app that's meant to run but is down, on the app's page: a
+    try coming, Gitberth having given up, a stop it leaves alone, or the check turned off. Inline, only the sentence the
+    "Its container is gone" banner adds. It follows the check's passes by itself.
+*@
+@if (Inline)
+{
+    @if (MissingWords(Status, App, MeantToRun, DateTime.UtcNow) is { } words)
+    {
+        <span> @words</span>
+    }
+}
+else if (MeantToRun && !App.Running)
+{
+    var status = Status;
+    switch (status.State)
+    {
+        case KeepState.Soon when status.Reason is { } why:
+            <Banner Tone="info" Icon="@Icons.Material.Outlined.Autorenew" Title="Gitberth brings it back in a moment" Tip="app.banner.keeper-soon">
+                <ChildContent>@KeepText.SoonBanner(why, status.NextTry, status.At, DateTime.UtcNow)</ChildContent>
+                <Actions>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="OnStart" Disabled="Busy">Start now</Btn>
+                </Actions>
+            </Banner>
+            break;
+        case KeepState.GaveUp when status.Reason is { } why:
+            <Banner Tone="critical" Title="Gitberth stopped bringing it back" Tip="app.banner.keeper-gave-up">
+                <ChildContent>@KeepText.GaveUpBanner(why, status.Tries, status.Over, status.At, DateTime.UtcNow)</ChildContent>
+                <Actions>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="OnStart" Disabled="Busy">Start</Btn>
+                    <Btn Size="BtnSize.Sm" Href="@($"{BaseHref}/logs")" Icon="@Icons.Material.Outlined.Article">Logs</Btn>
+                </Actions>
+            </Banner>
+            break;
+        case KeepState.Left when status.Reason is { } why:
+            <Banner Tone="info" Icon="@Icons.Material.Outlined.StopCircle" Title="@(why.Cause == KeepCause.Cancelled ? "Gitberth leaves it as it is" : "It stopped without a crash")"
+                    Tip="app.banner.keeper-left">
+                <ChildContent>@KeepText.Left(why)</ChildContent>
+                <Actions>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="OnStart" Disabled="Busy">Start</Btn>
+                </Actions>
+            </Banner>
+            break;
+        case KeepState.Off:
+            <Banner Tone="info" Title="Gitberth doesn't bring apps back by itself" Tip="app.banner.keeper-off">
+                <ChildContent>It's turned off in Settings › Keep apps running, so this app stays stopped until you start it.</ChildContent>
+                <Actions>
+                    <Btn Size="BtnSize.Sm" Href="settings#keep" Icon="@Icons.Material.Outlined.Settings">Settings</Btn>
+                </Actions>
+            </Banner>
+            break;
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public AppSummary App { get; set; } = default!;
+
+    /// <summary>The app's row: what the check says goes by it, and only an app meant to run has anything said.</summary>
+    [Parameter] public AppDefinition? Row { get; set; }
+
+    /// <summary>The app page's own address (apps/gb-website), for its Logs tab.</summary>
+    [Parameter] public string BaseHref { get; set; } = "";
+
+    /// <summary>Start, as the page's own Start button does it.</summary>
+    [Parameter] public EventCallback OnStart { get; set; }
+
+    [Parameter] public bool Busy { get; set; }
+
+    /// <summary>Only the sentence for the "Its container is gone" banner.</summary>
+    [Parameter] public bool Inline { get; set; }
+
+    private bool MeantToRun => Row is { DesiredState: DesiredState.Running };
+
+    private KeepStatus Status => Row is { } row ? Keeper.StatusOf(row.Id) : KeepStatus.Nothing;
+
+    protected override void OnInitialized() => Keeper.Changed += Refresh;
+
+    public void Dispose() => Keeper.Changed -= Refresh;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// What the "Its container is gone" banner adds about making it again by itself: when, that Gitberth stopped trying,
+    /// that someone cancelled its deploy, that it doesn't for an adopted container, or that the check is off. Null when
+    /// there's nothing to say.
+    /// </summary>
+    internal static string? MissingWords(KeepStatus status, AppSummary app, bool meantToRun, DateTime now) =>
+        app.State != AppState.Missing || !meantToRun ? null
+        : app.Source == AppSource.Existing ? "Gitberth doesn't make an adopted container again by itself."
+        : status.State switch
+        {
+            KeepState.Off => "Gitberth doesn't make it again by itself: Keep apps running is off in Settings.",
+            KeepState.GaveUp when status.Reason?.Cause == KeepCause.BuildFailed => "Gitberth stopped making it again: building it again didn't work.",
+            KeepState.GaveUp => $"Gitberth stopped making it again after {(status.Tries == 1 ? "1 try" : $"{status.Tries} tries")}.",
+            KeepState.Left when status.Reason?.Cause == KeepCause.Cancelled => "Gitberth doesn't make it again by itself: the deploy that was to do it was cancelled.",
+            KeepState.Soon => $"Gitberth makes it again by itself {KeepText.When(status.At, now)}.",
+            _ => null,
+        };
+}

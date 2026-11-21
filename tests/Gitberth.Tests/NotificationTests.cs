@@ -248,9 +248,122 @@ public sealed class NotificationTests : IDisposable
     {
         Assert.Empty(NotificationSettings.ParseDestinations("not json"));
         Assert.True(NotificationSettings.DefaultEvents.SetEquals(NotificationSettings.ParseEvents("{oops")));
-        // Chosen in 1.2 as a plain list: what it says, and the kinds added since (an app down, a certificate) as their defaults say.
-        Assert.True(NotificationSettings.ParseEvents("""["Crashed","Nonsense","Test"]""").SetEquals([NotifyEvent.Crashed, NotifyEvent.Down, NotifyEvent.CertificateExpiring]));
+        // Chosen in 1.2 as a plain list: what it says, and the kinds added since (an app down, a certificate, an app brought
+        // back, a token, Docker's disk) as their defaults say.
+        Assert.True(NotificationSettings.ParseEvents("""["Crashed","Nonsense","Test"]""").SetEquals([NotifyEvent.Crashed, NotifyEvent.Down, NotifyEvent.CertificateExpiring,
+            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow]));
         Assert.Empty(NotificationSettings.ParseMuted("[]"));
+    }
+
+    [Fact]
+    public void Choices_saved_before_the_new_kinds_get_them_as_their_defaults_say_and_once_known_they_stay_as_chosen()
+    {
+        // Saved by 1.4.1: the six kinds it knew, An app goes down turned off. The three added since come on; Down stays off.
+        const string saved = """{"on":["CertificateExpiring","Crashed","DeployFailed","Unhealthy"],"known":["DeployFailed","DeploySucceeded","Crashed","Unhealthy","Down","CertificateExpiring"]}""";
+        var on = NotificationSettings.ParseEvents(saved);
+        Assert.True(on.SetEquals([NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.CertificateExpiring,
+            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow]), string.Join(", ", on.Order()));
+        // Saved again now, every kind is known: one turned off stays off.
+        var written = NotificationSettings.WriteEvents(on.Remove(NotifyEvent.DiskLow));
+        Assert.DoesNotContain(NotifyEvent.DiskLow, NotificationSettings.ParseEvents(written));
+        Assert.Equal(NotificationSettings.Choosable.Order().Select(e => e.ToString()),
+            JsonDocument.Parse(written).RootElement.GetProperty("known").EnumerateArray().Select(k => k.GetString()));
+    }
+
+    [Fact]
+    public async Task The_new_kinds_are_on_by_default_and_what_follows_each_goes_with_its_switch()
+    {
+        NotifyEvent[] all = [NotifyEvent.BroughtBack, NotifyEvent.GaveUp, NotifyEvent.TokenExpiring, NotifyEvent.TokenRefused, NotifyEvent.DiskLow, NotifyEvent.DiskOk];
+        Assert.All(all, e => Assert.True(_choices.IsOn(e), $"{e} is off by default"));
+        // Giving up on an app, a token refused and room on the disk again have no switch of their own.
+        Assert.All(new[] { NotifyEvent.GaveUp, NotifyEvent.TokenRefused, NotifyEvent.DiskOk }, e => Assert.DoesNotContain(e, NotificationSettings.Choosable));
+        await Assert.ThrowsAsync<ArgumentException>(() => _choices.SetEventAsync(NotifyEvent.GaveUp, false));
+
+        await _choices.SetEventAsync(NotifyEvent.BroughtBack, false);
+        await _choices.SetEventAsync(NotifyEvent.TokenExpiring, false);
+        await _choices.SetEventAsync(NotifyEvent.DiskLow, false);
+        var again = new NotificationSettings(_settings);
+        await again.LoadAsync();
+        Assert.All(all, e => Assert.False(again.IsOn(e), $"{e} is still on"));
+        Assert.True(again.IsOn(NotifyEvent.Down));
+        Assert.True(again.IsOn(NotifyEvent.CertificateExpiring));
+    }
+
+    [Fact]
+    public async Task Each_switch_is_recorded_in_its_own_words()
+    {
+        var audit = new Audit.AuditLog();
+        var choices = new NotificationSettings(_settings, audit);
+        var words = new Dictionary<NotifyEvent, string>
+        {
+            [NotifyEvent.DeployFailed] = "a deploy fails",
+            [NotifyEvent.DeploySucceeded] = "a deploy succeeds",
+            [NotifyEvent.Crashed] = "an app crashes",
+            [NotifyEvent.Unhealthy] = "a health check fails",
+            [NotifyEvent.Down] = "an app goes down",
+            [NotifyEvent.BroughtBack] = "Gitberth brings an app back",
+            [NotifyEvent.CertificateExpiring] = "a certificate is about to expire",
+            [NotifyEvent.TokenExpiring] = "a token is about to expire or is refused",
+            [NotifyEvent.DiskLow] = "Docker's disk gets full",
+        };
+        // Every switch Settings has is here: a new one needs its words.
+        Assert.Equal(NotificationSettings.Choosable.Order(), words.Keys.Order());
+        foreach (var (kind, what) in words)
+        {
+            var on = !choices.IsOn(kind);
+            await choices.SetEventAsync(kind, on);
+            var entry = audit.Entries[^1];
+            Assert.Equal("settings.notifications.changed", entry.Action);
+            Assert.Equal(on ? $"Notifications are sent when {what} now." : $"No more notifications when {what}.", entry.Summary);
+            Assert.Equal(new Audit.AuditChange($"When {what}", on ? "off" : "on", on ? "on" : "off"), Assert.Single(entry.Changes));
+        }
+        // Before, every switch after the first three was recorded as the health check's.
+        Assert.Single(audit.Entries, e => e.Summary.Contains("a health check fails", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(NotifyEvent.DiskLow, "disk.low")]
+    [InlineData(NotifyEvent.DiskOk, "disk.ok")]
+    [InlineData(NotifyEvent.BroughtBack, "app.brought-back")]
+    [InlineData(NotifyEvent.GaveUp, "app.gave-up")]
+    [InlineData(NotifyEvent.TokenExpiring, "token.expiring")]
+    [InlineData(NotifyEvent.TokenRefused, "token.refused")]
+    public void The_new_kinds_have_their_own_names_in_a_webhook(NotifyEvent kind, string name)
+    {
+        Assert.Equal(name, NotificationFormats.EventName(kind));
+        var sent = NotificationFormats.Webhook(Sample(kind), null);
+        Assert.Equal(name, JsonDocument.Parse(sent.Body).RootElement.GetProperty("event").GetString());
+        Assert.Contains(sent.Headers, h => h.Key == "X-Gitberth-Event" && h.Value == name);
+    }
+
+    [Fact]
+    public void A_token_notice_tells_a_webhook_which_token_and_when_it_expires_and_every_other_notice_says_null()
+    {
+        var notice = new Notice(NotifyEvent.TokenExpiring, NoticeLevel.Warning, "The GitHub token expires in 6 days", "GitHub stops taking it on Dec 1, 2026.",
+            "http://192.168.50.10:8080/settings#github", "", null, new DateTime(2026, 11, 25, 9, 0, 0, DateTimeKind.Utc))
+        {
+            Credential = "github", Expires = new DateTimeOffset(2026, 12, 1, 1, 0, 0, TimeSpan.FromHours(1)),
+        };
+        var json = JsonDocument.Parse(NotificationFormats.Webhook(notice, null).Body).RootElement;
+        Assert.Equal(("token.expiring", "github", "2026-12-01T00:00:00Z"),
+            (json.GetProperty("event").GetString(), json.GetProperty("credential").GetString(), json.GetProperty("expires").GetString()));
+        // A notice about no app has none.
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("app").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("container").ValueKind);
+
+        var other = JsonDocument.Parse(NotificationFormats.Webhook(Sample(), null).Body).RootElement;
+        Assert.Equal((JsonValueKind.Null, JsonValueKind.Null), (other.GetProperty("credential").ValueKind, other.GetProperty("expires").ValueKind));
+    }
+
+    [Fact]
+    public async Task A_test_says_what_settings_sends_the_new_kinds_too()
+    {
+        Assert.Null(await _notifier.SendTestAsync(Discord));
+        var text = JsonDocument.Parse(Assert.Single(_endpoint.Calls).Body).RootElement.GetProperty("embeds")[0].GetProperty("description").GetString()!;
+        Assert.StartsWith("This is a test from Settings › Notifications.", text);
+        Assert.Contains("apps Gitberth brings back", text);
+        Assert.Contains("tokens about to expire", text);
+        Assert.Contains("Docker's disk getting full", text);
     }
 
     // ---- What each destination is sent ----

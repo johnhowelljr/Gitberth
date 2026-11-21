@@ -88,22 +88,27 @@ public sealed partial class UpdateService : IHookUpdates
         JsonObject? Image, UpdatePolicy Policy);
 
     public UpdateService(AppCatalog catalog, AppSettingsService settings, ImageService images, PortChanger changer, IContainerEngine engine,
-        IDbContextFactory<GitberthDb> dbFactory, ActivityLog activity, ILogger<UpdateService> logger, Audit.AuditLog? audit = null)
-        : this(new LiveSteps(catalog, settings, changer, engine, activity), images, dbFactory, logger, audit)
+        IDbContextFactory<GitberthDb> dbFactory, ActivityLog activity, ILogger<UpdateService> logger, Audit.AuditLog? audit = null,
+        Credentials.CredentialSignals? signals = null)
+        : this(new LiveSteps(catalog, settings, changer, engine, activity), images, dbFactory, logger, audit, signals)
     {
     }
 
     /// <param name="audit">Where updates found, applied, failed and rolled back are recorded; none in older tests.</param>
-    internal UpdateService(IUpdateSteps steps, ImageService images, IDbContextFactory<GitberthDb> dbFactory, ILogger<UpdateService> logger, Audit.AuditLog? audit = null)
+    /// <param name="signals">Where a registry turning a saved sign-in away (or taking it) is reported, for the token watch.</param>
+    internal UpdateService(IUpdateSteps steps, ImageService images, IDbContextFactory<GitberthDb> dbFactory, ILogger<UpdateService> logger, Audit.AuditLog? audit = null,
+        Credentials.CredentialSignals? signals = null)
     {
         _steps = steps;
         _images = images;
         _dbFactory = dbFactory;
         _logger = logger;
         _audit = audit;
+        _signals = signals;
     }
 
     private readonly Audit.AuditLog? _audit;
+    private readonly Credentials.CredentialSignals? _signals;
 
     // An update or rollback in the audit log once the engine is done with it, as whoever asked (a person, a hook, the
     // automatic updates).
@@ -553,7 +558,9 @@ public sealed partial class UpdateService : IHookUpdates
     internal async Task<ImageCheck> CheckReferenceAsync(ImageReference reference, int? registryId, CancellationToken ct)
     {
         var remote = await _images.ResolveAsync(reference.Canonical, registryId, ct);
-        var onlyHere = !remote.Found && (remote.NotFound || remote.Unauthorized && !await _images.SignedInAsync(reference, registryId, ct));
+        var signedIn = remote.Unauthorized && await _images.SignedInAsync(reference, registryId, ct);
+        var onlyHere = !remote.Found && (remote.NotFound || remote.Unauthorized && !signedIn);
+        TellSignIn(reference, remote, signedIn);
         var now = Now;
         return await SaveCheckAsync(_dbFactory, reference.Canonical, check =>
         {
@@ -576,6 +583,19 @@ public sealed partial class UpdateService : IHookUpdates
                 check.RetryAfter = remote.Unauthorized ? now.AddHours(24) : null;
             }
         }, ct);
+    }
+
+    // What the registry said of its saved sign-in, for the token watch: turned away (a sign-in was sent and refused), which
+    // the watch confirms by signing in again, or taken (the image was found with it). The watch ignores a registry it has
+    // no sign-in for.
+    private void TellSignIn(ImageReference reference, RemoteImage remote, bool signedIn)
+    {
+        if (_signals is null) return;
+        var key = Credentials.CredentialWatch.RegistryPrefix + reference.Registry;
+        if (signedIn)
+            _signals.Report(new Credentials.CredentialAnswer(key, null, Credentials.CredentialVerdict.Refused, Credentials.CredentialText.RegistryDoing(reference.Familiar)));
+        else if (remote.Found)
+            _signals.Report(new Credentials.CredentialAnswer(key, null, Credentials.CredentialVerdict.Accepted));
     }
 
     /// <summary>

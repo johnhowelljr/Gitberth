@@ -70,6 +70,15 @@ factor = 0.75
 # The built-in Help and the tips: measured on the first rig (2026-11-16, its 4 tests in 20 s). It deploys no app and
 # waits on nothing the timings change, so production's minutes are the same.
 "34" = { file = "test_34_help.py", minutes = 0.33, test_minutes = 0.33 }
+# Stability: keeping apps running (35), Docker's disk (36) and the tokens Gitberth uses (37). 35 deploys one test app and
+# crashes, stops and removes it (estimated, with keepEvery=3: the check looks every 3 s; with production timings every
+# 30 s, and a stopped app waits 30 s). 36 cleans up on request, and deploys one app to delete: measured on the first rig
+# (2026-11-20, its 3 tests and 22's build cache row in 26 s); production's minutes add the deploy's 15 s stay-up check.
+# 37's measured on rig b (2026-11-21, its 4 tests in 90 s): they deploy no app and wait on nothing the timings change,
+# so production's minutes are the same.
+"35" = { file = "test_35_keep_running.py", minutes = 5, test_minutes = 3 }
+"36" = { file = "test_36_disk.py", minutes = 1, test_minutes = 0.5 }
+"37" = { file = "test_37_tokens.py", minutes = 1.5, test_minutes = 1.49 }
 
 [aliases]
 # The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside
@@ -87,7 +96,8 @@ factor = 0.75
 "@wide" = ["@smoke", "00", "01", "06", "12", "19", "20", "22", "23", "24", "25"]
 # Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
 "@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
-           "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34"]
+           "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34",
+           "35", "36", "37"]
 "@release" = ["@full", "31"]  # and every template: + 16-30 min
 "@none" = []
 # Single tests the rules name.
@@ -203,6 +213,9 @@ groups = ["@t00-gitlab", "33"]
 [[rule]]
 globs = ["tests/e2e/scenarios/e2e/**", "tests/e2e/scenarios/conftest.py"]
 groups = ["00", "@wide"]
+refine = [
+    { match = 'expires_on', groups = ["00", "37"] },   # a Cloudflare token's end date (standin.py's helpers)
+]
 
 [[rule]]
 globs = ["tests/e2e/scenarios/Dockerfile", "tests/e2e/scenarios/pytest.ini"]
@@ -211,6 +224,10 @@ groups = ["00", "@smoke"]
 [[rule]]
 globs = ["tests/e2e/standins/cloudflared/**", "tests/e2e/standins/ingress.py", "tests/e2e/standins/cf.py"]
 groups = ["00", "05", "16", "17", "18", "23", "25", "26"]
+refine = [
+    # A token's end date, and what verify and the other calls make of a token that isn't active.
+    { match = 'expires_on|def expired|def active|self\.active|verified', groups = ["00", "16", "37"] },
+]
 
 [[rule]]
 globs = ["tests/e2e/standins/gh.py"]
@@ -232,6 +249,7 @@ refine = [
     { match = 'notif|discord|slack|ntfy|smtp|mail', groups = ["00", "21", "26"] },
     # GitLab's dispatch sits beside GitHub's: everything the rule runs, and GitLab's scenarios.
     { match = '[Gg]it[Ll]ab|\bGL\b', groups = ["00", "@smoke", "33"] },
+    { match = 'cloudflare/tokens|expires_on', groups = ["00", "37"] },   # a Cloudflare token changed as in its dashboard
 ]
 
 [[rule]]
@@ -290,6 +308,11 @@ refine = [
     { match = 'Cookie|Authentication|Authorization|Antiforgery|logout|renew|Login|StampRevalidator|AdminAuth', groups = ["20", "@t24-audit"] },
     { match = 'PortChanger|ContainerService|ContainerUpdater|HostHelpers|IContainerEngine|NetworkKeeper|HostPortMap', groups = ["24", "27"] },
     { match = 'Help|TipCatalog', groups = ["34"] },  # the Help's docs, tips and endpoints, and their start-up checks
+    # Stability: the attention board, and each job's own registration (AddAppKeeper, AddDiskCare, AddCredentialWatch).
+    { match = 'AttentionBoard', groups = ["20", "37"] },
+    { match = 'AppKeeper|Gitberth\.Keeper|StartupTasks', groups = ["35"] },
+    { match = 'DiskCare|Gitberth\.Disk', groups = ["36"] },
+    { match = 'CredentialWatch|Gitberth\.Credentials', groups = ["37", "15"] },
 ]
 
 [[rule]]
@@ -378,7 +401,7 @@ groups = ["10"]
 [[rule]]
 globs = ["src/Gitberth/Deploy/BuildCache.cs", "src/Gitberth/Docker/DockerApi.BuildCache.cs",
          "src/Gitberth/Components/Shared/BuildCacheRow.razor"]
-groups = ["22"]
+groups = ["22", "36"]                          # the row is in Settings › Disk, and the disk cleanup prunes through these calls
 
 [[rule]]
 globs = ["src/Gitberth/Deploy/CronScheduler.cs", "src/Gitberth/Detection/CronJobs.cs",
@@ -545,6 +568,8 @@ groups = ["00", "05", "16", "17", "18", "23", "25", "26"]
 refine = [
     # The webhook host's one path rule (/hooks/github, /hooks/gitlab, deploy hooks), and the earlier ones it replaces.
     { match = '[Gg]it[Ll]ab|WebhookPath|PlanWebhook', groups = ["00", "14", "23", "@t33-instant"] },
+    # The token's own check and refusal (the token watch's), and the save that reads its end date.
+    { match = 'TokenRefused|CheckTokenAsync|VerifyTokenAsync|CloudflareTokenCheck|Credentials\.', groups = ["00", "16", "37"] },
 ]
 
 [[rule]]
@@ -558,6 +583,7 @@ refine = [
     { match = 'Webhook|Hook', groups = ["14", "23"] },
     { match = 'Status', groups = ["26"] },
     { match = 'Main|Publish|Port', groups = ["05", "25"] },
+    { match = 'CheckTokenAsync|CloudflareTokenExpires|VerifyTokenAsync', groups = ["16", "37"] },   # the token watch's check, the save's end date
 ]
 
 [[rule]]
@@ -737,7 +763,8 @@ groups = ["10", "24", "27", "30", "@t12-failed", "@t13-comment"]
 globs = ["src/Gitberth/Services/AppActions.cs", "src/Gitberth/Components/Apps/AppCommands.cs"]
 groups = ["05", "11", "12", "20", "24", "25"]
 refine = [
-    { match = 'Delete|Remove', groups = ["05", "24", "27"] },
+    { match = 'Delete|Remove', groups = ["05", "24", "27", "36"] },
+    { match = 'DiskLeftovers', groups = ["36"] },
     { match = 'Restart', groups = ["@t12-recreate"] },
     { match = 'Stop|Start', groups = ["24", "25"] },
     { match = 'Roll[Bb]ack', groups = ["11", "20", "@t12-recreate"] },
@@ -832,10 +859,14 @@ refine = [
     { match = 'id="deploys"|watch-interval|build-cache|BuildCache', groups = ["@t20-settings", "@t22-cache"] },
     { match = 'NotificationsSection', groups = ["21"] },
     { match = 'UptimeSection', groups = ["26"] },
+    { match = 'KeepRunningSection|id="keep"|\("keep"', groups = ["35"] },
+    { match = 'DiskSection|id="disk"|\("disk"', groups = ["36", "@t22-cache"] },
     { match = 'DatabaseServersSection', groups = ["27"] },
     { match = 'ApiTokensSection', groups = ["29"] },
     { match = 'AuditLogSection', groups = ["@t24-audit"] },
     { match = '[Gg]it[Ll]ab', groups = ["@t20-settings", "@t33-settings"] },
+    # The token watch's banners, Check the token and expiry tags (GitHub access, Domains, Registries).
+    { match = 'CredentialWatch|Credentials\.|ExpiryWords|ExpiryClass|Check the token', groups = ["37"] },
     # Sections no scenario opens:
     { match = 'registries|reg-|updates|upd-|own-lan|lan-|id="network"|password|pw-|id="system"', groups = ["@smoke"], notes = ["No scenario opens this page or section: also run Gitberth.UiTests against the dev instance (GITBERTH_UI_URL and GITBERTH_UI_PASSWORD)."] },
 ]
@@ -854,6 +885,7 @@ refine = [
     { match = 'Template', groups = ["30"] },
     { match = 'Compose|Service', groups = ["@t28-repo"] },
     { match = 'Uptime', groups = ["26"] },
+    { match = 'Keeper', groups = ["35"] },
     { match = '[Tt]ab', groups = ["01", "09", "@t02-opened"] },
     { match = 'Deploy', groups = ["20", "22"] },
     { match = '[Gg]it[Ll]ab|[Mm]erge request', groups = ["@t33-new", "@t33-mr"] },   # a GitLab app's links, a merge request's preview
@@ -999,6 +1031,26 @@ groups = ["20"]
 [[rule]]
 globs = ["src/Gitberth/Components/Layout/NavMenu.razor", "src/Gitberth/Components/Layout/MainLayout.razor"]
 groups = ["20", "34"]                          # the sidebar and the top bar: their tips, Help and the Help menu
+
+# --- stability: keeping apps running (35), Docker's disk (36), the tokens Gitberth uses (37), and the attention board
+# their warnings go on. Each item adds its own files to its own rule (and refines, as it needs them).
+[[rule]]
+globs = ["src/Gitberth/Keeper/**", "src/Gitberth/Services/AppActions.Keep.cs", "src/Gitberth/Components/Shared/KeepRunningSection.razor",
+         "src/Gitberth/Components/Apps/KeeperBanner.razor"]
+groups = ["35", "24", "25", "26"]              # 24 to 26 stop apps outside Gitberth or in it, which must stay stopped
+
+[[rule]]
+globs = ["src/Gitberth/Disk/**", "src/Gitberth/Components/Shared/DiskSection.razor"]
+groups = ["36", "@t22-cache"]                  # Settings › Disk takes the build cache's row from Deploys
+
+[[rule]]
+globs = ["src/Gitberth/Credentials/**"]
+groups = ["37", "15"]                          # 15: the refusals each feature shows on its own
+
+[[rule]]
+globs = ["src/Gitberth/Health/AttentionBoard.cs", "src/Gitberth/Components/Shared/AttentionBanners.razor",
+         "src/Gitberth/Components/Layout/AttentionPill.razor"]
+groups = ["37", "20"]                          # the dashboard's banners and the top bar's pill
 
 
 # ===== E. Folders (new files and anything not named above) =====

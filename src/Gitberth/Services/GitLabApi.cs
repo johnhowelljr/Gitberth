@@ -30,8 +30,10 @@ public sealed class GitLabApiException(string message, HttpStatusCode? status = 
 }
 
 /// <summary>GitLab refused, or failed, a commit status, a merge request's comment or a project hook.</summary>
-public sealed class GitLabWriteException(string message, bool missingPermission = false, bool badToken = false, HttpStatusCode? status = null)
-    : HostWriteException(message, missingPermission, badToken)
+/// <param name="retrySoon">GitLab failed for a moment: it didn't answer in time, couldn't be reached, or failed itself (a 5xx).</param>
+/// <param name="status">GitLab's answer, when it gave one: a 429 is its rate limit.</param>
+public sealed class GitLabWriteException(string message, bool missingPermission = false, bool badToken = false, HttpStatusCode? status = null, bool retrySoon = false)
+    : HostWriteException(message, missingPermission, badToken, retrySoon, rateLimited: status == HttpStatusCode.TooManyRequests)
 {
     public HttpStatusCode? Status { get; } = status;
 }
@@ -373,6 +375,14 @@ public sealed class GitLabApi(IHttpClientFactory httpFactory, SettingsService se
         return existingId ?? ReadId(await response.Content.ReadAsStringAsync(ct));
     }
 
+    /// <summary>Removes a project hook (a second copy of Gitberth's own); one that's gone already counts as removed.</summary>
+    public async Task DeleteHookAsync(GitLabConnection conn, GitLabRepoRef project, long id, CancellationToken ct = default)
+    {
+        using var response = await SendAsync(conn, HttpMethod.Delete, $"projects/{project.ApiId}/hooks/{id.ToString(CultureInfo.InvariantCulture)}", null, ct, write: true);
+        if (response.StatusCode == HttpStatusCode.NotFound) return;
+        await EnsureWriteAsync(response, GitHubFeature.Webhooks, $"remove a second copy of its webhook from {project.FullName}", ct);
+    }
+
     // ---- The scope each feature needs ----
 
     /// <summary>What a token needs for a feature, and the role on the project its user needs, as the messages say it.</summary>
@@ -399,12 +409,13 @@ public sealed class GitLabApi(IHttpClientFactory httpFactory, SettingsService se
         catch (HttpRequestException ex)
         {
             var text = $"{conn.Host} couldn't be reached ({ex.Message}).";
-            throw write ? new GitLabWriteException(text) : new GitLabApiException(text);
+            throw write ? new GitLabWriteException(text, retrySoon: true) : new GitLabApiException(text);
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
+            // The client gave up: GitLab may still have done it, and only its answer was lost.
             var text = $"{conn.Host} didn't answer in time.";
-            throw write ? new GitLabWriteException(text) : new GitLabApiException(text);
+            throw write ? new GitLabWriteException(text, retrySoon: true) : new GitLabApiException(text);
         }
     }
 
@@ -504,19 +515,21 @@ public sealed class GitLabApi(IHttpClientFactory httpFactory, SettingsService se
             throw new GitLabWriteException("GitLab says the token is invalid, expired or revoked. Update it in Settings › GitLab.", badToken: true, status: status);
         if (status is HttpStatusCode.Forbidden or HttpStatusCode.NotFound)
             throw new GitLabWriteException(MissingPermissionText(feature, doing), missingPermission: true, status: status);
-        throw new GitLabWriteException($"GitLab didn't let Gitberth {doing}: {await ErrorTextAsync(response, ct)} (HTTP {(int)status}).", status: status);
+        throw new GitLabWriteException($"GitLab didn't let Gitberth {doing}: {await ErrorTextAsync(response, ct)} (HTTP {(int)status}).", status: status,
+            retrySoon: (int)status >= 500);
     }
 
     /// <summary>What to tell someone whose token can't do this on a project: the scope and role it needs.</summary>
     internal static string MissingPermissionText(GitHubFeature feature, string doing) =>
         $"The GitLab token isn't allowed to {doing}. It needs {NeedFor(feature)}. Gitberth stops trying on this project for an hour, or until the token is saved again.";
 
-    // A read that's part of a write feature (a hook's list, a merge request's notes), said as that feature's refusal.
+    // A read that's part of a write feature (a hook's list, a merge request's notes), said as that feature's refusal. One
+    // with no answer at all (no time, no connection, an answer that couldn't be read) or GitLab's own failure is for a moment.
     private static GitLabWriteException AsWrite(GitLabApiException ex, GitHubFeature feature, string doing) => ex.Status switch
     {
         HttpStatusCode.Unauthorized => new GitLabWriteException(ex.Message, badToken: true, status: ex.Status),
         HttpStatusCode.Forbidden or HttpStatusCode.NotFound => new GitLabWriteException(MissingPermissionText(feature, doing), missingPermission: true, status: ex.Status),
-        _ => new GitLabWriteException(ex.Message, status: ex.Status),
+        _ => new GitLabWriteException(ex.Message, status: ex.Status, retrySoon: ex.Status is null || (int)ex.Status >= 500),
     };
 
     /// <summary>

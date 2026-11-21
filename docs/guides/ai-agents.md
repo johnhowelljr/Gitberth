@@ -61,6 +61,14 @@ The list shows each token's name, access, first characters, when it was made, wh
 used, and when it expires. **Revoke** ends a token at once: every request with it is refused from then on. Making,
 revoking and the expiry of a token are recorded in the audit log, by name, never the token.
 
+### When a token expires
+
+A token that expires within the week has **expires in 5 days** (or **tomorrow**, **today**) next to its name. When
+something used it in the last 30 days, the dashboard and this section also get a banner a week and a day before it
+expires, and once it has (**The API token Claude Code expires in 5 days**), with when and from which address it was last
+used, so you know which agent it is. Each sends a notice too (see [Notifications](notifications.md)). Make a new token,
+give it to that agent or script, and revoke the old one. A token nobody uses isn't warned about.
+
 ## Access levels
 
 | Access | What the token can do |

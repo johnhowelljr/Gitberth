@@ -50,7 +50,7 @@ from e2e.wait import stays, until
 # 29's API tokens.
 from test_02_pull_request_previews import PULLS_EVERY, activity_texts, fetched, leftovers, own_apps, preview_row, unique, wait_deployed
 from test_12_commit_statuses import domains_turned_on
-from test_14_instant_deploys import OWN_SERVICE, PATH_RULE, TURNED_ON, instant_deploys, kv, notes, webhook_rules
+from test_14_instant_deploys import OWN_SERVICE, PATH_RULE, TURNED_ON, instant_deploys, kv, notes, slow_polls, webhook_rules  # noqa: F401 - slow_polls is a fixture
 from test_22_build_filters import set_filters
 from test_29_mcp import make_token
 
@@ -508,7 +508,10 @@ class TestMergeRequestPreview:
         # Without a hook, the watcher's next list of the open merge requests notices (every 20 s with the rig's timings,
         # 5 minutes with production's): a merge moves no merge request's head.
         gitberth.wait_no_preview(mr.app.id, pr=n, timeout=PULLS_EVERY + 120)
-        assert f"Preview MR !{n} removed: the merge request was merged." in activity_texts(gitberth, mr.app), activity_texts(gitberth, mr.app)
+        # The parent's Activity says why just after the preview's row goes.
+        wanted = f"Preview MR !{n} removed: the merge request was merged."
+        until(lambda: wanted in activity_texts(gitberth, mr.app), 15, "the parent's Activity to say why the preview went",
+              seen=lambda: activity_texts(gitberth, mr.app))
         until(lambda: not leftovers(engine, slug), 60, f"the engine to forget {slug}", seen=lambda: leftovers(engine, slug))
         # The merge is a push to main: production deploys it.
         production = gitberth.wait_deploy(mr.app.id, after=before, timeout=300)
@@ -552,7 +555,8 @@ def test_a_forks_merge_request_gets_no_preview_until_forks_are_on(world, page, g
     assert [(s, ref) for s, _, ref, _ in written(writes)] == [("running", None), ("success", None)], written(writes)
 
 
-def test_instant_deploys_add_the_project_hook_and_a_push_deploys_at_once(world, page, new_page, gitberth, cloudflare, standins, gl_token, uniq):
+def test_instant_deploys_add_the_project_hook_and_a_push_deploys_at_once(world, page, new_page, gitberth, cloudflare, standins, gl_token, uniq,
+                                                                         slow_polls):
     w = world
     p = w.project
     zone = f"{uniq('gw')}.test"
@@ -596,9 +600,11 @@ def test_instant_deploys_add_the_project_hook_and_a_push_deploys_at_once(world, 
             until(lambda: f"{p.path}: Webhook added" in [flat(t) for t in lines.all_inner_texts()], 30, "Settings to list the project's hook",
                   seen=lines.all_inner_texts)
 
-            # ---- A push: its Push Hook comes through Cloudflare and the tunnel's route, and it deploys at once.
+            # ---- A push: its Push Hook comes through Cloudflare and the tunnel's route, and it deploys at once. Pushed
+            # right after a look, with the watcher looking once a minute: no load on the server makes a poll beat the
+            # delivery to it.
             cloudflare.wait_runs()
-            p.wait_watcher_passes(1, since=standins.seq())   # pushed right after a look: the next poll is 10 s away
+            slow_polls(p, standins)
             before = gitberth.db.last_deployment_id(w.app.id)
             pushed = p.commit({"marker.txt": "instant"}, message="Pushed for an instant deploy")
             record = until(lambda: next((d for d in p.deliveries(mark, event="push") if d["hook_id"] == hook["id"]), None), 30,

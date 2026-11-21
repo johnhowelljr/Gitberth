@@ -1,6 +1,6 @@
 # Notifications
 
-Gitberth can tell you when something goes wrong, without you having to open it: a deploy that failed, an app that crashed or ran out of memory, a health check that started failing. It sends a short message with a link to the deploy log or the app's logs, by email, to a Discord or Slack channel, to your phone through [ntfy](https://ntfy.sh), or to any URL that takes a JSON POST (Home Assistant, n8n, a script of your own).
+Gitberth can tell you when something goes wrong, without you having to open it: a deploy that failed, an app that crashed or ran out of memory, a health check that started failing, a token about to expire, Docker's disk getting full. It sends a short message with a link to the deploy log or the app's logs, by email, to a Discord or Slack channel, to your phone through [ntfy](https://ntfy.sh), or to any URL that takes a JSON POST (Home Assistant, n8n, a script of your own).
 
 Nothing is sent until you add somewhere to send it. Sending never holds up a deploy, and a deploy never fails because a message couldn't be sent.
 
@@ -35,12 +35,15 @@ Under **Tell me when**:
 
 | Switch | What sends a message | Default |
 |---|---|---|
-| **A deploy fails** | A build that failed, a new version that didn't pass its checks (the previous version keeps running, and the message says so), and a [scheduled restart](scheduled-jobs-and-restarts.md) that didn't work. Not a deploy you cancelled, and not one Gitberth's own restart cut short: that's tried again by itself, and the retry's outcome is told. | On |
+| **A deploy fails** | A build that failed, a new version that didn't pass its checks (the previous version keeps running, and the message says so), and a [scheduled restart](scheduled-jobs-and-restarts.md) that didn't work. Not a deploy you cancelled, not one Gitberth's own restart cut short (that's tried again by itself, and the retry's outcome is told), and not one Gitberth made to bring an app back: **Gitberth brings an app back** tells those. | On |
 | **A deploy succeeds** | Deploys that build a commit: a push, **Deploy**, a promote, a rollback. Not restarts, settings changes or starts, which would say the same thing again and again, and not a [skipped commit](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy), which changed nothing. | Off |
 | **An app crashes** | Its process exits with an error, or it runs out of memory. A stop you or Gitberth asked for isn't a crash, and neither is a process ended by SIGTERM (a host shutting down, say). | On |
 | **A health check fails** | Docker marks the app unhealthy: its [health check](health-and-monitoring.md) failed several times in a row. And a second message once it passes again. | On |
 | **An app goes down** | Its [uptime check](uptime-and-status-page.md) from outside failed twice in a row: its domain or LAN address doesn't answer, answers with a server error, shows the down page, or has a certificate problem. And a second message once it's back up, saying how long it was down. | On |
+| **Gitberth brings an app back** | An app that's meant to run stopped by itself, and Gitberth [started it again](health-and-monitoring.md#when-an-app-stops-by-itself): it crashed and its restart policy doesn't start it, it stopped when Docker or the host restarted, or its container was gone. One message once it runs again (apps brought back together after a Docker restart share one), one if Gitberth stops trying after 4 tries, and one if its try every 6 hours after that brings it back. An app you stopped is never started again. | On |
 | **A certificate is about to expire** | The certificate of a domain Gitberth checks expires within 14 days, and again within 3 days. | On |
+| **A token is about to expire or is refused** | A token Gitberth uses: GitHub's, GitLab's or Cloudflare's, a registry sign-in, or an API token in use. Told 3 weeks, a week and a day before it expires (an API token a week and a day before), once it has, and as soon as its service refuses it; a refusal that comes back within a day is shown, not told again. A registry never says when a sign-in expires, so only its refusal is told. See [Tokens and sign-ins](troubleshooting.md#tokens-and-sign-ins). | On |
+| **Docker's disk gets full** | Free space on the disk Docker keeps images, build cache and volumes on drops under the warning line (not again within a day), and again when it's so low that Gitberth stops pulling images, each time after Gitberth [cleared what it could](troubleshooting.md#dockers-disk-is-filling-up) by itself. And a last message once there's room again. | On |
 | **Previews too** | Deploys of [previews](previews.md). Off, only production apps are told about. | Off |
 
 Crashes of any container count, not only the apps Gitberth deploys. A crash while a deploy is still checking the new version isn't told on its own: the deploy's message says it.
@@ -80,7 +83,7 @@ A `POST` with `Content-Type: application/json`, the header `X-Gitberth-Event` an
 }
 ```
 
-`event` is one of `deploy.failed`, `deploy.succeeded`, `container.crashed`, `container.unhealthy`, `container.healthy`, `uptime.down`, `uptime.up`, `certificate.expiring` and `test`; `level` is `critical`, `warning`, `good` or `info`. The uptime events also carry `address`, what the check asked (`https://app.example.com/`). Fields that don't apply are `null`: a crash has no `deployment`, an app Gitberth doesn't deploy has no `appId`, and `hook` names the [deploy hook](deploy-hooks.md) that started the deploy (its `trigger` is `Hook`).
+`event` is one of `deploy.failed`, `deploy.succeeded`, `container.crashed`, `container.unhealthy`, `container.healthy`, `uptime.down`, `uptime.up`, `certificate.expiring`, `app.brought-back`, `app.gave-up` (Gitberth stopped bringing an app back), `token.expiring`, `token.refused`, `disk.low`, `disk.ok` (Docker's disk has room again) and `test`; `level` is `critical`, `warning`, `good` or `info`. The uptime events also carry `address`, what the check asked (`https://app.example.com/`). The token events carry `credential`, which token it is (`github`, `gitlab`, `cloudflare`, `registry:` and the registry's host, or `api-token:` and the token's name; never the token itself), and `expires`, when it expires or expired (`2026-12-01T00:00:00Z`), when that's known. Fields that don't apply are `null`: a crash has no `deployment`, an app Gitberth doesn't deploy has no `appId`, a message about Docker's disk or a token has no `app`, and `hook` names the [deploy hook](deploy-hooks.md) that started the deploy (its `trigger` is `Hook`).
 
 ## When a message doesn't arrive
 

@@ -11,7 +11,7 @@
         <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.NotificationsActive" /></span>
         <div style="min-width:0">
             <div class="gb-h3"><span id="notify-t">Notifications</span><Tip Key="settings.notifications" /></div>
-            <p>Failed deploys, crashes, failing health checks and apps that go down, by email, Discord, Slack, ntfy or a webhook.</p>
+            <p>Failed deploys, crashes, failing health checks, apps that go down, tokens about to expire and a disk getting full, by email, Discord, Slack, ntfy or a webhook.</p>
         </div>
     </div>
     <div class="gb-sec-body">
@@ -61,8 +61,14 @@
                    Sub="Docker marks it unhealthy; and again once it passes." />
         <SwitchRow @key="@($"dn{switchKey}")" Title="An app goes down" Value="@Notify.IsOn(NotifyEvent.Down)" ValueChanged="v => SetAsync(NotifyEvent.Down, v)" Disabled="busy" Tip="settings.notifications.down"
                    Sub="Its uptime check fails twice in a row: its domain or LAN address doesn't answer, answers with a server error, or has a certificate problem. And again once it's back up." />
+        <SwitchRow @key="@($"bb{switchKey}")" Title="Gitberth brings an app back" Value="@Notify.IsOn(NotifyEvent.BroughtBack)" ValueChanged="v => SetAsync(NotifyEvent.BroughtBack, v)" Disabled="busy" Tip="settings.notifications.brought-back"
+                   Sub="It crashed and Docker won't restart it, it stopped when Docker or the host restarted, or its container went missing, and Gitberth started it again. And once more if Gitberth stops trying." />
         <SwitchRow @key="@($"ce{switchKey}")" Title="A certificate is about to expire" Value="@Notify.IsOn(NotifyEvent.CertificateExpiring)" ValueChanged="v => SetAsync(NotifyEvent.CertificateExpiring, v)" Disabled="busy" Tip="settings.notifications.certificate"
                    Sub="A domain's certificate expires in 14 days, and again at 3 days. Cloudflare renews its own well before that." />
+        <SwitchRow @key="@($"tk{switchKey}")" Title="A token is about to expire or is refused" Value="@Notify.IsOn(NotifyEvent.TokenExpiring)" ValueChanged="v => SetAsync(NotifyEvent.TokenExpiring, v)" Disabled="busy" Tip="settings.notifications.tokens"
+                   Sub="A GitHub, GitLab or Cloudflare token, a registry sign-in or an API token in use: 3 weeks, a week and a day before it expires (an API token a week and a day before), once it has, and the moment its service refuses it." />
+        <SwitchRow @key="@($"dk{switchKey}")" Title="Docker's disk gets full" Value="@Notify.IsOn(NotifyEvent.DiskLow)" ValueChanged="v => SetAsync(NotifyEvent.DiskLow, v)" Disabled="busy" Tip="settings.notifications.disk-low"
+                   Sub="Free space drops under the warning line Settings › Disk shows, and again when it's so low Gitberth stops pulling images; and once there's room again." />
         <SwitchRow @key="@($"pv{switchKey}")" Title="Previews too" Value="@Notify.Previews" ValueChanged="SetPreviewsAsync" Disabled="busy" Tip="settings.notifications.previews"
                    Sub="Deploys of previews. Off, only production apps are told about." />
         <p class="gb-help">

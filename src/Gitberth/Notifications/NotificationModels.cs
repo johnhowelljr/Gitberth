@@ -11,9 +11,16 @@ public enum SmtpSecurity { StartTls, None }
 /// <summary>
 /// What a notification is about. Settings › Notifications turns each kind on or off; a test is always sent. Saved by name:
 /// only ever appended. Down and BackUp come from the uptime checks (BackUp goes with Down, as Healthy with Unhealthy), and
-/// CertificateExpiring from the certificate an uptime check saw.
+/// CertificateExpiring from the certificate an uptime check saw. DiskLow and DiskOk are Docker's disk getting full and
+/// having room again (DiskOk goes with DiskLow); BroughtBack and GaveUp the keep-running check starting an app again and
+/// giving up on one (GaveUp goes with BroughtBack); TokenExpiring and TokenRefused a token Gitberth uses, about to expire
+/// or refused by its service (TokenRefused goes with TokenExpiring).
 /// </summary>
-public enum NotifyEvent { DeployFailed, DeploySucceeded, Crashed, Unhealthy, Healthy, Test, Down, BackUp, CertificateExpiring }
+public enum NotifyEvent
+{
+    DeployFailed, DeploySucceeded, Crashed, Unhealthy, Healthy, Test, Down, BackUp, CertificateExpiring,
+    DiskLow, DiskOk, BroughtBack, GaveUp, TokenExpiring, TokenRefused,
+}
 
 /// <summary>How bad it is: the color of a Discord embed, an ntfy priority, the word in a webhook's JSON.</summary>
 public enum NoticeLevel { Good, Info, Warning, Critical }
@@ -49,14 +56,14 @@ public sealed record Destination
 }
 
 /// <summary>
-/// One message: what happened, to which app, and where to read more. Built by Gitberth from a deploy or a container event,
-/// then shaped for each channel by <see cref="NotificationFormats"/>.
+/// One message: what happened, to which app, and where to read more. Built by Gitberth from a deploy, a container event or
+/// one of its own checks (Docker's disk, a token), then shaped for each channel by <see cref="NotificationFormats"/>.
 /// </summary>
 /// <param name="Title">One line: "Deploy of web failed".</param>
 /// <param name="Text">A sentence or two: the error, the commit, what happens next.</param>
 /// <param name="Link">The deploy log or the app's page on Gitberth; null when Gitberth's address isn't known yet.</param>
-/// <param name="App">The app's name as Gitberth shows it; empty for a test.</param>
-/// <param name="Container">Its container; null for a test.</param>
+/// <param name="App">The app's name as Gitberth shows it; empty for a test, or a notice about no app (Docker's disk, a token).</param>
+/// <param name="Container">Its container; null for a test, or a notice about no app.</param>
 public sealed record Notice(NotifyEvent Event, NoticeLevel Level, string Title, string Text, string? Link, string App, string? Container, DateTime At)
 {
     public int? AppId { get; init; }
@@ -68,6 +75,13 @@ public sealed record Notice(NotifyEvent Event, NoticeLevel Level, string Title, 
     public bool Preview { get; init; }
     /// <summary>The address an uptime check asked (https://web.example.com/), for Down, BackUp and CertificateExpiring.</summary>
     public string? Address { get; init; }
+    /// <summary>
+    /// The token or sign-in a TokenExpiring or TokenRefused notice is about: github, gitlab, cloudflare, registry:&lt;host&gt;
+    /// or api-token:&lt;name&gt;. Never the token itself.
+    /// </summary>
+    public string? Credential { get; init; }
+    /// <summary>When that token expires, or expired, when its service says.</summary>
+    public DateTimeOffset? Expires { get; init; }
 }
 
 /// <summary>How a delivery went, kept per channel (in memory) for Settings to show.</summary>

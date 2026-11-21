@@ -10,7 +10,7 @@ namespace Gitberth.Notifications;
 /// Tells about deploys that ended: every failure (a scheduled restart's too, which nobody watches), and when that's on,
 /// every success of a deploy that built a commit (not restarts, settings changes or starts, which would say the same thing
 /// over and over). A deploy that Gitberth's own restart cut short is tried again by itself, so only the retry's outcome is
-/// told; a cancel is the user's own doing, so nothing is.
+/// told; a cancel is the user's own doing, so nothing is. The keep-running check's deploys are its own to tell.
 /// </summary>
 public sealed class DeployNotifier(IDbContextFactory<GitberthDb> dbFactory, NotificationSettings settings, Notifier notifier) : IDeployReporter
 {
@@ -34,6 +34,9 @@ public sealed class DeployNotifier(IDbContextFactory<GitberthDb> dbFactory, Noti
     public static NotifyEvent? EventFor(DeployReport report) => report.Status switch
     {
         DeployStatus.Skipped => null,
+        // A deploy that was to bring an app back, however it ended: the keep-running check tells that itself ("shop's
+        // container is back", "Gitberth stopped bringing shop back"), not each of its tries, nor its quiet ones.
+        _ when report.Trigger == DeployTrigger.Recover => null,
         DeployStatus.Failed when report.Error?.StartsWith("Gitberth restarted", StringComparison.Ordinal) == true => null,
         DeployStatus.Failed or DeployStatus.RolledBack => NotifyEvent.DeployFailed,
         DeployStatus.Succeeded when report.Trigger is DeployTrigger.Restart or DeployTrigger.ConfigChange or DeployTrigger.Start => null,

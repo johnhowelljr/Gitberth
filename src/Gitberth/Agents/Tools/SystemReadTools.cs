@@ -27,12 +27,13 @@ namespace Gitberth.Agents.Tools;
 public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, DockerCli docker, ContainerStatsCollector stats, ImageService images,
     DomainService domains, UptimeMonitor uptime, UptimeStore uptimeStore, UptimeSettings uptimeSettings, StatusPage statusPage, AuditLog audit,
     AuditSettings auditSettings, DatabaseService databases, DatabaseServers servers, NotificationSettings notifications, SettingsService settings,
-    IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, TemplateCatalog templates)
+    IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, TemplateCatalog templates, AttentionBoard attention)
 {
     [McpServerTool(Name = "get_health", Title = "Get the host's health", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [ToolAccess(ApiAccess.Read)]
     [Description("How this host is doing: the Docker engine (version, CPUs, memory), the disk Docker uses, Gitberth's version, " +
-        "and the problems worth knowing about now: apps crashed, unhealthy, missing or down, deploys failing, a full disk.")]
+        "and the problems worth knowing about now: apps crashed, unhealthy, missing or down, deploys failing, a full disk, " +
+        "and what the dashboard's banners warn about.")]
     public async Task<object> GetHealth(CancellationToken ct = default)
     {
         var info = await docker.GetInfoAsync(ct);
@@ -49,21 +50,29 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
             if (a.AppId is int id && uptime.For(id) is { Status: UptimeStatus.Down } down)
                 problems.Add($"{a.Title} is down from outside since {down.Open?.Started:u}: {down.Open?.Cause ?? down.Last?.Problem}");
         }
-        if (disk.TotalBytes > 0 && disk.TotalBytes < long.MaxValue / 8 && disk.FreeBytes < disk.TotalBytes / 10)
-            problems.Add($"Docker's disk is {100 - disk.FreeBytes * 100 / disk.TotalBytes}% full: {disk.FreeBytes / 1024 / 1024 / 1024} GB free.");
+        // A low disk is the disk cleanup's: its banner's line comes with the others below.
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {
             var since = DateTime.UtcNow.AddHours(-24);
             var failed = await db.Deployments.AsNoTracking().Where(d => d.Status == DeployStatus.Failed && d.FinishedAt >= since).CountAsync(ct);
             if (failed > 0) problems.Add($"{failed} deploy{(failed == 1 ? "" : "s")} failed in the last 24 hours (list_deployments has them).");
         }
+        // What the dashboard's banners say from Warn up (Gitberth's own jobs keep them), dismissed or not.
+        problems.AddRange(attention.Problems);
+        var cleaned = Disk.DiskState.Parse(await settings.GetAsync(SettingKeys.DiskState, ct)).LastResult;
         return new
         {
             gitberth = new { version = AppVersion.Display, data_folder = options.DataDir },
             docker = new { server_version = info.ServerVersion, client_version = info.ClientVersion, error = info.Error },
             host = snapshot.Host is { } h ? new { name = h.Name, cpus = h.Cpus, memory_mb = (long)(h.MemoryBytes / 1024 / 1024) } : null,
-            disk = disk.TotalBytes > 0 && disk.TotalBytes < long.MaxValue / 8
-                ? new { free_gb = Math.Round(disk.FreeBytes / 1024.0 / 1024 / 1024, 1), total_gb = Math.Round(disk.TotalBytes / 1024.0 / 1024 / 1024, 1) } : null,
+            disk = disk.Known
+                ? new
+                {
+                    free_gb = Gb(disk.FreeBytes), total_gb = Gb(disk.TotalBytes),
+                    // Under the first a warning; under the second Gitberth pulls no image.
+                    warn_below_gb = Gb(disk.WarnBelow), refuse_below_gb = Gb(disk.RefuseBelow),
+                    last_cleanup = cleaned is { } c ? new { at = c.At, by = c.By, freed_gb = Gb(c.Freed) } : null,
+                } : null,
             apps = new
             {
                 total = list.Apps.Count,
@@ -369,6 +378,7 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
             {
                 enabled = await domains.EnabledAsync(ct),
                 cloudflare_token_saved = await domains.TokenSavedAsync(ct),
+                cloudflare_token_expires = DayOf(await settings.GetAsync(Credentials.CredentialKeys.CloudflareTokenExpires, ct)),
                 webhook_host = await domains.WebhookHostAsync(ct),
             },
             uptime = new { interval_seconds = await uptimeSettings.IntervalAsync(ct) },
@@ -378,6 +388,7 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
             {
                 token_saved = await settings.GetAsync(SettingKeys.GitHubToken, ct) is not null,
                 login = await settings.GetAsync(SettingKeys.GitHubLogin, ct),
+                token_expires = DayOf(await settings.GetAsync(SettingKeys.GitHubTokenExpires, ct)),
                 commit_statuses = await settings.GetAsync(SettingKeys.GitHubStatuses, ct) != "false",
                 pull_request_comments = await settings.GetAsync(SettingKeys.GitHubComments, ct) != "false",
             },
@@ -388,6 +399,7 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
                 token_saved = await settings.GetAsync(SettingKeys.GitLabToken, ct) is not null,
                 login = await settings.GetAsync(SettingKeys.GitLabLogin, ct),
                 scopes = await settings.GetAsync(SettingKeys.GitLabScopes, ct) is { Length: > 0 } scopes ? scopes.Split(',') : null,
+                token_expires = DayOf(await settings.GetAsync(SettingKeys.GitLabTokenExpires, ct)),
                 commit_statuses = await settings.GetAsync(SettingKeys.GitLabStatuses, ct) != "false",
                 merge_request_comments = await settings.GetAsync(SettingKeys.GitLabComments, ct) != "false",
             },
@@ -396,4 +408,13 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
             network = options.Network,
         };
     }
+
+    // GiB, to a tenth, as the disk's figures are given.
+    private static double Gb(long bytes) => Math.Round(bytes / 1024.0 / 1024 / 1024, 1);
+
+    // A token's expiry as its service said it, as a day (2026-12-01); null when it doesn't expire or that isn't known.
+    private static string? DayOf(string? saved) =>
+        DateTimeOffset.TryParse(saved, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind, out var at)
+            ? at.UtcDateTime.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            : null;
 }

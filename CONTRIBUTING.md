@@ -21,3 +21,17 @@ Questions about licensing go to business@objectstate.com.
   Actions › E2E (or a pushed `e2e-*` tag) runs it in about 25 minutes.
 - Moving code or adding a feature area may need a rule in `tests/e2e/impact.toml`; `python3 tests/e2e/impact.py check`
   checks the map.
+
+### Waiting in tests
+
+A test that sleeps a fixed time and then asserts fails on a busy machine and wastes time on an idle one. So:
+
+- Never assert after a fixed sleep. Wait on what you're waiting for: an event (`AuditWaits.RecordedAsync` for an audit
+  entry, a task's `WaitAsync`), or a condition with `Eventually.UntilAsync`, which polls every 25 ms. Their limits
+  (a minute) only guard against a hang: a passing test never waits them out.
+- Play retry schedules and timers with a clock: `HeldClock` holds each wait until the test lets it go, so the schedule
+  is asserted wait by wait and things change while the code is parked; `FakeClock` lets every wait pass at once.
+- A short sleep is fine only to show that something *doesn't* happen. `WaitingTests` fails on a unit test that sleeps a
+  fixed second or more.
+- In the end-to-end scenarios, every wait goes through `e2e.wait.until`, and a check of timing asserts what caused it,
+  never how many seconds it took (see tests/e2e/README.md).

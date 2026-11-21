@@ -20,9 +20,12 @@ namespace Gitberth.Tests;
 
 /// <summary>
 /// Images, creating an app and updating it, against the real engine (opt-in: GITBERTH_ENGINE_IT=1, with Docker's socket
-/// at /var/run/docker.sock). It pulls only alpine:3.20 and alpine:3.21, and removes the ones it pulled that the host
-/// didn't have before. Every container and network it makes is named gbtest-uc-*, through a guard that refuses any other
-/// name, any other network and any volume; they're removed at the end, whatever happened.
+/// at /var/run/docker.sock). It pulls only alpine:3.20, alpine:3.21 and busybox:1.37, and removes the ones it pulled that
+/// the host didn't have before. The update follows a tag of the test's own, made here on images of its own, so it never
+/// depends on a registry's tags moving (a registry's pull during an update is e2e scenario 24's). Every container and
+/// network it makes is named gbtest-uc-*, through a guard that refuses any other name, any other network and any volume,
+/// and every image and tag it makes is gbtest-uc-&lt;run&gt;:*; they're removed at the end, whatever happened. Run it against
+/// an engine nothing else uses (a rig's): the host's Gitberth would record its containers as changes made outside it.
 /// </summary>
 public sealed class ImageEngineIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
@@ -78,14 +81,13 @@ public sealed class ImageEngineIntegrationTests(ITestOutputHelper output) : IAsy
         }
         if ((await _real.ListNetworksAsync(default)).OfType<JsonObject>().Any(n => (string?)n["Name"] == Network))
             await _guarded.RemoveNetworkAsync(Network, default);
-        // The images this run pulled that the host didn't have before; never one a container uses.
-        var images = Images();
+        // The test's own tags, and with the last of each image's its image; then the images this run pulled that the host
+        // didn't have before, by their names. Never forced: Docker refuses one a container uses.
+        foreach (var image in (await _api.ListImagesAsync()).OfType<JsonObject>())
+            foreach (var tag in ImageService.Strings(image["RepoTags"]).Where(t => t.StartsWith(OwnRepo + ":", StringComparison.Ordinal)))
+                await RemoveImageAsync(Own(tag));
         foreach (var image in Pullable.Reverse().Where(i => !_hadBefore.Contains(i)))
-        {
-            if (await _api.InspectImageAsync(image) is not { } pulled) continue;
-            var left = await images.RemoveIfUnusedAsync((string)pulled["Id"]!);
-            output.WriteLine($"removing {image}: {left ?? "done"}");
-        }
+            if (await _api.InspectImageAsync(image) is not null) await RemoveImageAsync(image);
         _api.Dispose();
         SqliteConnection.ClearAllPools();
         try { Directory.Delete(_dir, recursive: true); }
@@ -169,14 +171,21 @@ public sealed class ImageEngineIntegrationTests(ITestOutputHelper output) : IAsy
     }
 
     /// <summary>
-    /// Needs Builder B's change engine (PortChanger.PlanCreateAsync, and PlanAsync for an update and a rollback): with the
-    /// stubs in Builder C's own tree it stops at the create and says so. Run it after the merge.
+    /// An app made from a tag of the test's own, gbtest-uc-&lt;run&gt;:follow, on two images of its own (v1, then v2, each
+    /// alpine:3.20 committed with the label Gitberth's builds carry, so no registry is ever asked about them): created on
+    /// v1, the tag moved on to v2 as a rebuild of it would, updated to v2, rolled back to v1, removed. Nothing is pulled but
+    /// alpine:3.20, and that only when the host hasn't got it.
     /// </summary>
     [EngineFact]
     public async Task Creates_updates_rolls_back_and_removes_an_app_on_the_real_engine()
     {
         await _guarded.CreateNetworkAsync(new JsonObject { ["Name"] = Network, ["Labels"] = new JsonObject { ["gbtest"] = "image-it" } }, default);
         var images = Images();
+        await PulledAsync(images, Alpine320);
+        var v1 = await CommitAsync("v1");
+        var v2 = await CommitAsync("v2");
+        await TagAsync(v1, "follow");
+        var follow = $"{OwnRepo}:follow";
         var changer = Changer();
         Func<string, string> containerFor = slug => $"{Prefix}{_run}-{slug}";
         var creator = new AppCreator(new CreateSteps(_real, changer, _db, _lan, containerFor, output), images, _options, NullLogger<AppCreator>.Instance)
@@ -184,47 +193,46 @@ public sealed class ImageEngineIntegrationTests(ITestOutputHelper output) : IAsy
             ContainerFor = containerFor,
         };
 
-        // Created from the registry image as any app is (pulled first when the host hasn't got it): Gitberth's labels, its
-        // network with the alias, unless-stopped.
-        var draft = await creator.DraftFromImageAsync(Alpine320, AppSource.Registry);
+        // Created from the tag as any app is: Gitberth's labels, its network with the alias, unless-stopped. The tag is on
+        // the host, so nothing is pulled.
+        var draft = await creator.DraftFromImageAsync(follow, AppSource.Registry);
         var plan = await creator.PlanAsync(draft with { Settings = draft.Settings with { Command = ["sleep", "3600"] } });
         Assert.True(plan.CanCreate, string.Join("; ", plan.Problems.Select(p => p.Message)));
-        Assert.Equal(!_hadBefore.Contains(Alpine320), plan.NeedsPull);
+        Assert.False(plan.NeedsPull);
         output.WriteLine(plan.DockerRun);
         var job = creator.Start(plan);
         var created = await job.Completion.WaitAsync(TimeSpan.FromMinutes(5));
-        if (!created.Ok && created.Message.Contains("not implemented", StringComparison.OrdinalIgnoreCase))
-            Assert.Fail($"The change engine here is a stub ({created.Message}): this test needs Builder B's PortChanger.PlanCreateAsync. Run it after the merge.");
         Assert.True(created.Ok, $"{created.Message} {created.LastOutput}");
-        Assert.Equal(("Done", plan.NeedsPull), (job.Phase, job.Pull is not null));
-        var id320 = (string)(await _api.InspectImageAsync(Alpine320))!["Id"]!;
+        Assert.Equal(("Done", false), (job.Phase, job.Pull is not null));
         var container = plan.Container;
         var made = (await _real.InspectContainerAsync(container, default))!;
-        Assert.Equal((true, id320), (Running(made), Str(made, "Image")));
-        Assert.Equal(("true", "alpine", "registry"), (Label(made, "gitberth.managed"), Label(made, "gitberth.app"), Label(made, "gitberth.source")));
+        Assert.Equal((true, v1, follow), (Running(made), Str(made, "Image"), Str(made["Config"], "Image")));
+        Assert.Equal(("true", draft.Slug, "registry"), (Label(made, "gitberth.managed"), Label(made, "gitberth.app"), Label(made, "gitberth.source")));
         Assert.Equal("unless-stopped", Str(made["HostConfig"]?["RestartPolicy"], "Name"));
-        Assert.Contains("alpine", ImageService.Strings(made["NetworkSettings"]?["Networks"]?[Network]?["Aliases"]));
+        Assert.Contains(draft.Slug, ImageService.Strings(made["NetworkSettings"]?["Networks"]?[Network]?["Aliases"]));
 
-        // Updated to alpine:3.21, the tag it follows from now on: pulled, recreated on the new image, the old one kept.
+        // The tag moves on to v2, as a rebuild of it would. Check for update, as the owner presses it: a newer image of the
+        // tag on the host, found without asking any registry. A fresh service: one that looked at the tag keeps what it
+        // named for a while.
+        await TagAsync(v2, "follow");
         var updates = new UpdateService(new UpdateSteps(_real, changer, _db, output), images, _db, NullLogger<UpdateService>.Instance);
-        await using (var context = _db.CreateDbContext())
-            await context.Apps.Where(a => a.Container == container).ExecuteUpdateAsync(s => s.SetProperty(a => a.ImageRef, Alpine321));
-        // Check for update, as the owner presses it: Docker Hub has alpine:3.21, so it's a registry's image with an update.
         var status = await updates.CheckAsync(container);
-        Assert.True((status.Origin, status.Available) == (ImageOrigin.Registry, true), status.Text);
+        Assert.True((status.Origin, status.Available) == (ImageOrigin.Local, true), status.Text);
+        Assert.StartsWith("A newer local image", status.Text);
+
+        // Updated to it: nothing pulled, recreated on v2 under the tag it follows, v1 kept to go back to.
         var update = await updates.PrepareAsync(container);
         Assert.Null(update.Blocked);
+        Assert.Null(update.Pull);
         output.WriteLine(string.Join(" | ", update.Plan!.Settings.Select(l => $"{l.Label}: {l.Before} → {l.After}")));
         var updated = await updates.Start(update.Plan).Completion.WaitAsync(TimeSpan.FromMinutes(3));
         await updates.FollowUpOf(container);
         Assert.True(updated.Ok, updated.Message);
-        Assert.True(update.Pull!.Ok, update.Pull.Message);
-        var id321 = (string)(await _api.InspectImageAsync(Alpine321))!["Id"]!;
         var after = (await _real.InspectContainerAsync(container, default))!;
-        Assert.Equal((true, id321, Alpine321), (Running(after), Str(after, "Image"), Str(after["Config"], "Image")));
+        Assert.Equal((true, v2, follow), (Running(after), Str(after, "Image"), Str(after["Config"], "Image")));
         Assert.Equal(["sleep", "3600"], ImageService.Strings(after["Config"]?["Cmd"]));
         await using (var context = _db.CreateDbContext())
-            Assert.Equal(id320, (await context.Apps.AsNoTracking().SingleAsync(a => a.Container == container)).PreviousImage);
+            Assert.Equal(v1, (await context.Apps.AsNoTracking().SingleAsync(a => a.Container == container)).PreviousImage);
 
         // Rolled back to the image it ran before, by its ID: nothing pulled.
         var rollback = await updates.PrepareRollbackAsync(container);
@@ -233,13 +241,61 @@ public sealed class ImageEngineIntegrationTests(ITestOutputHelper output) : IAsy
         await updates.FollowUpOf(container);
         Assert.True(rolledBack.Ok, rolledBack.Message);
         var back = (await _real.InspectContainerAsync(container, default))!;
-        Assert.Equal((true, id320), (Running(back), Str(back, "Image")));
+        Assert.Equal((true, v1), (Running(back), Str(back, "Image")));
 
         // Removed; nothing of it is left but the images, which the end of the run takes care of.
         await _guarded.RemoveAsync(container, force: true, default);
         Assert.Null(await _real.InspectContainerAsync(container, default));
         Assert.DoesNotContain((await _real.ListContainersAsync(default)).OfType<JsonObject>(),
             c => ImageService.Strings(c["Names"]).Any(n => n.TrimStart('/').StartsWith(container, StringComparison.Ordinal)));
+    }
+
+    // ---- The test's own images: gbtest-uc-<run>:*, and nothing else of the host's is tagged, committed or removed ----
+
+    private string OwnRepo => $"{Prefix}{_run}";
+
+    private string Own(string reference) => reference.StartsWith(OwnRepo + ":", StringComparison.Ordinal) || reference == OwnRepo
+        ? reference
+        : throw new InvalidOperationException($"The image engine test refused to touch the image {reference}: only {OwnRepo}:* are its own.");
+
+    private async Task PulledAsync(ImageService images, string image)
+    {
+        if (await _api.InspectImageAsync(image) is not null) return;
+        var pulled = await images.StartPull(image).Completion.WaitAsync(TimeSpan.FromMinutes(5));
+        Assert.True(pulled.Ok, pulled.Message);
+    }
+
+    // gbtest-uc-<run>:<tag>, alpine:3.20 committed from a container of the test's (never started) with the label Gitberth's
+    // builds carry: a local build, so no registry is asked about it. Each is made after the one before, so never older.
+    // Returns its ID.
+    private async Task<string> CommitAsync(string tag)
+    {
+        var source = $"{Prefix}{_run}-src";
+        if (await _real.InspectContainerAsync(source, default) is null)
+            await _guarded.CreateAsync(source, new JsonObject { ["Image"] = Alpine320, ["Cmd"] = new JsonArray("true") }, default);
+        var label = $"LABEL {ImageOrigins.BuildLabel}=gbtest-{tag}";
+        var answer = JsonNode.Parse(await _api.SendAsync(HttpMethod.Post,
+            $"commit?container={Uri.EscapeDataString(source)}&repo={Uri.EscapeDataString(Own(OwnRepo))}&tag={Uri.EscapeDataString(tag)}&changes={Uri.EscapeDataString(label)}"));
+        var id = (string?)answer?["Id"] ?? throw new InvalidOperationException($"Docker didn't say which image it committed for {OwnRepo}:{tag}.");
+        output.WriteLine($"{OwnRepo}:{tag} is {id}");
+        return id;
+    }
+
+    // Points gbtest-uc-<run>:<tag> at the image, as `docker tag` does: off the image it named before.
+    private Task TagAsync(string id, string tag) =>
+        _api.SendAsync(HttpMethod.Post, $"images/{Uri.EscapeDataString(id)}/tag?repo={Uri.EscapeDataString(Own(OwnRepo))}&tag={Uri.EscapeDataString(tag)}");
+
+    private async Task RemoveImageAsync(string name)
+    {
+        try
+        {
+            await _api.RemoveImageAsync(name, default);
+            output.WriteLine($"removed {name}");
+        }
+        catch (Exception ex) when (ex is DockerApiException or TimeoutException)
+        {
+            output.WriteLine($"{name} stays: {ex.Message}");
+        }
     }
 
     // The change engine as Program.cs makes it, from the real adapters, whatever its constructor asks for.

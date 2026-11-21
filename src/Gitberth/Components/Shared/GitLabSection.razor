@@ -1,4 +1,7 @@
+@using Gitberth.Credentials
+@using Gitberth.Components.Pages
 @inject GitLabSettings GitLabSettings
+@inject CredentialWatch Credentials
 @inject GitLabIntegrationState GitLabState
 @inject SettingsService Settings
 @inject DomainService Domains
@@ -29,6 +32,7 @@
         }
         else
         {
+            <AttentionBanners Where="@(i => i.Key == CredentialWatch.BoardKey(CredentialWatch.GitLabKey))" Here="settings#gitlab" />
             <div class="gb-row gb-row--wrap" style="gap:10px" aria-live="polite">
                 @if (status.TokenSaved)
                 {
@@ -43,7 +47,7 @@
                     }
                     @if (status.ExpiresAt is { } expires)
                     {
-                        <span class="@(ExpiresSoon ? "gb-tag gb-tag--warn" : "gb-t3")"><Tip Key="settings.gitlab.expires">expires @expires.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)@(ExpiresSoon ? ": renew it soon" : "")</Tip></span>
+                        <span class="@SettingsPage.ExpiryClass(expires, DateTimeOffset.UtcNow)"><Tip Key="settings.gitlab.expires" Detail="@CheckedLine">@SettingsPage.ExpiryWords(expires, DateTimeOffset.UtcNow)</Tip></span>
                     }
                     @if (status.Scopes is { Count: > 0 } scopes)
                     {
@@ -165,7 +169,17 @@
     private int switchKey;
     private int interval;
 
-    private bool ExpiresSoon => status?.ExpiresAt is { } at && at < DateTimeOffset.UtcNow.AddDays(14);
+    // The expiry tag's live line: when Gitberth last asked GitLab about the token.
+    private string? CheckedLine => Credentials.CheckedAt(CredentialWatch.GitLabKey) is { } at ? $"Checked {Format.Ago(at.UtcDateTime)}" : null;
+
+    // What the save's own check said of the token it kept: taken (GitLab said who it is), refused, or nothing (it asked
+    // nothing of the token, or GitLab couldn't answer), which leaves the token watch's word on it as it was.
+    internal static bool? Took(GitLabSave saved) => saved.Check switch
+    {
+        { Valid: false } => false,
+        { Username: not null } => true,
+        _ => null,
+    };
 
     // Something to save: a token typed, or another address.
     private bool CanSave => !busy && status is not null
@@ -218,6 +232,9 @@
                 return;
             }
             newToken = null;
+            // The token watch reads it again at once: a new token's past thresholds count as told, and what the save's own
+            // check said of the token (a new address checks the saved one there) ends or starts a refusal.
+            await Credentials.SavedAsync(CredentialWatch.GitLabKey, Took(saved));
             await LoadAsync();
             // The token or the address is new: every GitLab project's hook is set up again, and every project looked at.
             Webhooks.Poke();
@@ -239,11 +256,12 @@
         busy = true;
         try
         {
-            var checkedNow = await GitLabSettings.CheckAsync();
-            checkWarning = checkedNow.Check?.Warning;
+            // Through the token watch, so what GitLab says (taken, refused, its expiry) counts there at once too.
+            var checkedNow = await Credentials.CheckNowAsync(CredentialWatch.GitLabKey);
+            checkWarning = checkedNow.Warning;
             await LoadAsync();
-            if (checkedNow.Ok) Webhooks.Poke();
-            Snackbar.Add(checkedNow.Message, checkedNow.Ok ? Severity.Success : Severity.Error);
+            if (checkedNow.Took == true) Webhooks.Poke();
+            Snackbar.Add(checkedNow.Message, checkedNow.Took switch { true => Severity.Success, false => Severity.Error, _ => Severity.Warning });
         }
         catch (Exception ex)
         {
@@ -266,6 +284,7 @@
         try
         {
             await GitLabSettings.RemoveTokenAsync();
+            await Credentials.SavedAsync(CredentialWatch.GitLabKey);
             checkWarning = null;
             await LoadAsync();
             Snackbar.Add("The GitLab token is removed.", Severity.Info);

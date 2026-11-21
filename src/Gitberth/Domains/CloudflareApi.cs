@@ -7,16 +7,30 @@ using System.Text.Json.Nodes;
 namespace Gitberth.Domains;
 
 /// <param name="transient">Cloudflare failed for a moment rather than because of how things are set up (see <see cref="Transient"/>).</param>
-public sealed class CloudflareApiException(string message, bool transient = false) : Exception(message)
+/// <param name="tokenRefused">Cloudflare refused the token itself (see <see cref="TokenRefused"/>).</param>
+public sealed class CloudflareApiException(string message, bool transient = false, bool tokenRefused = false) : Exception(message)
 {
     /// <summary>
     /// Cloudflare was busy or out of reach (it answered 5xx or 429, or not at all, or not in time): the same call may work
     /// in a while. A refused token, a missing permission or something not set up is never transient.
     /// </summary>
     public bool Transient { get; } = transient;
+
+    /// <summary>
+    /// Cloudflare refused the token itself (a 401, or its codes for a token it doesn't take: expired, disabled, deleted or
+    /// unknown), not a permission it lacks: no call with it works until a new one is saved.
+    /// </summary>
+    public bool TokenRefused { get; } = tokenRefused;
 }
 
 public sealed record CloudflareZone(string Id, string Name);
+
+/// <summary>What Cloudflare's verify said of a token: taken, its status and expiry, or why not.</summary>
+/// <param name="Refused">Cloudflare refused it: it answered as for a token it doesn't take, or said it isn't active.</param>
+/// <param name="Status">Its status when Cloudflare said: active, disabled or expired.</param>
+/// <param name="ExpiresOn">When it expires; null when it doesn't, or Cloudflare didn't say.</param>
+/// <param name="Problem">Why it was refused, or couldn't be checked (Cloudflare out of reach or failing), in words; null when it's taken.</param>
+public sealed record CloudflareTokenCheck(bool Refused, string? Status, DateTimeOffset? ExpiresOn, string? Problem);
 
 /// <param name="Comment">Cloudflare's note on the record; Gitberth marks the ones it adds with <see cref="CloudflareApi.AddedByGitberth"/>.</param>
 /// <param name="Ttl">1 is Cloudflare's "auto".</param>
@@ -30,8 +44,9 @@ public sealed record AccessApp(string Id, string Name, string Domain, string Aud
 /// <summary>
 /// Gitberth's Cloudflare API calls: the routes of the tunnel on this host, and the DNS records that send a domain to it.
 /// Every change it makes to DNS and Cloudflare Access is recorded in the audit log, made or failed (never the token).
+/// What each answer said of the token goes to the token watch (<paramref name="signals"/>).
 /// </summary>
-public sealed class CloudflareApi(IHttpClientFactory httpFactory, Audit.AuditLog? audit = null)
+public sealed class CloudflareApi(IHttpClientFactory httpFactory, Audit.AuditLog? audit = null, Credentials.CredentialSignals? signals = null)
 {
     private const string ApiRoot = "https://api.cloudflare.com/client/v4/";
 
@@ -49,16 +64,46 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory, Audit.AuditLog
     /// <summary>Whether Gitberth added the record. Ones added before it was renamed carry its old name, GitDock, and are its own too.</summary>
     public static bool AddedByUs(string? comment) => comment is AddedByGitberth or AddedByGitDock;
 
-    /// <summary>Whether Cloudflare accepts the token at all (user tokens, then account-owned ones).</summary>
-    public async Task VerifyTokenAsync(string token, string accountId, CancellationToken ct = default)
+    /// <summary>Whether Cloudflare accepts the token at all (user tokens, then account-owned ones), and when it expires.</summary>
+    /// <exception cref="CloudflareApiException">Cloudflare refused it, or couldn't be asked; its message says which.</exception>
+    public async Task<DateTimeOffset?> VerifyTokenAsync(string token, string accountId, CancellationToken ct = default)
+    {
+        var check = await CheckTokenAsync(token, accountId, ct);
+        if (check.Problem is { } problem) throw new CloudflareApiException(problem, transient: !check.Refused, tokenRefused: check.Refused);
+        return check.ExpiresOn;
+    }
+
+    /// <summary>
+    /// What Cloudflare says of the token now: verified as a user's token, else as one the tunnel's account owns (as saving it
+    /// does), with its status and expiry. Refused only when Cloudflare refused it both ways, or said it isn't active; an
+    /// answer that couldn't be had (Cloudflare out of reach or failing) is a problem, never a refusal.
+    /// </summary>
+    public async Task<CloudflareTokenCheck> CheckTokenAsync(string token, string accountId, CancellationToken ct = default)
+    {
+        var user = await VerifyAsync(token, "user/tokens/verify", ct);
+        if (user.Status is not null) return user;
+        var account = await VerifyAsync(token, $"accounts/{accountId}/tokens/verify", ct);
+        if (account.Status is not null) return account;
+        return user.Refused && account.Refused ? account : new CloudflareTokenCheck(false, null, null, (account.Refused ? user : account).Problem);
+    }
+
+    // One verify: {id, status, expires_on} when Cloudflare answered for the token, else why not.
+    private async Task<CloudflareTokenCheck> VerifyAsync(string token, string path, CancellationToken ct)
     {
         try
         {
-            await SendAsync(token, HttpMethod.Get, "user/tokens/verify", null, "check the token", ct);
+            var result = await SendAsync(token, HttpMethod.Get, path, null, "check the token", ct) as JsonObject;
+            var status = (result is null ? null : Text(result, "status")) ?? "active";
+            var expires = result is not null && Text(result, "expires_on") is { Length: > 0 } on
+                && DateTimeOffset.TryParse(on, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var at)
+                ? at : (DateTimeOffset?)null;
+            return status == "active"
+                ? new CloudflareTokenCheck(false, status, expires, null)
+                : new CloudflareTokenCheck(true, status, expires, $"Cloudflare says Gitberth's API token is {status}. Save a new one in Settings › Domains.");
         }
-        catch (CloudflareApiException)
+        catch (CloudflareApiException ex)
         {
-            await SendAsync(token, HttpMethod.Get, $"accounts/{accountId}/tokens/verify", null, "check the token", ct);
+            return new CloudflareTokenCheck(ex.TokenRefused, null, null, ex.Message);
         }
     }
 
@@ -305,23 +350,52 @@ public sealed class CloudflareApi(IHttpClientFactory httpFactory, Audit.AuditLog
             {
             }
             if (response.IsSuccessStatusCode && doc?["success"] is JsonValue ok && ok.TryGetValue<bool>(out var success) && success)
+            {
+                signals?.Report(new Credentials.CredentialAnswer(Credentials.CredentialWatch.CloudflareKey, Credentials.CredentialSignals.Hash(token),
+                    Credentials.CredentialVerdict.Accepted));
                 return (doc["result"], doc["result_info"]);
+            }
             if (notFoundOk && response.StatusCode == HttpStatusCode.NotFound) return (null, null);
-            throw new CloudflareApiException(Explain(response.StatusCode, doc, doing, permissions), IsTransient(response.StatusCode));
+            var refused = TokenRefused(response.StatusCode, CodeOf(doc), MessageOf(doc));
+            if (refused)
+                signals?.Report(new Credentials.CredentialAnswer(Credentials.CredentialWatch.CloudflareKey, Credentials.CredentialSignals.Hash(token),
+                    Credentials.CredentialVerdict.Refused, Credentials.CredentialText.CloudflareDoing(doing)));
+            throw new CloudflareApiException(Explain(response.StatusCode, doc, doing, permissions), IsTransient(response.StatusCode), refused);
         }
     }
 
     /// <summary>Whether an answer means Cloudflare is busy or failing for now (5xx, its rate limit, a timeout), so asking again later may work.</summary>
     internal static bool IsTransient(HttpStatusCode status) => status is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout || (int)status >= 500;
 
-    /// <summary>Cloudflare's error, said plainly: a missing permission names the one the token needs.</summary>
+    /// <summary>
+    /// Whether Cloudflare refused the token itself: a 401, 1000 (an invalid token), 6003 or 6111 (malformed), or 9109 when it
+    /// says "Invalid access token". Cloudflare also answers 9109 ("Unauthorized to access requested resource") to a token that
+    /// works but lacks a permission there (an account's Access applications, say): that, a 403 without those, and 10000
+    /// ("Authentication error") are a permission the token lacks.
+    /// </summary>
+    internal static bool TokenRefused(HttpStatusCode status, int code, string? message = null) =>
+        status == HttpStatusCode.Unauthorized || code is 1000 or 6003 or 6111
+        || code == 9109 && message is not null && message.Contains("Invalid access token", StringComparison.OrdinalIgnoreCase);
+
+    // The first error's code, 0 when there's none.
+    private static int CodeOf(JsonNode? doc) =>
+        (doc?["errors"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault()?["code"] is JsonValue c && c.TryGetValue<int>(out var n) ? n : 0;
+
+    // The first error's message, null when there's none.
+    private static string? MessageOf(JsonNode? doc) =>
+        (doc?["errors"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault() is { } first ? Text(first, "message") : null;
+
+    /// <summary>
+    /// Cloudflare's error, said plainly: a token it refused outright says so (it expired, or was disabled or deleted), and a
+    /// missing permission names the one the token needs.
+    /// </summary>
     internal static string Explain(HttpStatusCode status, JsonNode? doc, string doing, string permissions = Permissions)
     {
-        var first = (doc?["errors"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault();
-        var code = first?["code"] is JsonValue c && c.TryGetValue<int>(out var n) ? n : 0;
-        var message = first is null ? null : Text(first, "message");
-        // 10000 is "Authentication error" (missing permission); 6003, 6111 and 9109 are a malformed or unknown token.
-        if (status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden || code is 10000 or 9109 or 6003 or 6111)
+        var code = CodeOf(doc);
+        var message = MessageOf(doc);
+        if (TokenRefused(status, code, message))
+            return $"Cloudflare refused Gitberth's API token itself, so it couldn't {doing}: the token has expired, or was disabled or deleted. Save a new one in Settings › Domains.";
+        if (status == HttpStatusCode.Forbidden || code is 10000 or 9109)
             return $"Cloudflare didn't let Gitberth's token {doing}. The token needs {permissions}.";
         if (status == HttpStatusCode.TooManyRequests)
             return $"Cloudflare's API rate limit was reached while trying to {doing}. It clears within minutes: Gitberth tries again on the app's next deploy, and every 15 minutes for a domain it's removing.";

@@ -639,8 +639,9 @@ else
 
     private static string RestartHelp(string policy) => policy switch
     {
-        "no" => "Never: it stays down after a crash or a host reboot until you start it.",
-        "on-failure" => "On failure: it comes back after a crash, but not after a reboot or if you stop it.",
+        // Docker's own rule, then what Gitberth adds (Settings › Keep apps running): a crash past it is brought back, a stop never.
+        "no" => "Never: Docker doesn't start it again after a crash or a host reboot. Gitberth does, up to 4 times (Settings › Keep apps running); once you stop it, it stays down.",
+        "on-failure" => "On failure: it comes back after a crash, but not after a reboot or if you stop it. When it crashes and this doesn't start it again, Gitberth does, up to 4 times (Settings › Keep apps running).",
         "always" => "Always: it comes back after a crash or a reboot, and even after you stop it once Docker restarts.",
         _ => "Unless stopped: it comes back after a crash or a host reboot, but stays down if you stop it.",
     };

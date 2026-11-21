@@ -12,7 +12,7 @@ Everything here is set in **Settings › GitLab**, and none of it is ever the re
 4. Add an app: **New app › Git repository**, paste the project's URL, **Check**, then **Create and deploy**. See
    [Deploy an app from GitHub or GitLab](deploy-from-github.md).
 
-Once saved, the section shows **Token saved**, whose it is, the GitLab it's for, when it expires (highlighted with **renew it soon** in its last 14 days) and its scopes. When it lacks a scope Gitberth uses, a banner names each one and what it's for. **Check the token** asks GitLab again, after you've changed the token's scopes, say.
+Once saved, the section shows **Token saved**, whose it is, the GitLab it's for, when it expires (highlighted with **renew it soon** in its last 3 weeks: see [When the token expires](#when-the-token-expires)) and its scopes. When it lacks a scope Gitberth uses, a banner names each one and what it's for. **Check the token** asks GitLab again, after you've changed the token's scopes, say.
 
 A public project needs no token: it's cloned, watched, built and previewed without one. GitLab then hears nothing from Gitberth, and the project's CI/CD variables can't be read.
 
@@ -31,6 +31,16 @@ With **read_api** and **read_repository** alone, Gitberth deploys, previews and 
 When GitLab refuses something on a project, **Settings › GitLab** says what's missing in a banner like **Commit statuses aren't set on you/website**, and Gitberth stops asking on that project for an hour, or until you save a token again. Other projects carry on. A token GitLab refuses outright (expired, revoked) stops it everywhere until it's replaced: **Commit statuses aren't set: GitLab refused the token**. Deploys carry on either way.
 
 GitLab's rate limit (an answer `429`, with `Retry-After`) is said, never pushed through: the call fails with when to try again, and Gitberth asks again later, as it does with GitHub's.
+
+## When the token expires
+
+GitLab's tokens expire on a day (GitLab stops taking one from the start of that day, UTC). Gitberth asks GitLab about the
+token every 6 hours, and says on the dashboard and in **Settings › GitLab** when it's 3 weeks, a week and a day away,
+and when it has expired (**The GitLab token expires in 6 days**). When GitLab turns the token away (revoked, say), and
+again when Gitberth checks it at once, the banner says **GitLab refused the token** with GitLab's own word when it gave
+one ("GitLab says it was revoked."), and the top bar has a pill until a new token is saved. Each of these sends a notice
+too (see [Notifications](notifications.md)). **Check the token** asks GitLab at once. Make the new token in your GitLab's
+**Access tokens** and save it with **Replace token**. See [Tokens and sign-ins](troubleshooting.md#tokens-and-sign-ins).
 
 ## A project's URL
 
@@ -95,7 +105,7 @@ On by default (**Settings › GitLab › Comments on merge requests**). A previe
 
 GitLab's project hooks share the host name for webhooks in **Settings › GitHub integration › Instant deploys** (which needs [domains](domains.md)): with one set, `https://hooks.example.com/hooks/gitlab` goes to Gitberth through the tunnel too, next to `/hooks/github` and deploy hooks, and nothing else on that host does.
 
-Gitberth adds its project hook to every GitLab project it deploys, and to new ones as you add them: that URL, **Push events** and **Merge request events**, SSL verification on, and a secret token of its own (never GitHub's webhook secret). The list in **Settings › GitLab** says, per project, **Webhook added** or why not. As with GitHub, it only ever changes its own hook (the one it added, or one with exactly its URL), moves it when the host name changes, and leaves any other alone.
+Gitberth adds its project hook to every GitLab project it deploys, and to new ones as you add them: that URL, **Push events** and **Merge request events**, SSL verification on, and a secret token of its own (never GitHub's webhook secret). The list in **Settings › GitLab** says, per project, **Webhook added** or why not. As with GitHub, it only ever changes its own hook (the one it added, or one with exactly its URL), moves it when the host name changes, and leaves any other alone. When GitLab fails for a moment, Gitberth tries again as it does with GitHub, but a minute after a request to add the hook whose answer never came back at the soonest: GitLab may still be adding that hook, and unlike GitHub it adds a second one with the same URL when asked again. Should a second copy of Gitberth's hook (exactly its URL) be on a project all the same, Gitberth removes it, so each push deploys once.
 
 Without the **api** scope or the Maintainer role, add it by hand on each project (**Settings › Webhooks › Add new webhook**) with the **URL**, the **Secret token** (**Show** reveals it, the copy button copies it) and the triggers **Settings › GitLab** shows.
 

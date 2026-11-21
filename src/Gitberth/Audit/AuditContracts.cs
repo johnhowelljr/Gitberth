@@ -4,8 +4,12 @@ namespace Gitberth.Audit;
 /// <remarks>Kept by name (the log and Deployment.RequestedBy), so names are only ever added, at the end.</remarks>
 public enum AuditActorKind { Gitberth, User, ApiToken, DeployHook, GitHub, Docker, Cloudflare, GitLab }
 
-/// <summary>Where the change came in: the UI, an AI agent or script, a webhook, or one of Gitberth's own jobs.</summary>
-public enum AuditVia { Gitberth, UI, Mcp, Api, Webhook, Hook, Watcher, Schedule, Startup, Updates, Health, Docker, Sync }
+/// <summary>
+/// Where the change came in: the UI, an AI agent or script, a webhook, or one of Gitberth's own jobs (KeepRunning: the
+/// check that brings back apps that stopped by themselves; Cleanup: the one that keeps Docker's disk from filling up).
+/// Kept by name, so names are only ever added, at the end.
+/// </summary>
+public enum AuditVia { Gitberth, UI, Mcp, Api, Webhook, Hook, Watcher, Schedule, Startup, Updates, Health, Docker, Sync, KeepRunning, Cleanup }
 
 /// <summary>How the change ended.</summary>
 public enum AuditOutcome { Succeeded, Failed, Denied }
@@ -229,7 +233,8 @@ public static class AuditActors
 
     /// <summary>
     /// Who a deploy was for: the actor it kept, else Gitberth through the job its trigger names (the watcher for a new
-    /// commit, the scheduler for a restart, startup for a start after Gitberth came up).
+    /// commit, the scheduler for a restart, startup for a start after Gitberth came up, the keep-running check for an app
+    /// it brought back).
     /// </summary>
     public static AuditActor ForDeploy(string? requestedBy, Data.DeployTrigger trigger) =>
         Parse(requestedBy) ?? AuditActor.System(trigger switch
@@ -237,6 +242,7 @@ public static class AuditActors
             Data.DeployTrigger.Poll or Data.DeployTrigger.Retry or Data.DeployTrigger.Webhook => AuditVia.Watcher,
             Data.DeployTrigger.Restart => AuditVia.Schedule,
             Data.DeployTrigger.Start => AuditVia.Startup,
+            Data.DeployTrigger.Recover => AuditVia.KeepRunning,
             _ => AuditVia.Gitberth,
         });
 

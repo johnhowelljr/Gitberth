@@ -1,6 +1,8 @@
 @page "/settings"
+@using Gitberth.Credentials
 @using Gitberth.Security
 @inject SettingsService Settings
+@inject CredentialWatch Credentials
 @inject GitHubApi GitHub
 @inject DomainService Domains
 @inject AdminAuthService Auth
@@ -38,6 +40,7 @@
         <section class="gb-card gb-sec" id="github" aria-labelledby="github-t">
             @Head("github-t", Icons.Custom.Brands.GitHub, "GitHub access", "For private repositories, and the repo variables apps keep their environment in.", TocTip("github"))
             <div class="gb-sec-body">
+                <AttentionBanners Where="@(i => i.Key == CredentialWatch.BoardKey(CredentialWatch.GitHubKey))" Here="settings#github" />
                 <div class="gb-row gb-row--wrap" style="gap:10px">
                     @if (tokenSaved)
                     {
@@ -46,9 +49,9 @@
                         {
                             <span class="gb-t2">for <strong>@login</strong></span>
                         }
-                        @if (expires is not null)
+                        @if (expires is { } until)
                         {
-                            <span class="@(ExpiresSoon ? "gb-tag gb-tag--warn" : "gb-t3")"><Tip Key="settings.github.expires">expires @expires.Value.ToLocalTime().ToString("MMM d, yyyy", CultureInfo.InvariantCulture)@(ExpiresSoon ? ": renew it soon" : "")</Tip></span>
+                            <span class="@ExpiryClass(until, DateTimeOffset.UtcNow)"><Tip Key="settings.github.expires" Detail="@CheckedLine(CredentialWatch.GitHubKey)">@ExpiryWords(until, DateTimeOffset.UtcNow)</Tip></span>
                         }
                     }
                     else
@@ -65,6 +68,7 @@
                         <Btn Kind="BtnKind.Primary" OnClick="SaveTokenAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(newToken)" Tip="settings.github.save-token">@(tokenSaved ? "Replace token" : "Save token")</Btn>
                         @if (tokenSaved)
                         {
+                            <Btn OnClick="CheckTokenAsync" Disabled="busy" Icon="@Icons.Material.Outlined.VerifiedUser" Tip="settings.github.check">Check the token</Btn>
                             <Btn Kind="BtnKind.Danger" OnClick="RemoveTokenAsync" Disabled="busy" Tip="settings.github.remove-token">Remove</Btn>
                         }
                     </div>
@@ -180,6 +184,7 @@
         <section class="gb-card gb-sec" id="registries" aria-labelledby="registries-t">
             @Head("registries-t", Icons.Material.Outlined.Key, "Registries", "Sign-ins for private images: used to pull them and to check them for updates.", TocTip("registries"))
             <div class="gb-sec-body">
+                <AttentionBanners Where="@(i => i.Key.StartsWith(CredentialWatch.BoardKey(CredentialWatch.RegistryPrefix), StringComparison.Ordinal))" Here="settings#registries" />
                 @if (registries is null)
                 {
                     <div class="gb-skel" style="height:48px"></div>
@@ -197,7 +202,7 @@
                                 <AppLogo Image="@RegistryLogo(r.Host)" Name="@r.Host" Size="26" />
                                 <div style="min-width:0">
                                     <div class="gb-regrow-t">@r.Host</div>
-                                    <div class="gb-regrow-s">@r.Username · <Tip Key="settings.registries.state">@RegistryState(r)</Tip></div>
+                                    <div class="gb-regrow-s">@r.Username · <Tip Key="settings.registries.state">@RegistryState(r, Credentials.RefusedAt(CredentialWatch.RegistryPrefix + r.Host))</Tip></div>
                                 </div>
                                 <span class="r-when gb-t3" style="font-size:12px">added @r.CreatedAt.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture)</span>
                                 <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Delete" OnClick="() => RemoveRegistryAsync(r)" Disabled="registryBusy" Tip="settings.registries.remove">Remove</Btn>
@@ -268,10 +273,15 @@
                 }
                 else
                 {
+                    <AttentionBanners Where="@(i => i.Key == CredentialWatch.BoardKey(CredentialWatch.CloudflareKey))" Here="settings#domains" />
                     <div class="gb-row gb-row--wrap" style="gap:10px">
                         @if (cloudflareSaved)
                         {
                             <span class="gb-pill2 gb-tone-good"><i class="gb-st-dot gb-st-dot--running"></i>Token saved</span>
+                            @if (cloudflareExpires is { } until)
+                            {
+                                <span class="@ExpiryClass(until, DateTimeOffset.UtcNow)"><Tip Key="settings.domains.expires" Detail="@CheckedLine(CredentialWatch.CloudflareKey)">token @ExpiryWords(until, DateTimeOffset.UtcNow)</Tip></span>
+                            }
                         }
                         else
                         {
@@ -294,6 +304,7 @@
                             <Btn Kind="BtnKind.Primary" OnClick="SaveCloudflareTokenAsync" Busy="busy" Disabled="@string.IsNullOrWhiteSpace(newCloudflareToken)" Tip="settings.domains.save-token">@(cloudflareSaved ? "Replace token" : "Save token")</Btn>
                             @if (cloudflareSaved)
                             {
+                                <Btn OnClick="CheckCloudflareTokenAsync" Disabled="busy" Icon="@Icons.Material.Outlined.VerifiedUser" Tip="settings.domains.check-token">Check the token</Btn>
                                 <Btn Kind="BtnKind.Danger" OnClick="RemoveCloudflareTokenAsync" Disabled="busy" Tip="settings.domains.remove-token">Remove</Btn>
                             }
                         </div>
@@ -364,6 +375,8 @@
         </section>
 
         <UptimeSection />
+
+        <KeepRunningSection />
 
         <section class="gb-card gb-sec" id="network" aria-labelledby="network-t">
             @Head("network-t", Icons.Material.Outlined.Lan, "Network", "How devices on your LAN reach containers.", TocTip("network"))
@@ -485,7 +498,7 @@
         </section>
 
         <section class="gb-card gb-sec" id="deploys" aria-labelledby="deploys-t">
-            @Head("deploys-t", Icons.Material.Outlined.RocketLaunch, "Deploys", "How often Gitberth looks for new commits, and Docker's build cache.", TocTip("deploys"))
+            @Head("deploys-t", Icons.Material.Outlined.RocketLaunch, "Deploys", "How often Gitberth looks for new commits.", TocTip("deploys"))
             <div class="gb-sec-body">
                 <div class="gb-setrow">
                     <Field Label="Check for new commits every" For="watch-interval" Tip="settings.deploys.interval" Help="10 to 3600 seconds.">
@@ -493,9 +506,10 @@
                     </Field>
                     <div style="padding-bottom:22px"><Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveDeploysAsync" Disabled="busy">Save</Btn></div>
                 </div>
-                <BuildCacheRow />
             </div>
         </section>
+
+        <DiskSection />
 
         <DatabaseServersSection />
 
@@ -572,9 +586,11 @@
         ("updates", "Updates", Icons.Material.Outlined.CloudDownload, Tip: "settings.updates"),
         ("domains", "Domains", Icons.Material.Outlined.Public, Tip: "settings.domains"),
         ("uptime", "Uptime and status page", Icons.Material.Outlined.MonitorHeart, Tip: "settings.uptime"),
+        ("keep", "Keep apps running", Icons.Material.Outlined.Autorenew, Tip: "settings.keep"),
         ("network", "Network", Icons.Material.Outlined.Lan, Tip: "settings.network"),
         ("own-lan", "Own LAN addresses", Icons.Material.Outlined.Router, Tip: "settings.own-lan"),
         ("deploys", "Deploys", Icons.Material.Outlined.RocketLaunch, Tip: "settings.deploys"),
+        ("disk", "Disk", Icons.Material.Outlined.Storage, Tip: "settings.disk"),
         ("databases", "Databases", GitberthIcons.Database, Tip: "settings.databases"),
         ("password", "Admin password", Icons.Material.Outlined.Lock, Tip: "settings.password"),
         ("agents", "AI agents and API", Icons.Material.Outlined.SmartToy, Tip: "settings.agents"),
@@ -596,7 +612,8 @@
 
     private bool busy, tokenSaved;
     private string? login, newToken, publicHost;
-    private DateTimeOffset? expires;
+    // When the GitHub token and the Cloudflare token expire, as their services said.
+    private DateTimeOffset? expires, cloudflareExpires;
     private string browserHost = "";
     // The host's network as read from its /proc: where its LAN address is detected.
     private HostScan? scan;
@@ -660,7 +677,20 @@
         _ => $"{count} domains are protected.",
     };
 
-    private bool ExpiresSoon => expires is not null && expires.Value < DateTimeOffset.UtcNow.AddDays(14);
+    /// <summary>
+    /// A token's expiry as its tag says it: "expires Dec 1, 2026", with "renew it soon" in its last 3 weeks (when the token
+    /// watch's first warning comes, so the page and the banner agree), and "expired Dec 1, 2026" after.
+    /// </summary>
+    internal static string ExpiryWords(DateTimeOffset until, DateTimeOffset now) =>
+        until <= now ? $"expired {CredentialText.Date(until)}"
+        : $"expires {CredentialText.Date(until)}{(until < now + CredentialWatch.WarnFrom ? ": renew it soon" : "")}";
+
+    /// <summary>The tag's look: critical once it has expired, warn in its last 3 weeks, plain before.</summary>
+    internal static string ExpiryClass(DateTimeOffset until, DateTimeOffset now) =>
+        until <= now ? "gb-tag gb-tag--critical" : until < now + CredentialWatch.WarnFrom ? "gb-tag gb-tag--warn" : "gb-t3";
+
+    // The expiry tag's live line: when Gitberth last asked the service about the token.
+    private string? CheckedLine(string key) => Credentials.CheckedAt(key) is { } at ? $"Checked {Format.Ago(at.UtcDateTime)}" : null;
 
     // What an empty field means: GITBERTH_PUBLIC_HOST, else the detected address, else the address in the browser.
     private string DefaultHost => Options.PublicHost ?? scan?.Address ?? browserHost;
@@ -887,10 +917,12 @@
 
     /// <summary>
     /// A saved sign-in as its row says it: one whose password can't be read any more (Gitberth's keys were lost) needs it
-    /// again, whenever it was last checked; the rest say when they signed in.
+    /// again, whenever it was last checked; one the registry refused (the token watch's word, <paramref name="refusedAt"/>)
+    /// says when; the rest say when they signed in.
     /// </summary>
-    internal static string RegistryState(RegistryInfo registry) =>
+    internal static string RegistryState(RegistryInfo registry, DateTimeOffset? refusedAt = null) =>
         registry.NeedsSecret ? "needs its password again: enter it below"
+        : refusedAt is { } refused ? $"refused on {refused.UtcDateTime.ToString("MMM d", CultureInfo.InvariantCulture)}: enter its password again"
         : registry.VerifiedAt is { } at ? $"signed in {Ago(at)}"
         : "saved";
 
@@ -932,6 +964,8 @@
             }
             (regHost, regUser) = (null, null);
             Snackbar.Add(saved.Message, Severity.Success);
+            // A sign-in the registry refused is fixed by entering it again: the token watch reads it again at once.
+            if (RegistryService.NormalizeHost(host) is { } signedInTo) await Credentials.SavedAsync(CredentialWatch.RegistryPrefix + signedInTo);
             await LoadRegistriesAsync();
         }
         catch (Exception ex)
@@ -956,6 +990,7 @@
         {
             await Registries.RemoveAsync(registry.Id);
             Snackbar.Add($"Removed the sign-in for {registry.Host}.", Severity.Success);
+            await Credentials.SavedAsync(CredentialWatch.RegistryPrefix + registry.Host);
             await LoadRegistriesAsync();
         }
         catch (Exception ex)
@@ -1100,6 +1135,8 @@
             (tunnel, tunnelProblem) = enabled ? await Domains.FindTunnelAsync() : (null, null);
             protection = enabled && cloudflareSaved ? await Domains.ProtectionAsync() : null;
             Webhooks.Poke();
+            // The Cloudflare token is watched only while domains are on.
+            Credentials.Poke();
             var problem = report.Notes.Any(n => n.Problem);
             Snackbar.Add(!enabled ? "Domains turned off. Your tunnel and DNS stay as they are."
                 : problem ? "Domains turned on. Some need attention; see below." : "Domains turned on.", problem ? Severity.Warning : Severity.Info);
@@ -1139,6 +1176,9 @@
             cloudflareSaved = true;
             cloudflareNotes = report.Notes;
             protection = await Domains.ProtectionAsync();
+            // A new token: a refusal of the old one goes at once, and its expiry is the one Cloudflare just gave.
+            await Credentials.SavedAsync(CredentialWatch.CloudflareKey);
+            cloudflareExpires = await ExpiryAsync(CredentialKeys.CloudflareTokenExpires);
             Snackbar.Add(report.Notes.Any(n => n.Problem) ? "Token saved. Some domains need attention; see below." : "Token saved. Domains are routed.",
                 report.Notes.Any(n => n.Problem) ? Severity.Warning : Severity.Success);
         }
@@ -1151,18 +1191,44 @@
     private async Task RemoveCloudflareTokenAsync()
     {
         await Domains.RemoveTokenAsync();
+        await Credentials.SavedAsync(CredentialWatch.CloudflareKey);
         cloudflareSaved = false;
+        cloudflareExpires = null;
         cloudflareNotes = [];
         Snackbar.Add("Cloudflare token removed. Routes already in your tunnel stay as they are.", Severity.Info);
     }
+
+    // Asks Cloudflare about the saved token now: whether it takes it, and when it expires.
+    private async Task CheckCloudflareTokenAsync()
+    {
+        busy = true;
+        try
+        {
+            var said = await Credentials.CheckNowAsync(CredentialWatch.CloudflareKey);
+            cloudflareExpires = await ExpiryAsync(CredentialKeys.CloudflareTokenExpires);
+            Snackbar.Add(said.Message, said.Took switch { true => Severity.Success, false => Severity.Error, _ => Severity.Warning });
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task<DateTimeOffset?> ExpiryAsync(string key) =>
+        DateTimeOffset.TryParse(await Settings.GetAsync(key), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var at) ? at : null;
 
     private async Task LoadAsync()
     {
         tokenSaved = await Settings.GetAsync(SettingKeys.GitHubToken) is not null;
         domainsEnabled = await Domains.EnabledAsync();
         cloudflareSaved = await Domains.TokenSavedAsync();
+        cloudflareExpires = await ExpiryAsync(CredentialKeys.CloudflareTokenExpires);
         login = await Settings.GetAsync(SettingKeys.GitHubLogin);
-        expires = DateTimeOffset.TryParse(await Settings.GetAsync(SettingKeys.GitHubTokenExpires), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var e) ? e : null;
+        expires = await ExpiryAsync(SettingKeys.GitHubTokenExpires);
         publicHost = savedHost = await Settings.GetAsync(SettingKeys.PublicHost);
         interval = await Settings.GetIntAsync(SettingKeys.WatchIntervalSeconds, RepoWatcher.DefaultIntervalSeconds);
         checkHours = await Settings.GetIntAsync(CheckHoursKey, 6);
@@ -1199,12 +1265,40 @@
                     .. check.ExpiresAt is { } until ? new[] { new Gitberth.Audit.AuditChange("Expires", null, until.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)) } : []],
             });
             newToken = null;
+            // A new token: a refusal of the old one goes at once, and the thresholds it's past count as told (its date is above).
+            await Credentials.SavedAsync(CredentialWatch.GitHubKey);
             await LoadAsync();
             Watch.CheckNow();
             // A new token may have the permissions the old one lacked: everything is tried again.
             GitHubState.Clear();
             Webhooks.Poke();
             Snackbar.Add(check.Warning ?? $"Token saved{(check.Login is null ? "" : $" for {check.Login}")}", check.Warning is null ? Severity.Success : Severity.Warning);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // Asks GitHub about the saved token now: whether it takes it, whose it is, and when it expires.
+    private async Task CheckTokenAsync()
+    {
+        busy = true;
+        try
+        {
+            var said = await Credentials.CheckNowAsync(CredentialWatch.GitHubKey);
+            await LoadAsync();
+            if (said.Took == true)
+            {
+                // Taken: whatever GitHub refused before is tried again.
+                GitHubState.Clear();
+                Webhooks.Poke();
+            }
+            Snackbar.Add(said.Message, said.Took switch { true => Severity.Success, false => Severity.Error, _ => Severity.Warning });
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
         }
         finally
         {
@@ -1222,6 +1316,7 @@
         {
             Target = "GitHub token",
         });
+        await Credentials.SavedAsync(CredentialWatch.GitHubKey);
         await LoadAsync();
         GitHubState.Clear();
         Snackbar.Add("Token removed", Severity.Info);

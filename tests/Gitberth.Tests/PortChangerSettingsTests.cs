@@ -580,6 +580,30 @@ public sealed class PortChangerSettingsTests
     }
 
     [Fact]
+    public async Task A_create_whose_app_isnt_wanted_any_more_makes_nothing()
+    {
+        var changer = Changer();
+        var wanted = true;
+        var plan = await changer.PlanCreateAsync(new NewContainerRequest
+        {
+            Name = "gb-web",
+            Settings = new ContainerSettings { Image = "alpine:3.20", Command = ["httpd", "-f"] },
+            Networks = [new NetworkJoin("gitberth", ["web"])],
+            // The keep-running check's create: asked again under the lock, right before anything is made.
+            Wanted = _ => Task.FromResult<string?>(wanted ? null : "web was stopped, deleted or forgotten meanwhile."),
+        });
+        Assert.True(plan.CanApply, plan.Blocked);
+
+        // Its app is forgotten while the create waits.
+        wanted = false;
+        var result = await changer.ApplyAsync(plan);
+
+        Assert.Equal("Nothing was created: web was stopped, deleted or forgotten meanwhile.", result.Message);
+        Assert.Empty(_engine.Calls);
+        Assert.Empty(_engine.Boxes);
+    }
+
+    [Fact]
     public async Task A_create_that_fails_its_checks_leaves_nothing_behind()
     {
         _engine.OnCreate = b =>

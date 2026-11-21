@@ -1,0 +1,53 @@
+@implements IDisposable
+@inject AttentionBoard Board
+
+@*
+    What needs someone's attention now (Health/AttentionBoard), as banners, worst first. The dashboard shows every one; a
+    section elsewhere can show its own (Where), without the button that leads to where it already is (Here). Each item's
+    job keeps it up to date, and the banners follow the board; a dismissed one stays hidden until it says something new.
+*@
+@foreach (var item in Items)
+{
+    <Banner @key="item.Key" Tone="@Tone(item.Level)" Title="@item.Title" Tip="@item.Tip" Class="gb-attention"
+            Actions="@ActionsOf(item)" OnDismiss="@DismissOf(item)">@item.Text</Banner>
+}
+
+@code {
+    /// <summary>Only the items this says yes to (one source's, one key's); every one when null.</summary>
+    [Parameter] public Func<AttentionItem, bool>? Where { get; set; }
+
+    /// <summary>The page this is on, like settings#github: a button that leads there is left out.</summary>
+    [Parameter] public string? Here { get; set; }
+
+    private IEnumerable<AttentionItem> Items => Where is null ? Board.Shown : Board.Shown.Where(Where);
+
+    protected override void OnInitialized() => Board.Changed += Refresh;
+
+    public void Dispose() => Board.Changed -= Refresh;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>A banner's tone for the item's level.</summary>
+    public static string Tone(AttentionLevel level) => level switch
+    {
+        AttentionLevel.Critical => "critical",
+        AttentionLevel.Warn => "warn",
+        _ => "info",
+    };
+
+    /// <summary>The buttons the item's banner shows: its own, but one that leads to where the banner already is.</summary>
+    public static IReadOnlyList<AttentionAction> ActionsFor(AttentionItem item, string? here) =>
+        [.. (item.Actions ?? []).Where(a => here is null || !string.Equals(a.Href, here, StringComparison.OrdinalIgnoreCase)).Take(AttentionBoard.MaxActions)];
+
+    private RenderFragment? ActionsOf(AttentionItem item) => ActionsFor(item, Here) is not { Count: > 0 } actions ? null : @<text>
+        @foreach (var a in actions)
+        {
+            <Btn Size="BtnSize.Sm" Href="@a.Href" Target="@(a.External ? "_blank" : null)" Tip="@a.Tip"
+                 EndIcon="@(a.External ? Icons.Material.Outlined.OpenInNew : null)">@a.Label</Btn>
+        }
+    </text>;
+
+    // Only an item that allows it gets the dismiss button (Banner shows one when it has a callback).
+    private EventCallback DismissOf(AttentionItem item) =>
+        item.Dismiss is null ? default : EventCallback.Factory.Create(this, () => { Board.Dismiss(item.Key); });
+}

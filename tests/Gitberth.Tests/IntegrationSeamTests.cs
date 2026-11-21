@@ -151,7 +151,7 @@ public sealed class IntegrationSeamTests : IDisposable
         Assert.Equal(512L * 1024 * 1024, update.Body["Memory"]!.GetValue<long>());
         Assert.Empty(_rig.Engine.Writes);
         Assert.Empty(await _rig.Journal.UnfinishedAsync(CancellationToken.None));
-        await EventuallyAsync(async () => (await _rig.Activity.ForAsync("postgres", row.Id)).Any(a => a.Kind == ActivityKind.Live));
+        await Eventually.UntilAsync(async () => (await _rig.Activity.ForAsync("postgres", row.Id)).Any(a => a.Kind == ActivityKind.Live), "the live change's record in Activity");
     }
 
     [Fact]
@@ -174,15 +174,5 @@ public sealed class IntegrationSeamTests : IDisposable
         var update = Assert.Single(_updates.Made);
         Assert.Equal(512L * 1024 * 1024, update.Body["Memory"]!.GetValue<long>());
         Assert.Empty(_rig.Engine.Writes);
-    }
-
-    private static async Task EventuallyAsync(Func<Task<bool>> condition)
-    {
-        for (var i = 0; i < 100; i++)
-        {
-            if (await condition()) return;
-            await Task.Delay(50);
-        }
-        Assert.Fail("It didn't happen within 5 s.");
     }
 }

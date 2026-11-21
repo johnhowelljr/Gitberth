@@ -53,6 +53,8 @@
         ActivityKind.Stopped => Icons.Material.Outlined.Stop,
         ActivityKind.Restarted => Icons.Material.Outlined.RestartAlt,
         ActivityKind.Removed => Icons.Material.Outlined.Delete,
+        ActivityKind.BroughtBack => Icons.Material.Outlined.Autorenew,
+        ActivityKind.GaveUp => Icons.Material.Outlined.ErrorOutline,
         _ => item.Tone == ActivityTone.Danger ? Icons.Material.Outlined.ErrorOutline : Icons.Material.Outlined.Info,
     }, item.Tone switch
     {
@@ -76,6 +78,8 @@
         ActivityKind.RolledBack => "Rolled back",
         ActivityKind.Change => "Change",
         ActivityKind.Removed => "Removed",
+        ActivityKind.BroughtBack => "Brought back",
+        ActivityKind.GaveUp => "Gitberth stopped",
         _ => "Docker",
     };
 

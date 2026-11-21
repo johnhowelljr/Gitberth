@@ -9,6 +9,7 @@ proxied and lead to this tunnel; a self-hosted Access application covering the a
 in to its login page; then the request goes to the tunnel's connector (the fake cloudflared), which routes it by the
 ingress it runs. A tunnel with no connector answers 530 (error 1033)."""
 import base64
+import datetime
 import http.client
 import json
 import os
@@ -113,19 +114,46 @@ class Cloudflare:
         return out
 
     def add_token(self, spec):
+        """A token: kind user (or account), every permission group unless permissions says, and an end date when
+        expires_on (ISO 8601, UTC) says one, as a token made with a TTL in Cloudflare's dashboard has."""
         value = spec.get("token") or secrets.token_urlsafe(30)
         t = {"token": value, "id": hex32(), "kind": spec.get("kind") or "user", "status": "active",
-             "permissions": self.permissions_of(spec.get("permissions"))}
+             "permissions": self.permissions_of(spec.get("permissions")), "expires_on": spec.get("expires_on")}
         with self.lock:
             self.tokens[value] = t
         return t
+
+    @staticmethod
+    def expired(t):
+        """Whether the token's end date has passed: Cloudflare takes it no more from then."""
+        at = t.get("expires_on")
+        if not at:
+            return False
+        try:
+            when = datetime.datetime.fromisoformat(str(at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=datetime.timezone.utc)
+        return when <= datetime.datetime.now(datetime.timezone.utc)
+
+    def active(self, t):
+        return t is not None and t["status"] == "active" and not self.expired(t)
+
+    @staticmethod
+    def verified(t):
+        """Verify's result: the token's id and status, and its end date when it has one."""
+        out = {"id": t["id"], "status": "active"}
+        if t.get("expires_on"):
+            out["expires_on"] = t["expires_on"]
+        return out
 
     def _token(self, req, need=None):
         value = token_of(req.headers)
         if not value:
             raise ApiError(400, "Missing X-Auth-Key, X-Auth-Email or Authorization headers", code=9106)
         t = self.tokens.get(value)
-        if t is None or t["status"] != "active":
+        if not self.active(t):
             raise ApiError(403, "Invalid access token", code=9109)
         if need and need not in t["permissions"]:
             raise ApiError(403, "Authentication error", code=10000)
@@ -189,16 +217,16 @@ class Cloudflare:
     def verify_user_token(self, req):
         value = token_of(req.headers)
         t = self.tokens.get(value or "")
-        if t is None or t["status"] != "active" or t["kind"] != "user":
+        if not self.active(t) or t["kind"] != "user":
             return self.error(401, 1000, "Invalid API Token")
-        return self.ok({"id": t["id"], "status": "active"}, messages=[{"code": 10000, "message": "This API Token is valid and active", "type": None}])
+        return self.ok(self.verified(t), messages=[{"code": 10000, "message": "This API Token is valid and active", "type": None}])
 
     def verify_account_token(self, req, a):
         value = token_of(req.headers)
         t = self.tokens.get(value or "")
-        if t is None or t["status"] != "active" or a != self.account_id:
+        if not self.active(t) or a != self.account_id:
             return self.error(401, 1000, "Invalid API Token")
-        return self.ok({"id": t["id"], "status": "active"}, messages=[{"code": 10000, "message": "This API Token is valid and active", "type": None}])
+        return self.ok(self.verified(t), messages=[{"code": 10000, "message": "This API Token is valid and active", "type": None}])
 
     def _tunnel(self, req, a, t):
         self._token(req, "tunnel")

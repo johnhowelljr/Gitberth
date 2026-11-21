@@ -1,5 +1,6 @@
 using System.Globalization;
 using Gitberth.Deploy;
+using Gitberth.Keeper;
 using Gitberth.Network;
 using Gitberth.Previews;
 using Gitberth.Services;
@@ -40,6 +41,16 @@ public sealed class TestTimings
         ["restartTick"] = new("how often restart schedules are looked at",
             sp => sp.GetRequiredService<RestartScheduler>().TickEvery,
             (sp, v) => sp.GetRequiredService<RestartScheduler>().TickEvery = v),
+        // The tries' back-off (1, 5 and 15 minutes) and the 10 minutes up that clear them stay as they are.
+        ["keepEvery"] = new("how often apps that should run are looked at, how long one is down before it's brought back, and the first look after start",
+            sp => KeeperWait(sp.GetRequiredService<AppKeeper>()),
+            (sp, v) =>
+            {
+                var keeper = sp.GetRequiredService<AppKeeper>();
+                keeper.PassEvery = v;
+                keeper.Grace = v;
+                keeper.FirstPassAfter = v;
+            }),
     };
 
     private TestTimings(IReadOnlyDictionary<string, TimeSpan> values) => Values = values;
@@ -90,10 +101,12 @@ public sealed class TestTimings
         foreach (var (key, value) in Values) Knobs[key].Set(services, value);
     }
 
-    /// <summary>"pullsEvery=20,restartMinute=20,restartTick=2,stableFor=3": the settings by name, in seconds.</summary>
+    /// <summary>"keepEvery=3,pullsEvery=20,restartMinute=20,restartTick=2,stableFor=3": the settings by name, in seconds.</summary>
     public override string ToString() => string.Join(",", Values.Select(v => $"{v.Key}={Seconds(v.Value)}"));
 
     private static TimeSpan Min(TimeSpan a, TimeSpan b) => a < b ? a : b;
+
+    private static TimeSpan KeeperWait(AppKeeper keeper) => Min(keeper.PassEvery, Min(keeper.Grace, keeper.FirstPassAfter));
 
     private static string Seconds(TimeSpan t) => t.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture);
 }

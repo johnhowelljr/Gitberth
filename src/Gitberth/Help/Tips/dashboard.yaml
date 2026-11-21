@@ -90,8 +90,18 @@ dashboard.host.memory:
 dashboard.host.disk:
   title: Disk
   text: >-
-    Free space on the disk Docker keeps its images and volumes on. Images, build caches and volumes fill it; the bar is
-    the part in use. Below 5 GB free, or 5% of the disk, Gitberth stops pulling images until you make room.
+    Free space on the disk Docker keeps its images and volumes on; the bar is the part in use. Under 15 GB free (less
+    on a small disk, more on a big one) it's **getting low**; under 5 GB, or 5% of the disk, **almost full**, and
+    Gitberth pulls no image.
+  more: guides/troubleshooting#dockers-disk-is-filling-up
+
+# The disk cleanup's banner (src/Gitberth/Disk), on the dashboard through the attention board.
+
+dashboard.disk-low:
+  title: Docker's disk is getting low
+  text: >-
+    Little room is left on the disk Docker keeps images, build cache and volumes on. Gitberth cleared what it could by
+    itself; **See what takes the room** opens Settings › Disk. Under the lower line it pulls no image, and builds may fail.
   more: guides/troubleshooting#dockers-disk-is-filling-up
 
 dashboard.recent-deploys:

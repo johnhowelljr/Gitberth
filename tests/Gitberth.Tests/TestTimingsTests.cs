@@ -1,7 +1,11 @@
 using Gitberth.Audit;
 using Gitberth.Deploy;
+using Gitberth.Docker;
 using Gitberth.Git;
+using Gitberth.Health;
+using Gitberth.Keeper;
 using Gitberth.Network;
+using Gitberth.Notifications;
 using Gitberth.Previews;
 using Gitberth.Services;
 using Microsoft.Extensions.Configuration;
@@ -22,8 +26,8 @@ public sealed class TestTimingsTests : IDisposable
 
     public void Dispose() => _rig.Dispose();
 
-    /// <summary>The four services the settings reach, built as the other tests build them, and given out as Program.cs registers them.</summary>
-    private sealed record Built(DeployPipeline Pipeline, PortChanger Changer, PreviewService Previews, RestartScheduler Scheduler, IServiceProvider Provider);
+    /// <summary>The five services the settings reach, built as the other tests build them, and given out as Program.cs registers them.</summary>
+    private sealed record Built(DeployPipeline Pipeline, PortChanger Changer, PreviewService Previews, RestartScheduler Scheduler, AppKeeper Keeper, IServiceProvider Provider);
 
     private Built Build()
     {
@@ -33,12 +37,17 @@ public sealed class TestTimingsTests : IDisposable
         var previews = new PreviewService(_rig.Db, _rig.Actions, _rig.Apps, _rig.Domains, new GitHubPulls(new ImageKit.NoHttp(), _rig.Settings),
             new GitClient(_rig.Options, _rig.Settings), _rig.Cli, _rig.Activity, new WatchState(), NullLogger<PreviewService>.Instance, gate: _rig.PreviewGate);
         var scheduler = new RestartScheduler(_rig.Db, _rig.Cli, _rig.Restarts, _rig.Actions, _rig.AppLocks, NullLogger<RestartScheduler>.Instance, _rig.ContainerLocks);
+        var notifier = new Notifier(new NotificationSettings(_rig.Settings), new NotificationSender(new ImageKit.NoHttp(), new SmtpMailer()), _rig.Settings,
+            NullLogger<Notifier>.Instance);
+        var keeper = new AppKeeper(_rig.Db, new DockerEngine(_rig.Api), _rig.Actions, _rig.ContainerLocks, _rig.Events, notifier, _rig.Activity, _rig.Settings,
+            new KeeperSettings(_rig.Settings), new AttentionBoard(), _rig.Options, NullLogger<AppKeeper>.Instance);
         var services = new ServiceCollection();
         services.AddSingleton(_rig.Pipeline);
         services.AddSingleton(changer);
         services.AddSingleton(previews);
         services.AddSingleton(scheduler);
-        return new Built(_rig.Pipeline, changer, previews, scheduler, services.BuildServiceProvider());
+        services.AddSingleton(keeper);
+        return new Built(_rig.Pipeline, changer, previews, scheduler, keeper, services.BuildServiceProvider());
     }
 
     private static GitberthOptions Options(string? value) => GitberthOptions.FromConfiguration(new ConfigurationBuilder()
@@ -53,6 +62,7 @@ public sealed class TestTimingsTests : IDisposable
         Assert.Equal(TimeSpan.FromMinutes(5), s.Previews.PullsEvery);
         Assert.Equal(TimeSpan.FromMinutes(1), s.Scheduler.TickEvery);
         Assert.Equal(TimeSpan.FromMinutes(1), s.Scheduler.MinuteLength);
+        Assert.Equal((TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(1)), (s.Keeper.PassEvery, s.Keeper.Grace, s.Keeper.FirstPassAfter));
     }
 
     [Theory]
@@ -117,7 +127,7 @@ public sealed class TestTimingsTests : IDisposable
     {
         var s = Build();
 
-        TestTimings.Parse("stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2")!.Apply(s.Provider);
+        TestTimings.Parse("stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2,keepEvery=3")!.Apply(s.Provider);
 
         // The stay-up check of deploys and of the change engine alike.
         Assert.Equal(TimeSpan.FromSeconds(3), s.Pipeline.StableFor);
@@ -125,6 +135,8 @@ public sealed class TestTimingsTests : IDisposable
         Assert.Equal(TimeSpan.FromSeconds(20), s.Previews.PullsEvery);
         Assert.Equal(TimeSpan.FromSeconds(20), s.Scheduler.MinuteLength);
         Assert.Equal(TimeSpan.FromSeconds(2), s.Scheduler.TickEvery);
+        // The keep-running check's look, its wait before a stopped app is brought back, and its first look all at once.
+        Assert.Equal((TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3)), (s.Keeper.PassEvery, s.Keeper.Grace, s.Keeper.FirstPassAfter));
     }
 
     [Theory]
@@ -133,6 +145,7 @@ public sealed class TestTimingsTests : IDisposable
     [InlineData("stableFor=15")]
     [InlineData("restartTick=60")]
     [InlineData("stableFor=3,restartMinute=61")]
+    [InlineData("keepEvery=30")]
     public void It_only_shortens_a_wait_and_otherwise_changes_nothing(string value)
     {
         var s = Build();

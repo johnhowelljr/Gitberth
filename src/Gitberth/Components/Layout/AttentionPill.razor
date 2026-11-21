@@ -1,0 +1,53 @@
+@implements IDisposable
+@inject AttentionBoard Board
+
+@*
+    The top bar's pill, on every page: the worst item on the attention board that asks for one (AttentionItem.Pill), and
+    how many more do, leading to where it's dealt with (to the dashboard's banners when there are several). Nothing at all
+    while none asks: a pill is only for what needs someone now.
+*@
+@if (Look(Board.Pills) is { } pill)
+{
+    <a href="@pill.Href" class="gb-attnpill gb-tone-@pill.Tone" aria-label="@pill.Label" data-tip="topbar.attention" data-tip-detail="@pill.Detail">
+        <SvgIcon Icon="@Icon(pill.Tone)" /><span class="gb-attnpill-t">@pill.Words</span>
+        @if (pill.More > 0)
+        {
+            <span class="gb-attnpill-more">+@pill.More</span>
+        }
+    </a>
+}
+
+@code {
+    /// <summary>What the pill shows.</summary>
+    /// <param name="Words">The worst item's pill words.</param>
+    /// <param name="Href">Where it leads: that item's place, or the dashboard, which has every banner, when more than one asks.</param>
+    /// <param name="Tone">The worst item's banner tone (critical, warn, info).</param>
+    /// <param name="More">How many more items ask for the pill.</param>
+    /// <param name="Label">What a screen reader says: the words, and how many more.</param>
+    /// <param name="Detail">Every one's title, for the tip's live line.</param>
+    public sealed record PillLook(string Words, string Href, string Tone, int More, string Label, string Detail);
+
+    protected override void OnInitialized() => Board.Changed += Refresh;
+
+    public void Dispose() => Board.Changed -= Refresh;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>The pill for the items that ask for one, worst first (<see cref="AttentionBoard.Pills"/>); null for none.</summary>
+    public static PillLook? Look(IReadOnlyList<AttentionItem> pills)
+    {
+        if (pills.Count == 0) return null;
+        var first = pills[0];
+        var words = first.Pill ?? first.Title;
+        var more = pills.Count - 1;
+        return new PillLook(words, more == 0 ? first.Href ?? "" : "", AttentionBanners.Tone(first.Level), more,
+            more == 0 ? words : $"{words}, and {more} more", string.Join(" · ", pills.Select(p => p.Title)));
+    }
+
+    private static string Icon(string tone) => tone switch
+    {
+        "critical" => Icons.Material.Outlined.ErrorOutline,
+        "warn" => Icons.Material.Outlined.WarningAmber,
+        _ => Icons.Material.Outlined.Info,
+    };
+}

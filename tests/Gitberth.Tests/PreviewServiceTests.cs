@@ -103,11 +103,7 @@ public sealed class PreviewServiceTests : IDisposable
         await _previews.CheckRepoAsync("acme", "orb", new RemoteInfo("main", branches, []), poked: true, watched, new HashSet<int>());
     }
 
-    private static async Task WaitForAsync(Func<Task<bool>> done)
-    {
-        for (var i = 0; i < 200 && !await done(); i++) await Task.Delay(50);
-        Assert.True(await done());
-    }
+    private static Task WaitForAsync(Func<Task<bool>> done) => Eventually.UntilAsync(done, "the queued deploys to settle");
 
     private async Task<List<(AppDefinition Row, PreviewInfo Info)>> PreviewsAsync()
     {

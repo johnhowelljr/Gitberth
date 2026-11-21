@@ -411,12 +411,12 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
                     .Where(d => d.Status == DeployStatus.Queued || d.Status == DeployStatus.Cloning || d.Status == DeployStatus.Building || d.Status == DeployStatus.Starting)
                     .ToListAsync(ct))
                 .GroupBy(d => d.AppId).ToDictionary(g => g.Key, g => g.MaxBy(d => d.Id)!);
-            // A Compose app's services: the ones its current release runs.
+            // A Compose app's services: the ones its current release brought up (not one behind a profile Compose never creates).
             var composeIds = rows.Where(r => r.IsCompose).Select(r => r.Id).ToList();
             released = composeIds.Count == 0 ? [] : (await db.Deployments.AsNoTracking()
                     .Where(d => composeIds.Contains(d.AppId) && d.Status == DeployStatus.Succeeded).Select(d => new { d.AppId, d.Id, d.Images }).ToListAsync(ct))
                 .GroupBy(d => d.AppId)
-                .ToDictionary(g => g.Key, g => (IReadOnlyCollection<string>)Deploy.DeployPipeline.ParseImages(g.MaxBy(d => d.Id)!.Images).Keys.ToList());
+                .ToDictionary(g => g.Key, g => (IReadOnlyCollection<string>)Compose.ComposeImages.Parse(g.MaxBy(d => d.Id)!.Images).BroughtUp);
         }
         string? error = null;
         var snapshot = NetworkSnapshot.Empty;

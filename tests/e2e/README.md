@@ -110,9 +110,11 @@ only the catch-all matches runs `@wide` and the report warns: add a rule. The se
 ## Timings
 
 Gitberth in the rig runs with shorter waits, `GITBERTH_TEST_TIMINGS`, whose list is in `rig/compose.e2e.yml`: a new
-container's stay-up check (3 s instead of 15), the pull-request list (every 20 s instead of 5 min), and restart
-schedules (a schedule minute lasts 20 s, looked at every 2 s). The log says which Gitberth has: `[rig] Gitberth's test
-timings: ...`, or `none (production timings)`.
+container's stay-up check (3 s instead of 15), the pull-request list (every 20 s instead of 5 min), restart schedules
+(a schedule minute lasts 20 s, looked at every 2 s), and the keep-running check (`keepEvery`: it looks every 3 s instead
+of 30, brings an app back once it's been down 3 s, and looks first 3 s after start; the tries' 1, 5 and 15 minutes and
+the 10 minutes up that clear them stay). The log says which Gitberth has: `[rig] Gitberth's test timings: ...`, or
+`none (production timings)`.
 
 - `E2E_TIMINGS=production` (`--timings production`, `-Timings production`) runs with none: as an install runs.
   `E2E_TEST_TIMINGS`, when set, is passed on as the list itself.
@@ -147,7 +149,9 @@ jobs and about 25 minutes, leaving CT 101 free. It's on demand; nothing starts i
 
 The plan job's summary shows the plan; each job uploads its outputs (`junit.xml`, `report.txt`, screenshots, and
 Gitberth's and the stand-ins' logs) as an `e2e-<id>` artifact for 14 days; the summary job puts every job's results in
-one table. Docker Hub is reached through `mirror.gcr.io`. The repo is public, so the runners cost nothing.
+one table. A job's log and artifacts need a GitHub sign-in, so a failed job also turns each failure into an annotation
+(`impact.py annotate`: the scenario, its assertion and Gitberth's log during it), which anyone can read, the check-runs
+API included. Docker Hub is reached through `mirror.gcr.io`. The repo is public, so the runners cost nothing.
 
 The Build workflow's "E2E impact" job writes every push's and pull request's plan, with what it leaves for the full
 suite, to the run's summary; nothing runs in a rig there.
@@ -389,6 +393,11 @@ Rules of thumb:
   well when the feature has a screen element.
 - Every wait polls with a timeout (`e2e.wait.until`). When it gives up, it says what it saw last. Never sleep longer
   than needed.
+- Assert what caused a timing, not how many seconds it took: a busy server (three rigs on one host) stretches seconds,
+  never causes. Report the seconds (scenario 14's `report`). To show something happened at once, the scenario takes
+  test_14's `slow_polls` fixture: `slow_polls(repo, standins)` sets the watcher to look once a minute and returns its
+  look at the repo, and the check is that the effect came before the next poll was due (`at_once`); the interval goes
+  back to 10 seconds after the scenario.
 - To know the watcher has looked, use `repo.wait_watcher_passes(n, since=marker)`. It counts Gitberth's `ls-remote`s of
   the repo, failed ones too: a look refused at its first request (`GET …/info/refs`, answered 401, 404 or an injected
   failure) gets no further, and counts as one. A clone refused there would count as well. The rig's interval is 10

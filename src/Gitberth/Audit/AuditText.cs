@@ -24,6 +24,7 @@ public static class AuditText
             DeployTrigger.Webhook => $"Queued a deploy of {app}: {WebhookHost(dep)} said its branch changed{at}.",
             DeployTrigger.Promote => $"Queued the promotion of a preview's commit to {app}{at}.",
             DeployTrigger.Hook => $"Queued a deploy of {app} for the deploy hook {dep.HookName ?? "?"}{noCache}.",
+            DeployTrigger.Recover => $"Queued a deploy of {app} to bring it back: its container was gone.",
             _ => $"Queued a deploy of {app}{noCache}.",
         };
     }
@@ -78,6 +79,7 @@ public static class AuditText
         DeployTrigger.Webhook => "GitHub webhook",
         DeployTrigger.Promote => "promote",
         DeployTrigger.Hook => "deploy hook",
+        DeployTrigger.Recover => "brought back",
         _ => trigger.ToString(),
     };
 

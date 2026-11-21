@@ -273,6 +273,7 @@ public static class Format
         DeployTrigger.Webhook => "Push on GitHub",
         DeployTrigger.Promote => "Promoted",
         DeployTrigger.Hook => "Deploy hook",
+        DeployTrigger.Recover => "Brought back",
         _ => trigger.ToString(),
     };
 

@@ -46,6 +46,7 @@ Each deploy records what started it:
 | **Rollback** | You clicked **Roll back to this** on an earlier deploy. |
 | **Automatic retry** | Gitberth tried a commit again after its build failed. See [Retries](#retries). |
 | **Scheduled restart** | The app's [scheduled restart](scheduled-jobs-and-restarts.md#scheduled-restarts) came due. |
+| **Brought back** | Gitberth made the app's container again because it was gone, from its last image without a build, or built it again from the commit it ran when its image was gone too. See [When an app stops by itself](health-and-monitoring.md#when-an-app-stops-by-itself). |
 | **Promoted** | You promoted one of the app's [previews](previews.md#promote-to-production): production builds its commit. |
 | **Deploy hook "Contentful"** | Something called one of the app's [deploy hooks](deploy-hooks.md), named in quotes. |
 
@@ -153,7 +154,8 @@ a newer image under the same tag (`node:24`) is used; a base image that's only o
 is. Use it when a build gives a result the cache got wrong. It takes
 longer than a usual build. The deploy's page and the app's **Activity** tab say **Without the build cache**.
 
-To clear the whole build cache, see [Settings › Deploys](../reference/gitberth-settings.md#deploys).
+To clear the whole build cache, see [Settings › Disk](../reference/gitberth-settings.md#disk). Gitberth also removes the
+build cache no build used for a week by itself, and more of it when Docker's disk gets low.
 
 ## The deploy page
 

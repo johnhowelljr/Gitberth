@@ -104,11 +104,25 @@ public sealed class WordsAndLabelsTests : IDisposable
     [Fact]
     public void The_settings_index_names_each_section_by_its_title()
     {
-        Assert.Equal(["GitHub access", "GitHub integration", "GitLab", "Notifications", "Registries", "Updates", "Domains", "Uptime and status page", "Network", "Own LAN addresses", "Deploys",
-                "Databases", "Admin password", "AI agents and API", "Audit log", "System"],
+        Assert.Equal(["GitHub access", "GitHub integration", "GitLab", "Notifications", "Registries", "Updates", "Domains", "Uptime and status page",
+                "Keep apps running", "Network", "Own LAN addresses", "Deploys", "Disk", "Databases", "Admin password", "AI agents and API", "Audit log", "System"],
             SettingsPage.Toc.Select(t => t.Text));
+        // Each entry has its own section and tip: keep and disk are the sections the keep-running check and the disk cleanup fill.
+        Assert.Equal(SettingsPage.Toc.Length, SettingsPage.Toc.Select(t => t.Id).Distinct().Count());
+        Assert.Equal(("settings.keep", "settings.disk"), (SettingsPage.Toc.Single(t => t.Id == "keep").Tip, SettingsPage.Toc.Single(t => t.Id == "disk").Tip));
         // A message that sends you to a section names one there is.
         Assert.Equal("Own LAN addresses are off. Turn them on in Settings › Own LAN addresses.", LanAddresses.OffText);
+    }
+
+    [Fact]
+    public void Every_way_a_change_comes_in_has_its_own_words_on_the_audit_page()
+    {
+        var words = Enum.GetValues<Audit.AuditVia>().Select(AuditLook.ViaWords).ToList();
+        Assert.Equal(words.Count, words.Distinct().Count());
+        Assert.Equal(("the keep-running check", "the disk cleanup"), (AuditLook.ViaWords(Audit.AuditVia.KeepRunning), AuditLook.ViaWords(Audit.AuditVia.Cleanup)));
+        // The short line under the actor's name.
+        Assert.Equal("keep-running check", AuditLook.ActorSub(Audit.AuditActor.System(Audit.AuditVia.KeepRunning)));
+        Assert.Equal("disk cleanup", AuditLook.ActorSub(Audit.AuditActor.System(Audit.AuditVia.Cleanup)));
     }
 
     [Fact]
@@ -120,6 +134,23 @@ public sealed class WordsAndLabelsTests : IDisposable
         Assert.Equal("signed in 3 days ago", SettingsPage.RegistryState(signIn));
         Assert.Equal("needs its password again: enter it below", SettingsPage.RegistryState(signIn with { NeedsSecret = true }));
         Assert.Equal("saved", SettingsPage.RegistryState(signIn with { VerifiedAt = null }));
+        // One the registry refused (the token watch says when): enter it again.
+        var refused = new DateTimeOffset(2026, 11, 18, 9, 30, 0, TimeSpan.Zero);
+        Assert.Equal("refused on Nov 18: enter its password again", SettingsPage.RegistryState(signIn, refused));
+        Assert.Equal("needs its password again: enter it below", SettingsPage.RegistryState(signIn with { NeedsSecret = true }, refused));
+    }
+
+    [Fact]
+    public void A_tokens_expiry_tag_says_renew_it_soon_in_its_last_3_weeks_and_expired_after()
+    {
+        var now = new DateTimeOffset(2026, 11, 5, 12, 0, 0, TimeSpan.Zero);
+        Assert.Equal(("expires Dec 31, 2026", "gb-t3"), (SettingsPage.ExpiryWords(now.AddDays(56), now), SettingsPage.ExpiryClass(now.AddDays(56), now)));
+        Assert.Equal(("expires Nov 25, 2026: renew it soon", "gb-tag gb-tag--warn"), (SettingsPage.ExpiryWords(now.AddDays(20), now), SettingsPage.ExpiryClass(now.AddDays(20), now)));
+        Assert.Equal(("expired Nov 4, 2026", "gb-tag gb-tag--critical"), (SettingsPage.ExpiryWords(now.AddDays(-1), now), SettingsPage.ExpiryClass(now.AddDays(-1), now)));
+        Assert.Null(ApiTokensSection.ExpiresSoon(new Agents.TokenView(1, "Claude Code", Data.ApiAccess.Read, "AbCd1234", now.UtcDateTime.AddDays(-30), now.UtcDateTime.AddDays(8),
+            null, null, null), now.UtcDateTime));
+        Assert.Equal("expires in 5 days", ApiTokensSection.ExpiresSoon(new Agents.TokenView(1, "Claude Code", Data.ApiAccess.Read, "AbCd1234", now.UtcDateTime.AddDays(-30),
+            now.UtcDateTime.AddDays(5), null, null, null), now.UtcDateTime));
     }
 
     [Fact]

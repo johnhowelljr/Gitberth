@@ -13,16 +13,26 @@ namespace Gitberth.Notifications;
 /// <param name="audit">Where destinations added and removed and the switches are recorded (names and kinds only, never addresses or tokens).</param>
 public sealed class NotificationSettings(SettingsService settings, Audit.AuditLog? audit = null)
 {
-    /// <summary>What's sent when nothing was chosen yet: failures (an app down, a certificate about to expire too), not successes.</summary>
+    /// <summary>
+    /// What's sent when nothing was chosen yet: failures (an app down, an app Gitberth had to bring back, a certificate or a
+    /// token about to expire, Docker's disk getting full too), not successes.
+    /// </summary>
     public static readonly ImmutableHashSet<NotifyEvent> DefaultEvents =
-        [NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down, NotifyEvent.CertificateExpiring];
+    [
+        NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down, NotifyEvent.CertificateExpiring,
+        NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow,
+    ];
 
     /// <summary>
-    /// The kinds Settings turns on and off. A health check passing again goes with Unhealthy, and an app back up with Down;
-    /// a test always goes.
+    /// The kinds Settings turns on and off, in the order its switches are in. A health check passing again goes with
+    /// Unhealthy, an app back up with Down, Gitberth giving up on an app with BroughtBack, a token refused with
+    /// TokenExpiring, and room on the disk again with DiskLow; a test always goes.
     /// </summary>
     public static readonly NotifyEvent[] Choosable =
-        [NotifyEvent.DeployFailed, NotifyEvent.DeploySucceeded, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down, NotifyEvent.CertificateExpiring];
+    [
+        NotifyEvent.DeployFailed, NotifyEvent.DeploySucceeded, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down,
+        NotifyEvent.BroughtBack, NotifyEvent.CertificateExpiring, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow,
+    ];
 
     /// <summary>
     /// The kinds Settings offered when the choices were saved as a plain list (1.2): a kind added since is on or off as its
@@ -52,6 +62,9 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
         NotifyEvent.Test => true,
         NotifyEvent.Healthy => _events.Contains(NotifyEvent.Unhealthy),
         NotifyEvent.BackUp => _events.Contains(NotifyEvent.Down),
+        NotifyEvent.GaveUp => _events.Contains(NotifyEvent.BroughtBack),
+        NotifyEvent.TokenRefused => _events.Contains(NotifyEvent.TokenExpiring),
+        NotifyEvent.DiskOk => _events.Contains(NotifyEvent.DiskLow),
         _ => _events.Contains(e),
     };
 
@@ -106,25 +119,37 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
     public Task SetEventAsync(NotifyEvent e, bool on, CancellationToken ct = default)
     {
         if (!Choosable.Contains(e)) throw new ArgumentException($"{e} isn't chosen in Settings.", nameof(e));
+        var what = When(e);
         return UpdateAsync(async () =>
         {
             var next = on ? _events.Add(e) : _events.Remove(e);
             if (next.SetEquals(_events)) return;
             await settings.SetAsync(SettingKeys.NotifyEvents, WriteEvents(next), ct);
             _events = next;
-            var what = e switch
-            {
-                NotifyEvent.DeployFailed => "a deploy fails",
-                NotifyEvent.DeploySucceeded => "a deploy succeeds",
-                NotifyEvent.Crashed => "an app crashes",
-                _ => "a health check fails",
-            };
             audit?.Record(new Audit.AuditEntry("settings.notifications.changed", on ? $"Notifications are sent when {what} now." : $"No more notifications when {what}.")
             {
                 Target = "notifications", Changes = [new($"When {what}", on ? "off" : "on", on ? "on" : "off")],
             });
         });
     }
+
+    /// <summary>
+    /// A switch of Settings › Notifications as the audit log's sentences name it: its title, in a sentence ("Notifications
+    /// are sent when an app goes down now."). Every kind Settings offers has its own, so none is recorded as another.
+    /// </summary>
+    internal static string When(NotifyEvent e) => e switch
+    {
+        NotifyEvent.DeployFailed => "a deploy fails",
+        NotifyEvent.DeploySucceeded => "a deploy succeeds",
+        NotifyEvent.Crashed => "an app crashes",
+        NotifyEvent.Unhealthy => "a health check fails",
+        NotifyEvent.Down => "an app goes down",
+        NotifyEvent.BroughtBack => "Gitberth brings an app back",
+        NotifyEvent.CertificateExpiring => "a certificate is about to expire",
+        NotifyEvent.TokenExpiring => "a token is about to expire or is refused",
+        NotifyEvent.DiskLow => "Docker's disk gets full",
+        _ => throw new ArgumentException($"{e} isn't chosen in Settings.", nameof(e)),
+    };
 
     /// <summary>The choices as they're saved: the kinds that are on, and every kind Settings offered then.</summary>
     internal static string WriteEvents(IEnumerable<NotifyEvent> on) => JsonSerializer.Serialize(new SavedEvents

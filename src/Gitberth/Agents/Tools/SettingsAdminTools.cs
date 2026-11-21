@@ -30,14 +30,18 @@ public sealed class SettingsAdminTools(NotificationSettings notifications, Setti
         [Description("When an app crashes.")] bool? crashed = null,
         [Description("When a health check fails (and passes again).")] bool? unhealthy = null,
         [Description("When an uptime check finds an app down (and back up).")] bool? down = null,
+        [Description("When Gitberth brings back an app that stopped by itself (and when it stops trying).")] bool? brought_back = null,
         [Description("When a domain's certificate is about to expire.")] bool? certificate_expiring = null,
+        [Description("When a token Gitberth uses is about to expire or is refused.")] bool? token_expiring = null,
+        [Description("When Docker's disk gets full (and has room again).")] bool? disk_low = null,
         [Description("About previews' deploys too.")] bool? previews = null,
         CancellationToken ct = default)
     {
         var wanted = new (NotifyEvent Event, bool? On)[]
         {
             (NotifyEvent.DeployFailed, deploy_failed), (NotifyEvent.DeploySucceeded, deploy_succeeded), (NotifyEvent.Crashed, crashed),
-            (NotifyEvent.Unhealthy, unhealthy), (NotifyEvent.Down, down), (NotifyEvent.CertificateExpiring, certificate_expiring),
+            (NotifyEvent.Unhealthy, unhealthy), (NotifyEvent.Down, down), (NotifyEvent.BroughtBack, brought_back),
+            (NotifyEvent.CertificateExpiring, certificate_expiring), (NotifyEvent.TokenExpiring, token_expiring), (NotifyEvent.DiskLow, disk_low),
         };
         if (wanted.All(w => w.On is null) && previews is null) throw new ToolError("Say what to turn on or off: get_settings shows what's sent now.");
         foreach (var (e, on) in wanted)

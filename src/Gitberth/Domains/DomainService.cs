@@ -171,6 +171,31 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
 
     public async Task<bool> TokenSavedAsync(CancellationToken ct = default) => await settings.GetSecretAsync(SettingKeys.CloudflareToken, ct) is not null;
 
+    /// <summary>
+    /// What Cloudflare says of the saved token now (taken, its status and its expiry), for the token watch and Settings'
+    /// Check the token. Null while domains are off (Gitberth never contacts Cloudflare then), once they're turned off while
+    /// it asks, or when no token is saved. An account-owned token is verified under the tunnel's account, as saving it is;
+    /// without the tunnel it can't be checked.
+    /// </summary>
+    public async Task<CloudflareTokenCheck?> CheckTokenAsync(CancellationToken ct = default)
+    {
+        // Taken before the setting is read (see SetEnabledAsync): domains turned off meanwhile stop the verify calls too, so
+        // once the switch is off nothing more of this reaches Cloudflare.
+        using var whileOn = CancellationTokenSource.CreateLinkedTokenSource(ct, _whileOn.Token);
+        try
+        {
+            if (!await EnabledAsync(ct) || await settings.GetSecretAsync(SettingKeys.CloudflareToken, ct) is not { } token) return null;
+            var (tunnel, problem) = await FindTunnelAsync(whileOn.Token);
+            whileOn.Token.ThrowIfCancellationRequested();
+            if (tunnel is null) return new CloudflareTokenCheck(false, null, null, problem ?? "Gitberth can't find the tunnel on this host.");
+            return await cloudflare.CheckTokenAsync(token, tunnel.AccountId, whileOn.Token);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
     public async Task<List<string>> HostnamesAsync(int appId, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -262,9 +287,10 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
             }
             var found = scan.Tunnels.First(t => t.TunnelId == chosen);
             // The token is checked before anything about cloudflared changes.
+            DateTimeOffset? expires;
             try
             {
-                await cloudflare.VerifyTokenAsync(token, found.AccountId, ct);
+                expires = await cloudflare.VerifyTokenAsync(token, found.AccountId, ct);
                 await cloudflare.GetTunnelConfigAsync(token, found.AccountId, found.TunnelId, ct);
             }
             catch (CloudflareApiException ex)
@@ -275,6 +301,8 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
             if (tunnel is null) return (problem, SyncReport.Nothing, found);
             await settings.SetSecretAsync(SettingKeys.CloudflareToken, token, ct);
             await settings.SetAsync(SettingKeys.CloudflareTunnelId, tunnel.TunnelId, ct);
+            // When it expires, as Cloudflare's verify said: Settings shows it, and the token watch warns ahead of it.
+            await settings.SetAsync(Credentials.CredentialKeys.CloudflareTokenExpires, expires?.ToString("O", System.Globalization.CultureInfo.InvariantCulture), ct);
             // A new token may see Access where the old one couldn't.
             _team = null;
             return (null, await SyncCoreAsync(widen: null, ct), tunnel);
@@ -292,6 +320,7 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         {
             await settings.SetSecretAsync(SettingKeys.CloudflareToken, null, ct);
             await settings.SetAsync(SettingKeys.CloudflareTunnelId, null, ct);
+            await settings.SetAsync(Credentials.CredentialKeys.CloudflareTokenExpires, null, ct);
             AuditSetting("domains.token.removed", "Removed the Cloudflare API token: routes already in the tunnel stay as they are.", "Cloudflare token");
         }
         finally

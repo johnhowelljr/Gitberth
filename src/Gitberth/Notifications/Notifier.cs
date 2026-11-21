@@ -57,7 +57,7 @@ public sealed class Notifier(NotificationSettings settings, NotificationSender s
     {
         var settingsUrl = await LinkAsync("settings#notifications", ct);
         var notice = new Notice(NotifyEvent.Test, NoticeLevel.Info, $"Gitberth can reach {destination.Title}",
-            "This is a test from Settings › Notifications. Gitberth sends here what you chose there: failed deploys, crashes, failing health checks, apps that go down and certificates about to expire, unless you turned them off.",
+            "This is a test from Settings › Notifications. Gitberth sends here what you chose there: failed deploys, crashes, failing health checks, apps that go down, apps Gitberth brings back, certificates and tokens about to expire, and Docker's disk getting full, unless you turned them off.",
             settingsUrl, "", null, DateTime.UtcNow);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(DeliveryTimeout);

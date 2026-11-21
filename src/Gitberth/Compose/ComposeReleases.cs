@@ -110,10 +110,14 @@ public sealed class ComposeReleases(string root)
         return removed;
     }
 
-    /// <summary>The deploy a gitberth-&lt;id&gt;.json is of; null for another file.</summary>
+    /// <summary>
+    /// The deploy a gitberth-&lt;id&gt;.json is of, or a gitberth-&lt;id&gt;.build.json (its file for docker compose build,
+    /// while it builds); null for another file.
+    /// </summary>
     internal static int? DeploymentOf(string path)
     {
         var name = Path.GetFileNameWithoutExtension(path);
+        if (name.EndsWith(".build", StringComparison.Ordinal)) name = name[..^".build".Length];
         return name.StartsWith("gitberth-", StringComparison.Ordinal) && int.TryParse(name["gitberth-".Length..], out var id) ? id : null;
     }
 }

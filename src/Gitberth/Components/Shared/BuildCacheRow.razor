@@ -2,7 +2,7 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 
-@* Settings › Deploys: Docker's build cache, how big it is, and clearing it (asked first, refused while a build runs). *@
+@* Settings › Disk: Docker's build cache, how big it is, how much of it the next cleanup takes, and clearing it (asked first, refused while a build runs). *@
 <div class="gb-row gb-row--wrap" id="build-cache" style="justify-content:space-between;gap:10px 18px">
     <div class="gb-stack" style="gap:2px">
         <span class="gb-label" style="margin:0"><Tip Key="settings.deploys.build-cache">Build cache</Tip></span>
@@ -11,13 +11,18 @@
             {
                 @($"Docker didn't say how big it is: {problem.TrimEnd('.')}.")
             }
-            else if (usage is null)
+            else if (report is null)
             {
                 @("Adding it up…")
             }
             else
             {
-                @($"{AppFacts.Bytes(usage.Bytes)} on this host. It makes builds quick: steps that didn't change aren't run again.")
+                @* The same units as the rest of Settings › Disk, the free space and its lines included. *@
+                @Gitberth.Disk.DiskText.Cache(report.Usage.Bytes)
+                if (Gitberth.Disk.DiskText.Stale(report.Stale, report.KeepDays) is { } stale)
+                {
+                    <span> @stale</span>
+                }
             }
         </span>
     </div>
@@ -25,17 +30,33 @@
 </div>
 
 @code {
-    private BuildCacheUsage? usage;
+    /// <summary>The days the cleanup keeps the cache no build uses: what's older is what its next run removes.</summary>
+    [Parameter] public int KeepDays { get; set; } = Gitberth.Disk.DiskRules.DefaultKeepDays;
+
+    private BuildCacheReport? report;
     private string? problem;
     private bool busy;
+    private int? readFor;
 
-    protected override async Task OnInitializedAsync() => await ReadAsync();
+    protected override async Task OnParametersSetAsync()
+    {
+        if (readFor == KeepDays) return;
+        readFor = KeepDays;
+        await ReadAsync();
+    }
+
+    /// <summary>Reads the cache again: after a cleanup, say.</summary>
+    public async Task RefreshAsync()
+    {
+        await ReadAsync();
+        StateHasChanged();
+    }
 
     private async Task ReadAsync()
     {
         try
         {
-            usage = await Cache.UsageAsync();
+            report = await Cache.ReportAsync(KeepDays, DateTime.UtcNow);
             problem = null;
         }
         catch (Exception ex) when (ex is DockerApiException or HttpRequestException or TimeoutException or IOException or System.Text.Json.JsonException)
@@ -46,7 +67,7 @@
 
     private async Task ClearAsync()
     {
-        var size = usage is null ? "" : $" ({AppFacts.Bytes(usage.Bytes)})";
+        var size = report is null ? "" : $" ({Gitberth.Disk.DiskText.Size(report.Usage.Bytes)})";
         if (await Dialogs.ShowMessageBoxAsync("Clear the build cache?",
                 $"Docker deletes every app's build cache{size}. Nothing that runs changes, but the next build of each app runs every step again, so it takes longer.",
                 yesText: "Clear build cache", cancelText: "Cancel") != true) return;
