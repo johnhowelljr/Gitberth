@@ -1,0 +1,60 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "deploy": {
+    "base": {
+      "image": "ghcr.io/railwayapp/railpack-runtime:mise-2026.10.14"
+    },
+    "inputs": [
+      {
+        "include": [
+          "."
+        ],
+        "step": "build"
+      }
+    ],
+    "startCommand": "sh start.sh",
+    "variables": {
+      "RAILPACK_VERSION": "0.43.0"
+    }
+  },
+  "secrets": [
+    "RAILPACK_BUILD_CMD"
+  ],
+  "steps": [
+    {
+      "inputs": [
+        {
+          "image": "ghcr.io/railwayapp/railpack-builder:mise-2026.10.14"
+        }
+      ],
+      "name": "packages:mise"
+    },
+    {
+      "commands": [
+        {
+          "dest": ".",
+          "src": "."
+        },
+        {
+          "cmd": "sh -c 'getent hosts gb-rpspike \u0026\u0026 getent hosts deb.debian.org'",
+          "customName": "getent hosts gb-rpspike \u0026\u0026 getent hosts deb.debian.org"
+        }
+      ],
+      "inputs": [
+        {
+          "step": "packages:mise"
+        },
+        {
+          "include": [
+            "."
+          ],
+          "local": true
+        }
+      ],
+      "name": "build",
+      "secrets": [
+        "*"
+      ]
+    }
+  ]
+}

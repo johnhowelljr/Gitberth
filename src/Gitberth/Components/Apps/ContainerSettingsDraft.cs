@@ -28,9 +28,11 @@ public sealed class EnvRowDraft
 
     /// <summary>
     /// Its name or value makes it a secret whatever it's marked (a password-like name, a URL with a password in it): it's
-    /// masked, and saved as secret. Any other variable is secret only when it's marked so.
+    /// masked, and saved as secret. Any other variable is secret only when it's marked so. A RAILPACK_ value is looked at
+    /// without its $NAME references (RailpackSettings): one that names a secret holds none, and a Git app's that holds one
+    /// isn't saved.
     /// </summary>
-    public bool AlwaysSecret => Security.Masking.IsSecret(Key.Trim(), Value);
+    public bool AlwaysSecret => Detection.EnvRules.IsRailpackKey(Key.Trim()) ? Railpack.RailpackSettings.LooksSecret(Key, Value) : Security.Masking.IsSecret(Key.Trim(), Value);
 
     /// <summary>Masked wherever it's shown and kept out of logs and the docker run: marked so, or a secret by its name or value.</summary>
     public bool IsSecret => Secret || AlwaysSecret;

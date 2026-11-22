@@ -56,6 +56,8 @@ public sealed record BridgeCheck(bool Ok, string? Why)
 /// <param name="composer">Runs docker compose for Compose apps; without it (in older tests) one is made over <paramref name="docker"/>.</param>
 /// <param name="builtIns">Where an app installed from a template is reached (APP_URL…), set at each of its deploys; without it (in tests) nothing is.</param>
 /// <param name="gitLab">GitLab's API, which a GitLab app's build filters ask what a push changed (its compare); without it git compares the commits.</param>
+/// <param name="railpack">Plans a Railpack build (railpack prepare); without it (in older tests) there's no Railpack, as in an image without it.</param>
+/// <param name="buildKit">gitberth-buildkit, where Railpack builds run; without it (in tests) one is made over <paramref name="docker"/>.</param>
 public sealed partial class DeployPipeline(
     IDbContextFactory<GitberthDb> dbFactory,
     GitClient git,
@@ -79,7 +81,9 @@ public sealed partial class DeployPipeline(
     Databases.DatabaseService? databases = null,
     Compose.ComposeRunner? composer = null,
     Templates.TemplateBuiltIns? builtIns = null,
-    GitLabApi? gitLab = null)
+    GitLabApi? gitLab = null,
+    Railpack.IRailpackPlanner? railpack = null,
+    Railpack.RailpackBuildKit? buildKit = null)
 {
     // How long a report may hold a deploy up: GitHub being slow never delays the next deploy for long.
     private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
@@ -101,7 +105,13 @@ public sealed partial class DeployPipeline(
     public const string PreviousSuffix = "_prev";
 
     // A variable is secret when it's marked so, or when its name or value looks it.
-    private static bool Secret(EnvVar v, string value) => v.IsSecret || Masking.IsSecret(v.Key, value);
+    private static bool Secret(EnvVar v, string value) => v.IsSecret || LooksSecret(v.Key, value);
+
+    // A RAILPACK_ value is looked at without its $NAME references (RailpackSettings): one that names a secret holds none,
+    // and goes to Railpack as it is.
+    private static bool LooksSecret(string key, string value, IReadOnlyCollection<string>? secretKeys = null) => EnvRules.IsRailpackKey(key)
+        ? secretKeys?.Contains(key) == true || Railpack.RailpackSettings.LooksSecret(key, value)
+        : Masking.IsSecret(key, value, secretKeys);
 
     /// <summary>
     /// Holds builds off while the build cache is cleared (<see cref="BuildCache"/>) or the disk cleaned up, or null when a
@@ -230,6 +240,8 @@ public sealed partial class DeployPipeline(
         SkipVerdict? skipped = null;
         // Which of the app's databases this deploy set: one added or taken off while it ran is still to be made live.
         string? databasesStamp = null;
+        // The image this deploy built is Railpack's: the audit log says so.
+        var builtWithRailpack = false;
         try
         {
             // The repo's variables in GitHub come first; the app's own values in Gitberth win. Like on Vercel, the GitHub
@@ -284,7 +296,7 @@ public sealed partial class DeployPipeline(
             var fromGitHub = usable
                 .Where(v => !ownKeys.Contains(v.Name) && !ListenerKeys.Contains(v.Name))
                 // A GitLab variable masked there is secret here too.
-                .Select(v => new EnvValue(v.Name, v.Value, v.Masked || Masking.IsSecret(v.Name, v.Value, secretKeys)))
+                .Select(v => new EnvValue(v.Name, v.Value, v.Masked || LooksSecret(v.Name, v.Value, secretKeys)))
                 .ToList();
             log.Mask(fromGitHub.Where(e => e.IsSecret).Select(e => e.Value));
             if (repo.Error is not null)
@@ -329,9 +341,12 @@ public sealed partial class DeployPipeline(
             }
             else
             {
+                // Railpack's settings configure its build whatever their mark: a RAILPACK_ value saved before that rule still gets there.
+                var railpackValues = runtimeEnv.Where(e => EnvRules.IsRailpackKey(e.Key)).ToList();
                 prepared = request.Build
-                    ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), fetch, workDir, log, ct)
+                    ? await BuildAsync(db, app, dep, buildEnv, gitHubKeys, vercelFor, runtimeEnv.Select(e => e.Key).ToList(), railpackValues, fetch, workDir, log, ct)
                     : await PrepareImageAsync(app, request, dep, log);
+                builtWithRailpack = request.Build && prepared.Railpack;
 
                 ct.ThrowIfCancellationRequested();
                 if (vercelFor is not null)
@@ -350,7 +365,19 @@ public sealed partial class DeployPipeline(
                 // removing the preview would delete it. Saves and the names above keep it from happening; this is the last word.
                 if (owners.SharedWithPreview(app, app.Volumes) is { } sharedNow) throw new DeployException(SharedVolume(app, sharedNow));
                 await SetStatusAsync(db, dep, DeployStatus.Starting);
-                outcome = await SwapAsync(app, prepared.Image, runtimeEnv, PortsFor(app, prepared.Port), (dep.Id, dep.Trigger), log, ct);
+                // An image Railpack built listens on PORT: the web container port, given now, so a port change needs no build.
+                var unported = runtimeEnv;
+                if (prepared.Railpack) runtimeEnv = WithRailpackPort(unported, PortsFor(app, prepared.Port), log);
+                outcome = await SwapAsync(app, prepared.Image, runtimeEnv, PortsFor(app, prepared.Port), (dep.Id, dep.Trigger), log, ct,
+                    railpack: prepared.Railpack, mayMove: prepared.Railpack);
+                // It listens on one other port: the web port moves there, and the swap runs once more (plan D4).
+                if (outcome.ListensOn is int moved && PortRules.WebOf(PortsFor(app, prepared.Port)) is { } was)
+                {
+                    log.Step(Railpack.RailpackText.PortMoves(moved, was.ContainerPort));
+                    prepared = prepared with { Port = moved, DetectedPort = moved };
+                    runtimeEnv = WithRailpackPort(unported, PortsFor(app, moved), log);
+                    outcome = await SwapAsync(app, prepared.Image, runtimeEnv, PortsFor(app, moved), (dep.Id, dep.Trigger), log, ct, railpack: true, mayMove: false);
+                }
             }
             if (!outcome.Ok && lifetime.ApplicationStopping.IsCancellationRequested)
             {
@@ -404,7 +431,8 @@ public sealed partial class DeployPipeline(
             else
             {
                 dep.Status = outcome.RolledBack ? DeployStatus.RolledBack : DeployStatus.Failed;
-                dep.Error = outcome.Error;
+                // Kept with the deploy, where a Read token sees it: masked as the log is.
+                dep.Error = outcome.Error is { } swapError ? log.Mask(swapError) : null;
                 log.Step(outcome.OldKeptRunning ? $"The new version didn't pass its checks, so the current one kept running throughout. {outcome.Error}"
                     : outcome.RolledBack ? $"Rolled back to the previous {(app.IsCompose ? "release" : "container")}. {outcome.Error}"
                     : $"Failed: {outcome.Error}");
@@ -438,14 +466,15 @@ public sealed partial class DeployPipeline(
         catch (DeployException ex)
         {
             dep.Status = DeployStatus.Failed;
-            dep.Error = ex.Message;
+            // Railpack's and docker's own words reach it: masked with the deploy's secret values, as the log is.
+            dep.Error = log.Mask(ex.Message);
             log.Step("Failed: " + ex.Message);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Deploy {DeploymentId} failed unexpectedly", dep.Id);
             dep.Status = DeployStatus.Failed;
-            dep.Error = ex.Message;
+            dep.Error = log.Mask(ex.Message);
             log.Step("Unexpected error: " + ex.Message);
         }
         finally
@@ -459,7 +488,7 @@ public sealed partial class DeployPipeline(
         // A preview's commit that didn't make it to production: production follows its branch again, unless a newer
         // promote waits to run. Asked once this one's outcome is saved.
         if (dep.Trigger == DeployTrigger.Promote && dep.Status != DeployStatus.Succeeded) await ForgetPromotionAsync(db, dep);
-        Audited(app, dep, previousCommit);
+        Audited(app, dep, previousCommit, builtWithRailpack);
         await ReportAsync(started: false, dep, skipped?.Kind);
         if (dep.Status == DeployStatus.Succeeded)
         {
@@ -487,7 +516,8 @@ public sealed partial class DeployPipeline(
     }
 
     // How the deploy ended, in the audit log, as the one who asked for it (the queue runs it as them).
-    private void Audited(AppDefinition app, Deployment dep, string? previousCommit)
+    /// <param name="railpack">The image was built with Railpack: the entry says which.</param>
+    private void Audited(AppDefinition app, Deployment dep, string? previousCommit, bool railpack = false)
     {
         if (audit is null) return;
         var (action, summary, outcome) = Audit.AuditText.Ended(app.Name, dep);
@@ -495,6 +525,7 @@ public sealed partial class DeployPipeline(
         if (dep.Status == DeployStatus.Succeeded && dep.CommitSha is { Length: >= 7 } sha)
             changes.Add(new("Commit", previousCommit is { Length: >= 7 } before ? before[..7] : null, sha[..7]));
         if (dep.Status == DeployStatus.Succeeded && dep.ImageTag is { Length: > 0 } image) changes.Add(new("Image", null, image));
+        if (railpack) changes.Add(new("Built with", null, $"Railpack {Railpack.RailpackRelease.Version}"));
         if (dep.NoCache) changes.Add(new("Build cache", null, "not used"));
         if (dep.FinishedAt is { } finished && dep.StartedAt is { } started)
             changes.Add(new("Took", null, $"{Math.Max(1, (int)(finished - started).TotalSeconds)} s"));
@@ -702,7 +733,8 @@ public sealed partial class DeployPipeline(
     /// <param name="Port">The container port to publish instead of the app's own, because the app now listens elsewhere.</param>
     /// <param name="DetectedPort">The port detection gave, saved as the app's new baseline once the deploy works.</param>
     /// <param name="Traits">What the image's build found out about the app.</param>
-    private sealed record Prepared(string Image, int? Port, int? DetectedPort, AppTraits Traits);
+    /// <param name="Railpack">Railpack built the image: its container gets PORT, and a Command runs through its bash -c.</param>
+    private sealed record Prepared(string Image, int? Port, int? DetectedPort, AppTraits Traits, bool Railpack = false);
 
     /// <summary>
     /// A recreate or rollback: the image that's there, and what its build found out. One built before the app's port moved
@@ -725,13 +757,16 @@ public sealed partial class DeployPipeline(
             log.Line($"{image} was built before Gitberth kept what a build finds out about the app, so it gets the variables {current} was built for.");
         }
         traits ??= AppTraits.None;
-        if (int.TryParse(labels.GetValueOrDefault(ImageLabels.Port), out var port) && port is > 0 and < 65536
+        // An image Railpack built listens on the PORT it's given (or wherever its app does, which a deploy moved the web port
+        // to): its label only says the port it was built for, so the web port doesn't follow it.
+        var railpack = labels.GetValueOrDefault(ImageLabels.Builder) == "railpack";
+        if (!railpack && int.TryParse(labels.GetValueOrDefault(ImageLabels.Port), out var port) && port is > 0 and < 65536
             && Follow(app.Ports, app.DetectedPort, app.DetectedKind, port) is { } follow)
         {
             log.Step($"{image} listens on port {follow.To}, so the web port follows it");
             return new Prepared(image, follow.To, follow.To, traits);
         }
-        return new Prepared(image, null, null, traits);
+        return new Prepared(image, null, null, traits, railpack);
     }
 
     /// <summary>Where Vercel's variables say the app lives, and whether it's the production deploy; null when they're off for the app.</summary>
@@ -861,9 +896,11 @@ public sealed partial class DeployPipeline(
     /// <param name="gitHubKeys">Which of <paramref name="buildEnv"/> come from the repo's GitHub variables rather than the app's own.</param>
     /// <param name="vercelFor">What Vercel's variables tell the app; null when they're off for it.</param>
     /// <param name="runtimeKeys">Every name the app or the repo sets, build-time or not: those win over Vercel's during the build too.</param>
+    /// <param name="railpackValues">The app's RAILPACK_ values, which a Railpack build gets whatever their mark.</param>
     /// <param name="fetch">What to fetch, when it isn't the app's branch tip.</param>
     private async Task<Prepared> BuildAsync(GitberthDb db, AppDefinition app, Deployment dep, List<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys,
-        VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, BuildSource fetch, string workDir, DeployLog log, CancellationToken ct)
+        VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, IReadOnlyList<EnvValue> railpackValues, BuildSource fetch, string workDir, DeployLog log,
+        CancellationToken ct)
     {
         var (commit, srcDir) = await FetchSourceAsync(db, app, dep, fetch, workDir, log, ct);
         var buildDir = Path.Combine(workDir, "build");
@@ -875,7 +912,8 @@ public sealed partial class DeployPipeline(
         // Vercel's variables are there while it builds too (front ends build NEXT_PUBLIC_VERCEL_URL in). What the build
         // finds out goes on the image, so a later recreate from it sets the same ones.
         var traits = VercelEnv.Detect(folder, srcDir);
-        return await BuildFetchedAsync(db, app, dep, commit, srcDir, appDir, folder, traits, buildEnv, gitHubKeys, vercelFor, runtimeKeys, buildDir, log, ct);
+        return await BuildFetchedAsync(db, app, dep, commit, srcDir, appDir, folder, traits, buildEnv, gitHubKeys, vercelFor, runtimeKeys, railpackValues, buildDir,
+            log, ct);
     }
 
     /// <summary>
@@ -928,8 +966,8 @@ public sealed partial class DeployPipeline(
 
     // The build of a fetched commit into one image (a Git app that isn't a Compose one).
     private async Task<Prepared> BuildFetchedAsync(GitberthDb db, AppDefinition app, Deployment dep, CommitInfo commit, string srcDir, string appDir, string folder,
-        AppTraits traits, List<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys, VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys, string buildDir,
-        DeployLog log, CancellationToken ct)
+        AppTraits traits, List<EnvValue> buildEnv, IReadOnlySet<string> gitHubKeys, VercelContext? vercelFor, IReadOnlyList<string> runtimeKeys,
+        IReadOnlyList<EnvValue> railpackValues, string buildDir, DeployLog log, CancellationToken ct)
     {
         var vercel = vercelFor is null
             ? []
@@ -962,11 +1000,26 @@ public sealed partial class DeployPipeline(
             source = app.CustomDockerfile;
             dockerfilePath = WriteDockerfile(buildDir, context, DockerfileMarkers.Expand(source, plainKeys, volumeTargets, secretKeys), null, dep.Id, log);
         }
+        else if (app.DockerfileMode == DockerfileMode.Railpack)
+        {
+            // Always Railpack: Gitberth's analyzer doesn't run, and a Dockerfile of the repo's isn't used.
+            log.Step(Railpack.RailpackText.Chosen);
+            if (HasDockerfile(folder)) log.Line(Railpack.RailpackText.RepoDockerfileUnused);
+            return await BuildWithRailpackAsync(db, app, dep, commit, srcDir, appDir, folder, traits, buildEnv, railpackValues, cronLabel, unrecognized: null,
+                buildDir, log, ct);
+        }
         else
         {
             var detection = analyzer.Analyze(srcDir, new AnalyzeOptions(app.ProjectHint, AppDir: appDir));
             // Apps from before Gitberth remembered the port detection gave start from what it gave their kind.
             app.DetectedPort ??= DefaultPort(app.DetectedKind);
+            if (detection.Unrecognized)
+            {
+                // Nothing Gitberth knows: Railpack's turn, without the analyzer's advice to customize the Dockerfile.
+                log.Step(Railpack.RailpackText.Fallback);
+                return await BuildWithRailpackAsync(db, app, dep, commit, srcDir, appDir, folder, traits, buildEnv, railpackValues, cronLabel, detection,
+                    buildDir, log, ct);
+            }
             if (detection.ContainerPort is int port)
             {
                 detectedPort = port;
@@ -1244,8 +1297,9 @@ public sealed partial class DeployPipeline(
     /// <param name="OldKeptRunning">The new version failed next to the old one, which never stopped.</param>
     /// <param name="Cancelled">Cancelled while the new version was checked next to the old one, which never stopped.</param>
     /// <param name="Networks">The app's own networks as they were saved when the swap read them, under its lock: one that's gone included.</param>
+    /// <param name="ListensOn">A Railpack image's app didn't open its web port but listens on this one: the web port moves there (plan D4).</param>
     private sealed record SwapOutcome(bool Ok, bool RolledBack, string? Error, bool OldKeptRunning = false, bool Cancelled = false,
-        IReadOnlyList<AppNetwork>? Networks = null);
+        IReadOnlyList<AppNetwork>? Networks = null, int? ListensOn = null);
 
     /// <summary>What every container one swap starts is created with besides the app's own settings.</summary>
     /// <param name="Networks">The app's own networks, read under its lock.</param>
@@ -1253,18 +1307,22 @@ public sealed partial class DeployPipeline(
     /// <param name="GatewayPriority">The engine takes gateway priorities (API 1.48, Docker 28).</param>
     /// <param name="LanIpv4Only">The host has an IPv6 address the internet can reach, so the LAN's ports go on IPv4 only.</param>
     /// <param name="Deploy">This deploy, recorded on the containers it starts.</param>
+    /// <param name="Railpack">The image is Railpack's: a Command runs through its bash -c, and the container has to open its web port.</param>
+    /// <param name="MayMove">The web port may move to the one other port the app listens on (once a deploy).</param>
     private sealed record SwapContext(IReadOnlyList<string> LogOptions, IReadOnlyList<AppNetwork> Networks, IReadOnlyDictionary<string, string> NetworkIds,
-        bool GatewayPriority, bool LanIpv4Only, (int Id, DeployTrigger Trigger) Deploy);
+        bool GatewayPriority, bool LanIpv4Only, (int Id, DeployTrigger Trigger) Deploy, bool Railpack = false, bool MayMove = false);
 
     private ContainerSpec Spec(AppDefinition app, string image, List<EnvValue> env, IReadOnlyList<PortMapping> ports, SwapContext with,
         string? name = null, string? restartPolicy = null, bool bridge = false) =>
         ContainerSpecFactory.For(app, image, env, options.Network, with.LogOptions, ports, name, restartPolicy, bridge, with.Deploy,
-            with.Networks, with.GatewayPriority, with.LanIpv4Only, with.NetworkIds);
+            with.Networks, with.GatewayPriority, with.LanIpv4Only, with.NetworkIds, railpackImage: with.Railpack);
 
     /// <param name="ports">What to publish. The app's saved ports only change once the swap has worked.</param>
     /// <param name="deploy">This deploy, recorded on the containers it starts.</param>
+    /// <param name="railpack">The image is Railpack's (<see cref="SwapContext.Railpack"/>).</param>
+    /// <param name="mayMove">The web port may move to the one other port a Railpack image's app listens on.</param>
     private async Task<SwapOutcome> SwapAsync(AppDefinition app, string image, List<EnvValue> env, IReadOnlyList<PortMapping> ports,
-        (int Id, DeployTrigger Trigger) deploy, DeployLog log, CancellationToken ct)
+        (int Id, DeployTrigger Trigger) deploy, DeployLog log, CancellationToken ct, bool railpack = false, bool mayMove = false)
     {
         // Not cancellable once started: a half-finished swap is worse than a finished one.
         using var _ = await locks.AcquireAsync(app.Id, CancellationToken.None);
@@ -1293,7 +1351,7 @@ public sealed partial class DeployPipeline(
         var (gatewayPriority, lanIpv4Only) = await HostTraitsAsync();
         // Read under the app's lock, which joining a network takes too: a network joined while the image built isn't lost.
         var (saved, there, ids) = await NetworksAsync(app, log);
-        var with = new SwapContext(await docker.GetLogOptionsAsync(), there, ids, gatewayPriority, lanIpv4Only, deploy);
+        var with = new SwapContext(await docker.GetLogOptionsAsync(), there, ids, gatewayPriority, lanIpv4Only, deploy, railpack, mayMove);
         if (hadOld)
         {
             var bridge = await CanBridgeAsync(app, ports);
@@ -1326,6 +1384,9 @@ public sealed partial class DeployPipeline(
             var run = await docker.RunAsync(args, new ProcessOptions { Environment = processEnv });
             var failure = run.Ok ? null : "docker run failed: " + run.ErrorText;
             failure ??= await VerifyAsync(app, spec, log, ct);
+            // A Railpack image's app is told PORT, but nothing makes it listen there: visitors only go to a port it opened.
+            int? listensOn = null;
+            if (failure is null && with.Railpack) (failure, listensOn) = await RailpackListensAsync(name, spec.Ports, spec.Ports, with.MayMove, log);
             if (failure is null)
             {
                 if (hadOld) await docker.RemoveAsync(previous);
@@ -1334,12 +1395,12 @@ public sealed partial class DeployPipeline(
 
             await ShowLastOutputAsync(name, log);
             await docker.RemoveAsync(name);
-            if (!hadOld) return new SwapOutcome(false, false, failure);
+            if (!hadOld) return new SwapOutcome(false, false, failure, ListensOn: listensOn);
 
             var restored = await docker.RenameAsync(previous, name);
             if (restored.Ok) restored = await docker.StartAsync(name);
             return restored.Ok
-                ? new SwapOutcome(false, true, failure)
+                ? new SwapOutcome(false, true, failure, ListensOn: listensOn)
                 : new SwapOutcome(false, false, $"{failure} Restoring the previous container also failed: {restored.ErrorText}");
         }
         finally
@@ -1567,14 +1628,17 @@ public sealed partial class DeployPipeline(
             _spareGate.Release();
         }
 
-        var failure = await VerifyAsync(app, side, log, ct) ?? await ListeningAsync(bridge, side.Ports, log);
+        var failure = await VerifyAsync(app, side, log, ct);
+        int? listensOn = null;
+        if (failure is null)
+            (failure, listensOn) = with.Railpack ? await RailpackListensAsync(bridge, side.Ports, ports, with.MayMove, log) : (await ListeningAsync(bridge, side.Ports, log), (int?)null);
         if (failure is not null)
         {
             await ShowLastOutputAsync(bridge, log);
             await docker.RemoveAsync(bridge);
             return ct.IsCancellationRequested
                 ? new SwapOutcome(false, false, "Cancelled", Cancelled: true)
-                : new SwapOutcome(false, true, failure, OldKeptRunning: true);
+                : new SwapOutcome(false, true, failure, OldKeptRunning: true, ListensOn: listensOn);
         }
         // It passed: other apps reach it by the app's name now too, and it comes back like the app would if it crashes.
         if (await docker.AddNetworkAliasAsync(bridge, app.Slug) is { } aliasError) log.Line($"warning: other apps can't reach the new version by name yet ({aliasError}).");
@@ -1668,21 +1732,34 @@ public sealed partial class DeployPipeline(
         var said = false;
         while (true)
         {
-            try
-            {
-                using var client = new TcpClient();
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                await client.ConnectAsync(host, number, timeout.Token);
-                return null;
-            }
-            catch (Exception ex) when (ex is SocketException or OperationCanceledException)
-            {
-            }
+            if (await Accepts(host, number)) return null;
             if (await docker.InspectStateAsync(container) is not { Running: true }) return $"{container} stopped before it opened port {port.ContainerPort}.";
-            if (DateTime.UtcNow >= until) return $"{container} didn't open port {port.ContainerPort} within {ListenWait.TotalSeconds:0} seconds.";
+            var left = until - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero) return $"{container} didn't open port {port.ContainerPort} within {ListenWait.TotalSeconds:0} seconds.";
             if (!said) log?.Line($"Waiting for {container} to open port {port.ContainerPort}…");
             said = true;
-            await Task.Delay(500, CancellationToken.None);
+            await Task.Delay(left < ListenPause ? left : ListenPause, CancellationToken.None);
+        }
+    }
+
+    /// <summary>How long <see cref="ListeningAsync"/> waits between two tries.</summary>
+    private static readonly TimeSpan ListenPause = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>Whether something accepts a TCP connection at host:port within 2 seconds; tests give a stand-in.</summary>
+    internal Func<string, int, Task<bool>> Accepts { get; set; } = AcceptsAsync;
+
+    private static async Task<bool> AcceptsAsync(string host, int port)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await client.ConnectAsync(host, port, timeout.Token);
+            return true;
+        }
+        catch (Exception ex) when (ex is SocketException or OperationCanceledException)
+        {
+            return false;
         }
     }
 
@@ -1839,6 +1916,7 @@ public sealed partial class DeployPipeline(
             ProjectKind.Static or ProjectKind.NodeSpa or ProjectKind.DotNetWasm => 80,
             ProjectKind.NextJs or ProjectKind.Nuxt or ProjectKind.SvelteKit or ProjectKind.NodeServer => 3000,
             ProjectKind.DotNetWeb => 8080,
+            ProjectKind.Railpack => Railpack.RailpackRelease.DefaultPort,
             _ => null,
         }
         : null;

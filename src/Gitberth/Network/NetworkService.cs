@@ -761,7 +761,7 @@ public sealed partial class NetworkService(DockerApi api, IDbContextFactory<Gitb
     // What joining and leaving never touch (7.3): helpers, a deploy's temporary containers, and what Swarm or Kubernetes run.
     // An app made from an image is never a deploy's, under any name (RecreateRules.MadeFromImage).
     private static string? Untouchable(Target t) =>
-        t.Labels.ContainsKey(HostScanHelper.Label) ? "This is a Gitberth helper: it only runs for a moment."
+        t.Labels.ContainsKey(HostScanHelper.Label) ? $"This is {HostScanHelper.What(t.Labels)}"
         : t.Labels.ContainsKey(ContainerSpecFactory.BridgeLabel)
           || (t.Labels.TryGetValue("gitberth.app", out var slug) && t.Name != AppDefinition.ContainerNameFor(slug) && !RecreateRules.MadeFromImage(t.Labels))
             ? "This is a deploy's temporary or previous container, which Gitberth removes itself."

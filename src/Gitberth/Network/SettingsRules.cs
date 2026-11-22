@@ -53,6 +53,8 @@ public static partial class SettingsRules
             if (!EnvRules.IsValidKey(e.Key)) Add(SettingField.Env, $"\"{e.Key}\" isn't a variable name: use letters, digits and _, not starting with a digit.");
             else if (!keys.Add(Apps.EnvScopes.Named(e.Key, e.Scope))) Add(SettingField.Env, $"{Apps.EnvScopes.Named(e.Key, e.Scope)} is listed twice.");
             if (e.Value.Contains('\0')) Add(SettingField.Env, $"{e.Key}'s value has a null character in it.");
+            // Railpack writes a Git app's RAILPACK_ settings into its plan and the image: one can't be secret.
+            if (context.GitApp && Railpack.RailpackSettings.IsSecret(e.Key, e.Value, e.Secret)) Add(SettingField.Env, Railpack.RailpackText.SecretSetting(e.Key.Trim()));
         }
 
         var targets = new HashSet<string>(StringComparer.Ordinal);

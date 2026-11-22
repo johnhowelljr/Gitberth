@@ -23,4 +23,13 @@ public static class ImageLabels
 
     /// <summary>On every image Gitberth builds now: an image without it was built before Gitberth kept what a build finds out.</summary>
     public const string Traits = "gitberth.traits";
+
+    /// <summary>"railpack" on an image Railpack built: its container gets PORT, and a Command runs through its bash -c.</summary>
+    public const string Builder = "gitberth.builder";
+
+    /// <summary>The Railpack release that built the image, like 0.43.0.</summary>
+    public const string RailpackVersion = "gitberth.railpack";
+
+    /// <summary>The tool versions Railpack resolved, as name@version pairs ("node@22.11.0 python@3.13.2"): a plain redeploy keeps them.</summary>
+    public const string RailpackPackages = "gitberth.railpack.packages";
 }

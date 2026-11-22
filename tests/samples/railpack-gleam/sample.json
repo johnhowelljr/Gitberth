@@ -1,0 +1,7 @@
+{
+  "builder": "railpack",
+  "railpackProvider": "gleam",
+  "kind": "Unknown",
+  "title": "Unknown project type",
+  "port": null
+}

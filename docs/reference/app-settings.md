@@ -53,11 +53,16 @@ detected. The app's image is built from the repository, so it has no **Image** f
 | **Subfolder** | The app's folder in the repository. Leave it empty for the repository's root. | Empty | Build |
 | **Deploy on push** | A new commit on the branch deploys by itself. Turn it off to deploy only with **Deploy**. | On | At once |
 | **Vercel's variables** | Sets `VERCEL_URL`, `VERCEL_GIT_COMMIT_SHA` and the rest. See [Variables Gitberth sets](../guides/environment-variables.md#variables-gitberth-sets-like-vercel). | On | Build |
-| **Build** | **Detect automatically** generates the Dockerfile on every deploy (or uses the repository's own). **Custom Dockerfile** uses the one you write here. | **Detect automatically** | Build |
+| **Build** | **Detect automatically** generates the Dockerfile on every deploy (or uses the repository's own); when it finds nothing it knows, Railpack builds the app. **Railpack** always builds with [Railpack](railpack.md), from the repository's `railpack.json` and the app's `RAILPACK_` variables; the repository's Dockerfile isn't used. **Custom Dockerfile** uses the one you write here. | **Detect automatically** | Build |
 | **Dockerfile** | With **Custom Dockerfile**: your Dockerfile. Keep the `# gitberth:build-args` and `# gitberth:volumes` lines; Gitberth fills them in. | The generated one | Build |
 | **Project to run** | .NET only: which project of the solution runs, such as `src/MyApp/MyApp.csproj`. | The one Gitberth picked | Build |
 | **Watch paths** | Build filters, one pattern per line, like a `.gitignore`: a new commit deploys by itself only when it changes a file one of these matches. An app in a subfolder offers **Watch website/** to fill in its folder. | Empty: any file | At once |
 | **Ignored paths** | A new commit whose changed files all match these doesn't deploy by itself, such as `*.md` and `docs/`. | Empty | At once |
+
+When Railpack builds the app (its **Build** is **Railpack**, or it's **Detect automatically** and Railpack built it last
+time), the section says **Railpack 0.43.0 builds it, from the repository's railpack.json and the app's RAILPACK_
+variables.**, with a link to [How Gitberth runs Railpack](railpack.md#how-gitberth-runs-it), and has no **Dockerfile** or
+**Project to run**.
 
 A commit the build filters leave out, or whose message says `[skip ci]`, ends **Skipped** and the app keeps running
 its version; **Deploy** still builds it. Patterns starting with `!` aren't supported, and each field takes at most 50
@@ -254,8 +259,8 @@ The app's environment variables. See [Environment variables](../guides/environme
 | Part | What it does | Applies |
 |---|---|---|
 | **Name** / **Value** | Each variable the container gets. Change a value in place; a new row takes a name too. | Recreate |
-| **Secret** (lock) | Masks the value wherever it's shown. Always on for names and values that look secret. | At once |
-| **Build time** (wrench) | Git apps: passes the variable to the image build too. | Build |
+| **Secret** (lock) | Masks the value wherever it's shown. Always on for names and values that look secret. Off, and can't be turned on, for a Git app's `RAILPACK_` variable, which Railpack writes into its plan and the image: one that holds a password isn't saved, and the secret goes in a variable of its own, written as `$NAME` in the setting (see [Railpack's settings](railpack.md#settings)). | At once |
+| **Build time** (wrench) | Git apps: passes the variable to the image build too. Always on, and can't be turned off, for a `RAILPACK_` variable: it configures [Railpack's build](railpack.md#settings). | Build |
 | **All deploys** / **Production** / **Previews** | Git apps: which deploys get the variable. One name can have a value for each; a **Production** or **Previews** one wins over **All deploys**. See [Environments](../guides/previews.md#environments). | Recreate (production) or the previews' next deploy |
 | **N from the image** | The image's own variables, folded. Edit one to make it the app's own. | Recreate |
 | **Add variable**, **Paste .env** | Add one variable, or several from `.env` lines. | Recreate |

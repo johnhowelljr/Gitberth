@@ -400,8 +400,10 @@ public static class GitAppSettings
             if (existing is null) app.EnvVars.Add(existing = new EnvVar { Key = key, Scope = e.Scope });
             if (existing.ProtectedValue.Length == 0 || protector.TryUnprotect(existing.ProtectedValue) != e.Value) existing.ProtectedValue = protector.Protect(e.Value);
             // Marked secret, or it looks it (a secret-sounding name, a URL with a password): the deploy keeps it off argv and out of its log.
-            existing.IsSecret = e.Secret || Masking.IsSecret(key, e.Value);
-            existing.BuildTime = e.BuildTime;
+            // A RAILPACK_ one never is (the saves refuse one that would be): its $NAME references hold nothing.
+            existing.IsSecret = Detection.EnvRules.IsRailpackKey(key) ? Railpack.RailpackSettings.IsSecret(key, e.Value, e.Secret) : e.Secret || Masking.IsSecret(key, e.Value);
+            // Railpack's settings (RAILPACK_NODE_VERSION…) configure its build: always build-time, from the UI, the API or MCP.
+            existing.BuildTime = e.BuildTime || Detection.EnvRules.IsRailpackKey(key);
         }
     }
 

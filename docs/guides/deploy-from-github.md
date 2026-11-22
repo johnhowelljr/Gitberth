@@ -2,8 +2,9 @@
 
 Give Gitberth a GitHub repository or a GitLab project and it works out how to build it, builds a Docker image, and runs it
 with your ports, environment variables and volumes. After that it deploys every new commit on the branch by itself. Use
-this for your own code: a static site, a Node.js or Python API, a Go, Rust or .NET service, anything with a Dockerfile, or
-a repo with a Compose file.
+this for your own code: a static site, a Node.js or Python API, a Go, Rust or .NET service, anything with a Dockerfile,
+anything [Railpack](../reference/railpack.md) builds (an Elixir app or a shell script, say), or a repo with a Compose
+file.
 
 The examples deploy `github.com/you/website`, a static site.
 
@@ -79,10 +80,26 @@ A .NET solution with several runnable projects also shows **Project to run**.
 To write the Dockerfile yourself, turn on **Customize the Dockerfile**. The text box starts with the generated one. Your
 Dockerfile is stored with the app and used as it is on every deploy, and your repository is never changed. Keep the
 `# gitberth:build-args` and `# gitberth:volumes` lines: Gitberth fills them in with the build-time variables and the
-volume folders. When Gitberth can't work out how to build the project, this switch is on already with a starter
-Dockerfile.
+volume folders. When neither Gitberth nor Railpack can work out how to build the project, this switch is on already
+with a starter Dockerfile.
+
+**Build with Railpack** has Railway's builder make the image instead of the Dockerfile Gitberth would write, or instead
+of the repo's own Dockerfile: for a repo set up for Railway, or to build an app the way Railway does. It's on by itself
+when the app's folder has a `railpack.json` and no Dockerfile. It and **Customize the Dockerfile** turn each other off.
+If Railpack can't plan the build while it's on, the card says why, and **Create and deploy** is refused with it.
 
 [How Gitberth builds each kind of project](../reference/build-detection.md) lists everything it detects.
+
+### A project Gitberth doesn't know
+
+When Gitberth finds nothing it knows how to build, it asks Railpack, Railway's open-source builder (**Asking
+Railpack…**). The card then says what Railpack found, such as **How it will run: Shell script with Railpack**, with a
+tick for each file it went by, **Railpack 0.43.0 plans the build: no Dockerfile needed**, the command that starts the
+app, and **Gets PORT=8080, the port Gitberth publishes**. **Railpack's plan** shows the steps Railpack will run, as it
+prints them. Railpack plans the build again on every deploy. See [Railpack builds](../reference/railpack.md).
+
+When Railpack can't work out how to build it either, the card says why, **Railpack couldn't work out how to build it
+either: …**, and **Customize the Dockerfile** is on with a starter Dockerfile.
 
 ## Fill in the settings
 
@@ -139,7 +156,7 @@ created yet** box, and creates nothing.
   **Deploys**. A commit whose message says `[skip ci]`, or that changes only files the app's build filters leave out, is
   skipped.
 - **The Dockerfile follows the repo.** Unless you customized it, Gitberth generates it again on every deploy, so a new
-  Node.js or .NET version in the repo is picked up by itself.
+  Node.js or .NET version in the repo is picked up by itself. Railpack plans an app's build again on every deploy too.
 - **The container port follows the app.** When a deploy finds the app now listens on another port, Gitberth moves the
   container port to match and keeps the host port. A container port you set yourself stays.
 - **GitHub or GitLab hears how it went**, when the token allows it: a status on each commit, and a comment on each pull
@@ -153,7 +170,8 @@ On the app's **Settings** tab, the **Source** section holds:
 - **Branch** and **Subfolder**.
 - **Deploy on push**: the same switch as when you created it.
 - **Vercel's variables**: see [Environment variables](environment-variables.md#variables-gitberth-sets-like-vercel).
-- **Build**: **Detect automatically** or **Custom Dockerfile**, with the Dockerfile to edit.
+- **Build**: **Detect automatically** (Railpack builds a project Gitberth doesn't know), **Railpack** (always), or
+  **Custom Dockerfile**, with the Dockerfile to edit.
 - **Project to run**, for a .NET solution.
 - **Watch paths** and **Ignored paths**: build filters, so a commit that only changes the docs isn't deployed. See
   [Skip commits that don't need a deploy](deploys-and-rollbacks.md#skip-commits-that-dont-need-a-deploy).

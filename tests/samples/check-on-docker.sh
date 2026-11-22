@@ -47,6 +47,11 @@ failed=""
 for name in "$@"; do
   dir="$generated/$name"
   meta="$dir/meta.json"
+  # A sample Railpack builds gets no Dockerfile from Gitberth, so the writer leaves it out: nothing to check here.
+  if [ ! -f "$meta" ]; then
+    echo "SKIP $name: no Dockerfile from Gitberth (Railpack builds it, or it wasn't generated)"
+    continue
+  fi
   context="$samples/$name/$(field "$meta" context)"
   port=$(field "$meta" port)
   path=$(field "$meta" path)

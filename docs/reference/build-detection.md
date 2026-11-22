@@ -35,6 +35,7 @@ picked what it did, or what to change in your repository so it picks something e
 | `package.json` for Bun: Elysia, `Bun.serve`, a script that runs bun | `oven/bun:<version>`, run with bun | Detected, else 3000 |
 | A Python script (`main.py` with `if __name__ == "__main__":`, `bot.py`, `worker.py`…) | `python <file>` | None, unless it serves HTTP |
 | `index.html` | nginx | 80 |
+| Anything else Railpack knows (`mix.exs`, `gleam.toml`, `CMakeLists.txt`, `build.zig`, `start.sh`…) | [Railpack](railpack.md) | 8080, given as `PORT` |
 
 "Detected" means Gitberth reads the port from the app's start command, its configuration or its code.
 
@@ -51,8 +52,10 @@ When a folder could be more than one kind of project, Gitberth tries these in or
 5. **Any other Python, Go, Rust or Deno program**, such as a script or a worker.
 6. **A static site** (`index.html`).
 
-When nothing matches, Gitberth can't build the app by itself: add a Dockerfile to the repository, or write one in
-Gitberth with **Customize the Dockerfile**.
+When nothing matches, Railpack, Railway's open-source builder, plans and builds the app instead (see
+[Railpack builds](railpack.md)). Only when Railpack can't work out how to build it either does the deploy fail: then add
+a Dockerfile to the repository, or write one in Gitberth with **Customize the Dockerfile**. An app whose **Build** is
+**Railpack** skips all of this: Railpack builds it, whatever the folder holds.
 
 ## Your own Dockerfile
 
@@ -338,6 +341,9 @@ the same `postgres:5432` the app uses when it runs, for example to apply databas
 Docker doesn't let a build join a network itself; host networking with the names added gives the same result. Gitberth
 reads only those containers' names and addresses, never their settings, which can hold secrets.
 
+A [Railpack build](railpack.md) runs in gitberth-buildkit, which is on the `gitberth` network itself, so its steps reach
+the same containers by name through Docker's own DNS.
+
 ## The container port follows the app
 
 When a deploy finds the app now listens on another port, Gitberth moves the container port to match. That happens when
@@ -346,6 +352,7 @@ the same. A container port you set yourself is left alone.
 
 ## Related
 
+- [Railpack builds](railpack.md)
 - [Deploy an app from GitHub or GitLab](../guides/deploy-from-github.md)
 - [Environment variables](../guides/environment-variables.md)
 - [Deploys and rollbacks](../guides/deploys-and-rollbacks.md)

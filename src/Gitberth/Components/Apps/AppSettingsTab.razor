@@ -1,3 +1,4 @@
+@using Gitberth.Railpack
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject ContainerStatsCollector Stats
@@ -126,6 +127,13 @@ else
                         <Field Label="Build" Tip="app.settings.build" Changed="@(Git.DockerfileMode != Git.Loaded.DockerfileMode)">
                             <Seg T="DockerfileMode" Options="BuildOptions" Value="Git.DockerfileMode" ValueChanged="v => Set(() => Git.DockerfileMode = v)" Label="Build" />
                         </Field>
+                        @if (BuiltWithRailpack(row))
+                        {
+                            <p class="gb-help" id="set-build-railpack" style="margin-top:-6px">
+                                Railpack @RailpackRelease.Version builds it, from the repository's railpack.json and the app's RAILPACK_ variables.
+                                <a href="help/reference/railpack#how-gitberth-runs-it">How Gitberth runs Railpack</a>
+                            </p>
+                        }
                     }
                     @if (!compose && Git.DockerfileMode == DockerfileMode.Custom)
                     {
@@ -134,7 +142,7 @@ else
                             <textarea id="set-dockerfile" class="gb-input" rows="14" spellcheck="false" @bind="Git.CustomDockerfile" @bind:event="oninput" @bind:after="Notify"></textarea>
                         </Field>
                     }
-                    else if (!compose && row.DetectedKind?.StartsWith("DotNet", StringComparison.Ordinal) == true)
+                    else if (!compose && Git.DockerfileMode != DockerfileMode.Railpack && row.DetectedKind?.StartsWith("DotNet", StringComparison.Ordinal) == true)
                     {
                         <Field Label="Project to run" For="set-project" Tip="app.settings.project" Help="When the solution has several." Changed="@((Git.ProjectHint.Trim().Length == 0 ? null : Git.ProjectHint.Trim()) != Git.Loaded.ProjectHint)">
                             <input id="set-project" class="gb-input gb-input--mono" placeholder="src/MyApp/MyApp.csproj" @bind="Git.ProjectHint" @bind:event="oninput" @bind:after="Notify" />
@@ -454,7 +462,16 @@ else
     private static IReadOnlyList<SegOption<HealthMode>> HealthOptions => AppFacts.HealthOptions;
 
     private static readonly IReadOnlyList<SegOption<DockerfileMode>> BuildOptions =
-        [new(DockerfileMode.Auto, "Detect automatically", Tip: "app.settings.build.auto"), new(DockerfileMode.Custom, "Custom Dockerfile", Tip: "app.settings.build.custom")];
+    [
+        new(DockerfileMode.Auto, "Detect automatically", Tip: "app.settings.build.auto"),
+        new(DockerfileMode.Railpack, "Railpack", Tip: "app.settings.build.railpack"),
+        new(DockerfileMode.Custom, "Custom Dockerfile", Tip: "app.settings.build.custom"),
+    ];
+
+    // Railpack builds the app: its Build says so, or Detect automatically handed it to Railpack the last time it was built.
+    private bool BuiltWithRailpack(AppDefinition row) =>
+        Git is not null && (Git.DockerfileMode == DockerfileMode.Railpack
+                            || Git.DockerfileMode == DockerfileMode.Auto && row.DetectedKind == nameof(ProjectKind.Railpack));
 
     // The three policies, said for what an update is for this image: a newer image in its registry, or (a local image) a
     // newer build of its tag on this host, which no registry is asked about.

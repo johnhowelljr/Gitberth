@@ -1,0 +1,1 @@
+ ERRO failed to ensure mise is installed: failed to download and install: temporary failure fetching https://github.com/jdx/mise/releases/download/v2026.10.14/mise-v2026.10.14-linux-x64-musl.tar.gz: Get "https://github.com/jdx/mise/releases/download/v2026.10.14/mise-v2026.10.14-linux-x64-musl.tar.gz": dial tcp 127.0.0.1:443: connect: connection refused

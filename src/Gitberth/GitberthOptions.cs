@@ -10,6 +10,8 @@ public sealed class GitberthOptions
     public required string DataDir { get; init; }
     public string DockerPath { get; init; } = "docker";
     public string GitPath { get; init; } = "git";
+    /// <summary>Railpack's CLI, run as it is when Gitberth runs outside a container (a developer's machine).</summary>
+    public string RailpackPath { get; init; } = "railpack";
     public string? PublicHost { get; init; }
     public string? InitialAdminPassword { get; init; }
     public bool RunningInContainer { get; init; }
@@ -57,6 +59,7 @@ public sealed class GitberthOptions
             DataDir = Path.GetFullPath(dataDir),
             DockerPath = NullIfBlank(config["GITBERTH_DOCKER"]) ?? "docker",
             GitPath = NullIfBlank(config["GITBERTH_GIT"]) ?? "git",
+            RailpackPath = NullIfBlank(config["GITBERTH_RAILPACK"]) ?? "railpack",
             PublicHost = NullIfBlank(config["GITBERTH_PUBLIC_HOST"]),
             InitialAdminPassword = NullIfBlank(config["GITBERTH_ADMIN_PASSWORD"]),
             RunningInContainer = inContainer,

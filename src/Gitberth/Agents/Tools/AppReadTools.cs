@@ -117,6 +117,9 @@ public sealed class AppReadTools(AgentContext ctx, AppCatalog catalog, AppSettin
                 watch_paths = g.WatchPaths,
                 ignored_paths = g.IgnoredPaths,
                 settings_pending = g.ConfigChangePending || g.RebuildPending ? true : (bool?)null,
+                // How its image is built: what Gitberth detects (Railpack for a project it doesn't know), always Railpack, or its own Dockerfile.
+                build = g.DockerfileMode switch { DockerfileMode.Railpack => "railpack", DockerfileMode.Custom => "custom", _ => "auto" },
+                detected = g.DetectedSummary,
             } : null,
             preview_of = row?.ParentAppId,
             web_port = loaded?.Options.WebPort,

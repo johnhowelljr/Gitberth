@@ -82,6 +82,16 @@ public static partial class LogoCatalog
         (["jvm"], "openjdk"), (["ruby"], "ruby"), (["php"], "php"), (["rust"], "rust"),
     ];
 
+    // How a Railpack app's DetectedSummary ends ("Elixir with Railpack"): its words say the language, its kind (Railpack) doesn't.
+    private const string WithRailpack = " with Railpack";
+
+    /// <summary>
+    /// What a Git app's logo goes by: its DetectedKind, or, for an app Railpack builds (kind Railpack), its DetectedSummary,
+    /// which names the language ("Elixir with Railpack").
+    /// </summary>
+    public static string? KindOf(string? detectedKind, string? detectedSummary) =>
+        detectedKind == nameof(global::Gitberth.Detection.ProjectKind.Railpack) && !string.IsNullOrWhiteSpace(detectedSummary) ? detectedSummary : detectedKind;
+
     /// <summary>The brand mark for a slug; null when the catalogue has none.</summary>
     public static LogoMark? Find(string slug) => Marks.GetValueOrDefault(slug);
 
@@ -90,13 +100,16 @@ public static partial class LogoCatalog
 
     /// <param name="image">The image as Docker shows it: postgres:18, cloudflare/cloudflared:latest, an ID.</param>
     /// <param name="name">The container's name (or the app's title).</param>
-    /// <param name="kind">A Git app's detected kind (NextJs, Static, NodeServer…); null for others.</param>
+    /// <param name="kind">A Git app's detected kind (NextJs, Static, NodeServer…), or a Railpack app's summary (<see cref="KindOf"/>); null for others.</param>
     /// <param name="self">Gitberth's own container.</param>
     public static LogoChoice Resolve(string? image, string? name, string? kind = null, bool self = false)
     {
         var repository = Repository(image);
         if (self || (repository == "gitberth" && name is "gitberth")) return new(null, null, null, "#6f78fb", "#ffffff", Gitberth: true);
 
+        // A project Railpack builds: its language's mark (Elixir, Gleam, Zig, C/C++, a shell script…).
+        if (kind is not null && kind.EndsWith(WithRailpack, StringComparison.Ordinal)
+            && global::Gitberth.Railpack.RailpackProviders.LogoSlug(kind) is { } railpack && Find(railpack) is not null) return Mark(railpack);
         if (kind is not null && Kinds.TryGetValue(kind, out var byKind)) return Mark(byKind);
         if (repository is not null && Repositories.TryGetValue(repository, out var byRepository)) return Mark(byRepository);
 

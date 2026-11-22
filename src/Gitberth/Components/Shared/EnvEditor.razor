@@ -21,16 +21,28 @@ else
             </div>
             @foreach (var row in Rows)
             {
+                var railpack = EnvRules.IsRailpackKey(row.Key?.Trim() ?? "");
                 <div class="gb-edrow gb-edrow--env" @key="row">
-                    <MudTextField T="string" @bind-Value="row.Key" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="NAME" Class="gb-mono-input" />
+                    <MudTextField T="string" Value="@row.Key" ValueChanged="@((string key) => SetKey(row, key))" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                  Placeholder="NAME" Class="gb-mono-input" />
                     <MudTextField T="string" @bind-Value="row.Value" Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="empty = not set"
                                   Class="gb-mono-input" HelperText="@row.Hint"
                                   InputType="@(row.IsSecret && !revealed.Contains(row) ? InputType.Password : InputType.Text)"
                                   Adornment="@(row.IsSecret ? Adornment.End : Adornment.None)"
                                   AdornmentIcon="@(revealed.Contains(row) ? Icons.Material.Outlined.VisibilityOff : Icons.Material.Outlined.Visibility)"
                                   OnAdornmentClick="() => ToggleReveal(row)" />
-                    <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.IsSecret" Size="Size.Small" Color="Color.Primary" /></div>
-                    <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.BuildTime" Size="Size.Small" Color="Color.Primary" /></div>
+                    @if (railpack)
+                    {
+                        @* Railpack writes its settings into its plan and the image, so one is never secret: off, and it stays off. *@
+                        <div class="gb-edrow-check" data-tip="app.env.railpack-secret"><MudCheckBox T="bool" Value="false" Disabled="true" Size="Size.Small" Color="Color.Primary" /></div>
+                        @* Railpack's own settings are always build-time: on, and it stays on (the model saves it so too). *@
+                        <div class="gb-edrow-check" data-tip="app.env.railpack"><MudCheckBox T="bool" Value="true" Disabled="true" Size="Size.Small" Color="Color.Primary" /></div>
+                    }
+                    else
+                    {
+                        <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.IsSecret" Size="Size.Small" Color="Color.Primary" /></div>
+                        <div class="gb-edrow-check"><MudCheckBox T="bool" @bind-Value="row.BuildTime" Size="Size.Small" Color="Color.Primary" /></div>
+                    }
                     <MudIconButton Icon="@Icons.Material.Outlined.DeleteOutline" Size="Size.Small" Class="gb-edrow-delete" OnClick="() => Rows.Remove(row)" aria-label="Remove" data-tip-text="Remove" />
                 </div>
             }
@@ -58,6 +70,13 @@ else
         if (!revealed.Remove(row)) revealed.Add(row);
     }
 
+    // A name that makes it one of Railpack's settings unmarks it: the save refuses a RAILPACK_ value that holds a secret, saying why.
+    private void SetKey(EnvRow row, string? key)
+    {
+        row.Key = key ?? "";
+        if (EnvRules.IsRailpackKey(row.Key.Trim())) row.IsSecret = false;
+    }
+
     private void StartBulk()
     {
         bulkText = "";
@@ -70,7 +89,11 @@ else
         {
             var existing = Rows.FirstOrDefault(r => r.Key == key);
             if (existing is not null) existing.Value = value;
-            else Rows.Add(new EnvRow { Key = key, Value = value, IsSecret = Security.Masking.IsSecretName(key), BuildTime = EnvRules.IsBuildTimePrefix(key) });
+            else Rows.Add(new EnvRow
+            {
+                Key = key, Value = value, IsSecret = !EnvRules.IsRailpackKey(key) && Security.Masking.IsSecretName(key),
+                BuildTime = EnvRules.IsBuildTimePrefix(key) || EnvRules.IsRailpackKey(key),
+            });
         }
         bulk = false;
     }

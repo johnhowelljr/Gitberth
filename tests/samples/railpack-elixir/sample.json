@@ -1,0 +1,7 @@
+{
+  "builder": "railpack",
+  "railpackProvider": "elixir",
+  "kind": "Unknown",
+  "title": "Unknown project type",
+  "port": null
+}

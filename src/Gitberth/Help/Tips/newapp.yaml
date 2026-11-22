@@ -440,8 +440,23 @@ newapp.git.detected:
   title: How it will run
   text: >-
     What Gitberth found in the repository and how it will build it; the ticks are what told it. A repo with its own
-    Dockerfile is built with that.
+    Dockerfile is built with that. A project Gitberth doesn't know is planned by Railpack, Railway's builder.
   more: reference/build-detection
+
+newapp.git.railpack:
+  title: Build with Railpack
+  text: >-
+    Railway's builder makes the image instead of the Dockerfile Gitberth would write: for a repository set up for
+    Railway, or to build it the way Railway does. On by itself when the repository has a `railpack.json`.
+  default: "Off"
+  more: reference/railpack#when-gitberth-uses-railpack
+
+newapp.git.railpack-plan:
+  title: Railpack's plan
+  text: >-
+    The steps Railpack will run and the command that starts the app, as Railpack prints them. It's made again on every
+    deploy, so a change in the repository is picked up.
+  more: reference/railpack#how-gitberth-runs-it
 
 newapp.git.project:
   title: Project to run

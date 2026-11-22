@@ -1,5 +1,7 @@
+@using Gitberth.Railpack
 @inject GitClient Git
 @inject ProjectAnalyzer Analyzer
+@inject IRailpackPlanner Railpack
 @inject AppService Apps
 @inject AppActions Actions
 @inject AppCatalog Catalog
@@ -85,6 +87,10 @@
             @if (analyzing)
             {
                 <div class="gb-progress"><i style="width:60%"></i></div>
+                @if (askingRailpack)
+                {
+                    <p class="gb-help" id="git-asking-railpack" style="margin:0">@RailpackText.Asking</p>
+                }
             }
         </div>
     </section>
@@ -167,6 +173,23 @@
                 {
                     <Banner Tone="warn" Title="Worth knowing">@w</Banner>
                 }
+                @if (detection is { Kind: ProjectKind.Railpack, RailpackPlan: { } plan })
+                {
+                    @* Railpack plans the build: who chose it, and the plan as Railpack printed it (design 4.1). *@
+                    <p class="gb-help" id="git-railpack-note">@(detection.Unrecognized ? RailpackText.FallbackNote : RailpackText.ChosenNote)</p>
+                    <div class="gb-label" style="margin:0">@RailpackText.PlanTitle<Tip Key="newapp.git.railpack-plan" /></div>
+                    <CodeBlock Title="railpack prepare" Code="@PlanText(plan)" Icon="@Icons.Material.Outlined.Description" />
+                }
+                @if (RailpackRefusal is { } refusal)
+                {
+                    <Banner Tone="critical" Title="Railpack couldn't plan the build">@refusal</Banner>
+                }
+                @if (ShowRailpackSwitch)
+                {
+                    <SwitchRow Title="@RailpackText.SwitchTitle" Tip="newapp.git.railpack" Disabled="Busy"
+                               Sub="@(gitberthDetection?.Kind == ProjectKind.Dockerfile ? RailpackText.SwitchSubRepoDockerfile : RailpackText.SwitchSub)"
+                               Value="railpackOn" ValueChanged="SetRailpackAsync" />
+                }
                 @if (detection.ProjectCandidates.Count > 1 && candidates.Count <= 1)
                 {
                     <Field Label="Project to run" For="git-proj" Tip="newapp.git.project">
@@ -178,7 +201,7 @@
                         </select>
                     </Field>
                 }
-                <SwitchRow Title="Customize the Dockerfile" Tip="newapp.git.customize" Sub="Stored with the app and used as it is on every deploy." Value="customize" ValueChanged="v => customize = v" />
+                <SwitchRow Title="Customize the Dockerfile" Tip="newapp.git.customize" Sub="Stored with the app and used as it is on every deploy." Value="customize" ValueChanged="SetCustomize" />
                 @if (customize)
                 {
                     <textarea class="gb-input gb-input--mono gb-paste" rows="16" spellcheck="false" value="@customDockerfile" @onchange="e => customDockerfile = e.Value?.ToString()"></textarea>
@@ -292,7 +315,13 @@
     private string branch = "";
     private string? subdir;
     private string? projectHint;
+    // The card shown: Gitberth's own detection, or the one Railpack's plan makes (design 4.1).
     private DetectionResult? detection;
+    // Railpack: Gitberth's own card for the folder, the plan's card (when a plan worked), the last plan, whether Build with
+    // Railpack is on, Asking Railpack… while it plans, and whether the next analysis plans because the switch was turned on.
+    private DetectionResult? gitberthDetection, railpackDetection;
+    private RailpackPlanResult? railpackPlan;
+    private bool railpackOn, askingRailpack, planRailpackNext;
     private List<AppCandidate> candidates = [];
     // What the detection shown was made from. The Subfolder field and Branch can be changed afterwards, so
     // creating uses these, and analyzes again first if they no longer match what's typed.
@@ -323,6 +352,114 @@
     private string composeWeb = "";
 
     private static string Count(int n, string what) => n == 1 ? $"1 {what}" : $"{n} {what}s";
+
+    // ---- Railpack (design 4.1) ----
+
+    /// <summary>Railpack's plan as it printed it, for the card's block.</summary>
+    internal static string PlanText(RailpackPlanResult plan) => string.Join("\n", plan.Output).Trim('\n');
+
+    /// <summary>
+    /// The card New app shows for a folder: Railpack's when Build with Railpack is on and its plan worked, or when Gitberth
+    /// didn't know the project and Railpack could plan it (the fallback); Gitberth's own otherwise.
+    /// </summary>
+    internal static DetectionResult? CardFor(DetectionResult? gitberths, DetectionResult? railpacks, bool railpackOn) =>
+        railpacks is not null && (railpackOn || railpacks.Unrecognized) ? railpacks : gitberths;
+
+    // The fallback card (Detect automatically gives the project to Railpack): it has no switch, since it's stored as Auto.
+    private bool RailpackFallback => detection is { Kind: ProjectKind.Railpack, Unrecognized: true };
+
+    // Build with Railpack: for a project Gitberth can build (its own card, or a repo set up for Railway), never on a fallback.
+    private bool ShowRailpackSwitch => !useCompose && !RailpackFallback && gitberthDetection is { CanBuild: true };
+
+    // Build with Railpack is on and Railpack couldn't plan it: what Railpack said, which Create is refused with.
+    private string? RailpackRefusal => railpackOn && !useCompose && railpackDetection is null && railpackPlan is { Ok: false } failed
+        ? failed.Error ?? RailpackText.NotInstalled : null;
+
+    private async Task SetRailpackAsync(bool on)
+    {
+        if (on == railpackOn) return;
+        railpackOn = on;
+        if (on) customize = false;
+        if (on && railpackPlan is null)
+        {
+            // Nothing planned this folder yet, and its clone is gone: analyze it again, planning with Railpack.
+            planRailpackNext = true;
+            await AnalyzeAsync(keepHint: true);
+            return;
+        }
+        await ShowCardAsync();
+    }
+
+    private async Task SetCustomize(bool on)
+    {
+        customize = on;
+        // A Dockerfile written here and Build with Railpack exclude each other.
+        if (on && railpackOn)
+        {
+            railpackOn = false;
+            await ShowCardAsync();
+        }
+    }
+
+    // The card follows the switch; the web port follows the card when it changed (Railpack's 8080 for a project with none).
+    private async Task ShowCardAsync()
+    {
+        detection = CardFor(gitberthDetection, railpackDetection, railpackOn) ?? detection;
+        if (detection is not null && ports.WebPort != detection.ContainerPort) await CardPortsAsync();
+    }
+
+    // The detected port's rule: on the LAN, at its own port when that's free (5.13).
+    private async Task CardPortsAsync()
+    {
+        var rules = new List<PortRule>();
+        if (detection!.ContainerPort is int port) rules.Add(new PortRule(port, "tcp", PortAccess.Lan, await SuggestHostPortAsync(port)));
+        ports = ContainerPortsDraft.ForNew(rules, detection.ContainerPort);
+        model.Ports = ports.ToPortRows().ToList();
+    }
+
+    /// <summary>
+    /// After Gitberth's analysis of the folder (still cloned): ask Railpack when Gitberth found nothing it knows, when the
+    /// folder has a railpack.json (Build with Railpack starts on), or when the switch was turned on.
+    /// </summary>
+    private async Task PlanWithRailpackAsync(string dir, string sub, string folder)
+    {
+        gitberthDetection = detection;
+        (railpackDetection, railpackPlan) = (null, null);
+        var wanted = planRailpackNext || railpackOn;
+        planRailpackNext = false;
+        railpackOn = false;
+        if (useCompose || detection is null) return;
+        var suggested = RailpackProviders.Suggested(folder, detection);
+        if (!detection.Unrecognized && !suggested && !wanted) return;
+        askingRailpack = true;
+        StateHasChanged();
+        RailpackPlanResult plan;
+        try
+        {
+            plan = await Railpack.PlanAsync(new RailpackPlanRequest(dir, sub, [], HasStartCommand: false, Previous: []), null, CancellationToken.None);
+        }
+        finally
+        {
+            askingRailpack = false;
+        }
+        railpackPlan = plan;
+        // Chosen (a railpack.json, or the switch) or the fallback (Detect automatically, nothing else to build it with).
+        var chosen = suggested || wanted;
+        if (plan.Ok)
+        {
+            railpackDetection = RailpackDetection.ToDetection(plan, sub, folder, port: chosen ? detection.ContainerPort : null, fallback: !chosen);
+            // Railpack's card has no suggestions of its own: the analyzer's know the app's code.
+            railpackDetection.EnvSuggestions.AddRange(detection.EnvSuggestions);
+        }
+        else if (!detection.CanBuild)
+        {
+            // Neither can build it: the Unknown card, with Railpack's reason, and the starter Dockerfile.
+            RailpackDetection.CouldntEither(detection, plan);
+        }
+        // A switch on a project only Railpack could build: nothing to turn it off for.
+        railpackOn = chosen && (plan.Ok || detection.CanBuild);
+        detection = CardFor(gitberthDetection, railpackDetection, railpackOn);
+    }
 
     /// <summary>
     /// Whether a repo's Compose file is the way to deploy it, as New app first offers: when it has several services, or
@@ -478,6 +615,7 @@
         (errors, portProblems, triedCreate) = ([], [], false);
         analyzedDir = lastAnalyzedDir = null;
         (composeFiles, composeTexts, composeFile, composeInfo, useCompose, composeWeb) = ([], new(StringComparer.Ordinal), null, null, false, "");
+        (gitberthDetection, railpackDetection, railpackPlan, railpackOn, planRailpackNext) = (null, null, null, false, false);
         await OnStage.InvokeAsync(NewAppStep.Source);
         // A github.com repository, or a project on Gitberth's GitLab.
         if (!RepoUrls.TryParse(url, gitLabInstance, out var parsed, out var parseError))
@@ -534,6 +672,8 @@
         subdir = chosen.Dir.Length == 0 ? null : chosen.Dir;
         projectHint = chosen.Hint;
         model.Name = "";
+        // Another app of the repo: Build with Railpack starts over (on again when its folder has a railpack.json).
+        railpackOn = false;
         await AnalyzeAsync(keepHint: true);
     }
 
@@ -583,8 +723,9 @@
             composeTexts = composeFiles.ToDictionary(f => f, f => File.ReadAllText(Path.Combine(folder, f)), StringComparer.Ordinal);
             ReadCompose(composeFiles.FirstOrDefault());
             useCompose = composeInfo is { } found && PreferCompose(found, detection.Kind != ProjectKind.Unknown);
-            customize = detection.Kind == ProjectKind.Unknown && !useCompose;
             customDockerfile = detection.Dockerfile ?? DockerfileTemplates.Starter;
+            await PlanWithRailpackAsync(dir, sub, folder);
+            customize = detection!.Kind == ProjectKind.Unknown && !useCompose;
             (analyzedDir, analyzedHint, analyzedBranch, lastAnalyzedDir) = (sub, projectHint, branch, sub);
             await PrefillAsync(sub.Length == 0 ? null : sub);
             await OnStage.InvokeAsync(NewAppStep.Configure);
@@ -624,19 +765,16 @@
                 });
             return;
         }
-        // On the LAN, at its own port when that's free (5.13).
-        var rules = new List<PortRule>();
-        if (detection!.ContainerPort is int port) rules.Add(new PortRule(port, "tcp", PortAccess.Lan, await SuggestHostPortAsync(port)));
-        ports = ContainerPortsDraft.ForNew(rules, detection.ContainerPort);
-        model.Ports = ports.ToPortRows().ToList();
+        await CardPortsAsync();
         // A value set here wins over the repo's GitHub (or GitLab) variables, so an example value never shadows one the repo already has.
         var inGitHub = (await RepoVars.GetAsync(repo!.AppOwner, repo.AppRepo)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var s in detection.EnvSuggestions)
+        foreach (var s in detection!.EnvSuggestions)
         {
             var shared = inGitHub.Contains(s.Key);
             model.Env.Add(new EnvRow
             {
-                Key = s.Key, Value = shared ? "" : s.Value, IsSecret = s.IsSecret, BuildTime = s.BuildTime,
+                // One of Railpack's settings is never marked secret: Railpack writes it into its plan (RailpackSettings).
+                Key = s.Key, Value = shared ? "" : s.Value, IsSecret = s.IsSecret && !EnvRules.IsRailpackKey(s.Key), BuildTime = s.BuildTime,
                 Hint = shared ? VariablesWhere : s.Source,
             });
         }
@@ -668,7 +806,15 @@
         model.Branch = analyzedBranch;
         model.Subdirectory = analyzedDir.Length == 0 ? null : analyzedDir;
         model.ProjectHint = analyzedHint;
-        model.DockerfileMode = customize && !useCompose ? DockerfileMode.Custom : DockerfileMode.Auto;
+        // Build with Railpack on, with a plan that didn't work: what Railpack said, and nothing is created.
+        if (!customize && RailpackRefusal is { } refusal)
+        {
+            errors = [refusal];
+            return;
+        }
+        // A fallback (Railpack builds what Gitberth doesn't know) is stored as Detect automatically.
+        model.DockerfileMode = customize && !useCompose ? DockerfileMode.Custom
+            : railpackOn && !useCompose ? DockerfileMode.Railpack : DockerfileMode.Auto;
         model.CustomDockerfile = customize && !useCompose ? customDockerfile : null;
         model.Ports = ports.ToPortRows().ToList();
         (model.ComposeFile, model.WebService) = useCompose ? (composeFile, composeWeb) : (null, null);
@@ -688,7 +834,8 @@
                 return;
             }
             if (all.Count > 0 || portProblems.Count > 0) return;
-            var appId = await Apps.CreateAsync(repo, model, detection);
+            // A custom Dockerfile builds what Gitberth found, not Railpack's plan.
+            var appId = await Apps.CreateAsync(repo, model, customize && !useCompose ? gitberthDetection ?? detection : detection);
             await Actions.DeployAsync(appId, DeployTrigger.Created);
             Nav.NavigateTo($"apps/{Uri.EscapeDataString(await Catalog.KeyForIdAsync(appId) ?? $"gb-{Slug}")}");
         }

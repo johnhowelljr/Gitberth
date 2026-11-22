@@ -37,7 +37,10 @@ Yes, as one app with all its services, from a repo or pasted. See [Compose apps]
 Yes: a preview of each pull request (or GitLab merge request), and of branches if you like, with its own address and database. See [Preview deployments](guides/previews.md).
 
 **What if my repo has no Dockerfile?**
-Gitberth works out how to build static sites, Node.js, Python, Go, Rust, Deno, .NET, Ruby, PHP and Java projects. See [How Gitberth builds](reference/build-detection.md).
+Gitberth works out how to build static sites, Node.js, Python, Go, Rust, Deno, .NET, Ruby, PHP and Java projects, and hands anything else to Railpack. See [How Gitberth builds](reference/build-detection.md).
+
+**Can it run Elixir, Gleam, C++…?**
+Yes, through Railpack, Railway's open-source builder: Gitberth hands it any project it doesn't know how to build itself, such as Elixir (Phoenix too), Gleam, C or C++ with CMake or Meson, Zig, or a shell script. An app can also be set to build with Railpack always. See [Railpack builds](reference/railpack.md).
 
 **Is there downtime during a deploy?**
 Not for visitors on an app's domain, when the app can swap that way: the new version starts next to the old one first. Other apps, and apps with a volume, are down for a few seconds. See [How deploys and changes work](concepts/how-deploys-work.md#deploys-without-downtime).

@@ -803,6 +803,47 @@ public sealed class DiskCleanupTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Railpacks_own_cache_goes_by_the_same_age_and_gitberth_buildkit_with_the_last_app_that_builds_with_it()
+    {
+        var commands = new List<string>();
+        var running = true;
+        var docker = new DockerCli(_d.Apps.Options)
+        {
+            Runner = (a, _, _) =>
+            {
+                lock (commands) commands.Add(string.Join(' ', a));
+                return Task.FromResult(a is ["container", "inspect", ..]
+                    ? new ProcessResult(0, $"{(running ? "true" : "false")} {Gitberth.Railpack.RailpackRelease.BuildKitImage} 0a1b2c3d4e5f\n", "")
+                    : new ProcessResult(0, "", ""));
+            },
+        };
+        using var buildKit = new Gitberth.Railpack.RailpackBuildKit(docker, _d.Apps.Options, NullLogger<Gitberth.Railpack.RailpackBuildKit>.Instance, _d.Api);
+        _d.Cleanup = _d.New(buildKit);
+        string[] Removals() => commands.Where(c => c.StartsWith("rm ", StringComparison.Ordinal) || c.StartsWith("volume ", StringComparison.Ordinal)).ToArray();
+
+        // While it runs: what no build used for the days the cleanup keeps, through buildx, and nothing goes.
+        await _d.Cleanup.CleanNowAsync();
+        Assert.Contains("buildx prune --builder gitberth-buildkit --force --filter until=168h", commands);
+        Assert.Empty(Removals());
+
+        // Stopped, while an app builds with Railpack: it stays for that app's next build.
+        running = false;
+        await using (var db = _d.Apps.Db.CreateDbContext())
+            await db.Apps.Where(a => a.Id == _d.Apps.ObsId).ExecuteUpdateAsync(s => s.SetProperty(a => a.DetectedKind, "Railpack"));
+        commands.Clear();
+        await _d.Cleanup.CleanNowAsync();
+        Assert.Empty(Removals());
+        Assert.DoesNotContain(commands, c => c.StartsWith("buildx", StringComparison.Ordinal));
+
+        // No app builds with it any more: it goes, with its volume.
+        await using (var db = _d.Apps.Db.CreateDbContext())
+            await db.Apps.Where(a => a.Id == _d.Apps.ObsId).ExecuteUpdateAsync(s => s.SetProperty(a => a.DetectedKind, "Static"));
+        commands.Clear();
+        await _d.Cleanup.CleanNowAsync();
+        Assert.Equal(["rm -f gitberth-buildkit", "volume rm gitberth-buildkit"], Removals());
+    }
+
+    [Fact]
     public void The_dashboard_and_the_apps_strip_say_the_disk_in_the_lines_own_units()
     {
         // 14.9 GiB free of 64 GiB: under the warning line of 15 GiB, and every figure says so in the same units.
@@ -855,9 +896,9 @@ internal sealed class DiskRig : IDisposable
     public DiskSpace Disk { get; set; } = new(40L << 30, 64L << 30);
     public DiskCleanup Cleanup { get; set; }
 
-    /// <summary>Another cleanup on the same database: Gitberth after a restart.</summary>
-    public DiskCleanup New() => new(Api, null, Apps.Pipeline, Apps.Db, Apps.Settings, Choices, Apps.AppLocks, Notifier, Board, NullLogger<DiskCleanup>.Instance,
-        Audit, time: _clock, engine: Images, actions: Apps.Actions) { ReadDisk = () => Disk };
+    /// <summary>Another cleanup on the same database: Gitberth after a restart; with gitberth-buildkit when a test gives one.</summary>
+    public DiskCleanup New(Gitberth.Railpack.RailpackBuildKit? buildKit = null) => new(Api, null, Apps.Pipeline, Apps.Db, Apps.Settings, Choices, Apps.AppLocks, Notifier, Board,
+        NullLogger<DiskCleanup>.Instance, Audit, time: _clock, engine: Images, actions: Apps.Actions, buildKit: buildKit) { ReadDisk = () => Disk };
 
     /// <summary>A destination, so notices are queued rather than dropped as unwanted.</summary>
     public Task TellAsync() => Notify.SaveDestinationAsync(new Destination { Id = "d1", Kind = DestinationKind.Webhook, Name = "Ops", Url = "https://hooks.example.com/gitberth" });

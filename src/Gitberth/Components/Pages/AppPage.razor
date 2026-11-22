@@ -45,7 +45,8 @@
 else
 {
     var app = view.Summary;
-    var logo = LogoCatalog.Resolve(app.Image, app.Container, view.Row?.DetectedKind, app.Role == ContainerRole.Self);
+    var logoKind = LogoCatalog.KindOf(view.Row?.DetectedKind, view.Row?.DetectedSummary);
+    var logo = LogoCatalog.Resolve(app.Image, app.Container, logoKind, app.Role == ContainerRole.Self);
     <PageTitle>@app.Title · Gitberth</PageTitle>
 
     <nav class="gb-crumbs" aria-label="Breadcrumb">
@@ -62,7 +63,7 @@ else
     </nav>
 
     <AppHero Title="@app.Title" Color="@logo.Color">
-        <Logo><AppLogo Image="@app.Image" Name="@app.Container" Size="60" Kind="@view.Row?.DetectedKind" Self="@(app.Role == ContainerRole.Self)" Dim="@(!app.Running)" /></Logo>
+        <Logo><AppLogo Image="@app.Image" Name="@app.Container" Size="60" Kind="@logoKind" Self="@(app.Role == ContainerRole.Self)" Dim="@(!app.Running)" /></Logo>
         <Status>
             <StatusLabel State="app.State" Text="@app.StateText" Hero="true" Since="@(app.Running ? (view.Details?.StartedAt ?? app.StartedAt) : null)"
                          Detail="@(app.Running ? null : StoppedFor)" />

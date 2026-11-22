@@ -369,7 +369,7 @@ Access: **Operate** · destructive: needs `confirm`, idempotent
 
 ### `create_app`
 
-Creates an app as New app does, checked the same way, and deploys or starts it. Sources: git (a GitHub repo, or a project on Gitberth's GitLab (Settings › GitLab: gitlab.com unless another is set), groups and subgroups too, built with what Gitberth detects, or with its Compose file when it has one: give repo, and maybe branch and subdirectory); image (a registry's image like nginx:1.27 or ghcr.io/owner/app:latest: give image); compose (a whole Compose file deployed as one app: give compose_yaml, and maybe web_service); template (one of Gitberth's app templates, as list_templates lists them: give template, its inputs, and maybe a domain; its databases and secrets are made as its page in New app makes them, and a template that needs Postgres needs a Postgres server first: create_postgres_server). Returns the app's key, and the deployment_id of a Git, Compose or template app's first deploy (wait follows it).
+Creates an app as New app does, checked the same way, and deploys or starts it. Sources: git (a GitHub repo, or a project on Gitberth's GitLab (Settings › GitLab: gitlab.com unless another is set), groups and subgroups too, built with what Gitberth detects (Railpack builds a project Gitberth doesn't know), or with its Compose file when it has one: give repo, and maybe branch, subdirectory and build); image (a registry's image like nginx:1.27 or ghcr.io/owner/app:latest: give image); compose (a whole Compose file deployed as one app: give compose_yaml, and maybe web_service); template (one of Gitberth's app templates, as list_templates lists them: give template, its inputs, and maybe a domain; its databases and secrets are made as its page in New app makes them, and a template that needs Postgres needs a Postgres server first: create_postgres_server). Returns the app's key, and the deployment_id of a Git, Compose or template app's first deploy (wait follows it).
 
 Access: **Admin**
 
@@ -381,6 +381,7 @@ Access: **Admin**
 | `branch` | string | no | git: the branch to deploy; the repo's default when left out. |
 | `subdirectory` | string | no | git: the folder the app is in, when it isn't the repo's root. |
 | `use_compose` | boolean | no | git: true to deploy with the repo's Compose file, false to build one container; leave out to choose as New app does. |
+| `build` | string | no | git: auto (the default: what Gitberth detects, and Railpack, Railway's builder, for a project Gitberth doesn't know; Railpack when the repo has a railpack.json and no Dockerfile) or railpack (always Railpack). |
 | `image` | string | no | image: the image reference, like nginx:1.27. |
 | `compose_yaml` | string | no | compose: the whole Compose file (YAML). |
 | `web_service` | string | no | git with Compose, or compose: the service that's the app's web service (domains, LAN port, health check); leave out to pick as New app does. |
@@ -438,6 +439,7 @@ Access: **Admin** · idempotent
 | `auto_deploy` | boolean | no | Git apps: deploy new commits by themselves. |
 | `watch_paths` | string | no | Git apps: build filters, one pattern per line: a commit deploys by itself only when it changes a file these match. Empty for any file. |
 | `ignored_paths` | string | no | Git apps: a commit whose changed files all match these patterns doesn't deploy by itself. Empty for none. |
+| `build` | string | no | Git apps: auto (what Gitberth detects, else Railpack) or railpack (always Railpack). A custom Dockerfile is written in the app's Settings tab. |
 | `down_page` | boolean | no | Show the down page on the app's domains while it can't be served. |
 | `down_page_message` | string | no | The down page's message; empty for none. |
 | `uptime_check` | boolean | no | Check the app from outside (its main domain, else its LAN address). |

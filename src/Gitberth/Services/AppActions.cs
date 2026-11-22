@@ -580,6 +580,7 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
         {
             DeployPaths.TryDeleteFile(DeployPaths.LogFile(options, id));
             DeployPaths.TryDeleteFile(DeployPaths.DockerfileCopy(options, id));
+            DeployPaths.TryDeleteFile(DeployPaths.RailpackPlanCopy(options, id));
         }
         // The kept copy of the repo's GitHub variables goes with the repo's last app.
         var (owner, repo) = (app.Owner.ToLowerInvariant(), app.Repo.ToLowerInvariant());

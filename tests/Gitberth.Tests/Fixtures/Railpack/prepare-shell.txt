@@ -1,0 +1,18 @@
+                   
+╭─────────────────╮
+│ Railpack 0.43.0 │
+╰─────────────────╯
+
+  ↳ Detected Shell
+  ↳ Using shell script: start.sh with interpreter: sh
+  → Add a `.dockerignore` file to exclude files from the build https://railpack.com/config/excluding-files
+            
+  Steps     
+  ──────────
+  ▸ build
+    $ chmod +x start.sh
+            
+  Deploy    
+  ──────────
+    $ sh start.sh
+

@@ -1,0 +1,7 @@
+{
+  "builder": "railpack",
+  "railpackProvider": "shell",
+  "kind": "Unknown",
+  "title": "Unknown project type",
+  "port": null
+}

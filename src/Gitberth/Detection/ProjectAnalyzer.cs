@@ -52,7 +52,8 @@ public sealed partial class ProjectAnalyzer
             ?? DetectNode(repoRoot, appDir, options)
             ?? InFolder(Matches().FirstOrDefault()?.Result, appDir)
             ?? InFolder(DetectStatic(appRoot), appDir)
-            ?? Unknown("Unknown project type", "No Dockerfile, .NET project, package.json, other app or index.html was found. Customize the Dockerfile to build it anyway.");
+            // Nothing Gitberth knows: Railpack may know it (DetectionResult.Unrecognized).
+            ?? Unknown("Unknown project type", "No Dockerfile, .NET project, package.json, other app or index.html was found. Customize the Dockerfile to build it anyway.", unrecognized: true);
         if (result.Kind == ProjectKind.Unknown) result.BuildContext = appDir;
         return (result, appRoot, files);
     }
@@ -104,9 +105,9 @@ public sealed partial class ProjectAnalyzer
         return r;
     }
 
-    private static DetectionResult Unknown(string title, string warning)
+    private static DetectionResult Unknown(string title, string warning, bool unrecognized = false)
     {
-        var r = new DetectionResult { Kind = ProjectKind.Unknown, Title = title };
+        var r = new DetectionResult { Kind = ProjectKind.Unknown, Title = title, Unrecognized = unrecognized };
         r.Warnings.Add(warning);
         return r;
     }

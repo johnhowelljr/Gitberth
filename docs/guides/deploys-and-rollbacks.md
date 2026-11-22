@@ -154,6 +154,10 @@ a newer image under the same tag (`node:24`) is used; a base image that's only o
 is. Use it when a build gives a result the cache got wrong. It takes
 longer than a usual build. The deploy's page and the app's **Activity** tab say **Without the build cache**.
 
+For an app [Railpack](../reference/railpack.md) builds, every step runs again too, and the tools' versions are looked up
+again instead of kept from the running image, so Node.js 22 can move to its newest release. The log says **… with
+Railpack without the build cache: every step runs again, and the tools' versions are looked up again**.
+
 To clear the whole build cache, see [Settings › Disk](../reference/gitberth-settings.md#disk). Gitberth also removes the
 build cache no build used for a week by itself, and more of it when Docker's disk gets low.
 
@@ -184,11 +188,13 @@ The log shows each step, in order:
 - For a new commit with build filters, what the filters found: **The build filters let it through: src/app.ts changed
   since 3f9c2a1**, or **Skipped: …** and the end of the deploy.
 - **Detected …** with the generated Dockerfile, **Using the repo's …** Dockerfile, or **Using your custom Dockerfile**,
-  with any warnings.
+  with any warnings. For a [Railpack build](../reference/railpack.md): **Gitberth doesn't know this kind of project, so
+  Railpack builds it** (or **Building with Railpack, as the app's settings say**), then **Planning the build with
+  Railpack 0.43.0** with Railpack's plan, and what it found, such as **Railpack found Shell script with Railpack**.
 - **Building** the image, and **without the build cache** when you chose that. Gitberth builds one image at a time;
   another deploy waits with **Waiting for another build to finish…**. A build reaches the containers on Gitberth's
   network by name, such as `postgres:5432`, so it can run database migrations; the log lists them after **Reachable by
-  name while building**.
+  name while building**. A Railpack build ends with **Adding Gitberth's labels to the image, and PORT=8080**.
 - Which of Vercel's variables are set.
 - **Starting the new container**, then **Checking that it stays up for 15 seconds…**, and the health URL, if you set one.
 - **Deploy succeeded**, and the app's domains, if it has any.

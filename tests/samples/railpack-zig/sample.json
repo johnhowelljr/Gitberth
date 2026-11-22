@@ -1,0 +1,7 @@
+{
+  "builder": "railpack",
+  "railpackProvider": "zig",
+  "kind": "Unknown",
+  "title": "Unknown project type",
+  "port": null
+}

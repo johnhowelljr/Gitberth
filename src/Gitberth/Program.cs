@@ -98,10 +98,18 @@ builder.Services.AddSingleton<TunnelLocator>();
 builder.Services.AddSingleton<DomainService>();
 builder.Services.AddSingleton<GitClient>();
 builder.Services.AddSingleton<DockerCli>();
+// Gitberth's own container, as its helpers need it: its image, and where its data folder is on the Docker host.
+builder.Services.AddSingleton<SelfContainer>();
 // ---- Compose apps (1.3): a repo's Compose file, or a pasted one, deployed as one app with all its services.
 builder.Services.AddSingleton<Gitberth.Compose.ComposeRunner>();
 builder.Services.AddSingleton<Gitberth.Compose.ComposeApps>();
 builder.Services.AddSingleton<ProjectAnalyzer>();
+// ---- Railpack: Railway's builder, for the projects Gitberth doesn't build itself and the apps set to it. It plans in a
+// throwaway container of Gitberth's own image, and builds in gitberth-buildkit, which it starts when a build needs it.
+builder.Services.AddSingleton<Gitberth.Railpack.RailpackPlanner>();
+builder.Services.AddSingleton<Gitberth.Railpack.IRailpackPlanner>(sp => sp.GetRequiredService<Gitberth.Railpack.RailpackPlanner>());
+builder.Services.AddSingleton<Gitberth.Railpack.RailpackBuildKit>();
+builder.Services.AddSingleton<Gitberth.Railpack.IRailpackBuildKit>(sp => sp.GetRequiredService<Gitberth.Railpack.RailpackBuildKit>());
 builder.Services.AddSingleton<AppLocks>();
 builder.Services.AddSingleton<LiveLogHub>();
 // ---- GitHub integration (1.1): what deploys tell GitHub (commit statuses, pull request comments), and instant deploys

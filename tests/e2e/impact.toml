@@ -79,6 +79,11 @@ factor = 0.75
 "35" = { file = "test_35_keep_running.py", minutes = 5, test_minutes = 3 }
 "36" = { file = "test_36_disk.py", minutes = 1, test_minutes = 0.5 }
 "37" = { file = "test_37_tokens.py", minutes = 1.5, test_minutes = 1.49 }
+# Railpack, the second builder: one app of apps/railpack-shell, built four times (New app's plan, the first deploy, one
+# without the build cache, and a commit neither builder can build). test_minutes measured on the first rig (2026-11-22,
+# gitberth-buildkit and its volume made afresh); minutes is still the estimate, until a run with production timings.
+# A fresh rig volume adds 2-3 min once, pulling BuildKit and Railpack's images.
+"38" = { file = "test_38_railpack.py", minutes = 4, test_minutes = 2.05 }
 
 [aliases]
 # The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside
@@ -97,7 +102,7 @@ factor = 0.75
 # Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
 "@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34",
-           "35", "36", "37"]
+           "35", "36", "37", "38"]
 "@release" = ["@full", "31"]  # and every template: + 16-30 min
 "@none" = []
 # Single tests the rules name.
@@ -176,8 +181,8 @@ weight = { nextcloud = 3, stirling-pdf = 3, paperless-ngx = 2, jellyfin = 2, gho
 
 # ===== A. Nothing to run in the rig (the unit suite still runs) =====
 [[rule]]
-globs = ["README.md", "PLAN.md", "CONTRIBUTING.md", "LICENSE.md", ".gitleaks.toml", ".github/**",
-         ".gitignore", ".env.example", "tests/e2e/README.md", "tests/e2e/impact.py", "tests/e2e/impact.toml",
+globs = ["README.md", "PLAN.md", "CONTRIBUTING.md", "LICENSE.md", "THIRD-PARTY-NOTICES.md", ".gitleaks.toml",
+         ".github/**", ".gitignore", ".env.example", "tests/e2e/README.md", "tests/e2e/impact.py", "tests/e2e/impact.toml",
          "tests/e2e/impact_test.py", "tests/e2e/shots/**"]  # shots/: the docs' screenshots, taken on demand only
 groups = ["@none"]
 
@@ -279,10 +284,11 @@ refine = [
 
 [[rule]]
 globs = ["Dockerfile", ".dockerignore", "docker-compose.yml", "docker-compose.build.yml"]
-groups = ["@wide"]
+groups = ["@wide", "38"]
 refine = [
     { match = 'docker|compose|buildx|cli', groups = ["@wide", "28", "30"] },  # the docker and compose CLIs in the image
     { match = 'COPY docs', groups = ["@smoke", "34"] },                      # the docs the build embeds for the Help
+    { match = '[Rr]ailpack|RAILPACK|\bmise\b|[Bb]uild[Kk]it', groups = ["38"] },  # Railpack, its mise and the BuildKit pin
 ]
 
 [[rule]]
@@ -360,6 +366,11 @@ groups = ["@smoke"]
 
 # ===== D. Single files and small sets =====
 # --- deploy pipeline
+# Railpack, the second builder: its planner, gitberth-buildkit, the pipeline's branch for it, and the app the rig builds.
+[[rule]]
+globs = ["src/Gitberth/Railpack/**", "src/Gitberth/Deploy/DeployPipeline.Railpack.cs", "tests/e2e/apps/railpack-*/**"]
+groups = ["38"]
+
 [[rule]]
 globs = ["src/Gitberth/Deploy/DeployPipeline.Compose.cs"]
 groups = ["28", "30", "32"]
@@ -388,6 +399,7 @@ refine = [
     { match = 'RepoVariable|gitHubKeys|EnvValue', groups = ["09", "10", "20"] },
     # A GitLab project's variables by scope, GitLab's compare for the build filters, and Vercel's provider.
     { match = '[Gg]it[Ll]ab|varsHost', groups = ["09", "22", "@t33-variables", "@t33-filters", "@t33-mr"] },
+    { match = 'Railpack|Prepared\(', groups = ["38"] },   # the branch to Railpack's build (DeployPipeline.Railpack.cs)
 ]
 
 [[rule]]
@@ -660,6 +672,7 @@ groups = ["20"]
 refine = [
     { match = '[Cc]ompose', groups = ["20", "@t28-repo"] },
     { match = '[Gg]it[Ll]ab|RepoUrls|RepoRef', groups = ["20", "@t33-new"] },
+    { match = '[Rr]ailpack', groups = ["20", "38"] },   # Railpack's card, its plan and its switch
 ]
 
 [[rule]]
@@ -847,6 +860,9 @@ globs = ["src/Gitberth/Detection/ProjectAnalyzer.cs", "src/Gitberth/Detection/Ap
          "src/Gitberth/Detection/EnvScanner.cs", "src/Gitberth/Detection/VercelConfig.cs",
          "src/Gitberth/Detection/Languages.cs"]
 groups = ["07", "20"]
+refine = [
+    { match = 'Unrecognized', groups = ["38"] },   # the catch-all Detect automatically hands to Railpack
+]
 
 # --- UI pages and tabs
 [[rule]]
@@ -867,6 +883,7 @@ refine = [
     { match = '[Gg]it[Ll]ab', groups = ["@t20-settings", "@t33-settings"] },
     # The token watch's banners, Check the token and expiry tags (GitHub access, Domains, Registries).
     { match = 'CredentialWatch|Credentials\.|ExpiryWords|ExpiryClass|Check the token', groups = ["37"] },
+    { match = '[Rr]ailpack', groups = ["38"] },     # System's Railpack row
     # Sections no scenario opens:
     { match = 'registries|reg-|updates|upd-|own-lan|lan-|id="network"|password|pw-|id="system"', groups = ["@smoke"], notes = ["No scenario opens this page or section: also run Gitberth.UiTests against the dev instance (GITBERTH_UI_URL and GITBERTH_UI_PASSWORD)."] },
 ]
@@ -909,6 +926,7 @@ refine = [
     { match = 'Compose|set-compose-yaml', groups = ["@t28-paste"] },
     { match = 'updates|Image', groups = ["@t24-registry"] },
     { match = '[Gg]it[Ll]ab', groups = ["@t33-filters", "@t33-fork"] },
+    { match = '[Rr]ailpack', groups = ["38"] },     # Build's Railpack option and its note
 ]
 
 [[rule]]
@@ -920,6 +938,7 @@ refine = [
     { match = 'GitHub|RepoVariables', groups = ["09", "@t24-audit"] },
     { match = 'APP_URL|[Aa]ddress', groups = ["30"] },
     { match = '[Gg]it[Ll]ab', groups = ["@t33-variables"] },
+    { match = '[Rr]ailpack|RAILPACK', groups = ["38"] },   # RAILPACK_ variables, always build-time
 ]
 
 [[rule]]

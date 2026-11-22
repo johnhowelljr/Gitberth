@@ -8,18 +8,20 @@ namespace Gitberth.Compose;
 /// Runs `docker compose` for Compose apps, through the docker CLI (so every change it makes is announced to the audit log
 /// first): with none of Gitberth's own environment, so a Compose file's ${…} never reads Gitberth's settings, and with the
 /// app's variables only through the .env it writes. Also knows where Gitberth's data folder is on the Docker host: bind
-/// mounts are the host's paths, and Gitberth runs in a container.
+/// mounts are the host's paths, and Gitberth runs in a container (<see cref="SelfContainer"/>).
 /// </summary>
-public sealed class ComposeRunner(DockerCli docker, GitberthOptions options, ILogger<ComposeRunner> logger)
+/// <param name="self">Gitberth's own container, as Program.cs gives it; made over <paramref name="docker"/> when not given.</param>
+public sealed class ComposeRunner(DockerCli docker, GitberthOptions options, ILogger<ComposeRunner> logger, SelfContainer? self = null)
 {
     /// <summary>The label value of the helper a preview's Compose file is read in.</summary>
     public const string HelperKind = "compose";
 
-    private string? _dataHostDir;
-    private string? _ownImage;
+    private SelfContainer? _self = self;
 
     /// <summary>Stands in for the host's data folder in tests (and outside a container, where it's the folder itself).</summary>
     internal string? DataHostDir { get; init; }
+
+    private SelfContainer Self => _self ??= new SelfContainer(docker, options, Microsoft.Extensions.Logging.Abstractions.NullLogger<SelfContainer>.Instance);
 
     /// <summary>
     /// docker compose -p &lt;project&gt; [-f &lt;file&gt;] [--project-directory &lt;dir&gt;] &lt;command&gt;, always from Gitberth's own
@@ -113,9 +115,13 @@ public sealed class ComposeRunner(DockerCli docker, GitberthOptions options, ILo
         ProcessResult result;
         if (sandbox && options.RunningInContainer)
         {
-            if (await OwnImageAsync(ct) is not { } image) return (null, "Gitberth couldn't find its own image to read the preview's Compose file in.");
+            if (await Self.OwnImageAsync(ct) is not { } image) return (null, "Gitberth couldn't find its own image to read the preview's Compose file in.");
             var host = await HostPathAsync(releaseDir, ct);
-            if (host is null) return (null, "Gitberth couldn't find where its data folder is on the Docker host.");
+            if (host is null)
+            {
+                logger.LogWarning("Gitberth couldn't find where {Data} is on the Docker host, so a preview's Compose file can't be read in its helper", options.DataDir);
+                return (null, "Gitberth couldn't find where its data folder is on the Docker host.");
+            }
             List<string> args =
             [
                 "run", "--rm", "--name", Docker.HostScanHelper.NewName(HelperKind), "--label", $"{Docker.HostScanHelper.Label}={HelperKind}",
@@ -151,51 +157,11 @@ public sealed class ComposeRunner(DockerCli docker, GitberthOptions options, ILo
     /// Where a path under Gitberth's data folder is on the Docker host: the same path outside a container, else the source
     /// of the mount Gitberth's /data comes from (its volume's folder, or a host folder). Null when it can't be found.
     /// </summary>
-    public async Task<string?> HostPathAsync(string path, CancellationToken ct = default)
-    {
-        var rel = Path.GetRelativePath(options.DataDir, path).Replace('\\', '/');
-        if (rel.StartsWith("..", StringComparison.Ordinal)) return null;
-        var root = DataHostDir ?? (options.RunningInContainer ? await DataHostDirAsync(ct) : options.DataDir);
-        if (root is null) return null;
-        return rel == "." ? root : root.TrimEnd('/') + "/" + rel;
-    }
-
-    private async Task<string?> DataHostDirAsync(CancellationToken ct)
-    {
-        if (_dataHostDir is not null) return _dataHostDir;
-        if (options.OwnContainer is not { } self) return null;
-        var r = await docker.RunAsync(["container", "inspect", "--format", "{{json .Mounts}}", self], null, ct);
-        if (!r.Ok) return null;
-        _dataHostDir = MountSource(r.StdOut, options.DataDir);
-        if (_dataHostDir is null) logger.LogWarning("Gitberth's container has no mount at {Data}, so Compose apps' bind mounts can't be given their host paths", options.DataDir);
-        return _dataHostDir;
-    }
+    public async Task<string?> HostPathAsync(string path, CancellationToken ct = default) =>
+        DataHostDir is { } root ? SelfContainer.Under(root, options.DataDir, path) : await Self.HostPathAsync(path, ct);
 
     /// <summary>The host path of the mount at <paramref name="destination"/>, from `docker inspect`'s Mounts as JSON.</summary>
-    internal static string? MountSource(string mountsJson, string destination)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(mountsJson.Trim());
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) return null;
-            foreach (var m in doc.RootElement.EnumerateArray())
-                if (m.TryGetProperty("Destination", out var d) && d.GetString()?.TrimEnd('/') == destination.TrimEnd('/')
-                    && m.TryGetProperty("Source", out var s) && s.GetString() is { Length: > 0 } source)
-                    return source;
-        }
-        catch (JsonException)
-        {
-        }
-        return null;
-    }
-
-    private async Task<string?> OwnImageAsync(CancellationToken ct)
-    {
-        if (_ownImage is not null) return _ownImage;
-        if (options.OwnContainer is not { } self) return null;
-        var r = await docker.RunAsync(["container", "inspect", "--format", "{{.Image}}", self], null, ct);
-        return r.Ok && r.StdOut.Trim() is { Length: > 0 } id ? _ownImage = id : null;
-    }
+    internal static string? MountSource(string mountsJson, string destination) => SelfContainer.MountSource(mountsJson, destination);
 
     /// <summary>
     /// Gitberth's own empty folder every docker compose runs from: /data/compose/.run (a slug never starts with '.', so it's

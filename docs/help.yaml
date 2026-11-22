@@ -59,6 +59,7 @@ sections:
       - reference/app-settings
       - reference/gitberth-settings
       - reference/build-detection
+      - reference/railpack
       - reference/api
       - reference/configuration
 

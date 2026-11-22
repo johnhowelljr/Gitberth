@@ -184,7 +184,8 @@ app.menu.deploy-no-cache:
   title: Deploy without the build cache
   text: >-
     Builds the newest commit again with every step run anew and the base images pulled fresh. Use it when a build went
-    wrong because of something cached, or a base image moved on.
+    wrong because of something cached, or a base image moved on. For an app Railpack builds, the tools' versions are
+    looked up again too.
   more: guides/deploys-and-rollbacks#without-the-build-cache
 
 app.menu.pin:
@@ -894,8 +895,8 @@ app.settings.vercel:
 app.settings.build:
   title: Build
   text: >-
-    How the image is built: from the Dockerfile Gitberth works out on each deploy (or the repository's own), or from
-    one you write here.
+    How the image is built: from the repository's own Dockerfile or one Gitberth writes for what it finds (a project
+    Gitberth doesn't know is built by Railpack), always with Railpack, or from a Dockerfile you write here.
   default: Detect automatically
   more: reference/build-detection#how-gitberth-decides
 
@@ -903,8 +904,15 @@ app.settings.build.auto:
   title: Detect automatically
   text: >-
     Each deploy looks at the code: a Dockerfile in the repository is used as it is, otherwise Gitberth writes one for
-    the framework it finds.
+    the framework it finds. When it finds nothing it knows, Railpack builds the app.
   more: reference/build-detection#how-gitberth-decides
+
+app.settings.build.railpack:
+  title: Railpack
+  text: >-
+    Railway's builder makes the image from the source on every deploy, whatever Gitberth detects; the repository's
+    Dockerfile isn't used. It reads the repository's `railpack.json` and the app's `RAILPACK_` variables.
+  more: reference/railpack
 
 app.settings.build.custom:
   title: Custom Dockerfile
@@ -1736,6 +1744,20 @@ app.env.build-time:
     Passed to the image's build as well as to the running container, for a front end that builds the value into its
     code, such as `VITE_*` or `NEXT_PUBLIC_*`. Changing one needs a new build.
   more: guides/environment-variables#build-time-variables-git-apps
+
+app.env.railpack:
+  title: Railpack's settings
+  text: >-
+    A variable whose name starts with `RAILPACK_` configures Railpack's build, like `RAILPACK_NODE_VERSION` or
+    `RAILPACK_START_CMD`, so it's always there at build time too.
+  more: reference/railpack#settings
+
+app.env.railpack-secret:
+  title: Never secret
+  text: >-
+    Railpack writes its `RAILPACK_` settings into the build plan and the image, so one can't be secret. Keep a secret in
+    a variable of its own and write `$NAME` in the command, like `./server --api-key $API_KEY`.
+  more: reference/railpack#settings
 
 app.env.build-toggle:
   title: Pass to the build

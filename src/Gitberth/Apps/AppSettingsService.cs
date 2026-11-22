@@ -98,7 +98,11 @@ public sealed class AppSettingsService
         var own = OptionLines(edit.LoadedOptions, edit.WantedOptions).Concat(GitLines(edit.LoadedGit, edit.WantedGit)).ToList();
         // Gitberth's own fields are checked whatever else changed, so Apply never meets them as an error halfway.
         var ownProblems = OptionProblems(edit.LoadedOptions, edit.WantedOptions).Concat(GitProblems(edit.LoadedGit, edit.WantedGit)).ToList();
-        var plan = new SettingsPlan { Key = key, Edit = edit, Lines = own, Problems = ownProblems, Consequence = own.Count > 0 ? "Saved at once: nothing restarts." : null };
+        // A Git setting (how it's built, its Dockerfile, its filters) is the next deploy's build: it says so before the save, as the save does.
+        var consequence = own.Count == 0 ? null
+            : own.Any(l => l.How == ApplyKind.Rebuild) ? "Saved at once: nothing restarts. The next deploy builds it with the change."
+            : "Saved at once: nothing restarts.";
+        var plan = new SettingsPlan { Key = key, Edit = edit, Lines = own, Problems = ownProblems, Consequence = consequence };
         if (fields.Count == 0) return plan;
         var deployed = DeployedRow(view) is not null;
         var context = await ContextAsync(deployed, ct);
@@ -491,7 +495,12 @@ public sealed class AppSettingsService
         return patterns.Count == 0 ? empty : string.Join(", ", patterns.Take(3)) + (patterns.Count > 3 ? $" and {patterns.Count - 3} more" : "");
     }
 
-    private static string BuildWords(DockerfileMode mode) => mode == DockerfileMode.Custom ? "Custom Dockerfile" : "Detect automatically";
+    private static string BuildWords(DockerfileMode mode) => mode switch
+    {
+        DockerfileMode.Custom => "Custom Dockerfile",
+        DockerfileMode.Railpack => "Railpack",
+        _ => "Detect automatically",
+    };
 
     // An update policy in the words the app's Settings tab gives it.
     private static string PolicyWords(UpdatePolicy policy) => policy switch

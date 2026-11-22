@@ -1,0 +1,28 @@
+{
+  "railpackVersion": "0.43.0",
+  "metadata": {
+    "detectedShellInterpreter": "sh",
+    "providers": "shell"
+  },
+  "detectedProviders": [
+    "shell"
+  ],
+  "logs": [
+    {
+      "Level": "info",
+      "Msg": "Detected Shell",
+      "DocsPath": ""
+    },
+    {
+      "Level": "info",
+      "Msg": "Using shell script: start.sh with interpreter: sh",
+      "DocsPath": ""
+    },
+    {
+      "Level": "suggestion",
+      "Msg": "Add a `.dockerignore` file to exclude files from the build",
+      "DocsPath": "/config/excluding-files"
+    }
+  ],
+  "success": true
+}

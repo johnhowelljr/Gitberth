@@ -20,8 +20,9 @@ public static class AppKinds
         try
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var rows = await db.Apps.AsNoTracking().Where(a => a.DetectedKind != null).Select(a => new { a.Slug, a.DetectedKind }).ToListAsync(ct);
-            cached = rows.ToDictionary(r => AppDefinition.ContainerNameFor(r.Slug), r => r.DetectedKind!);
+            var rows = await db.Apps.AsNoTracking().Where(a => a.DetectedKind != null).Select(a => new { a.Slug, a.DetectedKind, a.DetectedSummary }).ToListAsync(ct);
+            // A Railpack app's logo goes by its summary ("Elixir with Railpack"), which names the language.
+            cached = rows.ToDictionary(r => AppDefinition.ContainerNameFor(r.Slug), r => LogoCatalog.KindOf(r.DetectedKind, r.DetectedSummary)!);
             readAt = DateTime.UtcNow;
         }
         catch (Exception)

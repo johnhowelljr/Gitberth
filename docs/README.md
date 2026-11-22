@@ -78,6 +78,7 @@ demo server, `homelab` at `192.168.50.10`; yours show your own host's name and a
 | | |
 |---|---|
 | [How Gitberth builds your project](reference/build-detection.md) | Every project type it recognises, and how each is built. |
+| [Railpack builds](reference/railpack.md) | Railway's builder, for the projects Gitberth doesn't know and the apps set to it. |
 | [App settings](reference/app-settings.md) | Every field on an app's Settings, Environment and Network tabs. |
 | [Gitberth settings](reference/gitberth-settings.md) | The Settings page, section by section. |
 | [Tools for AI agents and the HTTP API](reference/api.md) | Every tool an agent or script can call, the access it needs, and its arguments. |
