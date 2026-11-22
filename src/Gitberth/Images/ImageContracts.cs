@@ -125,7 +125,6 @@ public sealed partial record ImageReference(string Registry, string Repository, 
 /// <param name="Containers">How many containers, running or stopped, were created from it.</param>
 /// <param name="BuiltByGitberth">One of Gitberth's own builds (gitberth/&lt;slug&gt;:&lt;commit&gt;) or Gitberth's image.</param>
 public sealed record LocalImage(string Id, IReadOnlyList<string> Tags, DateTime Created, long SizeBytes, int Containers, bool BuiltByGitberth);
-public sealed record HubResult(string Name, string Description, int Stars, bool Official);
 /// <param name="Digest">The digest a pull by tag gets: the index's, for an image with several platforms.</param>
 /// <param name="Platforms">linux/amd64, linux/arm64/v8 and the like; empty when the registry didn't say.</param>
 /// <param name="Error">Why it can't be pulled, in words the owner can act on; null when it was found.</param>

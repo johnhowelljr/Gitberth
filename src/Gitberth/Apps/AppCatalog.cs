@@ -34,6 +34,10 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
     // One adoption of a container at a time: a second one waits, then finds the row the first made.
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _adopting = new(StringComparer.Ordinal);
 
+    // One sync of an app's row at a time: when a change ends, its settings' follow-up and AppSync both sync the row, and two
+    // rewrites of its ports at once fail (the second deletes port rows the first has already replaced).
+    private readonly ConcurrentDictionary<int, SemaphoreSlim> _syncing = new();
+
     // The containers Gitberth is creating again from saved settings, and since when: their first start isn't a recreate
     // made outside Gitberth (AppSync).
     private readonly ConcurrentDictionary<string, DateTime> _creating = new(StringComparer.Ordinal);
@@ -229,11 +233,27 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
     /// <summary>A non-Git row brought in line with its live container: ports mirror (IsWeb kept by container port), ContainerId, snapshot.</summary>
     public async Task SyncAsync(int appId, CancellationToken ct = default)
     {
+        var gate = _syncing.GetOrAdd(appId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        bool synced;
+        try
+        {
+            synced = await SyncRowAsync(appId, ct);
+        }
+        finally
+        {
+            gate.Release();
+        }
+        if (synced) Changed?.Invoke();
+    }
+
+    private async Task<bool> SyncRowAsync(int appId, CancellationToken ct)
+    {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var row = await db.Apps.Include(a => a.Ports).FirstOrDefaultAsync(a => a.Id == appId, ct);
         // A Git app's row is the truth for its settings, and its deploys make its container.
-        if (row is null || row.Deployed) return;
-        if (await network.InspectAsync(row.ContainerName, ct) is not { } inspect) return;
+        if (row is null || row.Deployed) return false;
+        if (await network.InspectAsync(row.ContainerName, ct) is not { } inspect) return false;
         var previous = row.Ports.ToList();
         row.Ports.Clear();
         row.Ports.AddRange(Mirror(inspect, previous));
@@ -244,7 +264,7 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
         if (ContainerPorts.Str(inspect["Config"], "Image") is var image && IsTag(image) && image != row.ImageRef) row.ImageRef = image;
         row.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
-        Changed?.Invoke();
+        return true;
     }
 
     /// <summary>The settings saved to create the app's container again; null when there are none, or they can't be read (a lost key ring).</summary>

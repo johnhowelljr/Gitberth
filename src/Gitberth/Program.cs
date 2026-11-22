@@ -82,10 +82,36 @@ builder.Services.AddHttpClient("health", c => c.Timeout = TimeSpan.FromSeconds(5
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
 builder.Services.AddHttpClient("cron", c => c.Timeout = CronScheduler.RunTimeout)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { AllowAutoRedirect = false });
-// Docker Hub's public tags API, for the tag picker of New app.
-builder.Services.AddHttpClient(ImageService.HubClient, c => c.Timeout = TimeSpan.FromSeconds(10));
-// A registry's own API, for New app to read an image's config before it's pulled.
-builder.Services.AddHttpClient(RegistryClient.ClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+// Docker Hub's search and tags API, for New app's search and the tag picker: anonymous, as Gitberth/<version>, answers
+// decompressed, never redirected; a host that doesn't answer fails in 3 seconds.
+builder.Services.AddHttpClient(ImageService.HubClient, c =>
+    {
+        c.Timeout = TimeSpan.FromSeconds(10);
+        c.DefaultRequestHeaders.UserAgent.Add(HostGates.UserAgent);
+        // Answers are read through HostGates.ReadAsync's capped copy; should one ever be buffered, never past 4 MiB.
+        c.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        ConnectTimeout = TimeSpan.FromSeconds(3),
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        AllowAutoRedirect = false,
+    });
+// A registry's own API, for New app to read an image's config before it's pulled and to list an image's tags. Its blobs
+// may be served from a CDN: up to 5 redirects, which drop the Authorization header.
+builder.Services.AddHttpClient(RegistryClient.ClientName, c =>
+    {
+        c.Timeout = TimeSpan.FromSeconds(10);
+        c.DefaultRequestHeaders.UserAgent.Add(HostGates.UserAgent);
+        // Answers are read through HostGates.ReadAsync's capped copy; should one ever be buffered, never past 4 MiB.
+        c.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        ConnectTimeout = TimeSpan.FromSeconds(3),
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+        MaxAutomaticRedirections = 5,
+    });
 
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<SettingsService>();

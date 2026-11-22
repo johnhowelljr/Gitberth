@@ -362,6 +362,39 @@ public sealed class AppCatalogTests : IDisposable
     }
 
     [Fact]
+    public async Task Two_syncs_of_one_app_at_once_take_turns()
+    {
+        // A change's end is followed twice (its settings' follow-up and AppSync): the second sync waits for the first, so
+        // neither rewrites port rows the other has just replaced.
+        var row = await _rig.Catalog.AdoptAsync("sample-bun-elysia");
+        var id = _rig.Engine.Recreate("sample-bun-elysia");
+        var inspect = $"/containers/{row.ContainerName}/json";
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var inspects = 0;
+        _rig.Engine.BeforeRequest = async path =>
+        {
+            if (!path.EndsWith(inspect, StringComparison.Ordinal)) return;
+            if (Interlocked.Increment(ref inspects) != 1) return;
+            entered.SetResult();
+            await held.Task;
+        };
+
+        var first = Task.Run(() => _rig.Catalog.SyncAsync(row.Id));
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var second = Task.Run(() => _rig.Catalog.SyncAsync(row.Id));
+        await Task.Delay(300);
+        Assert.Equal(1, Volatile.Read(ref inspects));
+
+        held.SetResult();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, Volatile.Read(ref inspects));
+        var synced = (await _rig.RowAsync(a => a.Id == row.Id))!;
+        Assert.Equal(id, synced.ContainerId);
+        Assert.Single(synced.Ports, p => p.IsWeb);
+    }
+
+    [Fact]
     public async Task Forgetting_an_app_removes_its_row_and_domains_and_leaves_its_container()
     {
         var row = await _rig.Catalog.AdoptAsync("sample-index");

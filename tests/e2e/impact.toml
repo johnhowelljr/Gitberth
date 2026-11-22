@@ -84,6 +84,12 @@ factor = 0.75
 # gitberth-buildkit and its volume made afresh); minutes is still the estimate, until a run with production timings.
 # A fresh rig volume adds 2-3 min once, pulling BuildKit and Railpack's images.
 "38" = { file = "test_38_railpack.py", minutes = 4, test_minutes = 2.05 }
+# Docker Hub's search and the tag picker, against the Docker Hub stand-in and registry.e2e.test: New app's search and its
+# picker, one redis app made by create_app and recreated on another tag twice (Choose tag…, then the agents' tools), and
+# Docker Hub not answering (its 429 waited out, 10 s, and its hubWait). test_minutes measured on rig b (2026-11-22, its
+# 5 tests in 51 s, redis:8-alpine already pulled; a fresh rig volume adds that pull once); minutes is the estimate for
+# production timings (three 15 s stay-up checks, and a minute's hold instead of hubWait's 10 s).
+"39" = { file = "test_39_docker_hub.py", minutes = 2.5, test_minutes = 1.0 }
 
 [aliases]
 # The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside
@@ -102,12 +108,13 @@ factor = 0.75
 # Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
 "@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34",
-           "35", "36", "37", "38"]
+           "35", "36", "37", "38", "39"]
 "@release" = ["@full", "31"]  # and every template: + 16-30 min
 "@none" = []
 # Single tests the rules name.
 "@t00-cloudflared" = ["test_00_rig.py::test_gitberth_finds_the_fake_cloudflared"]
 "@t00-gitlab" = ["test_00_rig.py::TestGitLabStandIn"]  # the GitLab stand-in's self-tests
+"@t00-dockerhub" = ["test_00_rig.py::TestDockerHubStandIn"]  # the Docker Hub stand-in's and registry.e2e.test's self-tests
 "@t02-opened" = ["test_02_pull_request_previews.py::TestOpenedPullRequest"]  # 3 tests, one fixture
 "@t12-switches" = ["test_12_commit_statuses.py::test_settings_github_shows_the_switches_and_what_each_needs"]
 "@t12-failed" = ["test_12_commit_statuses.py::test_a_failed_deploy_links_to_its_log_and_github_gets_no_error_or_secret"]
@@ -146,6 +153,7 @@ factor = 0.75
 # group's minutes divided by its number of tests.
 [minutes]
 "test_00_rig.py::TestGitLabStandIn" = 0.15  # no Gitberth waits in it: the same with test timings
+"test_00_rig.py::TestDockerHubStandIn" = 0.15  # the runner's calls only (design 6's estimate)
 "test_02_pull_request_previews.py::TestOpenedPullRequest" = 2.2
 "test_02_pull_request_previews.py::TestOpenedPullRequest::test_it_gets_a_preview_built_from_its_pull_ref" = 1.7
 "test_12_commit_statuses.py::test_the_success_link_is_the_main_domain_once_the_app_has_one" = 1.75
@@ -162,6 +170,7 @@ factor = 0.75
 # The same with test timings, measured (impact.py minutes --timings test; the first rig run of 2026-11-16).
 [test_minutes]
 "test_00_rig.py::TestGitLabStandIn" = 0.14  # measured on rig b, 2026-11-16
+"test_00_rig.py::TestDockerHubStandIn" = 0.15
 "test_20_smoke.py::test_new_app_from_github_deploys_and_answers" = 0.3
 "test_02_pull_request_previews.py::TestClosedAndMergedPullRequests" = 0.6
 # Measured with test timings in the first two-lane impact run (2026-11-16; impact.py minutes --timings test).
@@ -220,6 +229,7 @@ globs = ["tests/e2e/scenarios/e2e/**", "tests/e2e/scenarios/conftest.py"]
 groups = ["00", "@wide"]
 refine = [
     { match = 'expires_on', groups = ["00", "37"] },   # a Cloudflare token's end date (standin.py's helpers)
+    { match = '[Dd]ocker ?[Hh]ub|dockerhub|registry\.e2e', groups = ["@t00-dockerhub", "39"] },   # the Docker Hub stand-in's client
 ]
 
 [[rule]]
@@ -255,7 +265,15 @@ refine = [
     # GitLab's dispatch sits beside GitHub's: everything the rule runs, and GitLab's scenarios.
     { match = '[Gg]it[Ll]ab|\bGL\b', groups = ["00", "@smoke", "33"] },
     { match = 'cloudflare/tokens|expires_on', groups = ["00", "37"] },   # a Cloudflare token changed as in its dashboard
+    # Docker Hub's and the registry's dispatch (dh.py): its self-tests and the image search's scenario.
+    { match = '[Dd]ocker ?[Hh]ub|dockerhub|\bDH\b|registry\.e2e', groups = ["00", "39"] },
 ]
+
+# The Docker Hub stand-in (hub.docker.com, index.docker.io) and registry.e2e.test: its self-tests and the one scenario
+# that calls it.
+[[rule]]
+globs = ["tests/e2e/standins/dh.py"]
+groups = ["@t00-dockerhub", "39"]
 
 [[rule]]
 globs = ["tests/e2e/standins/**", "tests/e2e/rig/**", "tests/e2e/run.sh"]
@@ -263,6 +281,8 @@ groups = ["00", "@smoke"]
 refine = [
     { match = '[Gg]it[Ll]ab', groups = ["00", "@smoke", "33"] },  # GitLab's names (certs.py, compose.e2e.yml, inner.sh)
     { match = 'docs', groups = ["@smoke", "34"] },               # the docs copied in for the image's Help
+    # Docker Hub's names and registry.e2e.test (certs.py, compose.e2e.yml): its self-tests and the image search's scenario.
+    { match = 'docker\.io|[Dd]ocker ?[Hh]ub|registry\.e2e', groups = ["00", "39"] },
 ]
 
 [[rule]]
@@ -309,7 +329,7 @@ refine = [
     { match = 'Preview|GitHubPulls', groups = ["01", "02", "05"] },
     { match = 'Cron', groups = ["07"] },
     { match = 'Restart', groups = ["@t12-sched"] },
-    { match = 'Update|ImageService|Registry', groups = ["@t24-registry", "32"] },
+    { match = 'Update|ImageService|Registry|DockerHub', groups = ["@t24-registry", "32", "39"] },   # the dockerhub and registry clients too
     { match = 'Domain|Cloudflare|Tunnel|RemovalRetry', groups = ["16", "17", "25"] },
     { match = 'Cookie|Authentication|Authorization|Antiforgery|logout|renew|Login|StampRevalidator|AdminAuth', groups = ["20", "@t24-audit"] },
     { match = 'PortChanger|ContainerService|ContainerUpdater|HostHelpers|IContainerEngine|NetworkKeeper|HostPortMap', groups = ["24", "27"] },
@@ -617,6 +637,7 @@ globs = ["src/Gitberth/Agents/Tools/AppAdminTools.cs", "src/Gitberth/Agents/Tool
 groups = ["29", "32"]
 refine = [
     { match = '[Gg]it[Ll]ab|RepoUrls', groups = ["29", "@t33-api"] },   # create_app from a GitLab project
+    { match = 'update_app_settings|image =|\bimage\b', groups = ["29", "32", "39"] },   # update_app_settings' image (an app from an image)
 ]
 
 [[rule]]
@@ -686,10 +707,16 @@ globs = ["src/Gitberth/Components/Apps/DatabasesSection.razor", "src/Gitberth/Co
 groups = ["27"]
 
 # --- new app sources, images, change engine
+# New app › Registry image (its Docker Hub search) and the tag picker it shares with Settings › Image's Choose tag….
+[[rule]]
+globs = ["src/Gitberth/Components/NewApp/RegistrySource.razor", "src/Gitberth/Components/Shared/TagPicker*.razor",
+         "src/Gitberth/Components/Shared/ImagePickerText.cs"]
+groups = ["39"]
+
 [[rule]]
 globs = ["src/Gitberth/Sources/DockerRunParser.cs", "src/Gitberth/Sources/ShellWords.cs",
-         "src/Gitberth/Components/NewApp/RegistrySource.razor", "src/Gitberth/Components/NewApp/LocalSource.razor"]
-groups = ["@smoke"]                            # no scenario makes an app from an image or a docker run (section 5)
+         "src/Gitberth/Components/NewApp/LocalSource.razor"]
+groups = ["@smoke"]                            # no scenario makes an app from a local image or a docker run (section 5)
 
 [[rule]]
 globs = ["src/Gitberth/Sources/AppCreator.cs", "src/Gitberth/Sources/SourceContracts.cs"]
@@ -913,6 +940,7 @@ globs = ["src/Gitberth/Components/Apps/AppSettingsTab.razor"]
 groups = ["06", "19", "22", "23", "24"]
 refine = [
     { match = 'sec-general|[Nn]otification|health URL|set-health-url', groups = ["21", "@t24-audit"] },
+    { match = 'TagPicker|Choose tag', groups = ["39"] },   # the Image field's Choose tag… (ahead of sec-source: both sections are its id)
     { match = 'sec-source|set-ignored|set-watch|set-dockerfile|Vercel|[Ff]ilter', groups = ["10", "22"] },
     { match = 'sec-previews|PreviewSettings', groups = ["03", "04", "05"] },
     { match = 'sec-hooks|DeployHooks', groups = ["23"] },
@@ -970,6 +998,9 @@ groups = ["05", "24", "27", "30"]
 globs = ["src/Gitberth/Components/Apps/NetworkTab.razor", "src/Gitberth/Components/Shared/Network/**",
          "src/Gitberth/wwwroot/css/network-newapp.css"]
 groups = ["17", "18", "20", "25"]              # the Network tab renders in every domain scenario; ReachDiagram is in New app too
+refine = [
+    { match = 'gb-dh-|gb-tp-|gb-resrow', groups = ["39"] },   # the image search's rows and the tag picker
+]
 
 [[rule]]
 globs = ["src/Gitberth/Components/Layout/TopSearch.razor"]
@@ -1078,6 +1109,7 @@ globs = ["src/Gitberth/Agents/**"]
 groups = ["29", "32"]
 refine = [
     { match = '[Gg]it[Ll]ab|RepoFullName', groups = ["29", "@t33-api"] },   # get_app's git, get_settings' gitlab
+    { match = 'search_images|list_image_tags|image =', groups = ["39", "29"] },   # Docker Hub's search and an image's tags
 ]
 
 [[rule]]
@@ -1129,6 +1161,29 @@ groups = ["26"]
 [[rule]]
 globs = ["src/Gitberth/Notifications/**"]
 groups = ["21", "26"]
+
+# Docker Hub's search, an image's tags and their ranking (the tag picker's backend), and what's kept about the hosts asked:
+# the image search's scenario.
+[[rule]]
+globs = ["src/Gitberth/Images/DockerHubApi.cs", "src/Gitberth/Images/TagRanking.cs", "src/Gitberth/Images/TagViews.cs",
+         "src/Gitberth/Images/ImagePickerContracts.cs", "src/Gitberth/Images/HostGates.cs"]
+groups = ["39"]
+
+# The registry client lists tags and reads an image's config before a pull (New app's Configure, signed in or not).
+[[rule]]
+globs = ["src/Gitberth/Images/RegistryClient.cs"]
+groups = ["39", "@t24-registry"]
+
+# The façade: its search, tags and digests are the image search's; the rest (pulls, the host's images, facts, updates) is
+# what the database and template scenarios pull through, as for any other file here.
+[[rule]]
+globs = ["src/Gitberth/Images/ImageService.cs"]
+groups = ["27", "32", "@t24-registry"]
+refine = [
+    { match = 'SearchAsync|TagsAsync|RegistryTagsAsync|ListedAsync|NoTags|DigestsOf|DockerHub|HostArchitecture|Lookups|HostWaitCap|HostGates|TimedCache|MaxListedTags', groups = ["39"] },
+    # An image's facts read from its registry before a pull (39's registry.e2e.test check), and the host's platform both use.
+    { match = 'RemoteFacts|PlatformAsync|HostPlatform', groups = ["27", "32", "39", "@t24-registry"] },
+]
 
 [[rule]]
 globs = ["src/Gitberth/Images/**"]

@@ -21,7 +21,7 @@ from e2e import config
 from e2e.engine import Engine, gitberth_logs
 from e2e.gitberth import Gitberth
 from e2e.gitlab import GitLab
-from e2e.standin import Cloudflare, GitHub, StandIns
+from e2e.standin import Cloudflare, DockerHub, GitHub, StandIns
 
 WATCH_SECONDS = 10
 
@@ -60,6 +60,14 @@ def gl_token(gitlab):
 def cloudflare(standins):
     """The Cloudflare stand-in: zones, DNS records, the tunnel's configuration, Zero Trust and Access applications."""
     return Cloudflare(standins)
+
+
+@pytest.fixture(scope="session")
+def dockerhub(standins):
+    """The Docker Hub stand-in (hub.docker.com's search and tags API, index.docker.io's basic search) and the registry
+    registry.e2e.test: seeded repositories, answers on demand (a 429, a 5xx, a dropped connection), and what Gitberth
+    asked of them."""
+    return DockerHub(standins)
 
 
 @pytest.fixture(scope="session")

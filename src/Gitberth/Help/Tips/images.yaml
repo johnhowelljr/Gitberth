@@ -1,0 +1,137 @@
+# Tips for finding an image and choosing its tag: New app's Docker Hub search (Components/NewApp/RegistrySource.razor), the
+# tag picker (Components/Shared/TagPicker.razor) and Settings › Image's Choose tag… (TagPickerDialog.razor). The badges'
+# keys are computed (TipKeys.Badge). New app's own fields keep theirs (newapp.registry.*). See Help/TipCatalog.cs.
+
+# ---- Docker Hub's search ----
+
+images.search:
+  title: Search Docker Hub
+  text: >-
+    Gitberth asks Docker Hub as you type, from two letters, and lists up to 25 images in Docker Hub's order, with their
+    badges, stars and pulls. Text with a colon, an `@` or a registry's address is taken as a reference instead, as typed.
+    When Docker Hub can't answer, type the image's full name: everything else still works.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.badge.official:
+  title: Official
+  text: >-
+    A Docker Official Image: one of the curated images Docker keeps on Docker Hub, such as `nginx` or `postgres`, pulled
+    by its name alone.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.badge.verified:
+  title: Verified Publisher
+  text: >-
+    Published by a company Docker has verified, under that company's own name on Docker Hub.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.badge.oss:
+  title: Sponsored OSS
+  text: >-
+    Made and kept current by an open-source project that Docker sponsors, such as the LinuxServer.io images.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.stars:
+  title: Stars
+  text: >-
+    How many people starred the image on Docker Hub: a rough sign of how widely it's known and used.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.pulls:
+  title: Pulls
+  text: >-
+    How many times the image was pulled from Docker Hub, as Docker Hub rounds it: 1B+ is over a billion.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.updated:
+  title: Updated
+  text: >-
+    When something was last pushed to the image on Docker Hub. An image nobody has updated for years may still run, but
+    it gets no security fixes.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.hub-page:
+  title: View on Docker Hub
+  text: >-
+    Opens the image's page on Docker Hub in a new tab: its description, its tags and how to use it.
+  more: guides/run-a-registry-image#pick-the-image
+
+images.no-platform:
+  title: No image for this host
+  text: >-
+    The registry lists no build of it for this host's processor (amd64 on most PCs, arm64 on a Raspberry Pi), so Docker
+    can't run it here. You can still choose it: Check, or the pull, says what the registry has.
+  more: guides/run-a-registry-image#pick-the-image
+
+# ---- The tag picker ----
+
+images.tags:
+  title: Tags
+  text: >-
+    The image's tags, newest stable version first, by variant. Click a row, or one of its chips, to choose a tag;
+    anything you type is used as it is, a digest included.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.variant:
+  title: Variant
+  text: >-
+    The image's flavours, such as **alpine** for a smaller image built on Alpine Linux. **Standard** is the plain one,
+    and **All** shows every variant together.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.recommended:
+  title: Recommended
+  text: >-
+    The version `latest` points to, when it's a stable release this host can run; otherwise the newest stable one. The
+    field preselects its version one part shorter, like `1.31` for 1.31.2, so patch releases arrive as updates and a new
+    major never does.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.follow:
+  title: Tags that name it
+  text: >-
+    The row's own tag, then the floating tags that point to the same image now, like `1.31`, `1` and `latest`. Choose a
+    floating one to get updates within it, or the exact one to stay on this release.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.pre-releases:
+  title: Pre-releases
+  text: >-
+    Alphas, betas and release candidates, and channels such as `edge` or `nightly`. They're hidden until you show them,
+    and marked **pre-release** when they're shown.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.other:
+  title: Other tags
+  text: >-
+    Tags that name no version (like `bookworm` or `nightly`), other numbering schemes such as dates, and names Gitberth
+    can't read as a version. Any of them can be chosen.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.older:
+  title: Load older tags
+  text: >-
+    Docker Hub lists tags newest first, 100 at a time, and Gitberth reads the first few hundred. This reads 100 more and
+    ranks them in with the rest.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.inferred:
+  title: Matched by name
+  text: >-
+    This registry doesn't say which tags point to the same image, so Gitberth matches them by name: `1.27` most likely
+    points to the highest 1.27.x. Check asks the registry about the tag you choose.
+  more: guides/run-a-registry-image#choose-the-tag
+
+images.tags.running:
+  title: Running now
+  text: >-
+    The app's container runs this image: its digest is the one the app was created or last updated with. Newer
+    versions are listed above it.
+  more: guides/updates#go-back-to-an-older-version
+
+images.tags.choose:
+  title: Choose tag
+  text: >-
+    Lists the image's tags, newest stable first, with the one the app runs marked. Using one puts it in the Image field;
+    **Review and apply** then recreates the app on it, after **Pull it** when it isn't on this host.
+  more: guides/updates#go-back-to-an-older-version

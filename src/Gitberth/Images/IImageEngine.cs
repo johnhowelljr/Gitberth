@@ -4,9 +4,9 @@ namespace Gitberth.Images;
 
 /// <summary>
 /// The image calls of the Docker Engine API (<see cref="Gitberth.Docker.DockerApi"/>'s), as Docker answers them: images,
-/// Docker Hub's search, the registry's view of a reference, pulls, sign-ins and removals. Docker's errors come as
+/// the registry's view of a reference, pulls, sign-ins and removals. Docker's errors come as
 /// <see cref="Gitberth.Docker.DockerApiException"/>; one that didn't answer as a <see cref="TimeoutException"/>. Nothing
-/// here removes a container or a volume.
+/// here removes a container or a volume. (Docker Hub's search is Gitberth's own: <see cref="ImageService.SearchAsync"/>.)
 /// </summary>
 public interface IImageEngine
 {
@@ -18,9 +18,6 @@ public interface IImageEngine
 
     /// <summary>GET /images/{name}/json; null when there's no such image or tag.</summary>
     Task<JsonObject?> InspectImageAsync(string nameOrId, CancellationToken ct);
-
-    /// <summary>GET /images/search: Docker Hub's search, through the daemon.</summary>
-    Task<JsonArray> SearchImagesAsync(string term, int limit, CancellationToken ct);
 
     /// <summary>GET /distribution/{reference}/json: the registry's descriptor and platforms for it, signed in with <paramref name="registryAuth"/>.</summary>
     Task<JsonObject> DistributionAsync(string reference, string? registryAuth, CancellationToken ct);

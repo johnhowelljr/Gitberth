@@ -7,9 +7,9 @@ using Gitberth.Images;
 namespace Gitberth.Docker;
 
 /// <summary>
-/// The image calls: the images on the host, Docker Hub's search, what a registry says about a reference, pulls that stream
-/// their progress, sign-ins and removals. Credentials go in X-Registry-Auth, per call, and are never logged. Nothing here
-/// removes a container or a volume, and an image is never removed by force.
+/// The image calls: the images on the host, what a registry says about a reference, pulls that stream their progress,
+/// sign-ins and removals. Credentials go in X-Registry-Auth, per call, and are never logged. Nothing here removes a
+/// container or a volume, and an image is never removed by force.
 /// </summary>
 public sealed partial class DockerApi : IImageEngine
 {
@@ -25,11 +25,6 @@ public sealed partial class DockerApi : IImageEngine
     /// <summary>GET images/json: every image on the host, dangling ones too, as Docker wrote them.</summary>
     public async Task<JsonArray> ListImagesAsync(CancellationToken ct = default) =>
         JsonNode.Parse(await SendAsync(HttpMethod.Get, "images/json", ct: ct)) as JsonArray ?? [];
-
-    /// <summary>GET images/search: Docker Hub's search, which the daemon makes; name, description, star_count and is_official per result.</summary>
-    public async Task<JsonArray> SearchImagesAsync(string term, int limit = 25, CancellationToken ct = default) =>
-        JsonNode.Parse(await SendAsync(HttpMethod.Get, $"images/search?term={Uri.EscapeDataString(term)}&limit={limit.ToString(CultureInfo.InvariantCulture)}",
-            timeout: RegistryTimeout, ct: ct)) as JsonArray ?? [];
 
     /// <summary>
     /// GET distribution/{reference}/json: the registry's descriptor for the reference (the digest a pull gets) and its
@@ -113,8 +108,6 @@ public sealed partial class DockerApi : IImageEngine
         JsonNode.Parse(await SendAsync(HttpMethod.Get, "containers/json?all=true", ct: ct)) as JsonArray ?? [];
 
     Task<JsonObject?> IImageEngine.InspectImageAsync(string nameOrId, CancellationToken ct) => InspectImageAsync(nameOrId, ct);
-
-    Task<JsonArray> IImageEngine.SearchImagesAsync(string term, int limit, CancellationToken ct) => SearchImagesAsync(term, limit, ct);
 
     Task<JsonObject> IImageEngine.DistributionAsync(string reference, string? registryAuth, CancellationToken ct) => DistributionAsync(reference, registryAuth, ct);
 

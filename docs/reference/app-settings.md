@@ -109,7 +109,7 @@ updates come from.
 
 | Field | What it does | Default | Applies |
 |---|---|---|---|
-| **Image** | A name and tag, such as `postgres:18`, or a digest. Changing it pulls the new image first, then recreates the app on it; what the old image set is left behind. If the image isn't on the host, **Pull it** appears in the bar. | The image it was created from | Recreate |
+| **Image** | A name and tag, such as `postgres:18`, or a digest. Changing it pulls the new image first, then recreates the app on it; what the old image set is left behind. If the image isn't on the host, **Pull it** appears in the bar. **Choose tag…** beside it lists the image's tags, newest stable first, with the one the app runs marked **Running now**, and puts the one you use in the field (see [Go back to an older version](../guides/updates.md#go-back-to-an-older-version)). | The image it was created from | Recreate |
 | **Updates** | **When I ask**: nothing's checked until you ask, and no badge shows. **Tell me**: a badge appears on the app when its registry has a newer image. **Automatically**: Gitberth pulls and recreates it when the tag moves, in the hours set in **Settings** › **Updates**. For an image no registry is known to have, the lines speak of a newer build of its tag on this host instead. Never automatic for a database. See [Image updates](../guides/updates.md). | For an app Gitberth created, **New apps from an image** in **Settings** › **Updates** (**Tell me** unless changed); **When I ask** for an image pinned by digest or ID; never **Automatically** for a database | At once |
 
 ### Deploy hooks

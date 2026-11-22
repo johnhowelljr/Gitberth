@@ -17,7 +17,10 @@
 - the GitLab stand-in (TestGitLabStandIn), as the contract has Gitberth use GitLab: its answer shapes and paging, tokens'
   scopes and users' roles, merge requests from branches and forks, commit statuses' state machine, notes, hooks and
   CI/CD variables, git over HTTPS with oauth2:<token> (a private project, a merge request's head), Push Hook and Merge
-  Request Hook deliveries going where their URL leads, its 429s, and calls recorded without a token in the log.
+  Request Hook deliveries going where their URL leads, its 429s, and calls recorded without a token in the log;
+- the Docker Hub stand-in and registry.e2e.test (TestDockerHubStandIn): Docker Hub's search in its full and basic shapes
+  and order, its tag pages newest push first with their platforms, a registry's token flow, Link paging, manifests and
+  config, a private repository, and answers on demand (a 429, a 500, a dropped connection).
 """
 import hashlib
 import hmac
@@ -1020,3 +1023,153 @@ class TestGitLabStandIn:
         assert "gitlab delivery Push Hook" in log, log[-2000:]
         for t in (gl_token, hook_token, "not-a-token"):
             assert t not in log, "a token reached the stand-ins' log"
+
+
+class TestDockerHubStandIn:
+    """The Docker Hub stand-in (hub.docker.com's search and tags API, index.docker.io's basic search) and the registry
+    registry.e2e.test, as the contract has Gitberth use them (design 8.3, with D3: Docker Hub's registry stays the real
+    one). No Gitberth feature is needed: these are the runner's calls, through the stand-in's own name."""
+
+    def test_search_answers_in_docker_hubs_shapes_and_order(self, dockerhub):
+        """v4's fields and badges; the exact name first, then names that start with the query, then by pulls; type=image
+        keeps a Hardened Image out; the basic search (v1) marks official images only; Docker Hub's rate-limit headers."""
+        status, headers, found = dockerhub.rest("hub.docker.com", "/api/search/v4?query=postg&from=0&size=25&type=image")
+        assert status == 200, found
+        ids = [r["id"] for r in found["results"]]
+        assert ids == ["library/postgres", "cimg/postgres", "circleci/postgres", "kasmweb/postgres"] and found["total"] == 4, ids
+        pg = found["results"][0]
+        assert (pg["slug"], pg["type"], pg["badge"], pg["pull_count"], pg["publisher"]["name"]) == ("postgres", "image", "official", "1B+", "library"), pg
+        assert isinstance(pg["raw_pull_count"], int) and pg["star_count"] > 1000 and pg["updated_at"].endswith("Z") and pg["archived"] is False, pg
+        assert {a["name"] for a in pg["architectures"]} >= {"amd64", "arm64"}, pg["architectures"]
+        by_id = {r["id"]: r for r in found["results"]}
+        assert {by_id[i]["badge"] for i in ("cimg/postgres", "circleci/postgres", "kasmweb/postgres")} == {"verified_publisher"}
+        assert [a["name"] for a in by_id["circleci/postgres"]["architectures"]] == ["amd64"]
+        assert header(headers, "x-ratelimit-limit") == "180" and int(header(headers, "x-ratelimit-remaining")) > 3, headers
+
+        _, _, ngin = dockerhub.rest("hub.docker.com", "/api/search/v4?query=ngin&from=0&size=25&type=image")
+        assert [r["id"] for r in ngin["results"]] == ["library/nginx", "linuxserver/nginx", "arm64v8/nginx", "dtagdevsec/nginx"], ngin
+        assert ngin["results"][1]["badge"] == "open_source" and [a["name"] for a in ngin["results"][2]["architectures"]] == ["arm64"]
+        _, _, every = dockerhub.rest("hub.docker.com", "/api/search/v4?query=nginx&from=0&size=25")
+        assert every["total"] == 5 and "dhi/nginx" in [r["id"] for r in every["results"]], "without type=image, the Hardened Image is found"
+        _, _, two = dockerhub.rest("hub.docker.com", "/api/search/v4?query=nginx&from=0&size=2&type=image")
+        assert [r["id"] for r in two["results"]] == ["library/nginx", "linuxserver/nginx"] and two["total"] == 4, two
+
+        status, _, basic = dockerhub.rest("index.docker.io", "/v1/search?q=nginx&n=25")
+        assert status == 200 and basic["num_results"] == 4 and basic["query"] == "nginx", basic
+        assert (basic["results"][0]["name"], basic["results"][0]["is_official"], basic["results"][0]["pull_count"]) == ("nginx", True, 13624900407)
+        assert not any(r["is_official"] for r in basic["results"][1:]) and "dhi/nginx" not in [r["name"] for r in basic["results"]], basic
+
+    def test_tags_come_by_page_newest_push_first(self, dockerhub, standins):
+        """nginx's 130 tags in two pages of 100: newest push first (so stable's rebuild first, not the newest version);
+        aliases share a digest; each tag's platforms, attestations among them; name= as a substring; 404 for an image
+        that isn't there; another path is no route."""
+        path = "/v2/namespaces/library/repositories/nginx/tags?page={}&page_size=100&ordering=last_updated"
+        status, _, one = dockerhub.rest("hub.docker.com", path.format(1))
+        assert status == 200 and (one["count"], len(one["results"])) == (130, 100), (one["count"], len(one["results"]))
+        assert "page=2" in one["next"] and one["previous"] is None, one["next"]
+        pushed = [t["tag_last_pushed"] for t in one["results"]]
+        assert pushed == sorted(pushed, reverse=True)
+        top = {t["name"] for t in one["results"][:7]}
+        assert top == {"stable", "1.30", "1.30.7", "stable-alpine", "stable-alpine3.24", "1.30.7-alpine", "1.30.7-alpine3.24"}, top
+        tags = {t["name"]: t for t in one["results"]}
+        latest = tags["latest"]
+        assert latest["digest"] == tags["1.31.2"]["digest"] != tags["1.31.1"]["digest"] and latest["digest"].startswith("sha256:")
+        assert [(i["os"], i["architecture"], i["variant"]) for i in latest["images"]] == \
+            [("linux", "amd64", None), ("linux", "arm64", "v8"), ("unknown", "unknown", None), ("unknown", "unknown", None)], latest["images"]
+        assert latest["full_size"] == latest["images"][0]["size"] and latest["content_type"] == "image"
+        assert [(i["os"], i["architecture"]) for i in tags["1.31.2-perl"]["images"]] == [("linux", "arm64")]
+        assert [i["os"] for i in tags["windowsservercore-ltsc2025"]["images"]] == ["windows"]
+        assert "1.32.0-rc.1" in tags and any(n.startswith("sha256-") and n.endswith(".sig") for n in tags)
+
+        _, _, two = dockerhub.rest("hub.docker.com", path.format(2))
+        assert len(two["results"]) == 30 and two["next"] is None and "page=1" in two["previous"], two["previous"]
+        assert {t["name"] for t in two["results"]}.isdisjoint(tags)
+        _, _, named = dockerhub.rest("hub.docker.com", "/v2/namespaces/library/repositories/nginx/tags?page=1&page_size=100&name=alpine")
+        assert named["count"] == 10 and all("alpine" in t["name"] for t in named["results"]), named["count"]
+        status, _, missing = dockerhub.rest("hub.docker.com", "/v2/namespaces/library/repositories/no-such-image/tags?page=1&page_size=100")
+        assert (status, missing) == (404, {"message": "object not found", "errinfo": {}})
+
+        # The legacy path is no route of the stand-in (Gitberth uses the documented one); every call is recorded as Docker Hub's.
+        mark = standins.seq()
+        assert dockerhub.rest("hub.docker.com", "/v2/repositories/library/nginx/tags/?page_size=2")[0] == 404
+        assert [(c["host"], c["path"]) for c in standins.calls(mark, unrouted=True)] == [("hub.docker.com", "/v2/repositories/library/nginx/tags/")]
+        dockerhub.rest("hub.docker.com", path.format(1))
+        assert [(c["kind"], c.get("repo")) for c in dockerhub.calls(mark, by_gitberth=False)] == [("dockerhub", None), ("dockerhub", "library/nginx")]
+
+    def test_the_registry_wants_a_token_and_pages_with_link(self, dockerhub):
+        """registry.e2e.test: a 401 naming its token service; an anonymous token for a public repository; tags/list in
+        lexical order, 5 to a page, with a relative Link; an image's index, this host's manifest and its config; a private
+        repository's tags only with its user's token."""
+        reg = "registry.e2e.test"
+        status, headers, body = dockerhub.rest(reg, "/v2/team/api/tags/list?n=1000")
+        assert status == 401 and body["errors"][0]["code"] == "UNAUTHORIZED", body
+        challenge = header(headers, "WWW-Authenticate")
+        assert challenge == 'Bearer realm="https://registry.e2e.test/token",service="registry.e2e.test",scope="repository:team/api:pull"', challenge
+        status, _, granted = dockerhub.rest(reg, "/token?service=registry.e2e.test&scope=repository:team/api:pull")
+        assert status == 200 and granted["token"] == granted["access_token"] and granted["expires_in"] == 300, granted
+        token = granted["token"]
+        status, headers, first = dockerhub.rest(reg, "/v2/team/api/tags/list?n=1000", token)
+        assert status == 200 and first == {"name": "team/api", "tags": ["1", "1.26", "1.26.5", "1.27", "1.27.2"]}, first
+        link = header(headers, "Link")
+        assert link == '</v2/team/api/tags/list?last=1.27.2&n=1000>; rel="next"', link
+        status, headers, rest = dockerhub.rest(reg, link[1:link.index(">")], token)
+        assert rest["tags"] == ["1.27.3", "1.28.0-rc1", "latest", "sha-4f9c2e1", "stable"] and header(headers, "Link") is None, (rest, headers)
+        assert dockerhub.rest(reg, "/v2/team/api/tags/list?n=5000", token)[0] == 400
+
+        # What New app reads before a pull: the index, this host's manifest, then its config.
+        status, headers, index = dockerhub.rest(reg, "/v2/team/api/manifests/1.27", token)
+        assert status == 200 and header(headers, "Content-Type") == "application/vnd.oci.image.index.v1+json", headers
+        platforms = {(m["platform"]["os"], m["platform"]["architecture"]): m["digest"] for m in index["manifests"]}
+        assert set(platforms) == {("linux", "amd64"), ("linux", "arm64")}, platforms
+        _, _, manifest = dockerhub.rest(reg, f"/v2/team/api/manifests/{platforms[('linux', 'amd64')]}", token)
+        _, _, config = dockerhub.rest(reg, f"/v2/team/api/blobs/{manifest['config']['digest']}", token)
+        assert config["architecture"] == "amd64" and config["config"]["ExposedPorts"] == {"8080/tcp": {}}, config
+        assert dockerhub.rest(reg, "/v2/team/api/manifests/9.9", token)[2]["errors"][0]["code"] == "MANIFEST_UNKNOWN"
+        nothing = dockerhub.rest(reg, "/token?service=registry.e2e.test&scope=repository:team/nothing:pull")[2]["token"]
+        assert dockerhub.rest(reg, "/v2/team/nothing/tags/list", nothing)[2]["errors"][0]["code"] == "NAME_UNKNOWN"
+
+        # A private repository: an anonymous token doesn't reach it, its user's does, and a wrong password gets no token.
+        user, password = "e2e-reader", "made-up-" + secrets.token_hex(6)
+        dockerhub.seed("team/secret", [{"name": "2.1.0"}, {"name": "2.1"}], registry=reg, private=True, user=user, password=password)
+        try:
+            scope = "/token?service=registry.e2e.test&scope=repository:team/secret:pull"
+            anonymous = dockerhub.rest(reg, scope)[2]["token"]
+            status, headers, _ = dockerhub.rest(reg, "/v2/team/secret/tags/list", anonymous)
+            assert status == 401 and 'error="insufficient_scope"' in header(headers, "WWW-Authenticate"), headers
+            signed = dockerhub.rest(reg, scope, basic=(user, password))[2]["token"]
+            assert dockerhub.rest(reg, "/v2/team/secret/tags/list", signed)[2]["tags"] == ["2.1", "2.1.0"]
+            assert dockerhub.rest(reg, scope, basic=(user, "wrong"))[0] == 401
+        finally:
+            dockerhub.reset()
+
+    def test_answers_on_demand_and_its_own_reset(self, dockerhub, standins):
+        """POST /answer: a 429 with Retry-After and x-ratelimit-reset, the usual answer with low rate-limit headers, a 500,
+        a dropped connection; each for as many calls as it says. Its reset puts the default seed back."""
+        search = "/api/search/v4?query=redis&from=0&size=25&type=image"
+        dockerhub.answer("hub.docker.com", "/api/search/v4", status=429, retry_after=30, reset_in=30)
+        status, headers, _ = dockerhub.rest("hub.docker.com", search)
+        assert status == 429 and header(headers, "Retry-After") == "30" and header(headers, "x-ratelimit-remaining") == "0", headers
+        assert abs(int(header(headers, "x-ratelimit-reset")) - (time.time() + 30)) < 3, headers
+        assert dockerhub.rest("hub.docker.com", search)[0] == 200, "times=1: the next call answers as usual"
+
+        dockerhub.answer("hub.docker.com", "/api/search/v4", remaining=2, reset_in=20)
+        status, headers, body = dockerhub.rest("hub.docker.com", search)
+        assert status == 200 and body["results"][0]["id"] == "library/redis" and header(headers, "x-ratelimit-remaining") == "2", headers
+
+        dockerhub.answer("index.docker.io", "/v1/search", status=500)
+        assert dockerhub.rest("index.docker.io", "/v1/search?q=redis&n=25")[0] == 500
+
+        dockerhub.answer("hub.docker.com", "/api/search/v4", close=True)
+        mark = standins.seq()
+        try:
+            dockerhub.rest("hub.docker.com", search)
+            raise AssertionError("the connection wasn't dropped")
+        except OSError:
+            pass  # RemoteDisconnected, a reset connection: what Gitberth gets from a host going away
+        assert [c["status"] for c in dockerhub.calls(mark, by_gitberth=False)] == [0]
+        assert dockerhub.answers() and all(a["left"] == 0 for a in dockerhub.answers())
+
+        dockerhub.seed("library/redis", [{"name": "9.9.9", "pushed": 0}])
+        assert [t["name"] for t in dockerhub.repo("redis")["tags"]] == ["9.9.9"]
+        dockerhub.reset()
+        assert dockerhub.answers() == [] and "8.2-alpine" in [t["name"] for t in dockerhub.repo("library/redis")["tags"]]

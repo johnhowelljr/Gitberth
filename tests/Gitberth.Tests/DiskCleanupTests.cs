@@ -1026,7 +1026,6 @@ internal sealed class ImageStore : IImageEngine
 
     public Task<JsonArray> ListContainersAsync(CancellationToken ct) => throw new NotSupportedException();
     public Task<JsonObject?> InspectImageAsync(string nameOrId, CancellationToken ct) => throw new NotSupportedException();
-    public Task<JsonArray> SearchImagesAsync(string term, int limit, CancellationToken ct) => throw new NotSupportedException();
     public Task<JsonObject> DistributionAsync(string reference, string? registryAuth, CancellationToken ct) => throw new NotSupportedException();
     public IAsyncEnumerable<JsonObject> PullAsync(string fromImage, string tagOrDigest, string? platform, string? registryAuth, CancellationToken ct) => throw new NotSupportedException();
     public Task<JsonObject> AuthAsync(JsonObject credentials, CancellationToken ct) => throw new NotSupportedException();

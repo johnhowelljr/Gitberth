@@ -5,7 +5,10 @@ way, of what only shows then (New app's steps, a dialog, a box shown once). See 
 
 The demo is the docs' own: host homelab at 192.168.50.10, Gitberth at http://192.168.50.10:8080, apps website,
 orders-api and inventory from github.com/you, storefront (a Compose app) too, postgres, redis, uptime-kuma, whoami,
-mailpit, adminer, backup-agent and Miniflux; example.com through Cloudflare (the stand-in), the API token Claude Code."""
+mailpit, adminer, backup-agent and Miniflux; example.com through Cloudflare (the stand-in), the API token Claude Code.
+Docker Hub's search and tags come from its stand-in (real image names, illustrative numbers); an image's config before
+its pull, and the pulls, from the real Docker Hub."""
+import hashlib
 import json
 import os
 import re
@@ -18,6 +21,7 @@ from e2e import config
 from e2e.engine import docker
 from e2e.gitberth import App
 from e2e.github_reports import set_github_switch
+from e2e.standin import DockerHub
 from e2e.wait import until
 from test_09_scoped_variables import add_variable
 from test_12_commit_statuses import add_domain
@@ -35,6 +39,25 @@ DOMAIN = "app.example.com"
 HOOKS = "hooks.example.com"
 STATUS = "status.example.com"
 ACTIVE = ("Queued", "Cloning", "Building", "Starting")
+KUMA = "louislam/uptime-kuma:1"
+
+
+def seed_uptime_kuma(hub, digest):
+    """The Docker Hub stand-in's louislam/uptime-kuma, as its default seed has it (its numbers illustrative), but with 1.23.16
+    (also 1.23 and 1) naming the image Docker Hub gives uptime-kuma:1 now: the image the app runs, so Running now shows."""
+    platforms = ["linux/amd64", "linux/arm64/v8", "linux/arm/v7"]
+
+    def named(names, image, days, size):
+        return [{"name": n, "digest": image, "pushed": days, "platforms": platforms, "size": size} for n in names]
+
+    def other(label):
+        return "sha256:" + hashlib.sha256(f"shots:{label}".encode()).hexdigest()
+
+    tags = (named(["2.5.11", "2.5", "2", "latest"], other("2.5.11"), 9, 160_200_000) + named(["2.5.10"], other("2.5.10"), 30, 160_100_000)
+            + named(["2.4.3", "2.4"], other("2.4.3"), 75, 159_800_000) + named(["1.23.16", "1.23", "1"], digest, 210, 147_300_000)
+            + named(["1.23.15"], other("1.23.15"), 260, 147_200_000) + named(["2.6.0-beta.1", "beta"], other("beta"), 5, 161_100_000))
+    hub.seed("louislam/uptime-kuma", tags, search={"badge": "none", "stars": 1104, "pulls": 162_000_000, "description": "A fancy self-hosted monitoring tool",
+                                                   "architectures": ["amd64", "arm64", "arm"], "updated_days": 9})
 
 
 def flat(text):
@@ -125,9 +148,11 @@ def mask_hook_urls(page):
 
 # ======================================================================== the host and the stand-ins
 
-def test_step_01_host(engine):
+def test_step_01_host(engine, demo):
     """What someone started on the host before Gitberth: redis, and whoami on an older image tagged latest (so an update
-    shows); and a local image built on the host. A run before this one's are removed first."""
+    shows); and a local image built on the host. A run before this one's are removed first. And the digest Docker Hub
+    gives uptime-kuma:1 now, for the Docker Hub stand-in (step 2): the image is pulled to read it, then removed, so New
+    app still pulls it (step 13)."""
     for name in ("whoami", "redis"):
         docker("rm", "-f", name, check=False)
     docker("volume", "rm", "-f", "redis-data", check=False)
@@ -137,11 +162,16 @@ def test_step_01_host(engine):
     docker("run", "-d", "--name", "redis", "--restart", "unless-stopped", "-v", "redis-data:/data", "redis:7-alpine")
     docker("run", "-d", "--name", "whoami", "--restart", "unless-stopped", "-p", "8000:80", "traefik/whoami:latest")
     docker("build", "-q", "-t", "backup-agent:1.0", "-", input=D.BACKUP_AGENT, timeout=300)
+    docker("pull", "-q", KUMA, timeout=600)
+    digests = json.loads(docker("image", "inspect", "--format", "{{json .RepoDigests}}", KUMA))
+    demo.kuma_digest = next(d.split("@", 1)[1] for d in digests if d.startswith("louislam/uptime-kuma@"))
+    docker("image", "rm", KUMA)
 
 
 def test_step_02_standins(github, gitlab, cloudflare, standins, demo):
-    """github.com/you's repos (their files committed by You), gitlab.com/you/website, a token on each, and Cloudflare's
-    example.com with Zero Trust's team homelab."""
+    """github.com/you's repos (their files committed by You), gitlab.com/you/website, a token on each, Cloudflare's
+    example.com with Zero Trust's team homelab, and Docker Hub's louislam/uptime-kuma with 1 naming the image it gives now
+    (so the app made from it in step 13 shows Running now in its tag picker)."""
     demo.gh_token = github.token(login="you", expires="2027-05-17 00:00:00 UTC")
     demo.repos = {}
     for name, files in (("website", D.WEBSITE), ("orders-api", D.ORDERS_API), ("inventory", D.INVENTORY), ("storefront", D.STOREFRONT)):
@@ -165,6 +195,8 @@ def test_step_02_standins(github, gitlab, cloudflare, standins, demo):
     cloudflare.zone(ZONE)
     cloudflare.set_team("homelab")
     demo.cf_token = cloudflare.settings_token()
+
+    seed_uptime_kuma(DockerHub(standins), demo.kuma_digest)
 
 
 # ======================================================================== Settings
@@ -319,18 +351,26 @@ def test_new_app_sources(shooter):
 
 
 def test_step_13_registry_uptime_kuma(gitberth, shooter):
-    """New app › Registry image, louislam/uptime-kuma:1, pictured at each step, then Create and start."""
+    """New app › Registry image: Docker Hub's results for postgres (Official and Verified Publisher, from the stand-in),
+    then louislam/uptime-kuma:1 from Popular with its tags in the picker, each step pictured, then Create and start."""
     page = shooter.page()
     shooter.open(page, "/apps/new", wait_for=".gb-srccard")
     box = page.locator("input[placeholder^='Search Docker Hub']")
-    box.fill("uptime-kuma")
-    until(lambda: page.get_by_role("button", name="Use", exact=True).count() > 2, 60, "Docker Hub's search results")
-    page.locator(".gb-tile", has=page.locator(".gb-tile-t", has_text="louislam/uptime-kuma")).first.click()
-    page.locator("#gb-reg-tag").wait_for()
-    until(lambda: page.locator("#gb-reg-tag").input_value() != "", 30, "the tag")
+    box.fill("postgres")
+    results = page.locator("#gb-reg-results [role=option]")
+    until(lambda: results.count() >= 4 and results.locator(".gb-dh-badge--verified-publisher").count() > 0, 60, "Docker Hub's results for postgres",
+          seen=lambda: page.locator(".gb-dh-search").inner_text())
     shooter.quiet(page)
     top(page)
     shooter.window(page, "new-app-registry")
+    page.locator(".gb-tile", has=page.locator(".gb-tile-t", has_text="louislam/uptime-kuma")).first.click()
+    field = page.locator("#gb-reg-tag")
+    field.wait_for()
+    until(lambda: page.locator("#gb-reg-tag-list [role=option]").count() > 0 and field.input_value() == "1", 60, "uptime-kuma's tags, with 1 chosen",
+          seen=lambda: page.locator(".gb-tp").inner_text())
+    shooter.quiet(page)
+    shooter.detail(page, page.locator("section.gb-card", has=page.locator("#gb-reg-title")), "new-app-tags")
+    top(page)
     page.get_by_role("button", name="Continue", exact=True).click()
     page.get_by_role("button", name="Review and create").wait_for(timeout=120_000)
     shooter.quiet(page)
@@ -791,6 +831,20 @@ def test_app_settings_updates(gitberth, shooter):
     page = shooter.page()
     shooter.open(page, "/apps/whoami/settings", wait_for="#sec-source")
     shooter.detail(page, page.locator("#sec-source"), "app-settings-updates")
+
+
+def test_app_settings_tags(gitberth, shooter):
+    """uptime-kuma's Settings › Image › Choose tag…: its tags newest stable first, on its variant, with the row it runs
+    marked Running now (step 2 gave the stand-in its digest); then Cancel."""
+    page = shooter.page()
+    shooter.open(page, f"/apps/{key_of(gitberth, 'uptime-kuma')}/settings", wait_for="#sec-source")
+    page.locator("#sec-source").get_by_role("button", name="Choose tag…").click()
+    dialog = page.locator(".mud-dialog")
+    running = dialog.locator("#gb-dlg-tag-list [role=option]").filter(has_text="Running now")
+    until(lambda: running.count() == 1, 60, "the row uptime-kuma runs, marked Running now", seen=lambda: dialog.inner_text())
+    shooter.quiet(page)
+    shooter.detail(page, dialog, "app-settings-tags", pad=0)
+    dialog.get_by_role("button", name="Cancel").click()
 
 
 def test_app_settings_build(gitberth, shooter):

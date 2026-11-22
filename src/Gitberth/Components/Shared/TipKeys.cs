@@ -1,14 +1,16 @@
 using System.Text;
 using Gitberth.Apps;
 using Gitberth.Data;
+using Gitberth.Images;
 using Gitberth.Network;
 
 namespace Gitberth.Components.Shared;
 
 /// <summary>
 /// The tips the badges and statuses give themselves, by what they show: an app's state (status.running), a deploy's
-/// (status.deploy.failed), an address's access (badge.access.lan), an app's source (badge.source.git) and its
-/// auto-deploy (badge.watch.on). <see cref="Computed"/> lists every one, so the catalog's tests know they're used.
+/// (status.deploy.failed), an address's access (badge.access.lan), an app's source (badge.source.git), its
+/// auto-deploy (badge.watch.on), and Docker Hub's mark on an image New app finds (images.badge.official).
+/// <see cref="Computed"/> lists every one, so the catalog's tests know they're used.
 /// </summary>
 public static class TipKeys
 {
@@ -23,13 +25,23 @@ public static class TipKeys
     /// <summary>A Git app's auto-deploy: on, off, paused while the app is stopped, or on but the repo can't be read.</summary>
     public static readonly IReadOnlyList<string> Watch = ["badge.watch.on", "badge.watch.off", "badge.watch.paused", "badge.watch.error"];
 
+    /// <summary>Docker Hub's mark on a search result (images.badge.official, .verified, .oss); null for none.</summary>
+    public static string? Badge(HubBadge badge) => badge switch
+    {
+        HubBadge.Official => "images.badge.official",
+        HubBadge.VerifiedPublisher => "images.badge.verified",
+        HubBadge.SponsoredOss => "images.badge.oss",
+        _ => null,
+    };
+
     /// <summary>Every key the components above compute at run time (the catalog must have each one).</summary>
     public static IEnumerable<string> Computed =>
         Enum.GetValues<AppState>().Select(State)
             .Concat(Enum.GetValues<DeployStatus>().Select(Deploy))
             .Concat(Enum.GetValues<AddressKind>().Select(Access))
             .Concat(Enum.GetValues<AppSource>().Select(Source))
-            .Concat(Watch);
+            .Concat(Watch)
+            .Concat(Enum.GetValues<HubBadge>().Select(Badge).OfType<string>());
 
     /// <summary>RolledBack → rolled-back, HostOnly → host-only.</summary>
     public static string Kebab(string name)

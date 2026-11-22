@@ -19,6 +19,9 @@ HOSTS = [
     "discord.com", "hooks.slack.com", "ntfy.e2e.test", "notify.e2e.test",
     # GitLab: a self-managed instance's address, and gitlab.com (Gitberth's default instance).
     "gitlab.e2e.test", "gitlab.com",
+    # Docker Hub's search and tags API (not its registry, registry-1.docker.io, nor auth.docker.io), and a registry of
+    # one's own: what New app's image search and the tag picker call.
+    "hub.docker.com", "index.docker.io", "registry.e2e.test",
 ]
 
 

@@ -227,6 +227,22 @@ These show in the change dialog, in the **Ports** card, or as a banner on the ap
 | "There's no earlier image to go back to: Gitberth hasn't updated it." or "The image it ran before (…) isn't on this host any more." | **Roll back** needs the image the app ran before its last update, and it's gone or never existed. | Go back by tag instead: see [Go back to an older version](updates.md#go-back-to-an-older-version). |
 | An app set to **When I ask** has no **Update** tag in the Apps list | That's the choice: no scheduled checks and no badge. | Click **Check for update** on its page, or choose **Tell me** in **Settings › Image**. |
 
+## Docker Hub search and tags
+
+New app's search and the tag picker (also **Choose tag…** on an app's **Settings** tab) never stop you: typing the
+image's full name, or the tag, always works. See [Run a registry image](run-a-registry-image.md#when-docker-hub-doesnt-answer).
+
+| Message | Cause | Fix |
+|---|---|---|
+| "Docker Hub can't be reached from this host, so there's no search. …" | Gitberth's own container can't open an HTTPS connection to `hub.docker.com`. It searches from its own container, not through Docker, so a proxy set only for Docker (its daemon's settings) doesn't cover it. Gitberth doesn't ask again for a minute. | Let Gitberth's container reach `hub.docker.com` and `index.docker.io` on port 443. Meanwhile, type the image's full name, like `nginx:1.27`. |
+| "Docker Hub asked Gitberth to wait before searching again. …", with **again in …** | Docker Hub's limit on calls from your address. | Nothing: Gitberth waits as long as Docker Hub asked, then searches again by itself. Type the full name meanwhile. |
+| "Docker Hub's search didn't answer properly (HTTP …). …" | Both of Docker Hub's searches failed. | Try again later, or type the full name. |
+| "Docker Hub's full search isn't answering: this is its basic one, with official images marked only." | Docker Hub's full search failed, and its basic one answered. | Nothing: the results are right, with fewer marks. |
+| "Docker Hub has no public image called …: check the name, or add a Docker Hub sign-in in Settings › Registries if it's private." | There's no public image of that name. | Check the name. For a private image, add a Docker Hub sign-in in **Settings › Registries**: its tags are then read from Docker Hub's registry with it. |
+| "… wants a sign-in to list …'s tags: add one in Settings › Registries." | The registry lists the tags only to someone signed in. | Add a sign-in for that registry in **Settings › Registries**, or choose one in **Sign in with**. It's sent only over HTTPS, to that registry and the sign-in service it names. |
+| "… can't be reached from this host, so its tags can't be listed.", "… asked Gitberth to wait before listing tags again." or "… didn't list …'s tags (HTTP …)." | The registry is down, out of reach of Gitberth's container, rate-limiting it, or failing. | Type the tag instead: **Check** asks the registry for it. |
+| A tag's chips are marked **≈** | The registry's tag list doesn't say which tags name the same image, so Gitberth matched them by their names. | Nothing: **Check** asks the registry about the tag you choose. |
+
 ## Domains
 
 | Message | Cause | Fix |

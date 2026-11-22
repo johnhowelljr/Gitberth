@@ -6,11 +6,14 @@ API and cloudflared). A browser drives the UI, and each scenario checks what rea
 volumes and environments in the engine, and the calls the stand-ins recorded.
 
 Gitberth and the scenario runner never reach the real GitHub, GitLab or Cloudflare: those names (gitlab.com, and
-gitlab.e2e.test for a self-managed GitLab) lead to the stand-ins, whose test CA they trust. The rig's engine itself
-resolves names as usual, though. So image pulls go to the real registries
-(Docker Hub, and ghcr.io for the uv image in Gitberth's Python Dockerfiles), and a build step or an app that fetched
-something from github.com would reach the real one. The test app does neither, and an app a scenario deploys mustn't
-either.
+gitlab.e2e.test for a self-managed GitLab) lead to the stand-ins, whose test CA they trust. For Gitberth, so do Docker
+Hub's search and tags API (`hub.docker.com`, `index.docker.io`) and a registry of one's own (`registry.e2e.test`):
+New app's image search and the tag picker never reach the real Docker Hub. Docker Hub's registry itself
+(`registry-1.docker.io`, `auth.docker.io`) isn't redirected, so New app's read of a Docker Hub image's config before
+its pull goes to the real one, as it always has. The rig's engine itself resolves names as usual, though. So image pulls
+go to the real registries (Docker Hub, and ghcr.io for the uv image in Gitberth's Python Dockerfiles), and a build step
+or an app that fetched something from github.com would reach the real one. The test app does neither, and an app a
+scenario deploys mustn't either.
 
 ## Running it
 
@@ -111,10 +114,11 @@ only the catch-all matches runs `@wide` and the report warns: add a rule. The se
 
 Gitberth in the rig runs with shorter waits, `GITBERTH_TEST_TIMINGS`, whose list is in `rig/compose.e2e.yml`: a new
 container's stay-up check (3 s instead of 15), the pull-request list (every 20 s instead of 5 min), restart schedules
-(a schedule minute lasts 20 s, looked at every 2 s), and the keep-running check (`keepEvery`: it looks every 3 s instead
+(a schedule minute lasts 20 s, looked at every 2 s), the keep-running check (`keepEvery`: it looks every 3 s instead
 of 30, brings an app back once it's been down 3 s, and looks first 3 s after start; the tries' 1, 5 and 15 minutes and
-the 10 minutes up that clear them stay). The log says which Gitberth has: `[rig] Gitberth's test timings: ...`, or
-`none (production timings)`.
+the 10 minutes up that clear them stay), and Docker Hub or a registry that couldn't be reached (`hubWait`: left alone
+10 s instead of a minute, and one that asked Gitberth to wait held 10 s at most). The log says which Gitberth has:
+`[rig] Gitberth's test timings: ...`, or `none (production timings)`.
 
 - `E2E_TIMINGS=production` (`--timings production`, `-Timings production`) runs with none: as an install runs.
   `E2E_TEST_TIMINGS`, when set, is passed on as the list itself.
@@ -187,7 +191,9 @@ name `homelab` (`E2E_HOSTNAME`), the LAN 192.168.50.0/24 with Gitberth at `http:
 pages (`E2E_HIDE_RIG=1`, under How it works). Its browser reaches Gitberth through a relay on the rig's engine
 (`shots/relay.py`), so Gitberth sees it come from 192.168.50.10, and it can reach nothing else. Its steps set up the
 docs' demo apps and settings through Gitberth's UI and the stand-ins (the example repos on github.com/you and
-gitlab.com/you, example.com through Cloudflare, a Discord channel). Each shot then takes its picture in a 1440 × 900
+gitlab.com/you, example.com through Cloudflare, a Discord channel, and Docker Hub's louislam/uptime-kuma with `1` naming
+the image Docker Hub gives it now: step 1 pulls it to read its digest, then removes it, so New app still pulls it). Each
+shot then takes its picture in a 1440 × 900
 window at twice the pixels, checks it shows none of the rig's addresses, ports or names and no API token or deploy
 hook's secret, frames it (`shots/frame.py`) and saves it as WebP. The pictures and `report.txt` land in
 `tests/e2e/out/shots`, and the apps stay in the rig to look at. From a PC, `e2e-run.ps1 -Tree <tree> -Shots` does all
@@ -201,7 +207,8 @@ steps started by hand, until `run.sh down` (with the same `E2E_INSTANCE`): take 
 host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privileged, 192.168.70.10, UI on host port 18092)
                                        │  its own engine, volume gitberth-e2e for /var/lib/docker
                                        ├─ gbe2e-standin   10.89.0.2 on gbe2e: HTTPS 443 for github.com, api.github.com,
-                                       │                  gitlab.e2e.test, gitlab.com, api.cloudflare.com, and
+                                       │                  gitlab.e2e.test, gitlab.com, api.cloudflare.com,
+                                       │                  hub.docker.com, index.docker.io, registry.e2e.test, and
                                        │                  Cloudflare's edge; control API on :8099
                                        ├─ gitberth        Gitberth, as docker-compose.yml starts it, plus rig/compose.e2e.yml
                                        ├─ cloudflare-tunnel  the fake cloudflared, on the host's network (edge port 7844)
@@ -213,7 +220,8 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
   and this folder into it, and runs **`rig/inner.sh`** there to build and start everything else.
 - **Gitberth** is the image built from the repo's `Dockerfile`. It's started with `docker-compose.yml` plus
   `rig/compose.e2e.yml`, which adds only test settings:
-  - `extra_hosts` send GitHub's, GitLab's and Cloudflare's names to the stand-in;
+  - `extra_hosts` send GitHub's, GitLab's and Cloudflare's names to the stand-in, and Docker Hub's search and tags API
+    (`hub.docker.com`, `index.docker.io`) and `registry.e2e.test` too (not Docker Hub's registry);
   - `SSL_CERT_FILE` and `GIT_SSL_CAINFO` name a CA bundle made of the image's own CAs plus the rig's test CA;
   - Gitberth also joins the rig's network.
 
@@ -283,6 +291,27 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
     - Its calls are recorded as kind `gitlab` (the API) and `gitlab-git` (git), with the project they're about (`repo`:
       its path, also when asked for by ID) and the token they carried; a token sent in the query is `[FILTERED]` in the
       record's query. No token ever goes to the stand-ins' log.
+  - **The Docker Hub stand-in** (`dh.py`) answers only what New app's image search and the tag picker call (design D3),
+    from seeded repositories with real public names (nginx, postgres, redis, louislam/uptime-kuma, ...) and illustrative
+    numbers:
+    - `hub.docker.com`: Docker Hub's search (`/api/search/v4`: `query`, `from`, `size`, `type`; its badges, stars,
+      pulls as a bucket and exactly, `updated_at`, architectures; the exact name first, then names that start with the
+      query, then by pulls; `type=image` keeps the Hardened Image out) and its tags API
+      (`/v2/namespaces/<ns>/repositories/<repo>/tags`: `page`, `page_size` up to 100, `ordering`, `name` as a
+      substring), newest push first, each tag with its digest and platforms (BuildKit's attestations as
+      `unknown/unknown`), gzipped when asked; a private or unknown repository is Docker Hub's 404. nginx has 130 tags
+      (two pages), its 1.30.7 pushed last, a pre-release, a tag for arm64 alone, a Windows one and a signature;
+    - `index.docker.io`: Docker Hub's basic search (`/v1/search`), official images marked only;
+    - `registry.e2e.test`: a registry with Docker's token flow (a 401 naming `https://registry.e2e.test/token`; a
+      token for a public repository to anyone, a private one's only with its seeded user), `tags/list` in lexical
+      order, 5 to a page with a relative `Link`, and an image's index, manifest and config (`team/api` declares
+      8080/tcp).
+
+    Any other path on these hosts is no route (unrouted). Calls are recorded as kind `dockerhub` or `registry`, with
+    the repository they're about. `dockerhub.answer(host, path, status=, retry_after=, reset_in=, remaining=,
+    close=, times=)` makes the next calls answer a 429, a 5xx, low rate-limit headers or a dropped connection;
+    `dockerhub.seed(...)` seeds or replaces a repository; `dockerhub.reset()` puts the default seed back (so does the
+    rig's reset). Docker Hub's registry (`registry-1.docker.io`, `auth.docker.io`) isn't the stand-in's.
   - **The Cloudflare stand-in** answers what `CloudflareApi.cs` calls in Cloudflare's envelope: token checks, zones,
     DNS records, the tunnel's configuration (each PUT bumps its version, which is kept across restarts), the Zero Trust
     organization, and Access applications. Its tokens have Cloudflare's permission groups. Access is two groups there:
@@ -333,11 +362,16 @@ host ── gbe2e-lan 192.168.70.0/24 ── gitberth-e2e (docker:29-dind, privi
   - Gitberth finding the fake cloudflared;
   - the GitLab stand-in (`TestGitLabStandIn`): its answer shapes and paging, tokens' scopes and users' roles, merge
     requests from branches and forks, statuses, notes, hooks and variables, git with `oauth2:<token>`, its deliveries
-    and its 429s.
+    and its 429s;
+  - the Docker Hub stand-in and `registry.e2e.test` (`TestDockerHubStandIn`, `@t00-dockerhub`): the search's shapes
+    and order, tag pages newest push first, the registry's token flow, `Link` paging, manifests and config, a private
+    repository, and answers on demand.
 
   The shared fixtures are in `conftest.py`, and the helpers in `scenarios/e2e/`.
 - The runner resolves GitHub's, GitLab's and Cloudflare's names to the stand-in and trusts the rig's CA, just as Gitberth
-  does. So `github.rest(...)`, `gitlab.rest(...)` and `cloudflare.rest(...)` get the answers Gitberth gets.
+  does. So `github.rest(...)`, `gitlab.rest(...)` and `cloudflare.rest(...)` get the answers Gitberth gets. Docker Hub's
+  names aren't the runner's to resolve: `dockerhub.rest(host, path)` goes to the stand-in's own name (`gbe2e-standin`,
+  which its certificate covers) with the host in the `Host` header, and gets the same answers.
 
 ### Deliveries
 
@@ -374,6 +408,7 @@ The fixtures (see `conftest.py` and `scenarios/e2e/`):
 | `github` | `token(login=, permissions=, repos=)` (a fine-grained token: `{"statuses": False}` or `"none"` takes a permission away, `"read"` makes it read-only), `change_token`, `rest(verb, path, token)`, `rate_limits()`, `reset_rate_limits()`, `create_repo(name, files=..., private=)` → a `Repo`: `commit`, `create_branch`, `delete_branch`, `fork`, `open_pull`, `update_pull`, `close_pull`, `merge_pull`, `set_variables`, `delete_comment`, `add_foreign_hook` (another service's), `add_pasted_hook` (Gitberth's, made by hand), `state`, `branch_sha`, `statuses`, `comments`, `hooks` (each with `made_by`: api, pasted or foreign), `deliveries`, `send_delivery(..., hook_id=, via_tunnel=, content_type=)`, `git_calls`, `ls_remotes`, `ls_remote_attempts`, `api_calls`, `wait_watcher_passes`, `wait_pulls_listed` (every one of these finds a call however it was answered). |
 | `gitlab` | `token(username=, scopes=, expires_at=, kind=personal\|project\|group\|oauth, project=, group=, access_level=)`, `change_token`, `tokens`, `add_member(target, username, level)`, `rest(verb, path, token, how=header\|bearer\|query, host=)`, `options(self_endpoint=, webhook_timeout=, authenticated_limit=, unauthenticated_limit=)`, `reset_options`, `throttle(path, times=, retry_after=)` (a 429 on demand), `reset_rate_limits`, `calls`, `deliveries`, `create_project("group/sub/name", files=, visibility=)` → a `Project` (`url`, `clone_url`, `id`): `commit`, `create_branch`, `delete_branch`, `fork(namespace, owner)`, `open_mr(source_branch, source=<a fork>, draft=)`, `update_mr`, `close_mr`, `reopen_mr`, `merge_mr`, `approve_mr`, `unapprove_mr`, `add_note`, `delete_note`, `set_variables`/`set_variable`, `add_member`, `add_foreign_hook`, `add_pasted_hook`, `change(archived=, visibility=)`, `state`, `branch_sha`, `mr_refs`, `merge_requests`, `statuses`, `notes`, `hooks` (with their tokens), `variables`, `deliveries`, `send_delivery(event=push\|merge_request, token=, hook_id=, via_tunnel=)`, `resend_delivery(id)`, `git_calls`, `ls_remotes`, `ls_remote_attempts`, `api_calls`, `wait_watcher_passes`, `wait_mrs_listed`. `gl_token` is a token of e2e-bot with `api`; `e2e.gitlab.quote(path)` URL-encodes a project's path, `basic_auth(token)` is git's header. |
 | `cloudflare` | `token(permissions)` (all of `Cloudflare.ALL` by default), `settings_token()` (exactly what Gitberth's Settings asks for: `Cloudflare.AS_SETTINGS_ASKS`), `change_token`, `rest(verb, path, token)`, `zone(name)`, `set_team(name)`, `tunnel()`, `ingress()`, `rules_for(host)`, `set_tunnel_config`, `connector()`, `wait_runs(version, network=)`, `visit(url, signed_in_as=)`, `dns_records`, `add_dns_record`, `delete_dns_record`, `access_apps`, `add_access_app`, `delete_access_app`, `options`, `cloudflared_token`. |
+| `dockerhub` | The Docker Hub stand-in and `registry.e2e.test`: `seed(repository, tags, registry=, private=, user=, password=, config=, search=)` (tags with one digest name one image), `repo(repository)`, `answer(host, path, status=, retry_after=, reset_in=, remaining=, close=, times=)`, `answers()`, `clear_answers()`, `reset()` (the default seed again, no answers; call it in a `finally` after `seed` or `answer`), `calls(since, host=, path=, by_gitberth=)`, `rest(host, path, token=, basic=)`. |
 | `standins` | `seq()` (a marker), `calls(since, host=, method=, path=, kind=, repo=, unrouted=)`, `fail(path, status=, host=, rate_limit=, ...)` to inject a failure, `clear_failures()`. |
 | `engine` | The rig's engine: `inspect`, `running`, `wait_running`, `wait_gone`, `containers`, `container_names`, `env`, `labels`, `image_of`, `mounts`, `host_ports`, `networks`, `address(name, network)`, `exec(name, *cmd, env=)`, `logs(name, since=, streams=)`, `images`, `image_labels`, `volumes`, `anonymous_volumes`, `recreate_fake_cloudflared(token, network)` (then `cloudflare.wait_runs(network=...)`). |
 | `page`, `anon_page`, `new_page` | Browser pages (signed in, not signed in, or made on demand). `gitberth.errors(page)` lists the browser's errors on a page. |
@@ -419,6 +454,12 @@ Rules of thumb:
   without a token). The real limits hold too: a scenario that uses one up calls `github.reset_rate_limits()` after.
 - GitLab's 429: `gitlab.throttle(path, times=1, retry_after=5)`, for the next calls whose path matches (git's too). A
   scenario that changes `gitlab.options(...)` puts them back with `gitlab.reset_options()` in a `finally`.
+- Docker Hub that can't be reached: `dockerhub.answer(host, path, close=True, times=20)`, then `clear_answers()` once
+  Gitberth has said so. .NET sends a request again by itself when a kept-alive connection is dropped before any answer,
+  once for each such connection it holds, so a few dropped connections alone are not a host that can't be reached.
+  Gitberth then leaves the host alone for the rig's `hubWait` (10 s): a scenario that makes it so waits that out before
+  it ends (scenario 39's last one does). Answers and searches are kept 10 minutes by query and by repository: a
+  scenario that needs a fresh answer uses a query or a repository no other scenario uses.
 - A call Gitberth makes that no stand-in route answers fails the scenario (and the run): add the route to the stand-in,
   in GitHub's or Cloudflare's real shape. The scenarios' own `rest()` calls are left out, so a check may ask for a
   missing route on purpose.

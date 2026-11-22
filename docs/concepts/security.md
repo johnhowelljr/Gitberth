@@ -61,7 +61,9 @@ Gitberth mounts the host's Docker socket, `/var/run/docker.sock`, and runs as ro
 
 - `github.com` with git, and `api.github.com`, for repos, the token and repo variables, statuses, comments and webhooks.
 - The GitLab in **Settings › GitLab** (gitlab.com unless you changed it), with git and its API, for the same.
-- Image registries, through the Docker engine, for pulls and update checks, and directly, when **New app** reads an image's ports, volumes and health check before it's pulled. `hub.docker.com` for the image search in **New app**.
+- Image registries, through the Docker engine, for pulls and update checks, and directly, when **New app** reads an image's ports, volumes and health check before it's pulled.
+- Docker Hub, anonymously, for **New app**'s image search and the tag picker: `hub.docker.com` (the search, and a public image's tags) and `index.docker.io` (its basic search, when the full one doesn't answer). No sign-in is ever sent there.
+- A registry's own tag list, for the tag picker (**New app**, and **Choose tag…** on an app's **Settings** tab): anonymously, or with the sign-in saved for that registry, sent only to that registry and to the sign-in service its answer names, over HTTPS. Tag lists, searches and their answers are kept in memory for a few minutes, never on disk.
 - `api.cloudflare.com`, only while domains are on.
 - For a [Railpack build](../reference/railpack.md): mise's version list while Railpack plans, for the versions of the
   tools the app needs, and `ghcr.io` for Railpack's own images.
