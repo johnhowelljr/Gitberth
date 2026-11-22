@@ -60,7 +60,7 @@ Over MCP a refusal or failure is a tool error whose text is the plain sentence t
 
 | Access | What a token with it may call |
 |---|---|
-| **Read** | Every read tool: apps, logs, stats, deploys, previews, health, domains, uptime, the audit log, databases, updates, settings. |
+| **Read** | Every read tool: apps, logs, stats, deploys, previews, health, domains, uptime, the audit log, databases, updates, settings, Docker Hub's search, an image's tags. |
 | **Operate** | Read, plus deploy, restart, start, stop, roll back, cancel a deploy, promote a preview, check for and apply updates, run a cron job now, and previews on or off. |
 | **Admin** | Every tool below. It's full control of this host, like signing in: it can create apps whose containers reach the whole host, so treat an Admin token like the admin password. |
 
@@ -221,6 +221,31 @@ Access: **Read** · read-only
 | Argument | Type | Required | What it is |
 |---|---|---|---|
 | `filter` | string | no | Only images whose tag contains this text (case-insensitive). |
+
+### `search_images`
+
+Searches Docker Hub as New app does, anonymously, in Docker Hub's order (at most 25): each image's name as it's pulled, its badge (official, verified_publisher or sponsored_oss), description, stars, pulls, when it was updated, its architectures, and fits_host (false when Docker Hub lists no image for this host's architecture). basic is true when only Docker Hub's basic search answered (official images marked, no dates or architectures). When Docker Hub can't be searched, problem and message say why (retry_at: when it may be asked again); typing a full image name still works. list_image_tags lists an image's tags.
+
+Access: **Read** · read-only
+
+| Argument | Type | Required | What it is |
+|---|---|---|---|
+| `query` | string | yes | What to search for, 2 to 100 characters: a name or a word, like postgres or nginx. |
+
+### `list_image_tags`
+
+An image's tags as New app's tag picker ranks them, newest stable first: from Docker Hub (with push dates, sizes and platforms), or any registry's own tag list (anonymously, or with the sign-in saved for it in Settings › Registries; no dates there, and floating tags inferred from their names). Each row is one image: its tag in the variant asked for, the floating tags that follow it now (1.31 and latest for 1.31.2), and also its tags in other variants. variants lists the variant chips ("" is the plain one); recommended is the newest stable row for this host, and default_tag the tag New app preselects (one part shorter: 1.31, so patch releases arrive as updates and majors don't). Channels that name no version (bookworm, nightly), other schemes and unparsed names are in other. Signatures, commit and CI tags, single-arch copies and other OSes' tags are left out. When the tags can't be listed, problem and message say why. update_app_settings image changes an app's tag.
+
+Access: **Read** · read-only
+
+| Argument | Type | Required | What it is |
+|---|---|---|---|
+| `image` | string | yes | The image, like nginx, nginx:1.27, louislam/uptime-kuma or ghcr.io/owner/app; a tag or digest only picks the variant. |
+| `variant` | string | no | The variant: a name variants lists (alpine), "" or standard for the plain one, or all. Leave out for the image's own (its tag's), else the default. |
+| `pre_releases` | boolean | no | Include pre-releases (rc, beta, alpha, nightly…), marked. |
+| `filter` | string | no | Only tags containing this text (any case), in every variant, pre-releases included. |
+| `pages` | integer | no | Docker Hub: how many pages of 100 tags to read, newest push first (1 to 10). Default 3. |
+| `limit` | integer | no | How many rows to return (1 to 200). Default 30. |
 
 ### `list_templates`
 
@@ -422,7 +447,7 @@ Access: **Admin** · idempotent
 
 ### `update_app_settings`
 
-Changes an app's settings, as its Settings and Network tabs do, and applies them the way the page would (live where Docker can, else a redeploy or a recreate): name, health check path, memory and CPU limits, restart policy, updates policy, a Git app's auto-deploy and build filters, the down page and its message, the uptime check, or the whole list of ports (on its own: not with other container settings in the same call). Only what's given changes. Previews: set_previews and set_preview_settings.
+Changes an app's settings, as its Settings and Network tabs do, and applies them the way the page would (live where Docker can, else a redeploy or a recreate): name, health check path, memory and CPU limits, restart policy, an image app's image and tag (pulled first when it isn't on this host) and updates policy, a Git app's auto-deploy and build filters, the down page and its message, the uptime check, or the whole list of ports (on its own: not with other container settings in the same call). Only what's given changes. Previews: set_previews and set_preview_settings.
 
 Access: **Admin** · idempotent
 
@@ -435,6 +460,7 @@ Access: **Admin** · idempotent
 | `cpus` | number | no | CPU limit in cores, like 0.5 or 2; 0 for none. |
 | `restart_policy` | string | no | no, always, unless-stopped or on-failure. |
 | `restart_retries` | integer | no | With on-failure only: how many times Docker restarts it before giving up (0: no limit). |
+| `image` | string | no | Image apps: the image and tag or digest to run, like nginx:1.31 (list_image_tags lists them). Pulled first when it isn't on this host, with the app's registry sign-in; then the app is recreated on it. |
 | `updates` | string | no | Image apps: off (when I ask), notify (tell me) or auto (update by itself). |
 | `auto_deploy` | boolean | no | Git apps: deploy new commits by themselves. |
 | `watch_paths` | string | no | Git apps: build filters, one pattern per line: a commit deploys by itself only when it changes a file these match. Empty for any file. |

@@ -21,7 +21,8 @@ namespace Gitberth.Agents.Tools;
 
 /// <summary>
 /// What a person sees across the host: its health, every domain, uptime and the status page, the audit log, databases,
-/// updates waiting, and Gitberth's own settings (never a secret). Every tool here reads; none changes anything.
+/// updates waiting, the images on it, Docker Hub's search and an image's tags (as New app shows them), and Gitberth's own
+/// settings (never a secret). Every tool here reads; none changes anything.
 /// </summary>
 [McpServerToolType]
 public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, DockerCli docker, ContainerStatsCollector stats, ImageService images,
@@ -314,6 +315,145 @@ public sealed class SystemReadTools(AgentContext ctx, AppCatalog catalog, Docker
             }).ToList(),
         };
     }
+
+    [McpServerTool(Name = "search_images", Title = "Search Docker Hub", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
+    [ToolAccess(ApiAccess.Read)]
+    [Description("Searches Docker Hub as New app does, anonymously, in Docker Hub's order (at most 25): each image's name as it's pulled, its badge " +
+        "(official, verified_publisher or sponsored_oss), description, stars, pulls, when it was updated, its architectures, and fits_host (false when " +
+        "Docker Hub lists no image for this host's architecture). basic is true when only Docker Hub's basic search answered (official images marked, " +
+        "no dates or architectures). When Docker Hub can't be searched, problem and message say why (retry_at: when it may be asked again); typing " +
+        "a full image name still works. list_image_tags lists an image's tags.")]
+    public async Task<object> SearchImages(
+        [Description("What to search for, 2 to 100 characters: a name or a word, like postgres or nginx.")] string query,
+        CancellationToken ct = default)
+    {
+        var text = query?.Trim() ?? "";
+        if (text.Length is < 2 or > 100) throw new ToolError("query is 2 to 100 characters: a name or a word, like postgres.");
+        var found = await images.SearchAsync(text, ct);
+        return new
+        {
+            query = found.Query,
+            total = found.Total,
+            basic = found.Basic,
+            images = found.Results.Select(i => new
+            {
+                name = i.Name,
+                badge = BadgeName(i.Badge),
+                description = i.Description.Length == 0 ? null : i.Description,
+                stars = i.Stars,
+                pulls = i.Pulls,
+                pulls_text = i.PullsText,
+                updated = i.Updated,
+                architectures = i.Architectures.Count == 0 ? null : i.Architectures,
+                fits_host = i.FitsHost,
+            }).ToList(),
+            problem = ProblemName(found.Problem),
+            message = found.Message,
+            retry_at = found.RetryAt,
+        };
+    }
+
+    [McpServerTool(Name = "list_image_tags", Title = "List an image's tags", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true)]
+    [ToolAccess(ApiAccess.Read)]
+    [Description("An image's tags as New app's tag picker ranks them, newest stable first: from Docker Hub (with push dates, sizes and platforms), " +
+        "or any registry's own tag list (anonymously, or with the sign-in saved for it in Settings › Registries; no dates there, and floating tags " +
+        "inferred from their names). Each row is one image: its tag in the variant asked for, the floating tags that follow it now (1.31 and latest " +
+        "for 1.31.2), and also its tags in other variants. variants lists the variant chips (\"\" is the plain one); recommended is the newest stable " +
+        "row for this host, and default_tag the tag New app preselects (one part shorter: 1.31, so patch releases arrive as updates and majors don't). " +
+        "Channels that name no version (bookworm, nightly), other schemes and unparsed names are in other. Signatures, commit and CI tags, single-arch " +
+        "copies and other OSes' tags are left out. When the tags can't be listed, problem and message say why. update_app_settings image changes an app's tag.")]
+    public async Task<object> ListImageTags(
+        [Description("The image, like nginx, nginx:1.27, louislam/uptime-kuma or ghcr.io/owner/app; a tag or digest only picks the variant.")] string image,
+        [Description("The variant: a name variants lists (alpine), \"\" or standard for the plain one, or all. Leave out for the image's own (its tag's), else the default.")]
+        string? variant = null,
+        [Description("Include pre-releases (rc, beta, alpha, nightly…), marked.")] bool pre_releases = false,
+        [Description("Only tags containing this text (any case), in every variant, pre-releases included.")] string? filter = null,
+        [Description("Docker Hub: how many pages of 100 tags to read, newest push first (1 to 10). Default 3.")] int pages = 3,
+        [Description("How many rows to return (1 to 200). Default 30.")] int limit = 30,
+        CancellationToken ct = default)
+    {
+        var text = image?.Trim() ?? "";
+        if (ImageReference.Parse(text) is not { } reference) throw new ToolError(ImageService.NotAReference(text));
+        if (pages is < 1 or > 10) throw new ToolError("pages is between 1 and 10.");
+        if (limit is < 1 or > 200) throw new ToolError("limit is between 1 and 200.");
+        var list = await images.TagsAsync(text, pages: pages, ct: ct);
+        var defaultFamily = list.Families.FirstOrDefault(f => f.Default)?.Name ?? "";
+        string? family;
+        if (variant is null) family = reference.Tag is { } tag ? TagViews.FamilyOf(list, tag) ?? defaultFamily : defaultFamily;
+        else if (variant.Trim().Equals("all", StringComparison.OrdinalIgnoreCase)) family = null;
+        else
+        {
+            // A chip's name; "" or standard for the plain one; or any variant a row has (alpine3.24 of nginx, which has no chip).
+            var wanted = variant.Trim();
+            family = list.Families.FirstOrDefault(f => f.Name == wanted)?.Name
+                ?? (wanted.Length == 0 || wanted.Equals("standard", StringComparison.OrdinalIgnoreCase) ? ""
+                    : list.Versions.Any(r => r.Families.Contains(wanted)) || list.Problem != LookupProblem.None ? wanted
+                    : throw new ToolError($"{list.Image} has no variant {wanted}: its variants are " +
+                        $"{string.Join(", ", list.Families.Select(f => f.Name.Length == 0 ? "\"\" (standard)" : f.Name))}, or all."));
+        }
+        var choices = TagViews.For(list, family, pre_releases, filter);
+        return new
+        {
+            image = list.Image,
+            registry = list.Registry,
+            dates = list.Dates,
+            default_variant = defaultFamily,
+            variant = family ?? "all",
+            variants = list.Families.Select(f => new { name = f.Name, label = f.Label, rows = f.Rows }).ToList(),
+            recommended = list.Recommended is { } recommended ? Recommended(list, recommended, defaultFamily) : null,
+            default_tag = list.Default,
+            tags = choices.Take(limit).Select(c => Row(c.Row, c.Tag, c.Follows, c.Recommended)).ToList(),
+            more_rows = choices.Count > limit ? choices.Count - limit : (int?)null,
+            other = string.IsNullOrWhiteSpace(filter) ? list.Other.Take(30).Select(r => Row(r, r.Tag, [], ReferenceEquals(r, list.Recommended))).ToList() : null,
+            read = list.Read,
+            total = list.Total,
+            more = list.More,
+            problem = ProblemName(list.Problem),
+            message = list.Message,
+            retry_at = list.RetryAt,
+        };
+    }
+
+    // A row as list_image_tags gives it: its tag under the variant, the tags following it, and its other tags as "also".
+    private static object Row(TagRow row, string tag, IReadOnlyList<string> follows, bool recommended)
+    {
+        var also = row.Also.Prepend(row.Tag).Where(t => t != tag && !follows.Contains(t)).ToList();
+        return new
+        {
+            tag,
+            version = row.Version,
+            recommended = recommended ? true : (bool?)null,
+            follows = follows.Count == 0 ? null : follows,
+            also = also.Count == 0 ? null : also,
+            pushed = row.Pushed,
+            size_mb = row.Size is long bytes ? Math.Round(bytes / 1024.0 / 1024, 1) : (double?)null,
+            pre_release = row.PreRelease ? true : (bool?)null,
+            fits_host = row.FitsHost,
+            platforms = row.Platforms.Count == 0 ? null : row.Platforms,
+            inferred = row.Inferred ? true : (bool?)null,
+        };
+    }
+
+    private static object Recommended(TagList list, TagRow row, string defaultFamily) =>
+        new { tag = TagViews.View(list, row, defaultFamily).Tag, version = row.Version };
+
+    private static string? BadgeName(HubBadge badge) => badge switch
+    {
+        HubBadge.Official => "official",
+        HubBadge.VerifiedPublisher => "verified_publisher",
+        HubBadge.SponsoredOss => "sponsored_oss",
+        _ => null,
+    };
+
+    private static string? ProblemName(LookupProblem problem) => problem switch
+    {
+        LookupProblem.None => null,
+        LookupProblem.NotFound => "not_found",
+        LookupProblem.NeedsSignIn => "needs_sign_in",
+        LookupProblem.Unreachable => "unreachable",
+        LookupProblem.RateLimited => "rate_limited",
+        _ => "failed",
+    };
 
     [McpServerTool(Name = "list_templates", Title = "List app templates", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
     [ToolAccess(ApiAccess.Read)]

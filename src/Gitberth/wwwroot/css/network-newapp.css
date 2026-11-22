@@ -340,6 +340,75 @@ a.gb-fn:hover { border-color: color-mix(in srgb, var(--ac, #fff) 50%, rgba(255, 
 .gb-searchbox { height: 44px; font-size: 15px; }
 .gb-searchbox input { font-family: var(--gb-mono); }
 .gb-kbd2 { font: 600 10.5px/1 var(--gb-sans); padding: 4px 6px; border-radius: 5px; color: var(--gb-text-3); background: var(--gb-surface-3); box-shadow: inset 0 0 0 1px var(--gb-line-2); }
+
+/* Registry image: Docker Hub's search (gb-dh-). A result: name, badge and On this host on one line, its description, then
+   its stars, pulls and when it was updated, with a warning when it has no image for this host. ↓/↑ highlight a row;
+   the picked one keeps the accent. */
+.gb-dh-search { padding-bottom: 12px; }
+.gb-dh-hint { margin-top: 8px; }
+.gb-dh-busy { display: inline-grid; place-items: center; color: var(--gb-text-3); }
+.gb-dh-busy .gb-i { width: 16px; height: 16px; animation: gb-spin .9s linear infinite; }
+.gb-dh-problem, .gb-tp-problem {
+    display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border-radius: var(--gb-r-md); font-size: 12.5px; line-height: 1.5;
+    color: #ffe2a6; border: 1px solid color-mix(in srgb, var(--gb-warn) 28%, transparent); background: color-mix(in srgb, var(--gb-warn) 7%, transparent);
+}
+.gb-dh-problem { margin-top: 10px; }
+.gb-dh-problem .gb-i, .gb-tp-problem .gb-i { color: var(--gb-warn); margin-top: 2px; flex: none; }
+.gb-dh-basic { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--gb-text-3); }
+.gb-dh-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+.gb-resrow--hl { background: var(--gb-hover); box-shadow: inset 3px 0 0 var(--gb-line-3); }
+.gb-dh-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.gb-dh-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.gb-dh-line .gb-resrow-t { min-width: 0; max-width: 100%; }
+.gb-dh-main .gb-resrow-s { margin-top: 0; }
+.gb-dh-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 0; font-size: 12px; color: var(--gb-text-3); font-variant-numeric: tabular-nums; }
+.gb-dh-meta .gb-dh-m + .gb-dh-m::before { content: "·"; margin: 0 7px; color: var(--gb-text-4); }
+.gb-dh-meta .gb-dh-m ~ .gb-tag { margin-left: 10px; }
+.gb-dh-badge--official { color: var(--gb-accent-text); background: var(--gb-accent-soft); }
+.gb-dh-badge--verified-publisher { color: #8ff0c3; background: rgba(61, 220, 151, .1); }
+.gb-dh-badge--sponsored-oss { color: #cbbcff; background: rgba(139, 92, 246, .15); }
+.gb-dh-acts { display: flex; align-items: center; gap: 6px; }
+.gb-dh-foot { flex-direction: column; align-items: stretch; gap: 14px; color: inherit; font-size: 13.5px; }
+
+/* The tag picker (gb-tp-): New app's Tag, and Settings › Image's Choose tag… dialog. The field, what the selection follows,
+   the variant chips and the pre-release switch, then the rows (≈ 320 px, scrolling), each with its follow chips. */
+.gb-tp { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.gb-tp-status { margin-top: -4px; }
+.gb-tp-listing { display: flex; flex-direction: column; gap: 8px; }
+.gb-tp-skel { display: flex; flex-direction: column; gap: 6px; }
+.gb-tp-skel .gb-skel { height: 34px; }
+.gb-tp-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; }
+.gb-tp-variants { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-width: 0; }
+.gb-tp-bar-l { font-size: 12.5px; font-weight: 600; color: var(--gb-text-2); }
+.gb-tp-pre { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--gb-text-2); }
+.gb-tp-list { max-height: 320px; overflow-y: auto; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); background: var(--gb-inset); }
+.gb-tp-row { padding: 8px 12px; border-top: 1px solid var(--gb-line-1); }
+.gb-tp-row:first-child { border-top: 0; }
+.gb-tp-row--hl { background: var(--gb-hover); }
+.gb-tp-row--on { background: rgba(76, 141, 255, .07); box-shadow: inset 3px 0 0 var(--gb-accent); }
+.gb-tp-row-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; cursor: pointer; }
+.gb-tp-tag { font: 600 13px/1.3 var(--gb-mono); color: var(--gb-text-1); overflow-wrap: anywhere; }
+.gb-tp-when { margin-left: auto; display: inline-flex; gap: 10px; font-size: 12px; color: var(--gb-text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.gb-tp-follows { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.gb-tp-chip { cursor: pointer; font-family: var(--gb-mono); font-weight: 500; background: transparent; border: 1px solid var(--gb-line-2); }
+.gb-tp-chip:hover { border-color: var(--gb-line-3); color: var(--gb-text-1); }
+.gb-tp-chip--on { color: var(--gb-accent-text); background: var(--gb-accent-soft); border-color: var(--gb-accent-line); }
+.gb-tp-approx { color: var(--gb-text-3); font-family: var(--gb-sans); }
+.gb-tag--pre { color: #cbbcff; background: rgba(139, 92, 246, .15); }
+.gb-tp-none { padding: 14px; border: 1px dashed var(--gb-line-3); border-radius: var(--gb-r-md); font-size: 12.5px; color: var(--gb-text-3); }
+.gb-tp-more { margin-top: -4px; }
+.gb-tp-disclose { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--gb-accent-text); font: 600 12.5px/1.4 var(--gb-sans); cursor: pointer; }
+.gb-tp-disclose:hover { text-decoration: underline; text-underline-offset: 3px; }
+.gb-tp-disclose:focus-visible { outline: none; box-shadow: var(--gb-focus); }
+.gb-tp-other { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; padding: 10px 12px; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); }
+.gb-tp-orow { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.gb-tp-orow .gb-tp-when { margin-left: 6px; }
+.gb-tp-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 10px; }
+/* Settings › Image: the field, with Choose tag… beside it. */
+.gb-tp-imagerow { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.gb-tp-imagerow > .gb-input { flex: 1 1 auto; min-width: 0; }
+.gb-tp-imagerow > .gb-btn { flex: none; }
+.gb-tpdlg .gb-tp-list { max-height: 360px; }
 .gb-paste { width: 100%; min-height: 168px; resize: vertical; font: 12.5px/1.65 var(--gb-mono) !important; padding: 12px 14px !important; height: auto !important; white-space: pre-wrap; overflow-wrap: anywhere; }
 .gb-issues { display: flex; flex-direction: column; gap: 10px; }
 .gb-issue-group { border-radius: var(--gb-r-md); border: 1px solid color-mix(in srgb, var(--tone) 30%, transparent); background: color-mix(in srgb, var(--tone) 6%, transparent); padding: 10px 14px; }
@@ -491,6 +560,12 @@ a.gb-fn:hover { border-color: color-mix(in srgb, var(--ac, #fff) 50%, rgba(255, 
     .gb-nrow { padding: 12px 14px; }
     .gb-resrow { grid-template-columns: auto minmax(0, 1fr) auto; }
     .gb-resrow > .r-extra { display: none; }
+    /* The picked image: its links under it; a tag's date and size under its name; Choose tag… under the field. */
+    .gb-dh-picked .gb-dh-row { grid-template-columns: auto minmax(0, 1fr); }
+    .gb-dh-picked .gb-dh-acts { grid-column: 1 / -1; justify-content: flex-end; }
+    .gb-tp-when { margin-left: 0; flex-basis: 100%; }
+    .gb-tp-imagerow { flex-wrap: wrap; }
+    .gb-tp-imagerow > .gb-btn { flex: 1 1 auto; justify-content: center; }
     .gb-read, .gb-everything { grid-template-columns: minmax(0, 1fr); gap: 2px 0; }
     .gb-read dd, .gb-everything dd { margin-bottom: 8px; }
     .gb-cfg-row--env { grid-template-columns: minmax(0, 1fr) auto; }

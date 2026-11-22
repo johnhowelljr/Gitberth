@@ -1,0 +1,91 @@
+@inject ImageService Images
+
+@*
+    Settings › Image's Choose tag…: the image's tags in the tag picker, with the app's own tag selected on its variant's chip
+    and the row it runs marked Running now (its digest is among the running image's). Use <tag> only puts the image and
+    tag in the Image field: the Settings tab's own path does the rest (Pull it when it isn't on this host, Review and
+    apply, the change dialog's Recreate). Nothing is pulled here.
+*@
+<MudDialog Class="gb-cdlg gb-tpdlg" ContentClass="gb-cdlg-content">
+    <TitleContent>
+        <div class="gb-cdlg-head">
+            <span class="gb-cdlg-ic"><SvgIcon Icon="@Icons.Material.Outlined.Sell" /></span>
+            <div style="min-width:0">
+                <div class="gb-cdlg-t">Choose a tag of @name</div>
+                <div class="gb-cdlg-s">@AppTitle runs @Image now. The tag you use goes in the Image field; nothing changes until Review and apply.</div>
+            </div>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <TagPicker Image="@name" RegistryId="RegistryId" Preset="@current" Running="running" OnHost="onHost" Tip="images.tags" FieldId="gb-dlg-tag"
+                   TagChanged="v => tag = v" />
+    </DialogContent>
+    <DialogActions>
+        <div class="gb-cdlg-foot">
+            <span class="gb-help">A tag that isn't on this host is pulled first: Pull it shows beside Review and apply.</span>
+            <Btn Kind="BtnKind.Ghost" OnClick="() => MudDialog.Cancel()">Cancel</Btn>
+            <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Check" OnClick="Use" Disabled="@(Chosen is null)">Use @Shown</Btn>
+        </div>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The Image field's value: postgres:18, ghcr.io/o/r:1.4, or a name with a digest.</summary>
+    [Parameter, EditorRequired] public string Image { get; set; } = "";
+    /// <summary>The app's registry sign-in, to list a private registry's tags with.</summary>
+    [Parameter] public int? RegistryId { get; set; }
+    /// <summary>The image the app's container runs (its ID): the row with one of its digests is Running now.</summary>
+    [Parameter] public string? RunningImage { get; set; }
+    /// <summary>What the lines call the app.</summary>
+    [Parameter] public string AppTitle { get; set; } = "";
+
+    private string name = "";
+    private string current = "latest";
+    private string tag = "";
+    private IReadOnlyCollection<string> running = [];
+    private IReadOnlyCollection<string> onHost = [];
+
+    // The tag as the button says it: what's selected, latest while the field is empty.
+    private string Shown => tag.Trim() is { Length: > 0 } t ? t.StartsWith("sha256:", StringComparison.Ordinal) ? t[..Math.Min(t.Length, 19)] + "…" : t : "latest";
+
+    // The reference the Image field gets; null when the field's text can't be one (a tag Docker refuses).
+    private string? Chosen => ImageReference.Parse(ImagePickerText.Reference(name, tag)) is not null ? ImagePickerText.Reference(name, tag) : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (ImageReference.Parse(Image) is { } parsed)
+        {
+            name = parsed.Name;
+            current = ImagePickerText.TagOf(parsed);
+        }
+        else
+        {
+            name = Image.Trim();
+        }
+        tag = current;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(RunningImage)) running = await Images.DigestsOfAsync(RunningImage);
+        }
+        catch (Exception)
+        {
+            // Without them no row says Running now; the list is the same.
+        }
+        try
+        {
+            var prefix = name + ":";
+            onHost = (await Images.ListLocalAsync()).SelectMany(i => i.Tags)
+                .Where(t => t.StartsWith(prefix, StringComparison.Ordinal)).Select(t => t[prefix.Length..]).ToHashSet(StringComparer.Ordinal);
+        }
+        catch (Exception)
+        {
+            // Without the host's list, no row says On this host.
+        }
+    }
+
+    private void Use()
+    {
+        if (Chosen is { } reference) MudDialog.Close(DialogResult.Ok(reference));
+    }
+}

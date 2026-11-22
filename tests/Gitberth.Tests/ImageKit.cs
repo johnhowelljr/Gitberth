@@ -27,9 +27,10 @@ internal static class ImageKit
 
     public static SecretProtector Protector() => new(new EphemeralDataProtectionProvider());
 
-    public static ImageService Images(Engine engine, Db db, SecretProtector? protector = null, DiskSpace? disk = null, IHttpClientFactory? http = null) =>
+    public static ImageService Images(Engine engine, Db db, SecretProtector? protector = null, DiskSpace? disk = null, IHttpClientFactory? http = null,
+        TimeProvider? time = null) =>
         new(engine, new RegistryService(db, protector ?? Protector(), engine), new GitberthOptions { DataDir = Path.GetTempPath() }, http ?? new NoHttp(),
-            NullLogger<ImageService>.Instance, db) { ReadDisk = () => disk ?? Plenty };
+            NullLogger<ImageService>.Instance, db) { ReadDisk = () => disk ?? Plenty, Time = time ?? TimeProvider.System };
 
     /// <summary>An image as GET /images/{id}/json describes it.</summary>
     public static JsonObject Image(string id, string[] tags, string[]? digests = null, string[]? exposed = null, string[]? volumes = null, string[]? env = null,
@@ -224,12 +225,6 @@ internal static class ImageKit
         {
             OnInspect?.Invoke(nameOrId);
             return Task.FromResult(Find(nameOrId)?.DeepClone() as JsonObject);
-        }
-
-        public Task<JsonArray> SearchImagesAsync(string term, int limit, CancellationToken ct)
-        {
-            Log($"search {term}");
-            return Task.FromResult(JsonNode.Parse(Fixture("Images", "search-postgres.json"))!.AsArray());
         }
 
         public Task<JsonObject> DistributionAsync(string reference, string? registryAuth, CancellationToken ct)

@@ -1,5 +1,7 @@
-"""Clients for the stand-ins' control API: play the people on GitHub and in Cloudflare's dashboard, inject failures, and
-read back what Gitberth asked for (every call is recorded with a sequence number; take one with seq() as a marker)."""
+"""Clients for the stand-ins' control API: play the people on GitHub, in Cloudflare's dashboard and publishing images on
+Docker Hub, inject failures, and read back what Gitberth asked for (every call is recorded with a sequence number; take
+one with seq() as a marker)."""
+import base64
 import json
 import urllib.parse
 
@@ -307,6 +309,80 @@ class Repo:
         return until(lambda: self.api_calls(since, path=r"/pulls$", method="GET", by_gitberth=by_gitberth), timeout,
                      f"Gitberth to list {self.full_name}'s pull requests",
                      seen=lambda: self.api_calls(since, by_gitberth=by_gitberth))[0]
+
+
+class DockerHub:
+    """The Docker Hub stand-in (hub.docker.com's search and tags API, index.docker.io's basic search) and the registry
+    registry.e2e.test, as the people publishing images see them: a repository's tags seeded (and what Docker Hub's search
+    says of it, or the config a registry's manifests lead to), the next calls answered with a 429, a 5xx or a dropped
+    connection, and what Gitberth asked. Docker Hub's registry itself (registry-1.docker.io) isn't the stand-in's."""
+
+    HUB = "docker.io"
+    REGISTRY = "registry.e2e.test"
+    HOSTS = ("hub.docker.com", "index.docker.io", "registry.e2e.test")
+
+    def __init__(self, standins):
+        self.s = standins
+
+    def seed(self, repository, tags, registry=HUB, private=False, user=None, password=None, config=None, search=None):
+        """Seeds or replaces a repository (library/redis, team/api): tags [{name, digest?, pushed? (ISO, or days ago),
+        platforms? (["linux/amd64", "linux/arm64/v8"] unless said), size?}], those with the same digest naming one image.
+        search: what Docker Hub's search says of it ({badge, stars, pulls, description, architectures, updated_days}).
+        Returns its state. reset() puts the default seed back."""
+        body = {"registry": registry, "repository": repository, "tags": tags, "private": private, "user": user, "password": password,
+                "config": config, "search": search}
+        return self.s.api("PUT", "/dockerhub/repo", {k: v for k, v in body.items() if v is not None})
+
+    def repo(self, repository, registry=HUB):
+        """A repository as seeded: its tags (newest push first), its search facts, its config."""
+        return self.s.api("GET", "/dockerhub/repo", query={"registry": registry, "repository": repository})
+
+    def answer(self, host, path, status=None, retry_after=None, reset_in=None, remaining=None, close=False, times=1):
+        """The next `times` calls to host under path get this answer: a status (a 429 with Retry-After in seconds and
+        x-ratelimit-reset reset_in seconds ahead, a 500), or without one the usual answer with x-ratelimit-remaining
+        `remaining`; close=True drops the connection instead. Returns the answer, with its id."""
+        body = {"host": host, "path": path, "status": status, "retry_after": retry_after, "reset_in": reset_in, "remaining": remaining,
+                "close": close or None, "times": times}
+        return self.s.api("POST", "/dockerhub/answer", {k: v for k, v in body.items() if v is not None})
+
+    def answers(self):
+        """The answers set, with how many calls each still takes (left) and has taken (hits)."""
+        return self.s.api("GET", "/dockerhub/answers")["answers"]
+
+    def clear_answers(self):
+        """No answer set any more: every call answers as usual again (the seeded repositories stay)."""
+        self.s.api("DELETE", "/dockerhub/answers")
+
+    def reset(self):
+        """The default seed again, and no answers set: for a scenario that re-seeded a repository (nothing else is reset)."""
+        return self.s.api("POST", "/dockerhub/reset", {})
+
+    def calls(self, since=0, host=None, path=None, by_gitberth=True):
+        """The calls to Docker Hub's hosts and the registry since the marker (host: one of them; path: a regex), in order;
+        the scenario's own calls only when by_gitberth is False."""
+        out = []
+        for h in [host] if host else self.HOSTS:
+            out += self.s.calls(since, host=h, path=path)
+        out.sort(key=lambda c: c["seq"])
+        return [c for c in out if not by_gitberth or (c.get("headers") or {}).get("User-Agent") != RUNNER_AGENT]
+
+    @staticmethod
+    def rest(host, path, token=None, basic=None, method="GET"):
+        """A call to the stand-in's HTTPS side for one of these hosts, as Gitberth would make it. The runner doesn't resolve
+        Docker Hub's names to the stand-in, so it goes to the stand-in's own name (which its certificate covers) with the
+        host in the Host header. token: a registry's bearer token; basic: (user, password). Returns (status, headers,
+        parsed JSON or the text); a dropped connection raises."""
+        headers = {"User-Agent": RUNNER_AGENT, "Host": host, "Accept": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        elif basic:
+            headers["Authorization"] = "Basic " + base64.b64encode(f"{basic[0]}:{basic[1]}".encode()).decode()
+        standin = urllib.parse.urlsplit(config.STANDIN_URL).hostname
+        status, hdrs, text = call(method, f"https://{standin}{path}", None, headers)
+        try:
+            return status, hdrs, json.loads(text) if text else None
+        except ValueError:
+            return status, hdrs, text
 
 
 class Cloudflare:

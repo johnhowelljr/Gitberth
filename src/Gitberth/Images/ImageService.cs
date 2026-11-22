@@ -11,15 +11,16 @@ using Microsoft.EntityFrameworkCore;
 namespace Gitberth.Images;
 
 /// <summary>
-/// The images on the host and in registries, for New app and for updates: the local list, Docker Hub's search and tags,
-/// what a registry says about a reference (without pulling), pulls in the background with their progress, the free space
-/// on Docker's disk, and removing an image nothing uses. Gitberth talks to registries through the Engine API, with the
-/// credentials <see cref="RegistryService"/> keeps; only New app's look at an image the host doesn't have yet asks the
-/// registry itself, for the image's config (<see cref="RemoteFactsAsync"/>).
+/// The images on the host and in registries, for New app and for updates: the local list, Docker Hub's search and an
+/// image's tags (ranked newest stable first), what a registry says about a reference (without pulling), pulls in the
+/// background with their progress, the free space on Docker's disk, and removing an image nothing uses. Pulls, update
+/// checks and sign-in checks go through the Engine API, with the credentials <see cref="RegistryService"/> keeps. Gitberth
+/// asks Docker Hub and registries itself only to read: Docker Hub's search and tags API (anonymously, <see cref="SearchAsync"/>,
+/// <see cref="TagsAsync"/>), a registry's tag list, and an image's config before it's pulled (<see cref="RemoteFactsAsync"/>).
 /// </summary>
 public sealed class ImageService
 {
-    /// <summary>The named HttpClient for Docker Hub's public tags API (Program.cs gives it a 10 s timeout).</summary>
+    /// <summary>The named HttpClient for Docker Hub's search and tags API: anonymous, never redirected (Program.cs).</summary>
     public const string HubClient = "dockerhub";
 
     private readonly IImageEngine _engine;
@@ -51,12 +52,42 @@ public sealed class ImageService
         _logger = logger;
         _dbFactory = dbFactory;
         _audit = audit;
+        _lookups = new Lazy<Lookups>(() => new Lookups(Time, _http, _logger, HostWaitCap));
     }
 
     private readonly Audit.AuditLog? _audit;
 
     /// <summary>Reads Docker's disk; tests give their own.</summary>
     internal Func<DiskSpace>? ReadDisk { get; init; }
+
+    /// <summary>The clock searches and tag lists are kept by (and a host's wait counted down); tests give their own.</summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// The most a host that couldn't be reached is left alone, or one that asked Gitberth to wait is held: the end-to-end
+    /// rig's test timings (hubWait) set it before anything is asked; null as installed (a minute; as long as the host asks).
+    /// </summary>
+    internal TimeSpan? HostWaitCap { get; set; }
+
+    // Docker Hub's API and the registries' tag lists, with what's remembered about their hosts: made on first use.
+    private readonly Lazy<Lookups> _lookups;
+
+    private sealed class Lookups
+    {
+        public Lookups(TimeProvider time, IHttpClientFactory http, ILogger logger, TimeSpan? cap)
+        {
+            Gates = new HostGates(time) { Cap = cap };
+            Hub = new DockerHubApi(http, time, Gates, logger);
+            // 200 lists, and 100,000 tags in all (a list holds 10,000 at most): about 30 MB at worst.
+            Lists = new TimedCache<RegistryTags>(time, 200, list => list.Tags.Count, MaxListedTags);
+        }
+
+        public const int MaxListedTags = 100_000;
+
+        public HostGates Gates { get; }
+        public DockerHubApi Hub { get; }
+        public TimedCache<RegistryTags> Lists { get; }
+    }
 
     /// <summary>Sees each line of a pull's stream as Docker sent it: the real-engine test records them.</summary>
     internal Action<JsonObject>? PullLine { get; init; }
@@ -132,46 +163,135 @@ public sealed class ImageService
     }
 
     /// <summary>
-    /// Docker Hub's search, through the daemon: official images first, then by stars. Throws with Docker's words when Docker
-    /// Hub can't be searched.
+    /// Docker Hub's search: its full one (badges, pulls, dates, architectures), else its basic one. Never throws but for
+    /// cancellation: a problem comes back in the answer, with a sentence for the owner. Under 2 or over 100 characters
+    /// (trimmed) nothing is asked.
     /// </summary>
-    /// <exception cref="InvalidOperationException">The search failed; its message says why.</exception>
-    public async Task<IReadOnlyList<HubResult>> SearchAsync(string term, CancellationToken ct = default)
+    public async Task<HubSearch> SearchAsync(string term, CancellationToken ct = default)
     {
         var text = term?.Trim() ?? "";
-        if (text.Length == 0) return [];
+        if (text.Length is < 2 or > 100) return new HubSearch(text, [], 0, false);
         try
         {
-            return ParseSearch(await _engine.SearchImagesAsync(text, 25, ct));
+            return await _lookups.Value.Hub.SearchAsync(text, (await PlatformAsync(ct)).Architecture, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            throw new InvalidOperationException($"Docker Hub couldn't be searched: {ex.Message}", ex);
+            _logger.LogDebug(ex, "Docker Hub's search for {Term} failed", text);
+            return new HubSearch(text, [], 0, false, LookupProblem.Failed, LookupText.Search(LookupProblem.Failed, 0));
         }
     }
 
     /// <summary>
-    /// A Docker Hub repository's tags, most recently pushed first, from Docker Hub's public API; empty for another
-    /// registry, or when Docker Hub didn't answer (the tag is then typed in).
+    /// An image's tags, ranked newest stable first: Docker Hub's tags API (dates, digests, platforms), or any registry's tag
+    /// list, anonymously or with the sign-in saved for it. Never throws but for cancellation: a problem comes back in the list.
+    /// A Docker Hub repository its API doesn't show (a private one) is listed by its registry when a Docker Hub sign-in is saved.
     /// </summary>
-    public async Task<IReadOnlyList<string>> TagsAsync(ImageReference reference, CancellationToken ct = default)
+    /// <param name="reference">Any form ImageReference.Parse takes; its tag or digest is ignored.</param>
+    /// <param name="registryId">The sign-in to use, as <see cref="RemoteFactsAsync"/> takes it.</param>
+    /// <param name="pages">Docker Hub only: how many pages of 100 to read (1 to 10).</param>
+    /// <param name="name">Docker Hub only: its filter on tag names (a substring).</param>
+    public async Task<TagList> TagsAsync(string reference, int? registryId = null, int pages = 3, string? name = null, CancellationToken ct = default)
     {
-        if (!reference.IsDockerHub) return [];
-        var slash = reference.Repository.IndexOf('/');
-        var url = $"https://hub.docker.com/v2/namespaces/{Uri.EscapeDataString(reference.Repository[..slash])}/repositories/" +
-                  $"{Uri.EscapeDataString(reference.Repository[(slash + 1)..])}/tags?page_size=100&ordering=last_updated";
+        if (ImageReference.Parse(reference) is not { } parsed) return NoTags(reference?.Trim() ?? "", "", LookupProblem.NotFound, NotAReference(reference));
+        var (image, registry) = (parsed.Name, parsed.RegistryName);
         try
         {
-            using var client = _http.CreateClient(HubClient);
-            using var response = await client.GetAsync(url, ct);
-            if (!response.IsSuccessStatusCode) return [];
-            return ParseTags(await response.Content.ReadAsStringAsync(ct));
+            var platform = await PlatformAsync(ct);
+            if (!parsed.IsDockerHub) return await RegistryTagsAsync(parsed, await _registries.SignInAsync(parsed, registryId, ct), platform, ct);
+            var filter = name?.Trim() is { Length: > 0 } text ? text[..Math.Min(text.Length, 128)] : null;
+            var hub = await _lookups.Value.Hub.TagsAsync(parsed, pages, filter, platform, ct);
+            if (hub.Problem == LookupProblem.None) return TagRanking.Rank(image, registry, hub.Tags, platform, hub.Total, hub.More);
+            // Not on Docker Hub's public API: a private repository's tags come from its registry, with the saved sign-in.
+            if (hub.Problem == LookupProblem.NotFound && await _registries.SignInAsync(parsed, registryId, ct) is { } signIn)
+                return await RegistryTagsAsync(parsed, signIn, platform, ct);
+            return NoTags(image, registry, hub.Problem, LookupText.Tags(hub.Problem, registry, image, hub.Status), hub.RetryAt);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogDebug(ex, "Docker Hub's tags for {Repository} couldn't be read", reference.Name);
+            _logger.LogDebug(ex, "{Image}'s tags couldn't be listed", image);
+            return NoTags(image, registry, LookupProblem.Failed, LookupText.Tags(LookupProblem.Failed, registry, image, 0));
+        }
+    }
+
+    // A registry's own tag list (tags/list): no dates, no digests. Kept ten minutes per sign-in, by its user name only.
+    private async Task<TagList> RegistryTagsAsync(ImageReference reference, RegistrySignIn? signIn, HostPlatform platform, CancellationToken ct)
+    {
+        var (image, registry) = (reference.Name, reference.RegistryName);
+        var lookups = _lookups.Value;
+        var host = new Uri(RegistryClient.BaseOf(reference)).Authority;
+        var key = $"{reference.Registry}/{reference.Repository}|{(signIn is null ? "anon" : "as:" + signIn.Username)}";
+        var listed = await ListedAsync(lookups, reference, signIn, host, key, ct);
+        if (listed.Problem != LookupProblem.None)
+            return NoTags(image, registry, listed.Problem, LookupText.Tags(listed.Problem, registry, image, listed.Status), listed.RetryAt?.UtcDateTime);
+        return TagRanking.Rank(image, registry, listed.Tags.Select(t => new TagFacts(t, null, null, null, null)).ToList(), platform, listed.Tags.Count, false);
+    }
+
+    // The registry's list as kept, else asked for in the host's turn, waited for no longer than a listing may take; then the
+    // listing has its own 20 s, so 40 s at worst behind a busy host (a shorter listing could be cut short and the registry
+    // taken for down). What the listings ahead of it found meanwhile (the list itself, a wait the host asked for, the host
+    // down) is used as is.
+    private async Task<RegistryTags> ListedAsync(Lookups lookups, ImageReference reference, RegistrySignIn? signIn, string host, string key, CancellationToken ct)
+    {
+        if (Known(lookups, host, key) is { } known) return known;
+        IDisposable slot;
+        using (var wait = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            wait.CancelAfter(RegistryClient.ListTimeout);
+            try
+            {
+                slot = await lookups.Gates.SlotAsync(host, wait.Token, listing: true);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // Its turn didn't come in time: nothing was asked, so the host isn't taken for down.
+                return new RegistryTags([], LookupProblem.Unreachable);
+            }
+        }
+        using (slot)
+        {
+            if (Known(lookups, host, key) is { } meanwhile) return meanwhile;
+            RegistryTags listed;
+            using (var client = _http.CreateClient(RegistryClient.ClientName))
+                listed = await new RegistryClient(client, Time).TagsAsync(reference, signIn, ct);
+            if (listed.Problem == LookupProblem.None) lookups.Lists.Set(key, listed, DockerHubApi.Keep);
+            else if (listed.Problem == LookupProblem.NotFound) lookups.Lists.Set(key, listed, DockerHubApi.KeepNotFound);
+            else if (listed.Problem == LookupProblem.Unreachable) lookups.Gates.Down(host);
+            else if (listed is { Problem: LookupProblem.RateLimited, RetryAt: { } until }) listed = listed with { RetryAt = lookups.Gates.Hold(host, until) };
+            return listed;
+        }
+    }
+
+    private static RegistryTags? Known(Lookups lookups, string host, string key) =>
+        lookups.Lists.TryGet(key, out var kept) ? kept
+        : lookups.Gates.HeldUntil(host) is { } held ? new RegistryTags([], LookupProblem.RateLimited, 0, held)
+        : lookups.Gates.IsDown(host) ? new RegistryTags([], LookupProblem.Unreachable)
+        : null;
+
+    private static TagList NoTags(string image, string registry, LookupProblem problem, string message, DateTime? retryAt = null) =>
+        new(image, registry, false, [], [], [], null, null, 0, 0, false, problem, message, retryAt);
+
+    /// <summary>The digests (sha256:…) in the image's RepoDigests, for the tag picker's "Running now"; empty when it isn't on the host.</summary>
+    public async Task<IReadOnlyList<string>> DigestsOfAsync(string imageIdOrReference, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(imageIdOrReference)) return [];
+        try
+        {
+            if (await _engine.InspectImageAsync(imageIdOrReference.Trim(), ct) is not { } image) return [];
+            return Strings(image["RepoDigests"]).Select(DigestOf).OfType<string>().Distinct(StringComparer.Ordinal).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogDebug(ex, "The digests of {Image} couldn't be read", imageIdOrReference);
             return [];
         }
+    }
+
+    /// <summary>This host's architecture as registries name it (amd64, arm64, arm/v7): the tag picker's "No arm64 image".</summary>
+    public async Task<string> HostArchitectureAsync(CancellationToken ct = default)
+    {
+        var platform = await PlatformAsync(ct);
+        return platform.Variant is { } variant ? $"{platform.Architecture}/{variant}" : platform.Architecture;
     }
 
     /// <summary>
@@ -448,27 +568,6 @@ public sealed class ImageService
                 tags.Any(t => t.StartsWith("gitberth/", StringComparison.Ordinal) || t.StartsWith("gitberth:", StringComparison.Ordinal))));
         }
         return list.OrderByDescending(i => i.Created).ThenBy(i => i.Tags[0], StringComparer.Ordinal).ToList();
-    }
-
-    internal static List<HubResult> ParseSearch(JsonArray results) =>
-        results.OfType<JsonObject>()
-            .Select(r => new HubResult(Str(r, "name"), Str(r, "description"), (int)ContainerPorts.Number(r, "star_count"),
-                r["is_official"]?.GetValueKind() == JsonValueKind.True))
-            .Where(r => r.Name.Length > 0)
-            .OrderByDescending(r => r.Official).ThenByDescending(r => r.Stars).ThenBy(r => r.Name, StringComparer.Ordinal)
-            .ToList();
-
-    /// <summary>Docker Hub's tags answer: {"results":[{"name":"18"},…]}.</summary>
-    internal static List<string> ParseTags(string json)
-    {
-        try
-        {
-            return (JsonNode.Parse(json)?["results"] as JsonArray ?? []).OfType<JsonObject>().Select(t => Str(t, "name")).Where(n => n.Length > 0).ToList();
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
     }
 
     /// <summary>The digest of a RepoDigests entry: sha256:… of postgres@sha256:….</summary>

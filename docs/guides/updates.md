@@ -135,11 +135,22 @@ For a Git app, roll back to an earlier deploy on its **Activity** tab instead (s
 **Roll back** goes back one update. To run an older version than that, or one that was never on the host, change the tag the app follows:
 
 1. Open the app's **Settings** tab and go to the **Image** section.
-2. In **Image**, type the older version's tag, for example `traefik/whoami:v1.10`.
-3. If the bar at the bottom says the image isn't on this host yet, click **Pull it**.
+2. Click **Choose tag…** beside **Image**. The image's tags are listed newest stable version first, as New app lists
+   them (see [Choose the tag](run-a-registry-image.md#choose-the-tag)), on the variant the app runs, with its tag
+   selected. The row the app runs says **Running now**, and every newer version sits above it. Click the older version's
+   row, or one of its chips to follow a floating tag such as `v1.10`, then **Use …**. Or type the tag in **Image**
+   yourself, for example `traefik/whoami:v1.10`.
+
+   ![Choose tag on an app's Settings tab: uptime-kuma's tags, the row it runs marked Running now](../images/app-settings-tags.webp)
+
+3. If the bar at the bottom says the image isn't on this host yet, click **Pull it**. Nothing is pulled before.
 4. Click **Review and apply**, then **Recreate whoami** in the change dialog.
 
-The app now follows the tag you typed. To stop an app moving forward by itself, set its **Updates** choice to **When I ask** or **Tell me**, or give it a tag that names one version rather than `latest`.
+The app now follows the tag you chose. To stop an app moving forward by itself, set its **Updates** choice to **When I ask** or **Tell me**, or give it a tag that names one version rather than `latest`.
+
+For a database (Postgres, MySQL, Redis and the like), a tag that may be another major version is refused: a new major
+version can't read the older one's data files. Pick a tag of the same major version, or dump the data and restore it
+into a new app.
 
 ## Related
 

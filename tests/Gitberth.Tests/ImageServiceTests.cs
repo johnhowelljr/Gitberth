@@ -325,48 +325,6 @@ public class ImageServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Searches_docker_hub_official_images_first()
-    {
-        var results = await ImageKit.Images(_engine, _db).SearchAsync("postgres");
-
-        Assert.Equal(["postgres", "circleci/postgres", "cimg/postgres", "kasmweb/postgres", "elestio/postgres"], results.Select(r => r.Name));
-        Assert.Equal(new HubResult("postgres", "The PostgreSQL object-relational database system provides reliability and data integrity.", 15048, true), results[0]);
-        Assert.Empty(await ImageKit.Images(_engine, _db).SearchAsync("  "));
-    }
-
-    [Fact]
-    public async Task Reads_docker_hubs_tags_and_nothing_elsewhere()
-    {
-        var hub = new Hub("""{"count":2,"results":[{"name":"18","last_updated":"2026-11-01"},{"name":"17"}]}""");
-        var images = ImageKit.Images(_engine, _db, http: hub);
-
-        Assert.Equal(["18", "17"], await images.TagsAsync(ImageReference.Parse("postgres")!));
-        Assert.Equal("https://hub.docker.com/v2/namespaces/library/repositories/postgres/tags?page_size=100&ordering=last_updated", Assert.Single(hub.Asked));
-        Assert.Empty(await images.TagsAsync(ImageReference.Parse("ghcr.io/o/r")!));
-        Assert.Empty(await ImageKit.Images(_engine, _db).TagsAsync(ImageReference.Parse("postgres")!));
-    }
-
-    private sealed class Hub(string answer) : IHttpClientFactory
-    {
-        public List<string> Asked { get; } = [];
-
-        public HttpClient CreateClient(string name)
-        {
-            Assert.Equal(ImageService.HubClient, name);
-            return new HttpClient(new Handler(this, answer));
-        }
-
-        private sealed class Handler(Hub hub, string answer) : HttpMessageHandler
-        {
-            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            {
-                hub.Asked.Add(request.RequestUri!.ToString());
-                return Task.FromResult(Json(answer));
-            }
-        }
-    }
-
-    [Fact]
     public async Task Reads_an_images_facts()
     {
         _engine.Add(DockerFixtures.Json("image-postgres.json").AsObject());
@@ -385,6 +343,108 @@ public class ImageServiceTests : IDisposable
         }
         Assert.Equal(Apps.ImageOrigin.Registry, (await ImageKit.Images(_engine, _db).FactsAsync("postgres:18"))!.Origin);
         Assert.Null(await ImageKit.Images(_engine, _db).FactsAsync("redis:7"));
+    }
+
+    // ---- Docker Hub's search and an image's tags (New app's picker), and what the picker reads from the host ----
+
+    [Fact]
+    public async Task Search_asks_nothing_under_two_characters_and_marks_results_by_this_hosts_architecture()
+    {
+        var http = new FakeHttp { Answer = _ => FakeHttp.Json(ImageKit.Fixture("DockerHub", "search-v4-nginx.json")) };
+        _engine.Info["Architecture"] = "aarch64";
+        var images = ImageKit.Images(_engine, _db, http: http);
+
+        var tooShort = await images.SearchAsync(" n ");
+        Assert.Equal(("n", 0, LookupProblem.None), (tooShort.Query, tooShort.Results.Count, tooShort.Problem));
+        Assert.Empty(http.Requests);
+
+        var found = await images.SearchAsync("  nginx ");
+        Assert.Equal("nginx", found.Query);
+        Assert.Equal(["https://hub.docker.com/api/search/v4?query=nginx&from=0&size=25&type=image"], http.Urls);
+        // An arm64 host: arm64v8/nginx is this host's; none lacks arm64 here.
+        Assert.All(found.Results, r => Assert.True(r.FitsHost, r.Name));
+    }
+
+    [Fact]
+    public async Task Tags_on_docker_hub_are_ranked_for_this_host_newest_stable_first()
+    {
+        var results = new JsonArray();
+        void Add(char digest, string pushed, string[] platforms, params string[] tags)
+        {
+            foreach (var tag in tags)
+                results.Add(new JsonObject
+                {
+                    ["name"] = tag, ["digest"] = ImageKit.Digest(digest), ["content_type"] = "image", ["tag_last_pushed"] = pushed, ["full_size"] = 26_000_000,
+                    ["images"] = new JsonArray(platforms.Select(p => (JsonNode)new JsonObject
+                    {
+                        ["os"] = p.Split('/')[0], ["architecture"] = p.Split('/')[1], ["variant"] = p.Split('/').ElementAtOrDefault(2), ["size"] = 26_000_000,
+                    }).ToArray()),
+                });
+        }
+        string[] both = ["linux/amd64", "linux/arm64/v8"];
+        Add('b', "2026-11-21T10:00:00Z", both, "stable", "1.30", "1.30.7");
+        Add('a', "2026-11-20T10:00:00Z", both, "latest", "mainline", "1", "1.31", "1.31.2");
+        Add('c', "2026-11-20T10:00:00Z", both, "alpine", "1.31-alpine", "1.31.2-alpine");
+        Add('9', "2026-11-19T10:00:00Z", ["linux/arm64/v8"], "1.31.2-perl");
+        Add('8', "2026-11-19T09:00:00Z", ["windows/amd64"], "windowsservercore-ltsc2025");
+        var http = new FakeHttp { Answer = _ => FakeHttp.Json(new JsonObject { ["count"] = results.Count, ["results"] = results.DeepClone() }.ToJsonString()) };
+
+        var list = await ImageKit.Images(_engine, _db, http: http).TagsAsync("nginx:1.27");
+
+        // Read: the Windows-only tag is left out.
+        Assert.Equal(("nginx", "Docker Hub", true, "1.31", 12, false), (list.Image, list.Registry, list.Dates, list.Default, list.Read, list.More));
+        Assert.Equal(["1.31.2", "1.30.7"], TagViews.For(list, "", false).Select(c => c.Tag));
+        Assert.Equal(["Standard", "alpine", "perl"], list.Families.Select(f => f.Label));
+        // On this amd64 host perl's only image isn't one it runs: listed, marked.
+        Assert.False(list.Versions.Single(r => r.Tag == "1.31.2-perl").FitsHost);
+        Assert.Equal(["https://hub.docker.com/v2/namespaces/library/repositories/nginx/tags?page=1&page_size=100&ordering=last_updated"], http.Urls);
+    }
+
+    [Fact]
+    public async Task Tags_of_a_reference_docker_wont_take_are_refused_without_asking()
+    {
+        var http = new FakeHttp();
+
+        var list = await ImageKit.Images(_engine, _db, http: http).TagsAsync("Not An Image");
+
+        Assert.Equal(LookupProblem.NotFound, list.Problem);
+        Assert.StartsWith("Not An Image isn't an image name Docker takes", list.Message);
+        Assert.Empty(http.Requests);
+    }
+
+    [Theory]
+    [InlineData("nginx", "Docker Hub can't be reached from this host, so its tags can't be listed.")]
+    [InlineData("ghcr.io/owner/app:1.4", "ghcr.io can't be reached from this host, so its tags can't be listed.")]
+    public async Task Tags_with_no_network_cant_be_reached_and_say_so(string reference, string message)
+    {
+        var list = await ImageKit.Images(_engine, _db).TagsAsync(reference);
+
+        Assert.Equal((LookupProblem.Unreachable, message), (list.Problem, list.Message));
+        Assert.Empty(list.Versions);
+    }
+
+    [Fact]
+    public async Task The_digests_of_an_image_on_the_host_are_its_repo_digests()
+    {
+        _engine.Add(ImageKit.Image(ImageKit.Id('a'), ["redis:8-alpine", "redis:8.2-alpine"],
+            ["redis@" + ImageKit.Digest('d'), "registry.lan/redis@" + ImageKit.Digest('e'), "redis@" + ImageKit.Digest('d')]));
+        var images = ImageKit.Images(_engine, _db);
+
+        Assert.Equal([ImageKit.Digest('d'), ImageKit.Digest('e')], await images.DigestsOfAsync("redis:8-alpine"));
+        Assert.Equal([ImageKit.Digest('d'), ImageKit.Digest('e')], await images.DigestsOfAsync(ImageKit.Id('a')));
+        Assert.Empty(await images.DigestsOfAsync("redis:7"));
+        Assert.Empty(await images.DigestsOfAsync(" "));
+    }
+
+    [Theory]
+    [InlineData("x86_64", "amd64")]
+    [InlineData("aarch64", "arm64")]
+    [InlineData("armv7l", "arm/v7")]
+    public async Task The_hosts_architecture_is_dockers_in_a_registrys_words(string uname, string architecture)
+    {
+        _engine.Info["Architecture"] = uname;
+
+        Assert.Equal(architecture, await ImageKit.Images(_engine, _db).HostArchitectureAsync());
     }
 
     // DATA-5 and L2 (changed by the backend fixer): only an untagged image goes, never one with a name someone gave it, nor

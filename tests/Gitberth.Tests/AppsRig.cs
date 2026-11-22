@@ -405,19 +405,28 @@ internal sealed class HostEngine : HttpMessageHandler
         };
     }
 
-    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    /// <summary>Awaited before each Engine API call is answered, with its path: a test holds one while something else happens.</summary>
+    public Func<string, Task>? BeforeRequest { get; set; }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        if (BeforeRequest is { } before) await before(request.RequestUri!.AbsolutePath);
+        return Respond(request);
+    }
+
+    private HttpResponseMessage Respond(HttpRequestMessage request)
     {
         var path = request.RequestUri!.AbsolutePath;
         lock (_gate) Requests.Add($"{request.Method} {path}");
         if (request.Method != HttpMethod.Get)
         {
             lock (_gate) Writes.Add($"engine {request.Method} {path}");
-            return Task.FromResult(Answer("""{"message":"refused: the tests never change a container"}""", HttpStatusCode.InternalServerError));
+            return Answer("""{"message":"refused: the tests never change a container"}""", HttpStatusCode.InternalServerError);
         }
         var rest = path.StartsWith("/v1.56/", StringComparison.Ordinal) ? path["/v1.56/".Length..] : path.TrimStart('/');
         lock (_gate)
         {
-            return Task.FromResult(rest switch
+            return rest switch
             {
                 "version" => Answer(DockerFixtures.Text("version.json")),
                 "containers/json" => Answer(new JsonArray([.. _listed.Select(l => (JsonNode?)l.DeepClone())]).ToJsonString()),
@@ -432,7 +441,7 @@ internal sealed class HostEngine : HttpMessageHandler
                     => DockerFixtures.Json("networks-json.json").AsArray().OfType<JsonObject>().FirstOrDefault(n => (string)n["Name"]! == Uri.UnescapeDataString(rest["networks/".Length..])) is { } network
                         ? Answer(network.ToJsonString()) : Answer("""{"message":"network not found"}""", HttpStatusCode.NotFound),
                 _ => Answer("""{"message":"not here"}""", HttpStatusCode.NotFound),
-            });
+            };
         }
     }
 

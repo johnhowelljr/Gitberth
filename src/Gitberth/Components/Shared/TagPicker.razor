@@ -1,0 +1,479 @@
+@implements IDisposable
+@inject ImageService Images
+
+@*
+    An image's tags, newest stable first (ImageService.TagsAsync, TagViews.For), for New app's Tag and Settings › Image's
+    Choose tag…. The Tag field shows the selection; typed into, it filters the list across every variant (on Docker Hub,
+    text that matches nothing read so far asks Docker Hub again by name), and any text still goes: a tag the list doesn't
+    have, a digest. Variant chips pick the family; a row marks Recommended, a pre-release, On this host, Running now and
+    an image this host can't run, and its follow chips are its tag and the floating tags that name it now. Under the
+    field, what the selection follows. ↓/↑ move through the rows, Enter takes one, Tab reaches its chips, Esc folds the
+    list and keeps what was typed.
+*@
+<div class="gb-tp">
+    <Field Label="Tag" For="@FieldId" Tip="@Tip">
+        <input id="@FieldId" class="gb-input gb-input--mono" value="@text" placeholder="latest" spellcheck="false" autocomplete="off"
+               role="combobox" aria-autocomplete="list" aria-expanded="@(Expanded ? "true" : "false")" aria-controls="@ListId"
+               aria-activedescendant="@(Expanded && highlight >= 0 && highlight < shown.Count ? OptionId(highlight) : null)"
+               @oninput="TypedAsync" @onkeydown="KeyAsync" />
+    </Field>
+    @if (StatusLine is { } status)
+    {
+        <div class="gb-help gb-tp-status" role="status">@status</div>
+    }
+
+    @if (list is null)
+    {
+        <div class="gb-tp-listing" role="status">
+            <span class="gb-help">@ImagePickerText.Listing(Image)</span>
+            <div class="gb-tp-skel" aria-hidden="true">
+                @for (var i = 0; i < 4; i++)
+                {
+                    <div class="gb-skel"></div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (ProblemLine is { } problem)
+        {
+            <div class="gb-tp-problem" role="status"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" Size="xs" /><span>@problem</span></div>
+        }
+        @if (HasRows)
+        {
+            <div class="gb-tp-bar">
+                @if (list.Families.Count > 0)
+                {
+                    <div class="gb-tp-variants">
+                        <span class="gb-tp-bar-l" id="@($"{FieldId}-variant")"><Tip Key="images.tags.variant">Variant</Tip></span>
+                        <div class="gb-seg gb-seg--wrap" role="radiogroup" aria-labelledby="@($"{FieldId}-variant")">
+                            @foreach (var f in list.Families)
+                            {
+                                var on = Filtering is null && family == f.Name;
+                                <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="gb-seg-btn @(on ? "on" : null)" @onclick="() => FamilyAsync(f.Name)">
+                                    @f.Label <span class="n">@f.Rows</span>
+                                </button>
+                            }
+                            <button type="button" role="radio" aria-checked="@(Filtering is not null || family is null ? "true" : "false")"
+                                    class="gb-seg-btn @(Filtering is not null || family is null ? "on" : null)" @onclick="() => FamilyAsync(null)">All</button>
+                        </div>
+                    </div>
+                }
+                <div class="gb-tp-pre">
+                    <button type="button" role="switch" aria-checked="@(pre ? "true" : "false")" aria-labelledby="@($"{FieldId}-pre")" class="gb-switch @(pre ? "on" : null)" @onclick="PreAsync"></button>
+                    <span id="@($"{FieldId}-pre")"><Tip Key="images.tags.pre-releases">Show pre-releases</Tip></span>
+                </div>
+            </div>
+            @if (Expanded)
+            {
+                @if (shown.Count == 0)
+                {
+                    <div class="gb-tp-none">
+                        @(Filtering is { } f ? (asking ? $"Asking {list.Registry} for tags with {f}…" : $"No tag listed has {f} in it: it's used as typed.")
+                          : "No tags in this variant: pick another, or show pre-releases.")
+                    </div>
+                }
+                else
+                {
+                    <div class="gb-tp-list" id="@ListId" role="listbox" aria-label="@($"{Image}'s tags")">
+                        @for (var i = 0; i < shown.Count; i++)
+                        {
+                            var c = shown[i];
+                            var index = i;
+                            var on = c.Tag == Selected || c.Follows.Contains(Selected);
+                            <div id="@OptionId(index)" role="option" aria-selected="@(on ? "true" : "false")" @key="c.Tag"
+                                 class="gb-tp-row @(on ? "gb-tp-row--on" : null) @(index == highlight ? "gb-tp-row--hl" : null)">
+                                <div class="gb-tp-row-head" @onclick="() => ChooseAsync(c.Tag)" @onmouseover="() => highlight = index">
+                                    <span class="gb-tp-tag">@c.Tag</span>
+                                    @if (c.Recommended)
+                                    {
+                                        <span class="gb-tag gb-tag--accent" data-tip="images.tags.recommended">Recommended</span>
+                                    }
+                                    @if (c.Row.PreRelease)
+                                    {
+                                        <span class="gb-tag gb-tag--pre" data-tip="images.tags.pre-releases">pre-release</span>
+                                    }
+                                    @if (OnHostOf(c) is { } local)
+                                    {
+                                        <span class="gb-tag gb-tag--good" data-tip="newapp.on-host" title="@($"{local} is on this host")"><SvgIcon Icon="@Icons.Material.Outlined.Check" />On this host</span>
+                                    }
+                                    @if (ImagePickerText.RunningNow(c.Row, Running))
+                                    {
+                                        <span class="gb-tag gb-tag--good" data-tip="images.tags.running"><SvgIcon Icon="@Icons.Material.Outlined.PlayArrow" />Running now</span>
+                                    }
+                                    @if (!c.Row.FitsHost)
+                                    {
+                                        <span class="gb-tag gb-tag--warn" data-tip="images.no-platform"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />@ImagePickerText.NoImageFor(hostArch)</span>
+                                    }
+                                    <span class="gb-tp-when">
+                                        @if (ImagePickerText.Pushed(c.Row.Pushed, DateTime.UtcNow) is { } pushed)
+                                        {
+                                            <span>@pushed</span>
+                                        }
+                                        @if (ImagePickerText.Size(c.Row.Size) is { } size)
+                                        {
+                                            <span>@size</span>
+                                        }
+                                    </span>
+                                </div>
+                                <div class="gb-tp-follows" role="group" aria-label="@($"Tags that name {c.Tag}")" data-tip="images.tags.follow">
+                                    @Chip(c.Tag, false)
+                                    @foreach (var t in c.Follows)
+                                    {
+                                        @Chip(t, c.Row.Inferred)
+                                    }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                    @if (total > shown.Count)
+                    {
+                        <div class="gb-help gb-tp-more">The first @shown.Count of @total: type in the field to find the others.</div>
+                    }
+                }
+                @if (Filtering is null && list.Other.Count > 0)
+                {
+                    <button type="button" class="gb-tp-disclose" aria-expanded="@(showOther ? "true" : "false")" aria-controls="@($"{FieldId}-other")"
+                            data-tip="images.tags.other" @onclick="() => showOther = !showOther">
+                        <SvgIcon Icon="@(showOther ? Icons.Material.Outlined.ExpandLess : Icons.Material.Outlined.ExpandMore)" Size="sm" />Other tags (@list.Other.Count)
+                    </button>
+                    @if (showOther)
+                    {
+                        <div class="gb-tp-other" id="@($"{FieldId}-other")" role="group" aria-label="Other tags">
+                            @foreach (var r in list.Other.Take(MaxRows))
+                            {
+                                <div class="gb-tp-orow" @key="r.Tag">
+                                    @Chip(r.Tag, false)
+                                    @foreach (var t in r.Also)
+                                    {
+                                        @Chip(t, r.Inferred)
+                                    }
+                                    @* A channel like edge or nightly sits here, still a pre-release; so may a tag this host can't run. *@
+                                    @if (r.PreRelease)
+                                    {
+                                        <span class="gb-tag gb-tag--pre" data-tip="images.tags.pre-releases">pre-release</span>
+                                    }
+                                    @if (!r.FitsHost)
+                                    {
+                                        <span class="gb-tag gb-tag--warn" data-tip="images.no-platform"><SvgIcon Icon="@Icons.Material.Outlined.WarningAmber" />@ImagePickerText.NoImageFor(hostArch)</span>
+                                    }
+                                    @if (ImagePickerText.Pushed(r.Pushed, DateTime.UtcNow) is { } pushed)
+                                    {
+                                        <span class="gb-tp-when">@pushed</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+                <div class="gb-tp-foot">
+                    <span class="gb-help">@ReadLine</span>
+                    @if (list.More && Filtering is null)
+                    {
+                        <Btn Kind="BtnKind.Ghost" Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.History" OnClick="OlderAsync" Busy="older" Tip="images.tags.older">Load older tags</Btn>
+                    }
+                </div>
+            }
+            else
+            {
+                <button type="button" class="gb-tp-disclose" aria-controls="@ListId" aria-expanded="false" @onclick="() => folded = false">
+                    <SvgIcon Icon="@Icons.Material.Outlined.ExpandMore" Size="sm" />Show the tags
+                </button>
+            }
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The image whose tags are listed, as people write it: nginx, louislam/uptime-kuma, ghcr.io/o/r (no tag).</summary>
+    [Parameter, EditorRequired] public string Image { get; set; } = "";
+    /// <summary>The sign-in to list a private registry's tags with, as ImageService.TagsAsync takes it.</summary>
+    [Parameter] public int? RegistryId { get; set; }
+    /// <summary>The tag it opened with (pasted, a Popular tile, the app's own): selected, on its variant's chip.</summary>
+    [Parameter] public string? Preset { get; set; }
+    /// <summary>The selection, each time it changes; empty means latest (the field's placeholder).</summary>
+    [Parameter] public EventCallback<string> TagChanged { get; set; }
+    /// <summary>The running image's digests (Settings › Image): the row with one of them is Running now.</summary>
+    [Parameter] public IReadOnlyCollection<string> Running { get; set; } = [];
+    /// <summary>This image's tags that are on this host (8-alpine for redis:8-alpine): their rows say On this host.</summary>
+    [Parameter] public IReadOnlyCollection<string> OnHost { get; set; } = [];
+    /// <summary>The Tag field's tip.</summary>
+    [Parameter] public string Tip { get; set; } = "images.tags";
+    /// <summary>The Tag field's id: its label points at it, and the list's ids are made from it.</summary>
+    [Parameter] public string FieldId { get; set; } = "gb-tag";
+
+    // Rows drawn at once: a registry's list can hold thousands; the field's filter finds the rest.
+    private const int MaxRows = 200;
+
+    private string loaded = "";
+    private TagList? list, named;
+    private string? namedFor, family, hostArch;
+    private string text = "";
+    private bool edited, touched, pre, showOther, folded, older, asking, disposed;
+    private int highlight = -1, pages = 3, total;
+    private List<TagChoice> shown = [];
+    private CancellationTokenSource? listing, naming, ticking;
+
+    private string ListId => FieldId + "-list";
+
+    // The selection: the field's text, or latest (its placeholder) while it's empty.
+    private string Selected => text.Trim() is { Length: > 0 } t ? t : "latest";
+
+    private string? Filtering => ImagePickerText.Filter(text, edited);
+
+    private bool Expanded => list is not null && HasRows && !folded;
+
+    private bool HasRows => list is not null && (list.Versions.Count > 0 || list.Other.Count > 0);
+
+    private string OptionId(int index) => $"{FieldId}-opt-{index}";
+
+    private string? ProblemLine => list is null ? null : ImagePickerText.TagsProblem(list.Problem, list.Message, list.RetryAt, DateTime.UtcNow);
+
+    // What the selection follows; nothing while the list is read, or when it couldn't be (its line says why).
+    private string? StatusLine
+    {
+        get
+        {
+            if (list is null || !HasRows) return null;
+            var row = ImagePickerText.RowOf(list, Selected) ?? ImagePickerText.RowOf(named, Selected);
+            var shownAs = shown.FirstOrDefault(c => c.Tag == Selected || c.Follows.Contains(Selected))?.Tag;
+            return ImagePickerText.Follows(Selected, row, shownAs);
+        }
+    }
+
+    private string ReadLine => list is null ? "" : ImagePickerText.TagCount(list);
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            hostArch = await Images.HostArchitectureAsync();
+        }
+        catch (Exception)
+        {
+            // "No image for this host" says it without the architecture's name.
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{Image}|{RegistryId}";
+        if (key == loaded) return;
+        var same = loaded.Split('|')[0] == Image;
+        loaded = key;
+        if (!same)
+        {
+            // Another image: everything starts again, with the tag it opened with (or latest, as the placeholder).
+            (named, namedFor, family, edited, touched, pre, showOther, folded, highlight, pages) = (null, null, null, false, false, false, false, false, -1, 3);
+            text = Preset?.Trim() ?? "";
+            await TagChanged.InvokeAsync(text);
+        }
+        list = null;
+        shown = [];
+        await ListAsync(pages, first: !same);
+    }
+
+    private async Task ListAsync(int wanted, bool first)
+    {
+        listing?.Cancel();
+        var mine = listing = new CancellationTokenSource();
+        TagList got;
+        try
+        {
+            got = await Images.TagsAsync(Image, RegistryId, wanted, null, mine.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception)
+        {
+            got = new TagList(Image, "", false, [], [], [], null, null, 0, 0, false, LookupProblem.Failed, "The tags couldn't be listed.");
+        }
+        if (mine.IsCancellationRequested || disposed) return;
+        list = got;
+        pages = wanted;
+        if (first && HasRows)
+        {
+            if (!touched)
+            {
+                text = ImagePickerText.Initial(Preset, list);
+                await TagChanged.InvokeAsync(text);
+            }
+            // The tag it opened with sits on its own variant's chip (TagViews.FamilyOf); else the default variant's.
+            family = (Preset is { Length: > 0 } opened && !opened.StartsWith("sha256:", StringComparison.Ordinal) ? TagViews.FamilyOf(list, opened) : null)
+                     ?? list.Families.FirstOrDefault(f => f.Default)?.Name ?? list.Families.FirstOrDefault()?.Name;
+        }
+        Refresh();
+        Tick(list.RetryAt, () => ListAsync(pages, first));
+    }
+
+    private void Refresh()
+    {
+        if (list is null)
+        {
+            (shown, total) = ([], 0);
+            return;
+        }
+        IReadOnlyList<TagChoice> all;
+        if (Filtering is { } filter)
+        {
+            all = TagViews.For(list, null, preReleases: true, filter);
+            if (all.Count == 0 && named is not null && namedFor is not null && filter.Contains(namedFor, StringComparison.OrdinalIgnoreCase))
+                all = TagViews.For(named, null, preReleases: true, filter);
+        }
+        else
+        {
+            all = TagViews.For(list, family, pre);
+        }
+        total = all.Count;
+        shown = all.Take(MaxRows).ToList();
+        if (highlight >= shown.Count) highlight = -1;
+    }
+
+    private async Task TypedAsync(ChangeEventArgs e)
+    {
+        text = e.Value?.ToString() ?? "";
+        (edited, touched, folded, highlight) = (true, true, false, -1);
+        await TagChanged.InvokeAsync(text.Trim());
+        Refresh();
+        // On Docker Hub, text that matches nothing read so far asks it again with name= (debounced), while older pages exist.
+        if (Filtering is { Length: >= 2 } filter && list is { More: true, Dates: true } && shown.Count == 0
+            && !(namedFor is not null && filter.Contains(namedFor, StringComparison.OrdinalIgnoreCase) && named is not null))
+        {
+            naming?.Cancel();
+            var mine = naming = new CancellationTokenSource();
+            try
+            {
+                await Task.Delay(350, mine.Token);
+                asking = true;
+                StateHasChanged();
+                var got = await Images.TagsAsync(Image, RegistryId, 1, filter, mine.Token);
+                if (mine.IsCancellationRequested || disposed) return;
+                (named, namedFor) = (got, filter);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            finally
+            {
+                if (naming == mine) asking = false;
+            }
+            Refresh();
+        }
+    }
+
+    private async Task KeyAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "ArrowDown":
+                folded = false;
+                highlight = ImagePickerText.Move(highlight, shown.Count, 1);
+                break;
+            case "ArrowUp":
+                folded = false;
+                highlight = ImagePickerText.Move(highlight, shown.Count, -1);
+                break;
+            case "Enter" when Expanded && highlight >= 0 && highlight < shown.Count:
+                await ChooseAsync(shown[highlight].Tag);
+                break;
+            case "Escape":
+                (folded, highlight) = (true, -1);
+                break;
+        }
+    }
+
+    private async Task ChooseAsync(string tag)
+    {
+        var fromFilter = Filtering is not null;
+        (text, edited, touched) = (tag, false, true);
+        // Taken from a search across every variant: its own variant's chip, so its row stays in sight.
+        if (fromFilter && list is not null) family = TagViews.FamilyOf(list, tag) ?? family;
+        Refresh();
+        highlight = shown.FindIndex(c => c.Tag == tag || c.Follows.Contains(tag));
+        await TagChanged.InvokeAsync(tag);
+    }
+
+    private Task FamilyAsync(string? name)
+    {
+        (family, edited, highlight, folded) = (name, false, -1, false);
+        Refresh();
+        return Task.CompletedTask;
+    }
+
+    private Task PreAsync()
+    {
+        pre = !pre;
+        Refresh();
+        return Task.CompletedTask;
+    }
+
+    private async Task OlderAsync()
+    {
+        if (list is null || older) return;
+        older = true;
+        try
+        {
+            await ListAsync(pages + 1, first: false);
+        }
+        finally
+        {
+            older = false;
+        }
+    }
+
+    // While a rate-limited registry's wait runs, its countdown moves every second; then the list is asked for again.
+    private void Tick(DateTime? retryAt, Func<Task> then)
+    {
+        ticking?.Cancel();
+        if (retryAt is not { } at || at <= DateTime.UtcNow) return;
+        var mine = ticking = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (DateTime.UtcNow < at)
+                {
+                    await Task.Delay(1000, mine.Token);
+                    await InvokeAsync(StateHasChanged);
+                }
+                await InvokeAsync(async () =>
+                {
+                    if (!mine.IsCancellationRequested && !disposed) await then();
+                    StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+                // A new answer, or the page went.
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        });
+    }
+
+    // The row's tag on this host, or one of the tags that follow it; null when none is.
+    private string? OnHostOf(TagChoice c) =>
+        OnHost.Count == 0 ? null : OnHost.Contains(c.Tag) ? c.Tag : c.Follows.FirstOrDefault(OnHost.Contains);
+
+    private RenderFragment Chip(string tag, bool inferred) => @<button type="button" class="gb-tag gb-tp-chip @(tag == Selected ? "gb-tp-chip--on" : null)"
+                                                                       aria-pressed="@(tag == Selected ? "true" : "false")" @onclick="() => ChooseAsync(tag)">
+        @if (inferred)
+        {
+            <span class="gb-tp-approx" data-tip="images.tags.inferred" aria-label="inferred from the names">≈</span>
+        }
+        @tag
+    </button>;
+
+    public void Dispose()
+    {
+        disposed = true;
+        listing?.Cancel();
+        naming?.Cancel();
+        ticking?.Cancel();
+    }
+}

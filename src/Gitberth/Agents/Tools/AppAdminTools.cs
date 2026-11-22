@@ -47,7 +47,7 @@ public sealed record PortInput(
 public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppService apps, AppActions actions, AppSettingsService settings,
     Lazy<AppCreator> creator, ComposeApps compose, GitClient git, ProjectAnalyzer analyzer, RepoVariables repoVariables, PreviewService previews,
     DatabaseService databases, DeployHooks hooks, UptimeSettings uptimeSettings, DomainService domains, GitberthOptions options,
-    TemplateCatalog templates, TemplateInstaller installer, GitLabApi? gitLab = null, Railpack.IRailpackPlanner? railpack = null)
+    TemplateCatalog templates, TemplateInstaller installer, Images.ImageService images, GitLabApi? gitLab = null, Railpack.IRailpackPlanner? railpack = null)
 {
     private static readonly Railpack.NoRailpack NoPlanner = new();
 
@@ -203,10 +203,12 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         return await ApplyEditAsync(view, edit, next_deploy ? ApplyTiming.NextDeploy : ApplyTiming.Now, wait, ct);
     }
 
-    [McpServerTool(Name = "update_app_settings", Title = "Change an app's settings", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    // Open world: its image may be pulled from any registry, as create_app's is.
+    [McpServerTool(Name = "update_app_settings", Title = "Change an app's settings", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = true)]
     [ToolAccess(ApiAccess.Admin)]
     [Description("Changes an app's settings, as its Settings and Network tabs do, and applies them the way the page would (live where Docker can, else a redeploy or a recreate): " +
-        "name, health check path, memory and CPU limits, restart policy, updates policy, a Git app's auto-deploy and build filters, the down page and its message, the uptime check, " +
+        "name, health check path, memory and CPU limits, restart policy, an image app's image and tag (pulled first when it isn't on this host) and updates policy, " +
+        "a Git app's auto-deploy and build filters, the down page and its message, the uptime check, " +
         "or the whole list of ports (on its own: not with other container settings in the same call). Only what's given changes. " +
         "Previews: set_previews and set_preview_settings.")]
     public async Task<object> UpdateAppSettings(
@@ -217,6 +219,8 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         [Description("CPU limit in cores, like 0.5 or 2; 0 for none.")] double? cpus = null,
         [Description("no, always, unless-stopped or on-failure.")] string? restart_policy = null,
         [Description("With on-failure only: how many times Docker restarts it before giving up (0: no limit).")] int? restart_retries = null,
+        [Description("Image apps: the image and tag or digest to run, like nginx:1.31 (list_image_tags lists them). Pulled first when it isn't on this host, " +
+            "with the app's registry sign-in; then the app is recreated on it.")] string? image = null,
         [Description("Image apps: off (when I ask), notify (tell me) or auto (update by itself).")] string? updates = null,
         [Description("Git apps: deploy new commits by themselves.")] bool? auto_deploy = null,
         [Description("Git apps: build filters, one pattern per line: a commit deploys by itself only when it changes a file these match. Empty for any file.")] string? watch_paths = null,
@@ -237,14 +241,20 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         var done = new List<object>();
         var containerChange = name is not null || health_path is not null || memory_mb is not null || cpus is not null || restart_policy is not null
             || restart_retries is not null || updates is not null || auto_deploy is not null || watch_paths is not null || ignored_paths is not null
-            || build is not null;
+            || build is not null || image is not null;
         if (ports is not null && containerChange) throw new ToolError("Change the ports in a call of their own: both may recreate the app.");
         if (!containerChange && ports is null && down_page is null && down_page_message is null && uptime_check is null && uptime_path is null)
             throw new ToolError("Say what to change: get_app shows the settings as they are.");
+        // The Settings tab has no Image field for a Git or Compose app: their images come from their repo or Compose file.
+        if (image is not null && view.Summary.Source == AppSource.Git)
+            throw new ToolError($"{title} is a Git app: its image is built from its repo, so image is an image app's.");
+        if (image is not null && view.Row?.IsCompose == true)
+            throw new ToolError($"{title} is a Compose app: its images are its Compose file's, so image is an image app's.");
         if (containerChange)
         {
             var loaded = await LoadAsync(view, ct);
             var draft = ContainerSettingsDraft.From(loaded.Container, loaded.Options.SecretKeys);
+            if (image is not null) draft.Image = await ImageToRunAsync(view, loaded, image, ct);
             var optionsDraft = AppOptionsDraft.From(loaded.Options);
             if (name is not null) optionsDraft.Name = name;
             if (health_path is not null) optionsDraft.HealthCheckPath = health_path;
@@ -713,6 +723,26 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
 
     private async Task<SettingsView> LoadAsync(AppView view, CancellationToken ct) =>
         await settings.LoadAsync(view.Summary.Key, ct) ?? throw ToolError.NotFound($"There's no app called {view.Summary.Key}.");
+
+    /// <summary>
+    /// The image an app is to run, as the Settings tab takes it: a reference Docker takes, pulled first (with the app's
+    /// registry sign-in) when the host doesn't have it, as the tab's Pull it does; the plan then checks the rest (the database
+    /// guard among it). Refused where the tab's Image field is read-only.
+    /// </summary>
+    private async Task<string> ImageToRunAsync(AppView view, SettingsView loaded, string image, CancellationToken ct)
+    {
+        var title = view.Summary.Title;
+        if (loaded.Access.ReadOnly.Contains(SettingField.Image))
+            throw ToolError.Conflict(loaded.Access.Recreate ?? $"Gitberth doesn't change {title}'s image.");
+        var wanted = image.Trim();
+        if (Images.ImageReference.Parse(wanted) is null) throw new ToolError(Images.ImageService.NotAReference(wanted));
+        if (wanted == loaded.Container.Image || await images.InspectAsync(wanted, ct) is not null) return wanted;
+        var pull = images.StartPull(wanted, registryId: loaded.Options.RegistryId);
+        if (await AgentContext.WaitAsync(pull.Completion, ct) is not { } pulled)
+            throw ToolError.Conflict($"Still pulling {wanted} after 10 minutes: call again once it's pulled (list_images shows it then).");
+        if (!pulled.Ok) throw ToolError.Conflict(pulled.Message);
+        return wanted;
+    }
 
     /// <summary>The page's Apply: the plan, its refusals, then the change (and, asked, its end).</summary>
     private async Task<object> ApplyEditAsync(AppView view, SettingsEdit edit, ApplyTiming timing, bool wait, CancellationToken ct)

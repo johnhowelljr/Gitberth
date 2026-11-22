@@ -2,6 +2,7 @@
 @implements IAsyncDisposable
 @inject IJSRuntime JS
 @inject ContainerStatsCollector Stats
+@inject IDialogService Dialogs
 
 @*
     The Settings tab: every setting of every app, in sections, with a sticky index on the left (a dot by each section
@@ -222,8 +223,15 @@ else
                     </div>
                     <Field Label="Image" For="set-image" Tip="app.settings.image.name" Changed="@changed.Contains(SettingField.Image)" Was="@Draft.Loaded.Image" OnUndo="() => Undo(Draft.UndoImage)"
                            Help="A name and tag (postgres:18), or a digest. Changing it recreates the app on the new image; what the old image set is left behind.">
-                        <input id="set-image" class="gb-input gb-input--mono @(changed.Contains(SettingField.Image) ? "gb-input--changed" : null)" readonly="@RO(SettingField.Image)"
-                               @bind="Draft.Image" @bind:event="oninput" @bind:after="Notify" spellcheck="false" />
+                        <div class="gb-tp-imagerow">
+                            <input id="set-image" class="gb-input gb-input--mono @(changed.Contains(SettingField.Image) ? "gb-input--changed" : null)" readonly="@RO(SettingField.Image)"
+                                   @bind="Draft.Image" @bind:event="oninput" @bind:after="Notify" spellcheck="false" />
+                            @if (CanChooseTag)
+                            {
+                                @* The TagPicker dialog: the image's tags, newest stable first, with the row it runs marked. *@
+                                <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Sell" OnClick="ChooseTagAsync" Tip="images.tags.choose">Choose tag…</Btn>
+                            }
+                        </div>
                     </Field>
                     @if (app.Role != ContainerRole.Self)
                     {
@@ -598,6 +606,28 @@ else
     }
 
     private Task Undo(Action undo) => Set(undo);
+
+    // Choose tag… beside the Image field: for an image that parses and isn't one of Gitberth's own builds, when the field
+    // can be edited (any source: every container is an app).
+    private bool CanChooseTag => Draft is not null && !RO(SettingField.Image)
+        && ImageReference.Parse(Draft.Image) is { } image && !image.Name.StartsWith("gitberth/", StringComparison.Ordinal);
+
+    // The tag picker's dialog: Use <tag> puts the image and tag in the field, and the tab's own path does the rest (Pull it
+    // when it isn't on this host, Review and apply, the change dialog's Recreate). Nothing is pulled on a pick.
+    private async Task ChooseTagAsync()
+    {
+        if (Draft is null || !CanChooseTag) return;
+        var dialog = await Dialogs.ShowAsync<TagPickerDialog>(null, new DialogParameters<TagPickerDialog>
+        {
+            { d => d.Image, Draft.Image },
+            { d => d.RegistryId, Options?.Loaded.RegistryId },
+            { d => d.RunningImage, Settings?.Image?.Id },
+            { d => d.AppTitle, View.Summary.Title },
+        }, new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true });
+        if (await dialog.Result is not { Canceled: false, Data: string reference } || reference == Draft.Image.Trim()) return;
+        Draft.Image = reference;
+        await Notify();
+    }
 
     // A build filter field's saved patterns on one line, for "was …".
     private static string FilterWas(string? text, string empty) => BuildFilters.Patterns(text) is { Count: > 0 } patterns ? string.Join(", ", patterns) : empty;

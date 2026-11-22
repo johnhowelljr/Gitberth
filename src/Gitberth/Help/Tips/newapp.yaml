@@ -531,9 +531,10 @@ newapp.registry:
 newapp.registry.tag:
   title: Tag
   text: >-
-    Which version of the image. A digest (`sha256:…`) pins one exact build, which then never updates.
-  default: latest
-  more: guides/run-a-registry-image#pick-the-image
+    Which version of the image: the tags are listed under the field, newest stable first. A floating tag like `1.31`
+    follows its patch releases; a digest (`sha256:…`) pins one exact build, which then never updates.
+  default: the recommended version, one part shorter (1.31 for 1.31.2); latest when there's none
+  more: guides/run-a-registry-image#choose-the-tag
 
 newapp.registry.sign-in:
   title: Sign in with

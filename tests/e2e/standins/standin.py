@@ -1,7 +1,7 @@
-"""The stand-ins' server. HTTPS on 443 answers for github.com (git), api.github.com, api.cloudflare.com and GitLab
-(gitlab.e2e.test and gitlab.com: its API and git), chosen by Host; plain HTTP on 8099 is the control API (/__control/...)
-the scenarios and the fake cloudflared use. Every call to 443 is recorded, and failures can be injected per host, method
-and path.
+"""The stand-ins' server. HTTPS on 443 answers for github.com (git), api.github.com, api.cloudflare.com, GitLab
+(gitlab.e2e.test and gitlab.com: its API and git), Docker Hub's search and tags API (hub.docker.com, index.docker.io)
+and a registry (registry.e2e.test), chosen by Host; plain HTTP on 8099 is the control API (/__control/...) the scenarios
+and the fake cloudflared use. Every call to 443 is recorded, and failures can be injected per host, method and path.
 
 GitHub's and GitLab's webhook deliveries go through the Cloudflare stand-in's edge (DNS, Access) to the fake cloudflared,
 which routes them by the tunnel ingress it runs: each of its polls tells the stand-in where it is and which version it runs.
@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import certs  # noqa: E402
 from cf import Cloudflare, ingress_problem  # noqa: E402
 from common import ApiError, Failures, Recorder, Request, Response, injected_response, injected_status, log, log_exception, send  # noqa: E402
+from dh import DockerHub, control_routes as dockerhub_control_routes  # noqa: E402
 from gh import GitHub  # noqa: E402
 from gl import GitLab, control_routes as gitlab_control_routes  # noqa: E402
 
@@ -85,12 +86,14 @@ FAILS = Failures()
 CF = Cloudflare(RIG["cf_account_id"], RIG["cf_tunnel_id"], STATE)
 GH = GitHub(REPOS, TEMPLATES, REC, GITBERTH_URL, edge=CF.edge)
 GL = GitLab(GITLAB_REPOS, TEMPLATES, REC, GITBERTH_URL, edge=CF.edge)
+# Docker Hub's search and tags API, and a registry: only what Gitberth's image search and tag picker call (dh.py).
+DH = DockerHub()
 # Cloudflare's edge certificates, for visitors' HTTPS requests to any other host name (see handle_edge).
 EDGE_CERTS = certs.EdgeCerts(STATE, CF.zone_for)
 
 # The names the HTTPS side answers as an API or a service; any other host name is a visitor's, through Cloudflare's edge.
 API_HOSTS = {"github.com", "www.github.com", "api.github.com", "api.cloudflare.com", "codeload.github.com", "uploads.github.com",
-             "raw.githubusercontent.com", "objects.githubusercontent.com", "gbe2e-standin", *GitLab.HOSTS}
+             "raw.githubusercontent.com", "objects.githubusercontent.com", "gbe2e-standin", *GitLab.HOSTS, *DockerHub.HOSTS}
 
 
 # ---- notifications: where Gitberth sends them ----
@@ -272,15 +275,18 @@ def handle_api(req):
     kind = "git" if req.host in ("github.com", "www.github.com") else "github" if req.host == "api.github.com" \
         else "cloudflare" if req.host == "api.cloudflare.com" else "notify" if req.host in NOTIFY_HOSTS \
         else GL.kind_of(req) if req.host in GitLab.HOSTS \
+        else DH.kind_of(req) if req.host in DockerHub.HOSTS \
         else "other" if req.host in API_HOSTS or not req.host else "edge"
     call = REC.start(req, kind)
     try:
         # Which repo the call is about (and for git, what it asked for), before anything answers it: a call an injected
-        # failure answers, or that GitHub or GitLab refuses, is still found by its repo.
+        # failure answers, or that GitHub, GitLab or a registry refuses, is still found by its repo.
         if kind in ("git", "github"):
             GH.describe(req, call)
         elif kind in ("gitlab", "gitlab-git"):
             GL.describe(req, call)
+        elif kind in ("dockerhub", "registry"):
+            DH.describe(req, call)
         rule = FAILS.match(req)
         if rule:
             call["injected"] = rule["id"]
@@ -310,6 +316,12 @@ def handle_api(req):
             resp = CF.api(req, call)
         elif kind == "notify":
             resp = notify_answer(req)
+        elif kind in ("dockerhub", "registry"):
+            resp = DH.api(req, call)
+            if resp is None:
+                # An answer the scenario set drops the connection, as a host that's going away does.
+                call["status"] = 0
+                return None
         elif kind == "edge":
             return handle_edge(req, call)
         else:
@@ -368,6 +380,7 @@ def c_reset(req):
     GH.reset()
     GL.reset()
     CF.reset()
+    DH.reset()
     FAILS.remove()
     REC.clear()
     MAIL.clear()
@@ -861,8 +874,9 @@ def c_cf_delete_app(req, id):
     return {"deleted": id}
 
 
-# GitLab's: /__control/gitlab/... (gl.control_routes).
+# GitLab's: /__control/gitlab/... (gl.control_routes). Docker Hub's and the registry's: /__control/dockerhub/... (dh.py).
 CONTROL.extend(gitlab_control_routes(GL))
+CONTROL.extend(dockerhub_control_routes(DH))
 
 
 def handle_control(req):
@@ -964,8 +978,9 @@ def main():
     control = PlainServer(("0.0.0.0", 8099), make_handler(handle_control, "control"))
     threading.Thread(target=https.serve_forever, name="https", daemon=True).start()
     threading.Thread(target=serve_smtp, name="smtp", daemon=True).start()
-    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com, GitLab (gitlab.e2e.test, gitlab.com) and "
-        "the notification hosts, and Cloudflare's edge for any other name; SMTP on 2525; "
+    log("stand-ins up: HTTPS on 443 for github.com, api.github.com, api.cloudflare.com, GitLab (gitlab.e2e.test, gitlab.com), "
+        "Docker Hub (hub.docker.com, index.docker.io), registry.e2e.test and the notification hosts, and Cloudflare's edge "
+        "for any other name; SMTP on 2525; "
         f"control on 8099; deliveries go through the tunnel's connector (or straight to {GITBERTH_URL} when a scenario asks)")
     control.serve_forever()
 

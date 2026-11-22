@@ -1,0 +1,6 @@
+{"num_pages":98884,"num_results":296652,"page_size":25,"page":1,"query":"nginx",
+ "results":[
+  {"name":"nginx","description":"Official build of Nginx.","pull_count":13624900407,"star_count":21427,"is_trusted":false,"is_automated":false,"is_official":true},
+  {"name":"linuxserver/nginx","description":"An Nginx container, brought to you by LinuxServer.io.","pull_count":31004556,"star_count":219,"is_trusted":false,"is_automated":false,"is_official":false},
+  {"name":"bitnami/nginx","description":"Bitnami container image for NGINX","pull_count":1204000000,"star_count":201,"is_trusted":false,"is_automated":false,"is_official":false}
+ ]}

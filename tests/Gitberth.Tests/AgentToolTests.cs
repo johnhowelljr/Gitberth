@@ -42,6 +42,8 @@ public sealed class AgentToolTests : IDisposable
         ["list_deployments"] = ApiAccess.Read, ["get_deployment"] = ApiAccess.Read, ["list_previews"] = ApiAccess.Read,
         ["get_health"] = ApiAccess.Read, ["list_domains"] = ApiAccess.Read, ["get_uptime"] = ApiAccess.Read, ["query_audit_log"] = ApiAccess.Read,
         ["list_databases"] = ApiAccess.Read, ["list_updates"] = ApiAccess.Read, ["list_images"] = ApiAccess.Read, ["get_settings"] = ApiAccess.Read,
+        // Docker Hub's search and an image's tags, as New app shows them.
+        ["search_images"] = ApiAccess.Read, ["list_image_tags"] = ApiAccess.Read,
         ["deploy_app"] = ApiAccess.Operate, ["restart_app"] = ApiAccess.Operate, ["start_app"] = ApiAccess.Operate, ["stop_app"] = ApiAccess.Operate,
         ["rollback_app"] = ApiAccess.Operate, ["cancel_deploy"] = ApiAccess.Operate, ["promote_preview"] = ApiAccess.Operate,
         ["check_updates"] = ApiAccess.Operate, ["apply_update"] = ApiAccess.Operate, ["run_cron_now"] = ApiAccess.Operate, ["set_previews"] = ApiAccess.Operate,
@@ -312,6 +314,73 @@ public sealed class AgentToolTests : IDisposable
         Assert.Contains("isn't deployed from a repo or a Compose file", JsonNode.Parse(body)!["error"]!.GetValue<string>());
     }
 
+    // ---- images: Docker Hub's search, an image's tags, and an app's tag ----
+
+    [Fact]
+    public async Task Search_images_and_list_image_tags_say_why_when_docker_hub_cant_be_reached()
+    {
+        // No network here: Docker Hub can't be reached, and the answer says so (a 200, as the picker's line does).
+        var (status, body) = await CallAsync("list_image_tags", new { image = "nginx:1.27" }, Admin);
+        Assert.True(status == 200, body);
+        var tags = JsonNode.Parse(body)!;
+        Assert.Equal(("nginx", "Docker Hub", "unreachable", "Docker Hub can't be reached from this host, so its tags can't be listed."),
+            (tags["image"]!.GetValue<string>(), tags["registry"]!.GetValue<string>(), tags["problem"]!.GetValue<string>(), tags["message"]!.GetValue<string>()));
+        Assert.Empty(tags["tags"]!.AsArray());
+
+        (status, body) = await CallAsync("search_images", new { query = "nginx" }, Admin);
+        Assert.True(status == 200, body);
+        var found = JsonNode.Parse(body)!;
+        Assert.Equal(("unreachable", "nginx"), (found["problem"]!.GetValue<string>(), found["query"]!.GetValue<string>()));
+        Assert.StartsWith("Docker Hub can't be reached from this host, so there's no search.", found["message"]!.GetValue<string>());
+
+        // What isn't a query, an image or a page count is the caller's to fix.
+        Assert.Equal(400, (await CallAsync("search_images", new { query = "n" }, Admin)).Status);
+        Assert.Equal(400, (await CallAsync("list_image_tags", new { image = "Not An Image" }, Admin)).Status);
+        Assert.Equal(400, (await CallAsync("list_image_tags", new { image = "nginx", pages = 11 }, Admin)).Status);
+        Assert.Equal(400, (await CallAsync("list_image_tags", new { image = "nginx", limit = 0 }, Admin)).Status);
+    }
+
+    [Fact]
+    public async Task Update_app_settings_image_is_refused_for_a_git_app_as_its_settings_tab_has_no_image()
+    {
+        var (status, body) = await CallAsync("update_app_settings", new { app = "orb", image = "nginx:1.31" }, Admin);
+
+        Assert.Equal(400, status);
+        Assert.Equal("orb is a Git app: its image is built from its repo, so image is an image app's.", JsonNode.Parse(body)!["error"]!.GetValue<string>());
+        Assert.Empty(_agents.ImageEngine.Calls);
+        Assert.Equal(400, (await CallAsync("update_app_settings", new { app = "postgres", image = "Not An Image" }, Admin)).Status);
+    }
+
+    [Fact]
+    public async Task Update_app_settings_image_pulls_what_the_host_doesnt_have_first_then_plans_as_the_tab_does()
+    {
+        // postgres runs postgres:18. The pull of postgres:19 puts it on the host, for Docker and for the change's plan.
+        _agents.ImageEngine.Pulls["docker.io/library/postgres:19"] = (["{\"status\":\"Status: Downloaded newer image for postgres:19\"}"], () =>
+        {
+            _agents.ImageEngine.Add(ImageKit.Image(ImageKit.Id('9'), ["postgres:19"], ["postgres@" + ImageKit.Digest('9')]));
+            _agents.Rig.Engine.Images["postgres:19"] = new JsonObject
+            {
+                ["Id"] = ImageKit.Id('9'),
+                ["RepoTags"] = new JsonArray("postgres:19"),
+                ["RepoDigests"] = new JsonArray("postgres@" + ImageKit.Digest('9')),
+                ["Config"] = new JsonObject { ["Env"] = new JsonArray("PG_MAJOR=19") },
+            };
+        });
+
+        var (status, body) = await CallAsync("update_app_settings", new { app = "postgres", image = "postgres:19" }, Admin);
+
+        Assert.Equal(["pull docker.io/library/postgres:19"], _agents.ImageEngine.Calls);
+        // The database guard's words, as the tab's plan gives them: a major version can't be changed here.
+        Assert.Equal(409, status);
+        Assert.Equal("A new major version of PostgreSQL can't read 18's data: dump it and restore it into a new app instead.", JsonNode.Parse(body)!["error"]!.GetValue<string>());
+        Assert.Empty(_agents.Rig.Engine.Writes);
+
+        // A pull that fails says why, and nothing is planned.
+        (status, body) = await CallAsync("update_app_settings", new { app = "postgres", image = "postgres:18.9-none" }, Admin);
+        Assert.Equal(409, status);
+        Assert.StartsWith("Docker Hub refused postgres:18.9-none", JsonNode.Parse(body)!["error"]!.GetValue<string>());
+    }
+
     // ---- Railpack ----
 
     /// <summary>Railpack's planner: the plan it gives, and what it was asked.</summary>
@@ -443,7 +512,7 @@ internal sealed class AgentsRig : IDisposable
         changer = new PortChanger(engine, rig.Journal, rig.ContainerLocks, host, host, host, host, rig.Containers, rig.Options, NullLogger<PortChanger>.Instance, updater: updater);
         var settings = new AppSettingsService(rig.Catalog, rig.Apps, new Lazy<AppActions>(() => rig.Actions), changer, updater, engine, rig.AppLocks, rig.Domains,
             rig.Health, rig.Restarts, rig.Protector, rig.Db, rig.Options, rig.Activity, NullLogger<AppSettingsService>.Instance);
-        var imageEngine = new ImageKit.Engine();
+        var imageEngine = ImageEngine;
         var images = new ImageService(imageEngine, new RegistryService(rig.Db, rig.Protector, imageEngine), rig.Options, new ImageKit.NoHttp(), NullLogger<ImageService>.Instance, rig.Db);
         var updates = rig.Updates = new UpdateService(new ImageKit.UpdateSteps(_kitDb), images, rig.Db, NullLogger<UpdateService>.Instance);
         var previews = new PreviewService(rig.Db, rig.Actions, rig.Apps, rig.Domains, new GitHubPulls(new ImageKit.NoHttp(), rig.Settings),
@@ -504,6 +573,8 @@ internal sealed class AgentsRig : IDisposable
     }
 
     public AppsRig Rig { get; } = new();
+    /// <summary>The image calls ImageService makes here (pulls among them); no network for it: Docker Hub can't be reached.</summary>
+    public ImageKit.Engine ImageEngine { get; } = new();
     public AuditLog Audit { get; } = new();
     /// <summary>What the dashboard's banners say, which get_health tells too.</summary>
     public AttentionBoard Attention { get; } = new();

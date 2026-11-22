@@ -42,7 +42,7 @@ It does every step below for you, checking each one, and ends with Gitberth's ad
 password it made up:
 
 ```text
-Gitberth 1.6.0 is running.
+Gitberth 1.7.0 is running.
 
   Open      http://192.168.50.10:8080
   Sign in   admin

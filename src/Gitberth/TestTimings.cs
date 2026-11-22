@@ -51,6 +51,10 @@ public sealed class TestTimings
                 keeper.Grace = v;
                 keeper.FirstPassAfter = v;
             }),
+        // Answers are still kept as long as ever (10 minutes; 2 for a basic search or a missing repository).
+        ["hubWait"] = new("how long Docker Hub or a registry that couldn't be reached is left alone, and the longest one that asked Gitberth to wait is held",
+            sp => sp.GetRequiredService<Images.ImageService>().HostWaitCap ?? Images.HostGates.DownFor,
+            (sp, v) => sp.GetRequiredService<Images.ImageService>().HostWaitCap = v),
     };
 
     private TestTimings(IReadOnlyDictionary<string, TimeSpan> values) => Values = values;

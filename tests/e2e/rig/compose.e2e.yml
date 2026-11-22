@@ -1,5 +1,5 @@
 # The rig's additions to docker-compose.yml, and nothing else: Gitberth runs as it's normally started, but github.com,
-# api.github.com, api.cloudflare.com and GitLab's names lead to the stand-ins, whose test CA it trusts (.NET reads
+# api.github.com, api.cloudflare.com, GitLab's names and Docker Hub's search lead to the stand-ins, whose test CA it trusts (.NET reads
 # SSL_CERT_FILE, git GIT_SSL_CAINFO; the bundle is its image's own CAs plus the rig's), its uptime checks over HTTPS reach
 # the stand-in's edge (GITBERTH_UPTIME_CONNECT_TO, a diagnostic setting), it runs with shorter waits
 # (GITBERTH_TEST_TIMINGS), and it's also on the rig's network so the stand-ins can deliver webhooks to it and the
@@ -25,6 +25,12 @@ services:
       - "ntfy.e2e.test:${E2E_STANDIN_IP}"
       - "notify.e2e.test:${E2E_STANDIN_IP}"
       - "smtp.e2e.test:${E2E_STANDIN_IP}"
+      # New app's image search and the tag picker: Docker Hub's search and tags API, and a registry of one's own. Not
+      # Docker Hub's registry (registry-1.docker.io, auth.docker.io): reading an image's config before it's pulled goes
+      # to the real one, as it always has; Docker's own pulls resolve in the rig's engine, untouched.
+      - "hub.docker.com:${E2E_STANDIN_IP}"
+      - "index.docker.io:${E2E_STANDIN_IP}"
+      - "registry.e2e.test:${E2E_STANDIN_IP}"
     environment:
       SSL_CERT_FILE: /e2e-trust/gitberth-bundle.pem
       GIT_SSL_CAINFO: /e2e-trust/gitberth-bundle.pem
@@ -32,10 +38,13 @@ services:
       # name: the scenarios' zones (<uniq>.test) resolve nowhere else. Host and TLS server name stay the domain's.
       GITBERTH_UPTIME_CONNECT_TO: "${E2E_STANDIN_IP}:443"
       # The rig's shorter waits (src/Gitberth/TestTimings.cs): a new container stays up 3 s instead of 15, pull requests
-      # are listed every 20 s instead of 5 min, a restart schedule's minute lasts 20 s and is looked at every 2 s, and the
+      # are listed every 20 s instead of 5 min, a restart schedule's minute lasts 20 s and is looked at every 2 s, the
       # keep-running check looks every 3 s instead of 30 (a stopped app waits 3 s too, and the first look comes 3 s after
-      # start). Unset: these. Set but empty (E2E_TEST_TIMINGS=, or E2E_TIMINGS=production with run.sh): as an install runs.
-      GITBERTH_TEST_TIMINGS: "${E2E_TEST_TIMINGS-stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2,keepEvery=3}"
+      # start), and Docker Hub or a registry that couldn't be reached is left alone 10 s instead of a minute (one that
+      # asked Gitberth to wait, at most 10 s: its shortest honoured wait anyway), so one scenario's Docker Hub outage never
+      # holds up the next. Unset: these. Set but empty (E2E_TEST_TIMINGS=, or E2E_TIMINGS=production with run.sh): as an
+      # install runs.
+      GITBERTH_TEST_TIMINGS: "${E2E_TEST_TIMINGS-stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2,keepEvery=3,hubWait=10}"
     volumes:
       - gbe2e-trust:/e2e-trust:ro
     networks:
