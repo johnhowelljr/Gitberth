@@ -18,7 +18,7 @@ The sidebar on the left holds:
 - **Dashboard**, **Apps**, **Network**, **Health** and **Audit log**. The number next to **Apps** is how many apps are
   running.
 - **Pinned**: the apps you've pinned, with their state.
-- **Settings**, **Help**, and the versions of Gitberth and Docker, like `Gitberth v1.5.0 · Docker 28.5.1`, at the bottom.
+- **Settings**, **Help**, and the versions of Gitberth and Docker, like `Gitberth v1.6.0 · Docker 28.5.1`, at the bottom.
 
 The top bar has a search box, the Docker engine's version (or **Docker offline**), the **?** button for help, the
 **New app** button and the account menu. While something needs you now, such as a token its service refused, a pill
