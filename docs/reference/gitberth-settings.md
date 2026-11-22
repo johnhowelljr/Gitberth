@@ -170,6 +170,8 @@ and that its restart policy doesn't start, stopped when Docker or the host resta
 stopped, in Gitberth or with `docker stop`, stays stopped. See
 [When an app stops by itself](../guides/health-and-monitoring.md#when-an-app-stops-by-itself).
 
+![Settings, Keep apps running: Bring apps back by themselves, on](../images/settings-keep.webp)
+
 | Field or button | What it does | Default |
 |---|---|---|
 | **Bring apps back by themselves** | Every 30 seconds Gitberth looks at every app that's meant to run and brings back one that stopped by itself: up to 4 tries in a row (at once, then 1, 5 and 15 minutes after the try before), then it tells you and only tries every 6 hours. Off, every stopped app is left as it is. Saved at once. | On |
@@ -227,6 +229,8 @@ Click **Save** to save it. Gitberth checks right away with the new interval.
 
 Docker's disk: how full it is, what takes the room, and what Gitberth cleans up by itself so that it doesn't fill up. See
 [Docker's disk is filling up](../guides/troubleshooting.md#dockers-disk-is-filling-up).
+
+![Settings, Disk: the free space with its bar, the build cache and Clear build cache, the images, Clean up by itself with the days unused build cache is kept, the last cleanup and Clean up now](../images/settings-disk.webp)
 
 | Field or button | What it does | Default |
 |---|---|---|

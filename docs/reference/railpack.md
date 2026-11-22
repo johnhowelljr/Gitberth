@@ -17,6 +17,8 @@ page says when Gitberth uses it, how it runs it, and what you can set.
   Railpack** on by itself when the app's folder has one and no Dockerfile. An app you already have doesn't change
   builder when a `railpack.json` appears: set its **Build** yourself.
 
+![New app from a repository with a shell script, a kind of project Gitberth doesn't build itself: How it will run: Shell script with Railpack, the note that Railpack builds it, and Railpack's plan](../images/new-app-railpack.webp)
+
 Railpack isn't tried when Gitberth knows what the project is but can't build it, such as a .NET Framework project or a
 `package.json` it can't read: the deploy says why, as before. An app whose deploys failed before because Gitberth
 couldn't work out how to build it tries Railpack on its next deploy, and Gitberth builds a failed commit again after

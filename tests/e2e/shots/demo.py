@@ -166,7 +166,29 @@ while True:
 ''',
 }
 
-MAILPIT = """docker run -d --name mailpit \\
+# A project Gitberth doesn't build itself, a shell script, which Railpack builds: New app's Railpack card. Only checked,
+# never created. It serves motd.txt on the PORT Gitberth gives, with Perl (Railpack's runtime image, Debian's slim, has it).
+MOTD = {
+    "README.md": "# motd\n\nThe home lab's message of the day: a shell script, built by Railpack.\n",
+    "start.sh": """#!/bin/sh
+echo "motd listening on ${PORT:-8080}"
+exec perl -MSocket -e '
+  my $port = $ENV{PORT} || 8080;
+  socket(my $s, PF_INET, SOCK_STREAM, 6) or die "socket: $!";
+  setsockopt($s, SOL_SOCKET, SO_REUSEADDR, pack("l", 1));
+  bind($s, sockaddr_in($port, INADDR_ANY)) or die "bind: $!";
+  listen($s, 16) or die "listen: $!";
+  while (accept(my $c, $s)) {
+    while (my $h = <$c>) { last if $h =~ /^\\r?$/ }
+    open(my $f, "<", "motd.txt"); my $body = join("", <$f>);
+    print $c "HTTP/1.0 200 OK\\r\\nContent-Type: text/plain\\r\\nContent-Length: " . length($body) . "\\r\\n\\r\\n$body";
+    close $c;
+  }'
+""",
+    "motd.txt": "Backups ran at 03:00. Disk 41% full. Have a good day.\n",
+}
+
+MAILPIT ="""docker run -d --name mailpit \\
   --restart unless-stopped \\
   -p 8025:8025 -p 1025:1025 \\
   -v mailpit-data:/data \\

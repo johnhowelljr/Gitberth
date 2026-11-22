@@ -5,7 +5,7 @@
         <div class="gb-dialog-sub">Each KEY=value line sets that variable, replacing one of the same name. Nothing changes until you apply.</div>
     </TitleContent>
     <DialogContent>
-        <textarea class="gb-input" rows="10" spellcheck="false" placeholder="DATABASE_URL=postgres://app:secret@postgres/app&#10;TZ=Europe/London"
+        <textarea class="gb-input" rows="10" spellcheck="false" placeholder="@Example"
                   @bind="text" @bind:event="oninput" aria-label=".env contents" style="min-height:200px"></textarea>
         <div class="gb-help" style="margin-top:8px">@Lines @(Lines == 1 ? "variable" : "variables") found.</div>
     </DialogContent>
@@ -19,6 +19,10 @@
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
 
     private string text = "";
+
+    // Two lines of example. A newline set from C#: an entity like &#10; in the markup reaches the page as those characters
+    // on an element with @bind, which Blazor builds attribute by attribute.
+    private const string Example = "DATABASE_URL=postgres://app:secret@postgres/app\nTZ=Europe/London";
 
     private int Lines => text.Replace("\r", "").Split('\n').Count(l => l.Trim() is { Length: > 0 } t && !t.StartsWith('#') && t.IndexOf('=') > 0);
 }

@@ -98,6 +98,8 @@ tick for each file it went by, **Railpack 0.43.0 plans the build: no Dockerfile 
 app, and **Gets PORT=8080, the port Gitberth publishes**. **Railpack's plan** shows the steps Railpack will run, as it
 prints them. Railpack plans the build again on every deploy. See [Railpack builds](../reference/railpack.md).
 
+![New app from a repository with a shell script, a kind of project Gitberth doesn't build itself: How it will run: Shell script with Railpack, the note that Railpack builds it, and Railpack's plan](../images/new-app-railpack.webp)
+
 When Railpack can't work out how to build it either, the card says why, **Railpack couldn't work out how to build it
 either: …**, and **Customize the Dockerfile** is on with a starter Dockerfile.
 

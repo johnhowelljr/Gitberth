@@ -47,6 +47,8 @@ How the app shows up in Gitberth. Nothing here restarts it.
 Git apps only: where the code comes from and how it's built. The section names the repository and what Gitberth last
 detected. The app's image is built from the repository, so it has no **Image** field.
 
+![An app's Settings tab, Source section: its repository, branch and subfolder, Deploy on push, and Build's three ways, Detect automatically chosen, Railpack and Custom Dockerfile](../images/app-settings-build.webp)
+
 | Field | What it does | Default | Applies |
 |---|---|---|---|
 | **Branch** | The branch Gitberth builds and watches. | The branch you picked when you added the app | Build |

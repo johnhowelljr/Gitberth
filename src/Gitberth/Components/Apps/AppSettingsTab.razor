@@ -170,7 +170,7 @@ else
                                    OnUndo="() => Undo(() => Git.IgnoredPaths = Git.Loaded.IgnoredPaths ?? string.Empty)" Error="@Git.IgnoredProblem">
                                 <ChildContent>
                                     <textarea id="set-ignored" class="gb-input gb-input--mono @(Git.IgnoredChanged ? "gb-input--changed" : null)" rows="4" spellcheck="false"
-                                              placeholder="*.md&#10;docs/" @bind="Git.IgnoredPaths" @bind:event="oninput" @bind:after="Notify"></textarea>
+                                              placeholder="@IgnoredExample" @bind="Git.IgnoredPaths" @bind:event="oninput" @bind:after="Notify"></textarea>
                                 </ChildContent>
                                 <HelpContent>A new commit whose changed files all match these doesn't deploy by itself.</HelpContent>
                             </Field>
@@ -460,6 +460,10 @@ else
     private static IReadOnlyList<SegOption<string>> RestartOptions => AppFacts.RestartOptions;
 
     private static IReadOnlyList<SegOption<HealthMode>> HealthOptions => AppFacts.HealthOptions;
+
+    // Ignored paths' example, two lines. A newline set from C#: an entity like &#10; in the markup reaches the page as
+    // those characters on an element with @bind, which Blazor builds attribute by attribute.
+    private const string IgnoredExample = "*.md\ndocs/";
 
     private static readonly IReadOnlyList<SegOption<DockerfileMode>> BuildOptions =
     [
