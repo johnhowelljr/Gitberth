@@ -13,6 +13,9 @@ public static partial class EnvRules
     /// <summary>Front-end frameworks bake these into the bundle at build time.</summary>
     public static bool IsBuildTimePrefix(string key) => BuildTimePrefixes.Any(p => key.StartsWith(p, StringComparison.Ordinal));
 
+    /// <summary>Railpack's own settings (RAILPACK_NODE_VERSION, RAILPACK_START_CMD…): they configure the build, so they're always build-time.</summary>
+    public static bool IsRailpackKey(string key) => key.StartsWith("RAILPACK_", StringComparison.Ordinal);
+
     public static bool IsValidKey(string key) => ValidKey().IsMatch(key);
 
     /// <summary>A URL with a password in it, like postgres://user:password@host/db: the one rule's (<see cref="Security.Masking.HasUrlPassword"/>).</summary>

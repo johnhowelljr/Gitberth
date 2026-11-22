@@ -193,6 +193,8 @@ public sealed partial class AppService(
             var key = e.Key.Trim();
             if (!EnvRules.IsValidKey(key)) errors.Add($"'{key}' isn't a valid variable name (letters, digits and _; it can't start with a digit).");
             else if (!keys.Add(key)) errors.Add($"The variable {key} is listed twice.");
+            // New app's and create_app's: a RAILPACK_ value goes into Railpack's plan and the image, so it can't be secret.
+            if (Railpack.RailpackSettings.IsSecret(key, e.Value ?? "", e.IsSecret)) errors.Add(Railpack.RailpackText.SecretSetting(key));
         }
 
         var targets = new HashSet<string>(StringComparer.Ordinal);
@@ -523,8 +525,11 @@ public sealed partial class AppService(
         // container each time.
         var api = await docker.ServerApiVersionAsync();
         var lanIpv4Only = hostScanner?.Last?.LanIpv4Only == true;
+        // An image Railpack built runs a Command of several words as one, through its bash -c: read off the image only then.
+        var railpack = app.CurrentImage is { } current && GitExtras.Parse(app.RuntimeExtras)?.Command is { Count: > 1 }
+            && await docker.ImageLabelAsync(current, ImageLabels.Builder) == "railpack";
         return ContainerSpecFactory.For(app, image, env, options.Network, await docker.GetLogOptionsAsync(),
-            gatewayPriority: api is not null && api >= DockerCli.GwPriorityApi, lanIpv4Only: lanIpv4Only).ToDisplayString();
+            gatewayPriority: api is not null && api >= DockerCli.GwPriorityApi, lanIpv4Only: lanIpv4Only, railpackImage: railpack).ToDisplayString();
     }
 
     /// <summary>
@@ -573,7 +578,8 @@ public sealed partial class AppService(
             }
             existing.ProtectedValue = protector.Protect(row.Value ?? "");
             existing.IsSecret = row.IsSecret;
-            existing.BuildTime = row.BuildTime;
+            // Railpack's settings configure its build, so they're always build-time (as GitAppSettings has it too).
+            existing.BuildTime = row.BuildTime || EnvRules.IsRailpackKey(key);
         }
 
         app.Volumes.Clear();
@@ -662,6 +668,8 @@ public sealed partial class AppService(
             {
                 if (!EnvRules.IsValidKey(e.Key.Trim())) problems.Add(new(SettingField.Env, $"'{e.Key}' isn't a valid variable name (letters, digits and _; it can't start with a digit)."));
                 else if (!keys.Add(EnvScopes.Named(e.Key.Trim(), e.Scope))) problems.Add(new(SettingField.Env, $"The variable {EnvScopes.Named(e.Key.Trim(), e.Scope)} is listed twice."));
+                // A RAILPACK_ value goes into Railpack's plan and the image: never saved secret (SettingsRules says so first).
+                if (Railpack.RailpackSettings.IsSecret(e.Key, e.Value, e.Secret)) problems.Add(new(SettingField.Env, Railpack.RailpackText.SecretSetting(e.Key.Trim())));
             }
         }
         if (problems.Count > 0) return new GitSaved(false, false, new HashSet<SettingField>(), problems);

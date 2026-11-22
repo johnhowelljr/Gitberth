@@ -386,6 +386,22 @@ public class PreviewRulesTests
     // ---- What a preview copies ----
 
     [Fact]
+    public void A_preview_builds_with_railpack_when_its_parent_does()
+    {
+        var parent = new AppDefinition { Id = 1, Name = "orb", Slug = "orb", Owner = "acme", Repo = "orb", DockerfileMode = DockerfileMode.Railpack };
+        var preview = new AppDefinition { Slug = "orb-pr-3", ParentAppId = 1 };
+        var info = new PreviewInfo { Kind = PreviewKind.PullRequest, Branch = "feature", PullRequest = 3, Ref = "refs/pull/3/head" };
+
+        PreviewCopy.Sync(preview, parent, info);
+        Assert.Equal(DockerfileMode.Railpack, preview.DockerfileMode);
+
+        // Set back to Detect automatically, the preview's next deploy follows.
+        parent.DockerfileMode = DockerfileMode.Auto;
+        PreviewCopy.Sync(preview, parent, info);
+        Assert.Equal(DockerfileMode.Auto, preview.DockerfileMode);
+    }
+
+    [Fact]
     public void A_preview_copies_its_parents_settings_but_nothing_production_holds()
     {
         var parent = new AppDefinition

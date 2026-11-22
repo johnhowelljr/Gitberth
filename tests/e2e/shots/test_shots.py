@@ -443,6 +443,22 @@ def test_new_app_gitlab(shooter):
     shooter.window(page, "new-app-gitlab")
 
 
+def test_new_app_railpack(gitberth, github, standins, shooter):
+    """github.com/you/motd, a shell script Gitberth doesn't build itself: New app's card once Railpack has planned it (How
+    it will run, the note that Railpack builds it, Railpack's plan). Only checked: nothing is created."""
+    github.create_repo("motd", owner="you", template=None, files={"README.md": "# motd\n"})
+    standins.api("POST", "/github/repos/you/motd/commits", {"branch": "main", "files": D.MOTD, "message": "First version",
+                                                          "author": D.AUTHOR, "pusher": "you"})
+    page = shooter.page()
+    shooter.open(page, "/apps/new?url=https%3A%2F%2Fgithub.com%2Fyou%2Fmotd")
+    page.locator("#git-name").wait_for(timeout=180_000)
+    card = page.locator("section.gb-card").filter(has=page.locator(".gb-h3", has_text="How it will run"))
+    card.locator("#git-railpack-note").wait_for(timeout=120_000)
+    shooter.quiet(page)
+    card.evaluate("e => scrollTo(0, e.getBoundingClientRect().top + scrollY - 90)")
+    shooter.window(page, "new-app-railpack")
+
+
 def test_step_19_template_miniflux(gitberth, shooter):
     page = shooter.page()
     install(gitberth, page, "miniflux")
@@ -777,6 +793,16 @@ def test_app_settings_updates(gitberth, shooter):
     shooter.detail(page, page.locator("#sec-source"), "app-settings-updates")
 
 
+def test_app_settings_build(gitberth, shooter):
+    """website's Settings › Source: its repository and branch, and Build's three ways (Detect automatically chosen,
+    Railpack, Custom Dockerfile) with what Gitberth detected."""
+    page = shooter.page()
+    shooter.open(page, f"/apps/{key_of(gitberth, 'website')}/settings", wait_for="#sec-source")
+    page.locator("#sec-source").get_by_role("radiogroup", name="Build", exact=True).wait_for()
+    shooter.quiet(page)
+    shooter.detail(page, page.locator("#sec-source"), "app-settings-build")
+
+
 def test_change_dialog(gitberth, shooter):
     """adminer's memory limit changed and Apply: the dialog, then Cancel and Discard."""
     page = shooter.page()
@@ -875,7 +901,7 @@ def test_settings(shooter):
     ("notifications", "settings-notifications"), ("registries", "settings-registries"), ("updates", "settings-updates"),
     ("domains", "settings-domains"), ("uptime", "settings-uptime"), ("network", "settings-network"),
     ("own-lan", "settings-own-lan"), ("deploys", "settings-deploys"), ("databases", "settings-databases"),
-    ("audit", "settings-audit"),
+    ("audit", "settings-audit"), ("keep", "settings-keep"), ("disk", "settings-disk"),
 ])
 def test_settings_section(shooter, sid, name):
     page = shooter.page()

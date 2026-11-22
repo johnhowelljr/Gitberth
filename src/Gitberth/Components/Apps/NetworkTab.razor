@@ -300,7 +300,7 @@ else
         Name = NetworkName,
         Title = App.Summary.Title,
         Image = App.Summary.Image,
-        Kind = App.Row?.DetectedKind,
+        Kind = LogoCatalog.KindOf(App.Row?.DetectedKind, App.Row?.DetectedSummary),
         Self = App.Summary.Role == ContainerRole.Self,
         State = App.Summary.State,
         StateText = App.Summary.StateText,
@@ -349,7 +349,7 @@ else
         var facts = new List<ReachFact>();
         if (IsGit && App.Row is { } row)
         {
-            if (row.DetectedKind is { Length: > 0 } stack) facts.Add(new("Stack", StackName(stack)));
+            if (row.DetectedKind is { Length: > 0 } stack) facts.Add(new("Stack", StackName(stack, row.DetectedSummary)));
             if (row.CurrentCommit is { Length: > 0 } commit) facts.Add(new("Commit", commit[..Math.Min(7, commit.Length)], true));
         }
         else if (App.Summary.Image.Length > 0)
@@ -361,9 +361,11 @@ else
         return facts;
     }
 
-    // "NextJs" as people write it: Next.js; any other kind with its words apart ("SpringBoot" is "Spring Boot").
-    private static string StackName(string kind) => kind switch
+    // "NextJs" as people write it: Next.js; any other kind with its words apart ("SpringBoot" is "Spring Boot"); an app
+    // Railpack builds by what Railpack found ("Shell script with Railpack").
+    internal static string StackName(string kind, string? summary = null) => kind switch
     {
+        "Railpack" => summary is { Length: > 0 } found ? found : "Railpack",
         "NextJs" => "Next.js",
         "NodeJs" or "Node" => "Node.js",
         "DotNet" => ".NET",

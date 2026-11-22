@@ -5,6 +5,7 @@ using Gitberth.Docker;
 using Gitberth.Domains;
 using Gitberth.Health;
 using Gitberth.Network;
+using Gitberth.Railpack;
 using Gitberth.Security;
 using Gitberth.Services;
 using Microsoft.AspNetCore.DataProtection;
@@ -339,6 +340,60 @@ public sealed class GitAppSettingsTests : IDisposable
 
         var app = await LoadAsync(id);
         Assert.Equal((AppSource.Git, true, (string?)null, "gb-site", "site", UpdatePolicy.Off), (app.Source, app.Pinned, app.Container, app.ContainerName, app.NetworkName, app.UpdatePolicy));
+    }
+
+    [Fact]
+    public async Task A_railpack_setting_is_build_time_however_its_saved_and_a_change_to_it_waits_for_a_build()
+    {
+        // New app's form: not marked build-time, and it's build-time all the same; another value keeps its mark.
+        var created = await LoadAsync(await _apps.CreateAsync(new Gitberth.Git.GitHubRepoRef("acme", "site"), new AppSettingsModel
+        {
+            Name = "Site",
+            Env = [new EnvRow { Key = "RAILPACK_NODE_VERSION", Value = "22" }, new EnvRow { Key = "LOG_LEVEL", Value = "info" }],
+        }, null));
+        Assert.Equal([("LOG_LEVEL", false), ("RAILPACK_NODE_VERSION", true)], created.EnvVars.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => (v.Key, v.BuildTime)));
+
+        // The Settings tab (and the API, and MCP): the same, so a change to one waits for a build, as any build-time value's does.
+        var id = await AddAsync(Kanban());
+        var added = await _apps.SaveSettingsAsync(id, await EditAsync(id, s => s with { Env = [.. s.Env, new EnvSetting("RAILPACK_DEPLOY_APT_PACKAGES", "ffmpeg")] }));
+        Assert.True(added.RebuildNeeded);
+        Assert.True((await LoadAsync(id)).EnvVars.Single(v => v.Key == "RAILPACK_DEPLOY_APT_PACKAGES").BuildTime);
+        var changed = await _apps.SaveSettingsAsync(id, await EditAsync(id, s => s with
+        {
+            Env = [.. s.Env.Select(e => e.Key == "RAILPACK_DEPLOY_APT_PACKAGES" ? e with { Value = "ffmpeg imagemagick", BuildTime = false } : e)],
+        }));
+        Assert.Equal((true, true), (changed.RebuildNeeded, (await LoadAsync(id)).RebuildPending));
+    }
+
+    [Fact]
+    public async Task A_railpack_setting_that_would_be_secret_is_never_saved_and_one_that_names_a_secret_is()
+    {
+        var id = await AddAsync(Kanban());
+        var before = await LoadAsync(id);
+
+        // The Settings tab, its paste, the API and MCP: marked secret, or holding one.
+        foreach (var setting in new[] { new EnvSetting("RAILPACK_START_CMD", "./server --port $PORT", Secret: true), new EnvSetting("RAILPACK_START_CMD", "./server --api-key=s3cr3t-api-key") })
+        {
+            var refused = await _apps.SaveSettingsAsync(id, await EditAsync(id, s => s with { Env = [.. s.Env, setting] }));
+            Assert.Equal([RailpackText.SecretSetting("RAILPACK_START_CMD")], refused.Problems.Select(p => p.Message));
+            Assert.Equal(before.EnvVars.Count, (await LoadAsync(id)).EnvVars.Count);
+        }
+
+        // The secret in a variable of its own, named in the command: saved, and as a plain value.
+        var saved = await _apps.SaveSettingsAsync(id, await EditAsync(id, s => s with
+        {
+            Env = [.. s.Env, new EnvSetting("RAILPACK_START_CMD", "./server --api-key $API_KEY"), new EnvSetting("API_KEY", "s3cr3t-api-key", Secret: true)],
+        }));
+        Assert.Empty(saved.Problems);
+        var row = (await LoadAsync(id)).EnvVars.Single(v => v.Key == "RAILPACK_START_CMD");
+        Assert.Equal((false, true), (row.IsSecret, row.BuildTime));
+
+        // New app and create_app: the same refusal before anything is made.
+        var problems = await _apps.ValidateAsync(null, new AppSettingsModel
+        {
+            Name = "Site", Env = [new EnvRow { Key = "RAILPACK_BUILD_CMD", Value = "make", IsSecret = true }, new EnvRow { Key = "RAILPACK_PACKAGES", Value = "node@22 python@3.13" }],
+        });
+        Assert.Equal([RailpackText.SecretSetting("RAILPACK_BUILD_CMD")], problems);
     }
 
     [Fact]

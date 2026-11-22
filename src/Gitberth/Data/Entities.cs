@@ -3,7 +3,8 @@ using Gitberth.Network;
 
 namespace Gitberth.Data;
 
-public enum DockerfileMode { Auto, Custom }
+// Stored by name (AppDefinition.DockerfileMode): members are only ever added at the end.
+public enum DockerfileMode { Auto, Custom, Railpack }
 
 public enum DesiredState { Running, Stopped }
 
@@ -51,7 +52,10 @@ public class AppDefinition
     public string Branch { get; set; } = "main";
     public string? Subdirectory { get; set; }
 
-    /// <summary>Auto = detect and generate the Dockerfile on every deploy; Custom = use <see cref="CustomDockerfile"/>.</summary>
+    /// <summary>
+    /// Auto = Gitberth's detection on every deploy, else Railpack; Custom = <see cref="CustomDockerfile"/>; Railpack = always
+    /// Railpack.
+    /// </summary>
     public DockerfileMode DockerfileMode { get; set; } = DockerfileMode.Auto;
     public string? CustomDockerfile { get; set; }
     /// <summary>Which project to run when a .NET solution has several (relative path of the .csproj).</summary>

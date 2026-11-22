@@ -8,6 +8,8 @@
 @inject AdminAuthService Auth
 @inject DockerCli Docker
 @inject GitClient Git
+@inject Gitberth.Railpack.IRailpackPlanner RailpackPlanner
+@inject Gitberth.Railpack.IRailpackBuildKit RailpackBuildKit
 @inject GitberthOptions Options
 @inject HostScanner Scanner
 @inject NetworkService Networks
@@ -550,6 +552,8 @@
                     </dd>
                     <dt><Tip Key="settings.system.git">git</Tip></dt>
                     <dd>@(gitVersion ?? "Not found")</dd>
+                    <dt><Tip Key="settings.system.railpack">Railpack</Tip></dt>
+                    <dd id="system-railpack">@(railpackLine ?? "Checking…")</dd>
                     <dt><Tip Key="settings.system.data">Data folder</Tip></dt>
                     <dd><code>@Options.DataDir</code></dd>
                     <dt><Tip Key="settings.system.version">Version</Tip></dt>
@@ -633,6 +637,35 @@
     private string currentPassword = "", newPassword = "", repeatPassword = "";
     private DockerInfo? dockerInfo;
     private string? gitVersion;
+    // Settings › System's Railpack line: the version in this image, and gitberth-buildkit's state.
+    private string? railpackLine;
+
+    /// <summary>
+    /// The Railpack line: "0.43.0 · builds in gitberth-buildkit (running)", stopped until a build needs it, or made on the
+    /// first Railpack build; "Not in this image" when the image has no Railpack.
+    /// </summary>
+    internal static string RailpackLine(string? version, Gitberth.Railpack.RailpackBuildKitStatus? status)
+    {
+        if (string.IsNullOrWhiteSpace(version)) return "Not in this image";
+        var state = status is not { Exists: true } ? "made on the first Railpack build"
+            : status.Running ? "running" : "stopped until a build needs it";
+        return $"{version.Trim()} · builds in {Gitberth.Railpack.RailpackRelease.BuildKitContainer} ({state})";
+    }
+
+    private async Task LoadRailpackAsync()
+    {
+        try
+        {
+            var version = await RailpackPlanner.VersionAsync(CancellationToken.None);
+            var status = version is null ? null : await RailpackBuildKit.StatusAsync(CancellationToken.None);
+            railpackLine = RailpackLine(version, status);
+        }
+        catch (Exception ex)
+        {
+            // Docker or the image couldn't say: the line says why rather than breaking the page.
+            railpackLine = $"Couldn't be read: {ex.Message.TrimEnd('.')}.";
+        }
+    }
     private bool domainsEnabled, cloudflareSaved;
     // Bumped when saving the switch fails, which re-creates it so it shows the saved state rather than the click.
     private int switchKey;
@@ -723,6 +756,8 @@
     {
         browserHost = new Uri(Nav.BaseUri).Host;
         GitHubState.Changed += OnGitHubChanged;
+        // Beside the rest: gitberth-buildkit's cache is sized by walking its volume, which can take a moment.
+        var railpack = LoadRailpackAsync();
         await RememberAddressAsync();
         await LoadAsync();
         await LoadIntegrationAsync();
@@ -738,6 +773,7 @@
         // Only looked for while domains are on: off, Gitberth doesn't read the tunnel's container at all.
         if (domainsEnabled) (tunnel, tunnelProblem) = await Domains.FindTunnelAsync();
         if (domainsEnabled && cloudflareSaved) protection = await Domains.ProtectionAsync();
+        await railpack;
     }
 
     public void Dispose() => GitHubState.Changed -= OnGitHubChanged;

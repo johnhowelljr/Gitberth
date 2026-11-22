@@ -80,7 +80,7 @@ again, set it back to `ghcr.io/johnhowelljr/gitberth:latest`.
 
 ### See which image you run
 
-In Gitberth, **Settings › System** shows the **Version**, with the commit a published image was built from, like `1.5.0 (3f9c2ab)`, and the sidebar shows `v1.5.0`. On the host:
+In Gitberth, **Settings › System** shows the **Version**, with the commit a published image was built from, like `1.6.0 (3f9c2ab)`, and the sidebar shows `v1.6.0`. On the host:
 
 ```bash
 docker compose images

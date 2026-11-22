@@ -228,7 +228,8 @@ public sealed partial class DockerCli(GitberthOptions options, Audit.ExpectedCha
                 if (!c.TryGetProperty("NetworkSettings", out var settings) || !settings.TryGetProperty("Networks", out var networks)
                     || networks.ValueKind != JsonValueKind.Object || !networks.TryGetProperty(network, out var endpoint)) continue;
                 var ip = Str(endpoint, "IPAddress");
-                if (ip.Length == 0) continue;
+                // gitberth-buildkit, where Railpack builds run, is Gitberth's own: no build reaches it, and no list names it.
+                if (ip.Length == 0 || Str(c, "Name").TrimStart('/') == Railpack.RailpackRelease.BuildKitContainer) continue;
                 var id = Str(c, "Id");
                 var names = new List<string> { Str(c, "Name").TrimStart('/') };
                 if (endpoint.TryGetProperty("Aliases", out var aliases) && aliases.ValueKind == JsonValueKind.Array)

@@ -50,8 +50,9 @@ public sealed record HostScan(
 public static class HostScanHelper
 {
     /// <summary>
-    /// Marks every short-lived container Gitberth runs for itself, with what it's for as the value (ports, probe, check,
-    /// lan-check), and the lan-check's own temporary network. Gitberth's lists, counts, health charts and events leave them out.
+    /// Marks every container Gitberth runs for itself, with what it's for as the value (ports, probe, check, lan-check,
+    /// compose, railpack: short-lived; buildkit: gitberth-buildkit, which runs while Railpack builds need it), and the
+    /// lan-check's own temporary network. Gitberth's lists, counts, health charts and events leave them out.
     /// </summary>
     public const string Label = "gitberth.helper";
 
@@ -110,6 +111,15 @@ public static class HostScanHelper
     public const int LanCheckBatch = 60;
 
     public static bool IsHelper(IReadOnlyDictionary<string, string> labels) => labels.ContainsKey(Label);
+
+    /// <summary>
+    /// What a helper is, after "This is" or "&lt;name&gt; is": gitberth-buildkit stays up while Railpack builds need it, the
+    /// others only run for a moment.
+    /// </summary>
+    public static string What(IReadOnlyDictionary<string, string> labels) =>
+        labels.TryGetValue(Label, out var kind) && kind == Railpack.RailpackRelease.BuildKitHelperKind
+            ? Railpack.RailpackText.BuildKitHelper
+            : "a Gitberth helper: it only runs for a moment.";
 
     /// <summary>A name for one run of the helper, so one left behind can be removed by it.</summary>
     public static string NewName() => NewName("ports");

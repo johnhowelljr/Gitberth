@@ -170,6 +170,8 @@ and that its restart policy doesn't start, stopped when Docker or the host resta
 stopped, in Gitberth or with `docker stop`, stays stopped. See
 [When an app stops by itself](../guides/health-and-monitoring.md#when-an-app-stops-by-itself).
 
+![Settings, Keep apps running: Bring apps back by themselves, on](../images/settings-keep.webp)
+
 | Field or button | What it does | Default |
 |---|---|---|
 | **Bring apps back by themselves** | Every 30 seconds Gitberth looks at every app that's meant to run and brings back one that stopped by itself: up to 4 tries in a row (at once, then 1, 5 and 15 minutes after the try before), then it tells you and only tries every 6 hours. Off, every stopped app is left as it is. Saved at once. | On |
@@ -228,13 +230,15 @@ Click **Save** to save it. Gitberth checks right away with the new interval.
 Docker's disk: how full it is, what takes the room, and what Gitberth cleans up by itself so that it doesn't fill up. See
 [Docker's disk is filling up](../guides/troubleshooting.md#dockers-disk-is-filling-up).
 
+![Settings, Disk: the free space with its bar, the build cache and Clear build cache, the images, Clean up by itself with the days unused build cache is kept, the last cleanup and Clean up now](../images/settings-disk.webp)
+
 | Field or button | What it does | Default |
 |---|---|---|
 | **Free space** | What's free of the disk's size, like **41.2 GB free of 64.0 GB**, with a bar, and **Getting low** or **Almost full**. The line under it says where the two lines are on this disk: "Gitberth warns under 15.0 GB free and stops pulling images under 5.0 GB." It's measured on Gitberth's data folder, which is on Docker's disk. | |
-| **Build cache** | How much room Docker's build cache takes on the host, such as **1.2 GB on this host**, and how much of it no build used for the days below: what the next cleanup removes. The cache keeps each step of every app's builds, so a step whose files didn't change isn't run again and builds are quick. | |
-| **Clear build cache** | Asks first, then deletes all of the build cache. Nothing that runs changes, but the next build of each app runs every step again, so it takes longer. Afterwards Gitberth says how much it freed. While a build or a cleanup runs, it's refused, and says which: clear it once that's done. To build one app without the cache instead, use **Deploy without the build cache**; see [Deploys and rollbacks](../guides/deploys-and-rollbacks.md#without-the-build-cache). | |
+| **Build cache** | How much room Docker's build cache takes on the host, such as **1.2 GB on this host**, and how much of it no build used for the days below: what the next cleanup removes. The cache keeps each step of every app's builds, so a step whose files didn't change isn't run again and builds are quick. Once a Railpack build has run, a line under it says what [Railpack's builds](railpack.md#which-builder-runs-it) take in their own cache: **Railpack's builds (gitberth-buildkit): 1.2 GB**. | |
+| **Clear build cache** | Asks first, then deletes all of the build cache, Railpack's too: gitberth-buildkit and its volume go, and the next Railpack build makes them again. Nothing that runs changes, but the next build of each app runs every step again, so it takes longer. Afterwards Gitberth says how much it freed, like **Cleared the build cache: 3.4 GB freed, Railpack's own cache included. The next builds take longer, since every step runs again.** While a build or a cleanup runs, it's refused, and says which: clear it once that's done. To build one app without the cache instead, use **Deploy without the build cache**; see [Deploys and rollbacks](../guides/deploys-and-rollbacks.md#without-the-build-cache). | |
 | **Images** | What every image on the host takes, each layer counted once. Not shown on Docker engines older than 23 (API 1.42). | |
-| **Clean up by itself** | Once a day Gitberth removes the build cache no build used for the days below, keeps the cache under a tenth of the disk (2 to 20 GB), removes the untagged images of its own old builds and the images of deleted apps it was asked to remove, and each app's images beyond the ones it keeps for **Roll back**. When the disk is getting low it also removes the build cache no build used for a day; when it's almost full, all the build cache no build is using. It never removes an image an app runs, names, rolls back to or a container uses, nor anything a build uses: it holds builds off while it runs, and a deploy that gets to its build waits for it. A cleanup Docker fails or refuses is tried again a few minutes later. Off, it only warns. | On |
+| **Clean up by itself** | Once a day Gitberth removes the build cache no build used for the days below, keeps the cache under a tenth of the disk (2 to 20 GB), removes the untagged images of its own old builds and the images of deleted apps it was asked to remove, and each app's images beyond the ones it keeps for **Roll back**. When the disk is getting low it also removes the build cache no build used for a day; when it's almost full, all the build cache no build is using. It never removes an image an app runs, names, rolls back to or a container uses, nor anything a build uses: it holds builds off while it runs, and a deploy that gets to its build waits for it. A cleanup Docker fails or refuses is tried again a few minutes later. Railpack's cache too: while gitberth-buildkit runs, the cleanup removes what no Railpack build used for the days below, and once no app uses Railpack, it removes gitberth-buildkit and its volume. Off, it only warns. | On |
 | **Keep unused build cache for** | How many days the build cache a build hasn't used is kept, 1 to 90. **Save** saves it. | 7 days |
 | **Last cleanup** | When the disk was last cleaned up and by whom, what it freed, and what was free after it, like **Today 04:12, by Gitberth: 2.1 GB freed (build cache 2.0 GB, 3 images). 41.2 GB free after.** | |
 | **Clean up now** | Runs the daily cleanup now, as you, and says what it freed: **Cleaned up: 2.1 GB freed.** or **Nothing to clean up.** When Docker fails or refuses it, it says what Docker said. Refused while a build runs or the build cache is being cleared, and while another cleanup does. | |
@@ -311,8 +315,9 @@ What this Gitberth installation is talking to. Nothing here can be changed.
 |---|---|
 | **Docker engine** | The engine's version and the docker CLI's, or **Not reachable** with the reason. |
 | **git** | The version of git Gitberth uses, or **Not found**. |
+| **Railpack** | The version of Railpack in this image, and the state of gitberth-buildkit, where its builds run: `0.43.0 · builds in gitberth-buildkit (running)`, `(stopped until a build needs it)` or `(made on the first Railpack build)`. **Not in this image** for an image built without it. See [Railpack builds](railpack.md#which-builder-runs-it). |
 | **Data folder** | Where Gitberth keeps its data inside its container, `/data` in the published image. |
-| **Version** | Gitberth's version, and the commit a published image was built from, like `1.5.0 (3f9c2ab)`. |
+| **Version** | Gitberth's version, and the commit a published image was built from, like `1.6.0 (3f9c2ab)`. |
 
 ## Related
 

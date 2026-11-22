@@ -177,7 +177,7 @@ public static class RecreateRules
     // too): it's recreated like any other container. Only Git apps deploy, so only their containers have temporaries.
     private static RecreateVerdict? Gitberths(string name, string id, IReadOnlyDictionary<string, string> labels, string? self, ComposeService? compose)
     {
-        if (labels.ContainsKey(HelperLabel)) return new(RecreateKind.Helper, "This is a Gitberth helper: it only runs for a moment.");
+        if (labels.ContainsKey(HelperLabel)) return new(RecreateKind.Helper, $"This is {HostScanHelper.What(labels)}");
         if (IsSelf(name, id, labels, self))
             return new(RecreateKind.Self, compose is null
                 ? "Gitberth's own container: it can't recreate itself."

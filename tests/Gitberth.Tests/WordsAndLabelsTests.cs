@@ -95,6 +95,12 @@ public sealed class WordsAndLabelsTests : IDisposable
         var git = new GitOptions("main", null, DockerfileMode.Auto, null, null, AutoDeploy: true, VercelVariables: true);
         Assert.Equal([("Build", "Detect automatically", "Custom Dockerfile"), ("Deploy on push", "on", "off")],
             AppSettingsService.GitLines(git, git with { AutoDeploy = false, DockerfileMode = DockerfileMode.Custom }).Select(l => (l.Label, l.Before, l.After)));
+        // Railpack, the Build's third choice, as its Seg names it; the change builds the app again.
+        Assert.Equal(("Build", "Detect automatically", "Railpack", ApplyKind.Rebuild),
+            AppSettingsService.GitLines(git, git with { DockerfileMode = DockerfileMode.Railpack }).Select(l => (l.Label, l.Before, l.After, l.How)).Single());
+        Assert.Equal(("Build", "Railpack", "Custom Dockerfile"),
+            AppSettingsService.GitLines(git with { DockerfileMode = DockerfileMode.Railpack }, git with { DockerfileMode = DockerfileMode.Custom })
+                .Select(l => (l.Label, l.Before, l.After)).Single());
         Assert.Equal(("Gather stats", "on", "off"),
             AppSettingsService.OptionLines(new AppOptions(), new AppOptions { GatherStats = false }).Select(l => (l.Label, l.Before, l.After)).Single());
         Assert.Equal(("Notifications", "on", "off"),

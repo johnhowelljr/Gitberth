@@ -1,0 +1,25 @@
+                   
+╭─────────────────╮
+│ Railpack 0.43.0 │
+╰─────────────────╯
+
+  ⚠ No node package manager detected, using npm
+  → Specify the package manager and version explicitly https://railpack.com/config/recommendations#specify-the-node-package-manager-version
+  ↳ Detected Node
+  ↳ Using npm package manager
+  ↳ Custom start command detected, skipping Caddy start
+  → Add a `package-lock.json` for more deterministic installs https://railpack.com/architecture/recommendations
+  ✖ Failed to get latest version for package `node` after trying versions: lts: failed to run mise command '/tmp/railpack/mise/mise-2026.10.14 latest node@lts': exit status 1
+  
+  
+  mise WARN  mise-versions endpoint=version_list tool=node outcome=failed status=0 fallback=true error="error sending request"
+  mise ERROR error sending request
+  mise ERROR client error (Connect)
+  mise ERROR dns error
+  mise ERROR error resolving DNS
+  mise ERROR failed to lookup address information: Try again
+  mise ERROR Version: 2026.10.14 linux-x64 (2026-10-18)
+  mise ERROR Run with --verbose or MISE_VERBOSE=1 for more information
+  
+
+

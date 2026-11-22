@@ -171,7 +171,7 @@ engine() {
 # earlier run's report).
 sync_tree() {
   (cd "$ROOT" && tar --exclude=bin --exclude=obj --exclude=__pycache__ --exclude=.pytest_cache --exclude=tests/e2e/out \
-    -cf - Dockerfile .dockerignore LICENSE.md docker-compose.yml docs src/Gitberth tests/e2e) \
+    -cf - Dockerfile .dockerignore LICENSE.md THIRD-PARTY-NOTICES.md docker-compose.yml docs src/Gitberth tests/e2e) \
     | docker exec -i "$RIG" sh -c 'rm -rf /e2e/src.new && mkdir -p /e2e/src.new && tar -xf - -C /e2e/src.new && rm -rf /e2e/src && mv /e2e/src.new /e2e/src'
 }
 

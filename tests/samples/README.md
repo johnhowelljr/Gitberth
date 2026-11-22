@@ -25,6 +25,12 @@ The smallest project of each kind Gitberth builds, kept as a regression suite.
 | `expect` | Text the answer must contain. |
 | `env` | Variables the container gets in the Docker check. Optional. |
 | `worker` | `true` for an app with no HTTP: the Docker check only makes sure it keeps running. |
+| `builder` | `railpack` for a project only Railpack builds (`railpack-*`): detection must hand it over (kind `Unknown`, Gitberth's catch-all), and the Docker check leaves it out. Optional. |
+| `railpackProvider` | With `builder`: the Railpack provider whose files the sample has (`shell`, `elixir`, `gleam`, `cpp`, `zig`). |
+
+The `railpack-*` samples are detection samples only: Elixir and Gleam compile Erlang, and C/C++ and Zig fetch their tools,
+from GitHub's downloads, which neither these tests nor the end-to-end rig reach. The end-to-end rig builds one Railpack
+app, the shell script in `tests/e2e/apps/railpack-shell`.
 
 ## Adding one
 

@@ -315,11 +315,17 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
             else if (!options.SecretKeys.SequenceEqual(current.SecretKeys))
             {
                 // A Git app keeps the mark on its variables: its deploys pass secret ones through their own environment,
-                // never on docker's command line or in the deploy log. One that looks secret stays secret.
+                // never on docker's command line or in the deploy log. One that looks secret stays secret. A RAILPACK_ one
+                // goes by Railpack's rule, as its saves do: naming a secret ($NAME) doesn't make it one.
                 await db.Entry(app).Collection(a => a.EnvVars).LoadAsync(ct);
                 var secret = options.SecretKeys.ToHashSet(StringComparer.Ordinal);
                 foreach (var v in app.EnvVars)
-                    v.IsSecret = Masking.IsSecret(v.Key, protector.TryUnprotect(v.ProtectedValue), secret);
+                {
+                    var value = protector.TryUnprotect(v.ProtectedValue);
+                    v.IsSecret = Detection.EnvRules.IsRailpackKey(v.Key)
+                        ? Railpack.RailpackSettings.IsSecret(v.Key, value, secret.Contains(v.Key))
+                        : Masking.IsSecret(v.Key, value, secret);
+                }
             }
             if (options.WebPort != current.WebPort)
             {
@@ -626,7 +632,7 @@ public sealed class AppCatalog(IDbContextFactory<GitberthDb> dbFactory, NetworkS
     // Why a container never gets a row of its own: a helper, or a deploy's or a change's temporary one, which are their app's.
     private async Task<string?> WhyNotAnAppAsync(string name, IReadOnlyDictionary<string, string> labels, CancellationToken ct)
     {
-        if (HostScanHelper.IsHelper(labels)) return $"{name} is a Gitberth helper: it only runs for a moment.";
+        if (HostScanHelper.IsHelper(labels)) return $"{name} is {HostScanHelper.What(labels)}";
         if (labels.ContainsKey(ContainerSpecFactory.BridgeLabel)) return $"{name} is a deploy's temporary container, which Gitberth removes itself.";
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         // An app's own Redis while the app keeps it; one no app keeps any more is a container like any other.

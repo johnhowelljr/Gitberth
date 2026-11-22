@@ -311,6 +311,121 @@ public sealed class AgentToolTests : IDisposable
         Assert.Equal(409, status);
         Assert.Contains("isn't deployed from a repo or a Compose file", JsonNode.Parse(body)!["error"]!.GetValue<string>());
     }
+
+    // ---- Railpack ----
+
+    /// <summary>Railpack's planner: the plan it gives, and what it was asked.</summary>
+    private sealed class Planner(Railpack.RailpackPlanResult result) : Railpack.IRailpackPlanner
+    {
+        public List<Railpack.RailpackPlanRequest> Asked { get; } = [];
+
+        public Task<Railpack.RailpackPlanResult> PlanAsync(Railpack.RailpackPlanRequest request, Action<string>? onLine, CancellationToken ct)
+        {
+            Asked.Add(request);
+            return Task.FromResult(result);
+        }
+
+        public Task<string?> VersionAsync(CancellationToken ct) => Task.FromResult<string?>(Railpack.RailpackRelease.Version);
+    }
+
+    [Fact]
+    public async Task Create_app_builds_with_railpack_when_asked_and_for_a_project_gitberth_doesnt_know()
+    {
+        var dir = Directory.CreateTempSubdirectory("gitberth-choose-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "start.sh"), "echo hi\n");
+            var shell = new Planner(new Railpack.RailpackPlanResult(true, null, null,
+                Railpack.RailpackInfoParser.Parse(RailpackFixtures.Info("info-shell.json"), RailpackFixtures.Plan("plan-shell.json")), RailpackFixtures.Text("plan-shell.json"), []));
+            var unknown = new ProjectAnalyzer().Analyze(dir);
+            Assert.True(unknown.Unrecognized);
+
+            // Detect automatically: Railpack's plan is the card, with its port; Build stays Detect automatically.
+            var (fallback, mode, tried) = await Agents.Tools.AppAdminTools.ChooseBuilderAsync(shell, alwaysRailpack: false, unknown, dir, "", dir,
+                [new EnvValue("RAILPACK_NODE_VERSION", "22", false)], CancellationToken.None);
+            Assert.Equal((ProjectKind.Railpack, 8080, true, DockerfileMode.Auto, true), (fallback.Kind, fallback.ContainerPort, fallback.Unrecognized, mode, tried));
+            Assert.Equal("Shell script with Railpack", fallback.Title);
+            var asked = Assert.Single(shell.Asked);
+            Assert.Equal((dir, "", false, "RAILPACK_NODE_VERSION"), (asked.RepoDir, asked.AppDir, asked.HasStartCommand, asked.Env.Single().Key));
+
+            // build railpack: always Railpack, on the port Gitberth detected.
+            File.WriteAllText(Path.Combine(dir, "index.html"), "<h1>hi</h1>");
+            var site = new ProjectAnalyzer().Analyze(dir);
+            var (chosen, always, _) = await Agents.Tools.AppAdminTools.ChooseBuilderAsync(shell, alwaysRailpack: true, site, dir, "", dir, [], CancellationToken.None);
+            Assert.Equal((ProjectKind.Railpack, 80, false, DockerfileMode.Railpack), (chosen.Kind, chosen.ContainerPort, chosen.Unrecognized, always));
+
+            // A kind Gitberth knows isn't Railpack's to plan.
+            Assert.Equal((site, DockerfileMode.Auto, false), await Agents.Tools.AppAdminTools.ChooseBuilderAsync(shell, false, site, dir, "", dir, [], CancellationToken.None));
+            Assert.Equal(2, shell.Asked.Count);
+
+            // Railpack can't plan it either: as before (the Starter Dockerfile follows); asked for, create_app says why.
+            var nothing = new Planner(new Railpack.RailpackPlanResult(false, Railpack.RailpackFailure.NothingFound,
+                Railpack.RailpackText.CantBuild(Railpack.RailpackText.FoundNothing), null, null, []));
+            Assert.Equal((unknown, DockerfileMode.Auto, true), await Agents.Tools.AppAdminTools.ChooseBuilderAsync(nothing, false, unknown, dir, "", dir, [], CancellationToken.None));
+            var refused = await Assert.ThrowsAsync<ToolError>(() => Agents.Tools.AppAdminTools.ChooseBuilderAsync(nothing, true, unknown, dir, "", dir, [], CancellationToken.None));
+            Assert.Equal(Railpack.RailpackText.CantBuild(Railpack.RailpackText.FoundNothing), refused.Message);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task An_agent_sets_a_git_apps_build_and_get_app_says_it_with_what_was_detected()
+    {
+        await using (var db = _agents.Rig.Db.CreateDbContext())
+            await db.Apps.Where(a => a.Id == _agents.Rig.ObsId).ExecuteUpdateAsync(s => s
+                .SetProperty(a => a.DetectedKind, "Railpack").SetProperty(a => a.DetectedSummary, "Shell script with Railpack"));
+
+        var (status, body) = await CallAsync("update_app_settings", new { app = "orb", build = "railpack", next_deploy = true }, Admin);
+
+        Assert.True(status == 200, body);
+        await using (var db = _agents.Rig.Db.CreateDbContext())
+        {
+            var orb = await db.Apps.AsNoTracking().SingleAsync(a => a.Id == _agents.Rig.ObsId);
+            // A new builder is a new image: it waits for the next deploy.
+            Assert.Equal((DockerfileMode.Railpack, true), (orb.DockerfileMode, orb.RebuildPending));
+        }
+        var git = JsonNode.Parse((await CallAsync("get_app", new { app = "orb" }, Admin)).Body)!["git"]!;
+        Assert.Equal(("railpack", "Shell script with Railpack"), (git["build"]!.GetValue<string>(), git["detected"]!.GetValue<string>()));
+
+        // A custom Dockerfile is the Settings tab's, and only a Git app has a build.
+        (status, body) = await CallAsync("update_app_settings", new { app = "orb", build = "custom" }, Admin);
+        Assert.Equal((400, "build is auto or railpack: a custom Dockerfile is written in the app's Settings tab."), (status, JsonNode.Parse(body)!["error"]!.GetValue<string>()));
+        (status, body) = await CallAsync("update_app_settings", new { app = "postgres", build = "railpack" }, Admin);
+        Assert.Equal(400, status);
+        Assert.EndsWith("isn't deployed from a repo: build is a Git app's.", JsonNode.Parse(body)!["error"]!.GetValue<string>());
+        (status, body) = await CallAsync("create_app", new { source = "image", image = "nginx:1.27", build = "railpack" }, Admin);
+        Assert.Equal((400, "build goes with source git: it's how a repo's image is built."), (status, JsonNode.Parse(body)!["error"]!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task An_agent_cant_make_a_railpack_setting_secret_but_can_name_a_secret_in_one()
+    {
+        // Holding a secret, or marked secret: refused, with what to do instead, and nothing saved.
+        foreach (var setting in new object[] { new { name = "RAILPACK_START_CMD", value = "./server --api-key=s3cr3t-api-key" }, new { name = "RAILPACK_START_CMD", value = "./server", secret = true } })
+        {
+            var (refused, why) = await CallAsync("set_env_vars", new { app = "orb", set = new[] { setting }, next_deploy = true }, Admin);
+            Assert.Equal((400, Railpack.RailpackText.SecretSetting("RAILPACK_START_CMD")), (refused, JsonNode.Parse(why)!["error"]!.GetValue<string>()));
+        }
+        await using (var db = _agents.Rig.Db.CreateDbContext())
+            Assert.False(await db.EnvVars.AnyAsync(v => v.AppId == _agents.Rig.ObsId && v.Key == "RAILPACK_START_CMD"));
+
+        // The secret in a variable of its own, named in the command: saved, the command as a plain value.
+        var (status, body) = await CallAsync("set_env_vars", new
+        {
+            app = "orb",
+            set = new object[] { new { name = "RAILPACK_START_CMD", value = "./server --api-key $API_KEY" }, new { name = "API_KEY", value = "s3cr3t-api-key", secret = true } },
+            next_deploy = true,
+        }, Admin);
+        Assert.True(status == 200, body);
+        await using (var db = _agents.Rig.Db.CreateDbContext())
+        {
+            var saved = await db.EnvVars.AsNoTracking().Where(v => v.AppId == _agents.Rig.ObsId).ToDictionaryAsync(v => v.Key);
+            Assert.Equal((false, true, true), (saved["RAILPACK_START_CMD"].IsSecret, saved["RAILPACK_START_CMD"].BuildTime, saved["API_KEY"].IsSecret));
+        }
+    }
 }
 
 /// <summary>The tools' services on CT 101's containers (<see cref="AppsRig"/>), as Program.cs registers them, for calling tools in tests.</summary>

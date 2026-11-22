@@ -6,6 +6,9 @@ public static class DeployPaths
 
     public static string DockerfileCopy(GitberthOptions options, int deploymentId) => Path.Combine(options.LogsDir, $"deploy-{deploymentId}.Dockerfile");
 
+    /// <summary>The plan a Railpack build used, with Gitberth's edits: next to the deploy's log, gone with the app.</summary>
+    public static string RailpackPlanCopy(GitberthOptions options, int deploymentId) => Path.Combine(options.LogsDir, $"deploy-{deploymentId}.railpack.json");
+
     public static List<string> ReadTail(string path, int maxLines)
     {
         var tail = new Queue<string>();
@@ -68,6 +71,19 @@ public sealed class DeployLog : IDisposable, Databases.IDatabaseLog
         lock (_lock) _secrets = _secrets.Concat(secrets.Where(s => s.Length >= 4)).Distinct().OrderByDescending(s => s.Length).ToArray();
     }
 
+    /// <summary>The text with this deploy's secret values hidden, as a line of the log has them: for what's kept elsewhere (the deploy's error).</summary>
+    public string Mask(string text)
+    {
+        lock (_lock) return Hide(text);
+    }
+
+    // Under the lock.
+    private string Hide(string text)
+    {
+        foreach (var secret in _secrets) text = text.Replace(secret, Security.Masking.Mask, StringComparison.Ordinal);
+        return text;
+    }
+
     public void Step(string message) => Write("==> " + message);
 
     public void Line(string line) => Write(line);
@@ -78,8 +94,7 @@ public sealed class DeployLog : IDisposable, Databases.IDatabaseLog
         lock (_lock)
         {
             if (_disposed) return;
-            foreach (var secret in _secrets) text = text.Replace(secret, Security.Masking.Mask, StringComparison.Ordinal);
-            stamped = $"{DateTime.Now:HH:mm:ss} {text}";
+            stamped = $"{DateTime.Now:HH:mm:ss} {Hide(text)}";
             _writer.WriteLine(stamped);
         }
         _live.Append(stamped);

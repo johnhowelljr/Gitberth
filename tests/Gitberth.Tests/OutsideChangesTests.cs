@@ -120,6 +120,26 @@ public sealed class OutsideChangesTests
         Assert.Empty(ExpectedChanges.ApiExpectations(HttpMethod.Post, "auth", new JsonObject()));
     }
 
+    [Fact]
+    public void Railpacks_commands_say_what_they_change()
+    {
+        string Specs(IEnumerable<ExpectedChanges.Spec> specs) => string.Join(" ", specs.Select(s => $"{s.Type}:{string.Join(',', s.Actions)}:{(s.Any ? "*" : s.Prefix ?? string.Join(',', s.Subjects))}"));
+
+        // buildx's builder lives in buildx's own config, and its prune inside gitberth-buildkit: Docker hears of neither.
+        Assert.Empty(ExpectedChanges.CliExpectations(["buildx", "create", "--name", "gitberth-buildkit", "--driver", "remote", "docker-container://gitberth-buildkit"]));
+        Assert.Empty(ExpectedChanges.CliExpectations(["buildx", "inspect", "--bootstrap", "gitberth-buildkit"]));
+        Assert.Empty(ExpectedChanges.CliExpectations(["buildx", "prune", "--builder", "gitberth-buildkit", "--force", "--filter", "until=168h"]));
+        // --load hands the image to the engine, which loads and tags it.
+        Assert.Equal("image:pull,tag,untag,delete,load,import:*", Specs(ExpectedChanges.CliExpectations(
+            ["buildx", "build", "--builder", "gitberth-buildkit", "--load", "--progress=plain", "-f", "/data/work/dep-7/railpack/railpack-plan.json", "-t", "gitberth/shop:1a2b3c4-railpack",
+             "--secret", "id=API_TOKEN,env=GITBERTH_SECRET_0", "/data/work/dep-7/src"])));
+        // gitberth-buildkit by its name, with its volume.
+        Assert.Equal("container:create,start,die,kill,stop,destroy:gitberth-buildkit volume:create:* image:pull,tag,untag:*", Specs(ExpectedChanges.CliExpectations(
+            ["run", "-d", "--name", "gitberth-buildkit", "--label", "gitberth.helper=buildkit", "--privileged", "--restart", "no", "--network", "gitberth",
+             "-v", "gitberth-buildkit:/var/lib/buildkit", "--entrypoint", "sh", "moby/buildkit:v0.34.0", "-c", "exec buildkitd"])));
+        Assert.Equal("volume:destroy:gitberth-buildkit", Specs(ExpectedChanges.CliExpectations(["volume", "rm", "gitberth-buildkit"])));
+    }
+
     // ---- Reading Docker's events ----
 
     [Fact]

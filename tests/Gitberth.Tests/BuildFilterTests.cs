@@ -534,4 +534,36 @@ public sealed class BuildFilterTests
         Assert.Equal("Docker didn't clear the build cache: a prune operation is already running.", cleared.Message);
         Assert.NotNull(rig.Pipeline.TryHoldBuilds());
     }
+
+    [Fact]
+    public async Task Clearing_the_build_cache_clears_railpacks_own_with_it()
+    {
+        // Docker's cache frees 1.2 GiB; gitberth-buildkit's volume holds 512 MiB.
+        var engine = new Engine(r => r.RequestUri!.AbsolutePath switch
+        {
+            "/v1.56/system/df" => Answer("""{"BuildCache":[],"Volumes":[{"Name":"gitberth-buildkit","UsageData":{"Size":536870912,"RefCount":1}}]}"""),
+            "/v1.56/build/prune" => Answer("""{"CachesDeleted":["a"],"SpaceReclaimed":1288490188}"""),
+            _ => Answer("""{"message":"not here"}""", HttpStatusCode.NotFound),
+        });
+        using var api = new DockerApi("unix:///var/run/docker.sock", engine);
+        using var rig = new AppsRig();
+        var commands = new List<string>();
+        var docker = new DockerCli(rig.Options)
+        {
+            Runner = (a, _, _) =>
+            {
+                lock (commands) commands.Add(string.Join(' ', a));
+                return Task.FromResult(a is ["container", "inspect", ..] ? new ProcessResult(0, $"false {Railpack.RailpackRelease.BuildKitImage} 0a1b2c3d4e5f\n", "") : new ProcessResult(0, "", ""));
+            },
+        };
+        using var buildKit = new Railpack.RailpackBuildKit(docker, rig.Options, NullLogger<Railpack.RailpackBuildKit>.Instance, api);
+
+        var cleared = await new BuildCache(api, rig.Pipeline, NullLogger<BuildCache>.Instance, buildKit: buildKit).ClearAsync();
+
+        Assert.True(cleared.Ok);
+        Assert.Equal(1288490188 + 536870912, cleared.Freed);
+        Assert.Equal("Cleared the build cache: 1.7 GiB freed, Railpack's own cache included. The next builds take longer, since every step runs again.", cleared.Message);
+        // The container and its volume go: the next Railpack build makes them again.
+        Assert.Equal(["rm -f gitberth-buildkit", "volume rm gitberth-buildkit"], commands.Where(c => !c.StartsWith("container inspect", StringComparison.Ordinal)));
+    }
 }

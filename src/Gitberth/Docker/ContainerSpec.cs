@@ -52,6 +52,20 @@ public sealed class ContainerSpec
     public GitExtras? Extras { get; init; }
 
     /// <summary>
+    /// The image runs its command through a shell (an image Railpack built: ENTRYPOINT ["/bin/bash","-c"]), so a Command
+    /// of several words goes as one, quoted as a shell reads it: `bash -c npm start` would run npm alone.
+    /// </summary>
+    public bool ShellCommand { get; init; }
+
+    /// <summary>The command docker run gives after the image: the app's, joined into one shell word when <see cref="ShellCommand"/> asks it.</summary>
+    internal IReadOnlyList<string> CommandArgs(IReadOnlyList<string> command) =>
+        ShellCommand && Extras?.Entrypoint is null && command.Count > 1 ? [ShellJoin(command)] : command;
+
+    /// <summary>The words as one shell command line: each one with a character outside [A-Za-z0-9_./=:@%+-] in single quotes.</summary>
+    internal static string ShellJoin(IReadOnlyList<string> words) =>
+        string.Join(' ', words.Select(w => w.Length > 0 && w.All(c => char.IsAsciiLetterOrDigit(c) || "_./=:@%+-".Contains(c)) ? w : "'" + w.Replace("'", "'\\''") + "'"));
+
+    /// <summary>
     /// Args for `docker run -d ...`, plus env vars for the docker CLI process itself.
     /// Secret values travel through that environment (`-e KEY` with no value), never through argv.
     /// </summary>
@@ -89,7 +103,7 @@ public sealed class ContainerSpec
         args.Add(Image);
         // An entrypoint of several words: docker run takes its first, and the rest go before the command.
         if (x?.Entrypoint is { Count: > 1 } entrypoint) args.AddRange(entrypoint.Skip(1));
-        if (x?.Command is { } command) args.AddRange(command);
+        if (x?.Command is { } command) args.AddRange(CommandArgs(command));
         return (args, processEnv);
     }
 
@@ -194,7 +208,7 @@ public sealed class ContainerSpec
         var (args, _) = BuildRunCommand();
         var secrets = Env.Where(e => e.IsSecret).Select(e => e.Key).ToHashSet(StringComparer.Ordinal);
         // What follows the image is the command, whose secret-looking options are hidden.
-        var command = Math.Max(0, (Extras?.Entrypoint?.Count ?? 1) - 1) + (Extras?.Command?.Count ?? 0);
+        var command = Math.Max(0, (Extras?.Entrypoint?.Count ?? 1) - 1) + (Extras?.Command is { } words ? CommandArgs(words).Count : 0);
         var image = args.Count - 1 - command;
         if (command > 0) args = [.. args.Take(image + 1), .. Security.Masking.Args(args.Skip(image + 1).ToList(), secrets)];
         var sb = new StringBuilder("docker");
@@ -362,11 +376,13 @@ public static class ContainerSpecFactory
     /// <param name="gatewayPriority">The engine takes gateway priorities (API 1.48, Docker 28).</param>
     /// <param name="lanIpv4Only">The host has an IPv6 address the internet can reach, so the LAN's ports go on IPv4 only.</param>
     /// <param name="networkIds">The IDs docker run is given for networks whose names have capitals, by name (see <see cref="NetworkJoin.Id"/>).</param>
+    /// <param name="railpackImage">Railpack built the image, which runs its command through bash -c (<see cref="ContainerSpec.ShellCommand"/>).</param>
     public static ContainerSpec For(AppDefinition app, string image, IReadOnlyList<EnvValue> env, string network, IReadOnlyList<string>? logOptions = null,
         IReadOnlyList<PortMapping>? ports = null, string? name = null, string? restartPolicy = null, bool bridge = false,
         (int Id, DeployTrigger Trigger)? deploy = null, IReadOnlyList<AppNetwork>? networks = null, bool gatewayPriority = true, bool lanIpv4Only = false,
-        IReadOnlyDictionary<string, string>? networkIds = null) => new()
+        IReadOnlyDictionary<string, string>? networkIds = null, bool railpackImage = false) => new()
     {
+        ShellCommand = railpackImage,
         LogOptions = logOptions ?? [],
         Name = name ?? app.ContainerName,
         Image = image,

@@ -1,0 +1,15 @@
+{
+  "logs": [
+    {
+      "Level": "warn",
+      "Msg": "Failed to read config file `railpack.json`\nUse the following schema to validate your config file: https://schema.railpack.com\n",
+      "DocsPath": ""
+    },
+    {
+      "Level": "error",
+      "Msg": "hujson: line 4, column 1: parsing object after value: unexpected EOF",
+      "DocsPath": ""
+    }
+  ],
+  "success": false
+}

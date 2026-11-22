@@ -38,8 +38,10 @@ databases**, **Set by Gitberth: where it's reached** (a template's app) and, for
 3. Use the buttons at the end of each row:
    - the eye shows or hides a secret value;
    - the copy button copies the real value, even when it's masked;
-   - the lock marks the variable **Secret**, or makes it plain again;
-   - the wrench (Git apps) passes the variable to the build too: it shows **Build time**;
+   - the lock marks the variable **Secret**, or makes it plain again (never for a `RAILPACK_` variable, which can't be
+     secret: see [Railpack builds](#railpack-builds));
+   - the wrench (Git apps) passes the variable to the build too: it shows **Build time** (always, for a `RAILPACK_`
+     variable);
    - undo puts back what was there; the cross removes the variable.
 
    **Undo every change here** drops all your edits on this tab.
@@ -79,7 +81,7 @@ encrypted.
 - Gitberth marks a variable secret by itself when its name looks like one (it contains `SECRET`, `PASSWORD`, `TOKEN`,
   `API_KEY`, `PRIVATE`, `CREDENTIAL`, `DSN`, or ends in `_KEY`, and the like) or its value is a URL with a password in it,
   such as `postgres://app:password@postgres/app`. Those are always secret, and the lock can't be turned off.
-- Mark any other variable secret with its lock.
+- Mark any other variable secret with its lock, but a `RAILPACK_` one: it [can't be secret](#railpack-builds).
 - The copy button copies the real value.
 
 [Security](../concepts/security.md) explains how the values are encrypted.
@@ -108,6 +110,22 @@ on by itself for those names when it suggests them for a Node.js app.
   argument, `GITBERTH_SECRETS`, made from the values with a key only this Gitberth has: it gives none of them away, and
   a changed secret (or a preview's own value) builds those steps again instead of reusing what an older value built.
 - A Dockerfile in your repo only gets build arguments, and only for the `ARG`s it declares.
+
+### Railpack builds
+
+- **`RAILPACK_` variables are always build-time.** A variable whose name starts with `RAILPACK_`, like
+  `RAILPACK_NODE_VERSION` or `RAILPACK_START_CMD`, configures [Railpack's build](../reference/railpack.md#settings), so
+  its **Build time** is on and can't be turned off. Changing one marks the app for a rebuild.
+- **`RAILPACK_` variables can't be secret.** Railpack writes them into the build plan and the image, so the lock is off
+  and can't be turned on, and Gitberth doesn't save one that holds a password, such as `--api-key=…` or a URL with a
+  password in it. Keep the secret in a variable of its own and write `$NAME` in the command, such as
+  `RAILPACK_START_CMD=./server --api-key $API_KEY`: the start command runs through a shell, and every build step gets the
+  build-time variables. One that's secret anyway, such as a GitLab variable masked there, isn't passed to Railpack, and
+  the deploy log says so.
+- **Every build-time value is a secret to Railpack.** Railpack has no build arguments, so in a Railpack build every
+  build-time value goes in as a BuildKit secret, secret or not, and every build step gets all of them as environment
+  variables. None is written into the image, and Railpack's planning never sees a secret value.
+- See [Build-time variables and secrets](../reference/railpack.md#build-time-variables-and-secrets).
 
 ## Variables kept in GitHub
 

@@ -88,7 +88,7 @@ Gitberth's own container isn't recreated from its page: its **Network** tab show
 |---|---|
 | `gitberth.db` | Gitberth's SQLite database: settings, apps, ports, networks, domains, deploy history, activity, update checks, and every secret, encrypted. While Gitberth runs, `gitberth.db-wal` and `gitberth.db-shm` sit next to it. |
 | `keys/` | The keys Gitberth encrypts secrets with (ASP.NET Core Data Protection). They also sign the sign-in cookie. |
-| `logs/deploy-<number>.log` | Each deploy's log. `logs/deploy-<number>.Dockerfile` is the Dockerfile it built with. They go when the app is deleted. |
+| `logs/deploy-<number>.log` | Each deploy's log. `logs/deploy-<number>.Dockerfile` is the Dockerfile it built with, and `logs/deploy-<number>.railpack.json` the plan a [Railpack build](railpack.md) used. They go when the app is deleted. |
 | `stats.db` | The Health page's readings and Docker's events for the last few hours, so the charts carry on after a restart. Nothing in it is needed to run. |
 | `uptime.db` | The [uptime checks'](../guides/uptime-and-status-page.md) history: every check for 7 days, an hourly summary and the incidents for 400 days, and what each domain's certificate said. The status page and the Uptime cards read it. |
 | `audit.db` | The [audit log](../guides/audit-log.md): every change, who made it and how it ended, each entry hashed with the one before it. While Gitberth runs, `audit.db-wal` and `audit.db-shm` sit next to it. |
@@ -109,9 +109,11 @@ Gitberth upgrades its database when a new version starts. See [Back up and resto
 | Container | `postgres` | A Postgres server set up from **Settings › Databases** (or `postgres-2` when that name is taken). |
 | Container | `gb-<app>_next`, `gb-<app>_prev` | A deploy's temporary containers: the new version starting next to the old one, and the old one moved aside. Gitberth removes them when the deploy is done. |
 | Container | `<name>_new_<id>`, `<name>_old_<id>` | The new and old container while Gitberth recreates a container for a change or an update. |
-| Container | Labelled `gitberth.helper` | Short-lived helpers that read the host's network and test LAN addresses. They run Gitberth's own image, read-only, with no capabilities and 32 MiB of memory. |
+| Container | Labelled `gitberth.helper` | Short-lived helpers that read the host's network and test LAN addresses. They run Gitberth's own image, read-only, with no capabilities and 32 MiB of memory. Railpack plans a build in one too, `gitberth-helper-railpack-<id>`. |
+| Container | `gitberth-buildkit` | The BuildKit container [Railpack builds](railpack.md#which-builder-runs-it) run in: privileged, on `gitberth`, started when a build needs it and stopped when idle. |
 | Image | `gitberth/<app>:<commit>` | A Git app's image, tagged with the first 7 characters of its commit. The last 3 good ones are kept for rollbacks. |
 | Volume | `gb-<app>-<name>` | A Git app's named volume: a volume called `data` on `website` is `gb-website-data`. |
+| Volume | `gitberth-buildkit` | gitberth-buildkit's cache. **Clear build cache** removes it, and so does the daily cleanup once no app uses Railpack. |
 
 ### Labels
 
@@ -129,6 +131,7 @@ Gitberth labels the containers and images it makes. Don't remove these labels: G
 | `gitberth.helper` | Containers, networks | A helper, or a network a test made for a moment. |
 | `gitberth.commit` | Images | The commit a Git app's image was built from. |
 | `gitberth.port`, `gitberth.crons` and other `gitberth.*` labels | Images | What a build found out: the web port, the scheduled jobs from `vercel.json`, and what Vercel's variables need. A rollback to that image uses them. |
+| `gitberth.builder`, `gitberth.railpack`, `gitberth.railpack.packages` | Images | An image [Railpack](railpack.md) built: `railpack`, the Railpack version, and the tools' versions it was built with, which the next deploy keeps. |
 
 ## Related
 

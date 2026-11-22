@@ -13,6 +13,9 @@ namespace Gitberth.Tests;
 /// <param name="Expect">Text the answer must contain.</param>
 /// <param name="Env">Variables the container gets in the Docker check.</param>
 /// <param name="Worker">No HTTP: the Docker check only makes sure it keeps running.</param>
+/// <param name="Builder">"railpack" for a project only Railpack builds: Gitberth's analyzer must hand it over (Unknown,
+/// Unrecognized), and the Docker check, which builds with Gitberth's Dockerfiles, leaves it out.</param>
+/// <param name="RailpackProvider">The Railpack provider whose marker files the sample has (shell, elixir, gleam…).</param>
 public sealed record SampleSpec(
     string Kind,
     string Title,
@@ -21,7 +24,13 @@ public sealed record SampleSpec(
     string Path = "/",
     string Expect = "",
     Dictionary<string, string>? Env = null,
-    bool Worker = false);
+    bool Worker = false,
+    string? Builder = null,
+    [property: JsonPropertyName("railpackProvider")] string? RailpackProvider = null)
+{
+    /// <summary>Railpack builds it, not a Dockerfile Gitberth writes.</summary>
+    public bool Railpack => Builder == "railpack";
+}
 
 /// <summary>
 /// The sample projects in tests/samples: small real layouts of each framework Gitberth builds. Every one is detected in
@@ -75,6 +84,19 @@ public class SampleTests
 
         var r = Samples.Analyze(name);
 
+        if (spec.Railpack)
+        {
+            // Gitberth doesn't build it: the analyzer's catch-all, which Detect automatically hands to Railpack, and the
+            // files Railpack's provider goes by are there.
+            Assert.Equal(ProjectKind.Unknown, r.Kind);
+            Assert.True(r.Unrecognized, $"{name}: an Unknown Gitberth explains isn't handed to Railpack ({r.Title})");
+            Assert.Equal(spec.Kind, r.Kind.ToString());
+            Assert.Contains(spec.Title, r.Title);
+            Assert.Equal(spec.Port, r.ContainerPort);
+            var folder = spec.AppDir is { Length: > 0 } sub ? System.IO.Path.Combine(Samples.Dir(name), sub) : Samples.Dir(name);
+            Assert.NotEmpty(Gitberth.Railpack.RailpackProviders.Markers(spec.RailpackProvider, folder));
+            return;
+        }
         Assert.True(r.CanBuild, $"{name}: {string.Join(" ", r.Warnings)}");
         Assert.Equal(spec.Kind, r.Kind.ToString());
         Assert.Contains(spec.Title, r.Title);
@@ -93,6 +115,8 @@ public class SampleTests
         foreach (var name in Samples.Names())
         {
             var spec = Samples.Spec(name);
+            // Railpack builds these, not a Dockerfile Gitberth writes: nothing for the Docker check to build.
+            if (spec.Railpack) continue;
             var r = Samples.Analyze(name);
             var dir = Directory.CreateDirectory(Path.Combine(output, name)).FullName;
             var dockerfile = r.Dockerfile is not null

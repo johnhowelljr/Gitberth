@@ -26,7 +26,8 @@ namespace Gitberth.Agents.Tools;
 public sealed record EnvVarInput(
     [property: Description("The variable's name, like DATABASE_URL.")] string Name,
     [property: Description("Its value. A secret's value is written and never read back.")] string Value,
-    [property: Description("Mask it everywhere and keep it out of logs. A password-like name or value is secret anyway.")] bool? Secret = null,
+    [property: Description("Mask it everywhere and keep it out of logs. A password-like name or value is secret anyway. A Git app's RAILPACK_ variable " +
+        "can't be secret (Railpack writes it into its plan and the image): name the secret as $NAME in it, from a variable of its own.")] bool? Secret = null,
     [property: Description("Git apps: which deploys get it: all (default), production or preview.")] string? Scope = null,
     [property: Description("Git apps: pass it to the build too.")] bool? BuildTime = null);
 
@@ -46,13 +47,16 @@ public sealed record PortInput(
 public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppService apps, AppActions actions, AppSettingsService settings,
     Lazy<AppCreator> creator, ComposeApps compose, GitClient git, ProjectAnalyzer analyzer, RepoVariables repoVariables, PreviewService previews,
     DatabaseService databases, DeployHooks hooks, UptimeSettings uptimeSettings, DomainService domains, GitberthOptions options,
-    TemplateCatalog templates, TemplateInstaller installer, GitLabApi? gitLab = null)
+    TemplateCatalog templates, TemplateInstaller installer, GitLabApi? gitLab = null, Railpack.IRailpackPlanner? railpack = null)
 {
+    private static readonly Railpack.NoRailpack NoPlanner = new();
+
     [McpServerTool(Name = "create_app", Title = "Create an app", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = true)]
     [ToolAccess(ApiAccess.Admin)]
     [Description("Creates an app as New app does, checked the same way, and deploys or starts it. Sources: " +
         "git (a GitHub repo, or a project on Gitberth's GitLab (Settings › GitLab: gitlab.com unless another is set), groups and subgroups too, " +
-        "built with what Gitberth detects, or with its Compose file when it has one: give repo, and maybe branch and subdirectory); " +
+        "built with what Gitberth detects (Railpack builds a project Gitberth doesn't know), or with its Compose file when it has one: give repo, " +
+        "and maybe branch, subdirectory and build); " +
         "image (a registry's image like nginx:1.27 or ghcr.io/owner/app:latest: give image); " +
         "compose (a whole Compose file deployed as one app: give compose_yaml, and maybe web_service); " +
         "template (one of Gitberth's app templates, as list_templates lists them: give template, its inputs, and maybe a domain; its databases and secrets " +
@@ -65,6 +69,8 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         [Description("git: the branch to deploy; the repo's default when left out.")] string? branch = null,
         [Description("git: the folder the app is in, when it isn't the repo's root.")] string? subdirectory = null,
         [Description("git: true to deploy with the repo's Compose file, false to build one container; leave out to choose as New app does.")] bool? use_compose = null,
+        [Description("git: auto (the default: what Gitberth detects, and Railpack, Railway's builder, for a project Gitberth doesn't know; Railpack when " +
+            "the repo has a railpack.json and no Dockerfile) or railpack (always Railpack).")] string? build = null,
         [Description("image: the image reference, like nginx:1.27.")] string? image = null,
         [Description("compose: the whole Compose file (YAML).")] string? compose_yaml = null,
         [Description("git with Compose, or compose: the service that's the app's web service (domains, LAN port, health check); leave out to pick as New app does.")] string? web_service = null,
@@ -82,9 +88,17 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         var kind = source?.Trim().ToLowerInvariant();
         if (kind != "template" && (template is not null || inputs is not null || domain is not null))
             throw new ToolError("template, inputs and domain go with source template. Any other app gets a domain once it's made, with add_domain.");
+        var fromGit = kind is "git" or "github" or "gitlab" or "repo";
+        if (!fromGit && build is not null) throw new ToolError("build goes with source git: it's how a repo's image is built.");
+        var alwaysRailpack = build?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "auto" => false,
+            "railpack" => true,
+            _ => throw new ToolError("build is auto or railpack."),
+        };
         return kind switch
         {
-            "git" or "github" or "gitlab" or "repo" => await CreateFromGitAsync(name, repo, branch, subdirectory, use_compose, web_service, env, wait, ct),
+            "git" or "github" or "gitlab" or "repo" => await CreateFromGitAsync(name, repo, branch, subdirectory, use_compose, alwaysRailpack, web_service, env, wait, ct),
             "image" or "registry" => await CreateFromImageAsync(name, image, env, wait, ct),
             "compose" => await CreateFromComposeAsync(name, compose_yaml, web_service, env, wait, ct),
             "template" => await CreateFromTemplateAsync(name, template, inputs, domain, env, wait, ct),
@@ -207,6 +221,8 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         [Description("Git apps: deploy new commits by themselves.")] bool? auto_deploy = null,
         [Description("Git apps: build filters, one pattern per line: a commit deploys by itself only when it changes a file these match. Empty for any file.")] string? watch_paths = null,
         [Description("Git apps: a commit whose changed files all match these patterns doesn't deploy by itself. Empty for none.")] string? ignored_paths = null,
+        [Description("Git apps: auto (what Gitberth detects, else Railpack) or railpack (always Railpack). A custom Dockerfile is written in the app's Settings tab.")]
+        string? build = null,
         [Description("Show the down page on the app's domains while it can't be served.")] bool? down_page = null,
         [Description("The down page's message; empty for none.")] string? down_page_message = null,
         [Description("Check the app from outside (its main domain, else its LAN address).")] bool? uptime_check = null,
@@ -220,7 +236,8 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         var title = view.Summary.Title;
         var done = new List<object>();
         var containerChange = name is not null || health_path is not null || memory_mb is not null || cpus is not null || restart_policy is not null
-            || restart_retries is not null || updates is not null || auto_deploy is not null || watch_paths is not null || ignored_paths is not null;
+            || restart_retries is not null || updates is not null || auto_deploy is not null || watch_paths is not null || ignored_paths is not null
+            || build is not null;
         if (ports is not null && containerChange) throw new ToolError("Change the ports in a call of their own: both may recreate the app.");
         if (!containerChange && ports is null && down_page is null && down_page_message is null && uptime_check is null && uptime_path is null)
             throw new ToolError("Say what to change: get_app shows the settings as they are.");
@@ -236,11 +253,14 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
             var gitDraft = loaded.Git is { } g ? GitOptionsDraft.From(g) : null;
             if ((auto_deploy is not null || watch_paths is not null || ignored_paths is not null) && gitDraft is null)
                 throw new ToolError($"{title} isn't deployed from a repo: auto_deploy and build filters are a Git app's.");
+            if (build is not null && gitDraft is null) throw new ToolError($"{title} isn't deployed from a repo: build is a Git app's.");
             if (gitDraft is not null)
             {
                 if (auto_deploy is bool on) gitDraft.AutoDeploy = on;
                 if (watch_paths is not null) gitDraft.WatchPaths = watch_paths;
                 if (ignored_paths is not null) gitDraft.IgnoredPaths = ignored_paths;
+                // A custom Dockerfile's text stays with the app, for when its Build is set back to it in the Settings tab.
+                if (build is not null) gitDraft.DockerfileMode = BuildOf(build);
                 if ((gitDraft.WatchProblem ?? gitDraft.IgnoredProblem) is { } filterProblem) throw new ToolError(filterProblem);
             }
             var wanted = draft.ToSettings();
@@ -528,9 +548,11 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         return new { key = installed.Key, id = installed.AppId, template = t.Id, deployment_id = installed.DeploymentId, message = installed.Message, notes = t.Notes };
     }
 
-    private async Task<object> CreateFromGitAsync(string? name, string? url, string? branch, string? subdirectory, bool? useCompose, string? webService,
-        IReadOnlyList<EnvVarInput>? env, bool wait, CancellationToken ct)
+    /// <param name="alwaysRailpack">build railpack: Railpack builds it, whatever Gitberth detects.</param>
+    private async Task<object> CreateFromGitAsync(string? name, string? url, string? branch, string? subdirectory, bool? useCompose, bool alwaysRailpack,
+        string? webService, IReadOnlyList<EnvVarInput>? env, bool wait, CancellationToken ct)
     {
+        if (alwaysRailpack && useCompose == true) throw new ToolError("build railpack builds one container: leave use_compose out, or set it to false.");
         // A github.com repository, or a project on Gitberth's GitLab.
         var instance = gitLab is null ? GitLabRepoRef.DefaultInstance : await gitLab.InstanceAsync(ct);
         if (!RepoUrls.TryParse(url, instance, out var repo, out var parseError) || repo is null)
@@ -563,8 +585,13 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
             var composeFile = composeFiles.FirstOrDefault();
             var composeText = composeFile is null ? null : await File.ReadAllTextAsync(Path.Combine(folder, composeFile), ct);
             var composeInfo = composeText is null ? null : ComposeFiles.Read(composeText);
-            var useIt = useCompose ?? (composeInfo is { } found && GitSource.PreferCompose(found, detection.Kind != ProjectKind.Unknown));
+            var useIt = !alwaysRailpack && (useCompose ?? (composeInfo is { } found && GitSource.PreferCompose(found, detection.Kind != ProjectKind.Unknown)));
             if (useIt && composeInfo is null) throw new ToolError("The repo's folder has no Compose file: leave use_compose out to build it.");
+            // Railpack, as New app has it: always when asked (or the repo's railpack.json says how Railway's builder makes it),
+            // and for a project Gitberth doesn't know.
+            var (chosen, mode, triedRailpack) = useIt ? (detection, DockerfileMode.Auto, false)
+                : await ChooseBuilderAsync(railpack ?? NoPlanner, alwaysRailpack, detection, dir, folderName, folder, PlanValues(env), ct);
+            detection = chosen;
             var custom = !useIt && detection.Kind == ProjectKind.Unknown;
             var model = new AppSettingsModel
             {
@@ -572,7 +599,7 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
                 Branch = chosenBranch,
                 Subdirectory = folderName.Length == 0 ? null : folderName,
                 ProjectHint = hint,
-                DockerfileMode = custom ? DockerfileMode.Custom : DockerfileMode.Auto,
+                DockerfileMode = custom ? DockerfileMode.Custom : mode,
                 CustomDockerfile = custom ? detection.Dockerfile ?? DockerfileTemplates.Starter : null,
             };
             var inGitHub = (await repoVariables.GetAsync(repo.AppOwner, repo.AppRepo, ct)).Variables.Select(v => v.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -598,7 +625,7 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
                 var key = v.Name?.Trim() ?? "";
                 if (key.Length == 0) throw new ToolError("A variable needs a name.");
                 model.Env.RemoveAll(r => r.Key == key);
-                model.Env.Add(new EnvRow { Key = key, Value = v.Value ?? "", IsSecret = v.Secret ?? Security.Masking.IsSecret(key, v.Value ?? ""), BuildTime = v.BuildTime == true });
+                model.Env.Add(new EnvRow { Key = key, Value = v.Value ?? "", IsSecret = SecretOf(v, key), BuildTime = v.BuildTime == true });
             }
             var portProblems = await apps.ValidatePortsAsync(null, model.Ports, ct: ct);
             var all = await apps.ValidateAsync(null, model, ct);
@@ -608,10 +635,11 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
             var deployment = await actions.DeployAsync(appId, DeployTrigger.Created, ct);
             var key2 = await catalog.KeyForIdAsync(appId, ct);
             if (wait) return await ctx.WaitForDeployAsync(deployment, ct);
+            var created = $"Created {model.Name}: deploy #{deployment} is queued (get_deployment follows it).";
             return new
             {
                 app = model.Name, key = key2, id = appId, deployment_id = deployment, compose = useIt ? true : (bool?)null,
-                message = $"Created {model.Name}: deploy #{deployment} is queued (get_deployment follows it).",
+                message = custom && triedRailpack ? $"{created} {Railpack.RailpackText.StarterNote}" : created,
             };
         }
         finally
@@ -619,6 +647,41 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
             DeployPaths.TryDeleteDirectory(dir);
         }
     }
+
+    /// <summary>
+    /// How create_app builds a repo's app, as New app chooses it. Always Railpack when asked, or when the app's folder has a
+    /// railpack.json (and no Dockerfile of the repo's builds it): Railpack must plan it, or the app isn't made. For a project
+    /// Gitberth doesn't know, Railpack is asked too: its plan gives the app's card and port (8080), and if it can't plan it
+    /// either the app gets the Starter Dockerfile, as before. The analyzer's variables to suggest are kept either way.
+    /// </summary>
+    /// <returns>The detection to create the app with, its Build, and whether Railpack was asked.</returns>
+    internal static async Task<(DetectionResult Detection, DockerfileMode Mode, bool Tried)> ChooseBuilderAsync(Railpack.IRailpackPlanner planner, bool alwaysRailpack,
+        DetectionResult detection, string dir, string appDir, string folder, IReadOnlyList<Docker.EnvValue> env, CancellationToken ct)
+    {
+        var chosen = alwaysRailpack || Railpack.RailpackProviders.Suggested(folder, detection);
+        if (!chosen && !detection.Unrecognized) return (detection, DockerfileMode.Auto, false);
+        var plan = await planner.PlanAsync(new Railpack.RailpackPlanRequest(dir, appDir, env, HasStartCommand: false, Previous: []), null, ct);
+        if (!plan.Ok)
+        {
+            if (chosen) throw new ToolError(plan.Error ?? Railpack.RailpackText.NotInstalled);
+            return (detection, DockerfileMode.Auto, true);
+        }
+        // Gitberth's detected port stays when Railpack is chosen; a project Gitberth doesn't know gets Railpack's 8080.
+        var card = Railpack.RailpackDetection.ToDetection(plan, appDir, folder, chosen ? detection.ContainerPort : null, fallback: !chosen);
+        card.EnvSuggestions.AddRange(detection.EnvSuggestions);
+        return (card, chosen ? DockerfileMode.Railpack : DockerfileMode.Auto, true);
+    }
+
+    // The values create_app gives Railpack to plan with: the build-time ones it was given, RAILPACK_ ones always.
+    private static List<Docker.EnvValue> PlanValues(IReadOnlyList<EnvVarInput>? env) =>
+        (env ?? []).Where(v => v.Name?.Trim() is { Length: > 0 } key && (v.BuildTime == true || EnvRules.IsRailpackKey(key)) && (v.Value ?? "").Length > 0)
+            .Select(v => new Docker.EnvValue(v.Name!.Trim(), v.Value!, SecretOf(v, v.Name.Trim())))
+            .ToList();
+
+    // A variable create_app was given is secret as it says, else when it looks it; a RAILPACK_ one by its value without its
+    // $NAME references (RailpackSettings), so one that names a secret isn't refused.
+    private static bool SecretOf(EnvVarInput v, string key) =>
+        v.Secret ?? (EnvRules.IsRailpackKey(key) ? Railpack.RailpackSettings.LooksSecret(key, v.Value ?? "") : Security.Masking.IsSecret(key, v.Value ?? ""));
 
     // The web service's ports as New app's Compose path proposes them.
     private async Task<IReadOnlyList<PortRow>> ComposePortsAsync(ComposeFileInfo info, string web, CancellationToken ct)
@@ -743,5 +806,14 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         "unless-stopped" or "unless_stopped" => "unless-stopped",
         "on-failure" or "on_failure" => "on-failure",
         _ => throw new ToolError("restart_policy is no, always, unless-stopped or on-failure."),
+    };
+
+    // A Git app's Build: what Gitberth detects (else Railpack), or always Railpack. A custom Dockerfile is the Settings tab's to write.
+    private static DockerfileMode BuildOf(string build) => build.Trim().ToLowerInvariant() switch
+    {
+        "auto" => DockerfileMode.Auto,
+        "railpack" => DockerfileMode.Railpack,
+        "custom" => throw new ToolError("build is auto or railpack: a custom Dockerfile is written in the app's Settings tab."),
+        _ => throw new ToolError("build is auto or railpack."),
     };
 }

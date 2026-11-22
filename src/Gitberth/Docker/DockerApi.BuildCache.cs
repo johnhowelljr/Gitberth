@@ -64,6 +64,31 @@ public sealed partial class DockerApi
         return answer?["LayersSize"] is JsonValue size && size.TryGetValue<long>(out var n) ? Math.Max(0, n) : null;
     }
 
+    /// <summary>
+    /// GET system/df?type=volume: what one volume takes (gitberth-buildkit's, Railpack's build cache); null when it isn't
+    /// there or the engine doesn't say. The engine walks every volume to size it, which takes a second on a busy host.
+    /// </summary>
+    public async Task<long?> VolumeSizeAsync(string name, CancellationToken ct = default)
+    {
+        if (await ApiVersionAsync(ct) < DiskUsageByType) return null;
+        return ParseVolumeSize(await SendAsync(HttpMethod.Get, "system/df?type=volume", timeout: BuildCacheReadTimeout, ct: ct), name);
+    }
+
+    /// <summary>A volume's UsageData.Size in system/df's answer; null when it isn't listed or isn't sized (-1).</summary>
+    internal static long? ParseVolumeSize(string json, string name)
+    {
+        try
+        {
+            foreach (var volume in JsonNode.Parse(json)?["Volumes"] as JsonArray ?? [])
+                if (volume?["Name"] is JsonValue n && n.TryGetValue<string>(out var named) && named == name)
+                    return volume["UsageData"]?["Size"] is JsonValue size && size.TryGetValue<long>(out var bytes) && bytes >= 0 ? bytes : null;
+        }
+        catch (JsonException)
+        {
+        }
+        return null;
+    }
+
     /// <summary>The BuildCache list of system/df's answer, added up as <c>docker system df</c> does; none when it has no list.</summary>
     internal static BuildCacheUsage ParseBuildCache(string json) => Usage(ParseBuildCacheRecords(json));
 

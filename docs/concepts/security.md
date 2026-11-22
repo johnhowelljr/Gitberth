@@ -38,9 +38,9 @@ The keys are in `/data/keys`, in the same volume as the database. Anyone with a 
 
 **Where secrets go:**
 
-- **On screen and in logs**, values are masked (`••••`) when they're marked **Secret**, when their name looks secret (like `DATABASE_PASSWORD` or `TUNNEL_TOKEN`), or when they're a URL with a password in it. The same goes for secret-looking options in a command, like `--token`. Build logs mask the app's secret values too.
+- **On screen and in logs**, values are masked (`••••`) when they're marked **Secret**, when their name looks secret (like `DATABASE_PASSWORD` or `TUNNEL_TOKEN`), or when they're a URL with a password in it. The same goes for secret-looking options in a command, like `--token`. Build logs mask the app's secret values too, and so does a deploy's error.
 - **To a container**, environment values are passed in the process environment, never on `docker`'s command line. Once a container runs, its environment is part of its settings in Docker, as with any container: anyone who can use Docker on the host can read it with `docker inspect`.
-- **To a build**, secret values go in as BuildKit secrets in a Dockerfile Gitberth writes, so they're never written into the image's history.
+- **To a build**, secret values go in as BuildKit secrets in a Dockerfile Gitberth writes, so they're never written into the image's history. In a [Railpack build](../reference/railpack.md#build-time-variables-and-secrets), every build-time value goes in as a BuildKit secret, and every build step gets all of them as environment variables, your dependencies' install scripts included. Railpack's planning never sees a secret value. A `RAILPACK_` variable can't be secret, since Railpack writes it into the plan and the image: Gitberth doesn't save one that's marked secret or holds a password, and one that's secret anyway (a GitLab variable masked there) isn't passed to Railpack at all. Name the secret as `$NAME` in the setting instead, from a variable of its own.
 - **To git**, the GitHub token goes through git's configuration in the environment, never into `.git/config`, the remote URL or the process arguments.
 - **To Docker**, a registry sign-in is passed with each pull or check that needs it. It's never logged.
 - **To a registry**, when **New app** reads an image that isn't on the host yet, Gitberth sends the registry's saved sign-in itself, over HTTPS only.
@@ -53,6 +53,8 @@ Gitberth mounts the host's Docker socket, `/var/run/docker.sock`, and runs as ro
 
 - **Builds** of your repos run with the host's network, so a build step can reach the containers on the `gitberth` network by name, and anything else the host can reach.
 - **Helper containers** that read the host's network run Gitberth's own image, read-only, with no capabilities, 32 MiB of memory and no log.
+- **Railpack's planning** runs in a throwaway container of Gitberth's own image, with no Docker socket, none of Gitberth's data, a read-only file system and no capabilities, on Gitberth's network. A repo's `railpack.json`, `mise.toml` and `.tool-versions` are read there by Railpack, never inside Gitberth's own container.
+- **Railpack's builds** run in gitberth-buildkit, a privileged BuildKit container on the `gitberth` network. It opens no port, so no other container can reach BuildKit: Gitberth talks to it through `docker exec`. Its build steps reach the containers on the `gitberth` network by name, and the internet. See [Railpack builds](../reference/railpack.md#which-builder-runs-it).
 - **Gitberth's own container** can't be stopped, removed or recreated from its page.
 
 ## Where Gitberth connects
@@ -61,6 +63,8 @@ Gitberth mounts the host's Docker socket, `/var/run/docker.sock`, and runs as ro
 - The GitLab in **Settings › GitLab** (gitlab.com unless you changed it), with git and its API, for the same.
 - Image registries, through the Docker engine, for pulls and update checks, and directly, when **New app** reads an image's ports, volumes and health check before it's pulled. `hub.docker.com` for the image search in **New app**.
 - `api.cloudflare.com`, only while domains are on.
+- For a [Railpack build](../reference/railpack.md): mise's version list while Railpack plans, for the versions of the
+  tools the app needs, and `ghcr.io` for Railpack's own images.
 - The [notification](../guides/notifications.md) destinations you add: a mail server, Discord, Slack, ntfy or your webhook.
 - Your apps, for their health URLs, scheduled jobs and [uptime checks](../guides/uptime-and-status-page.md) (through their
   domains, as a visitor would).

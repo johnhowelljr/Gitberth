@@ -1,4 +1,5 @@
 @inject BuildCache Cache
+@inject Gitberth.Railpack.IRailpackBuildKit RailpackBuildKit
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 
@@ -25,6 +26,11 @@
                 }
             }
         </span>
+        @if (railpack is { CacheBytes: long railpackBytes })
+        {
+            @* Railpack's builds keep their cache in gitberth-buildkit's own volume, not in Docker's build cache. *@
+            <span class="gb-help" id="build-cache-railpack" style="margin:0">Railpack's builds (@Gitberth.Railpack.RailpackRelease.BuildKitContainer): @Gitberth.Disk.DiskText.Size(railpackBytes)</span>
+        }
     </div>
     <Btn Icon="@Icons.Material.Outlined.LayersClear" OnClick="ClearAsync" Busy="busy" Disabled="busy" Tip="settings.deploys.clear-cache">Clear build cache</Btn>
 </div>
@@ -34,6 +40,7 @@
     [Parameter] public int KeepDays { get; set; } = Gitberth.Disk.DiskRules.DefaultKeepDays;
 
     private BuildCacheReport? report;
+    private Gitberth.Railpack.RailpackBuildKitStatus? railpack;
     private string? problem;
     private bool busy;
     private int? readFor;
@@ -63,13 +70,26 @@
         {
             problem = ex.Message;
         }
+        try
+        {
+            railpack = await RailpackBuildKit.StatusAsync(CancellationToken.None);
+        }
+        catch (Exception)
+        {
+            // Not known: no line, as when Railpack never built anything here.
+            railpack = null;
+        }
     }
 
     private async Task ClearAsync()
     {
         var size = report is null ? "" : $" ({Gitberth.Disk.DiskText.Size(report.Usage.Bytes)})";
+        // gitberth-buildkit and its volume go too (BuildCache.ClearAsync): its next Railpack build makes them again, from cold.
+        var railpackToo = railpack is { Exists: true } r
+            ? $", and Railpack's own in {Gitberth.Railpack.RailpackRelease.BuildKitContainer}{(r.CacheBytes is long bytes ? $" ({Gitberth.Disk.DiskText.Size(bytes)})" : "")}"
+            : "";
         if (await Dialogs.ShowMessageBoxAsync("Clear the build cache?",
-                $"Docker deletes every app's build cache{size}. Nothing that runs changes, but the next build of each app runs every step again, so it takes longer.",
+                $"Docker deletes every app's build cache{size}{railpackToo}. Nothing that runs changes, but the next build of each app runs every step again, so it takes longer.",
                 yesText: "Clear build cache", cancelText: "Cancel") != true) return;
         busy = true;
         try

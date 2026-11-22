@@ -19,7 +19,7 @@ You don't need to back up images. A Git app's image is rebuilt from Git, and a r
 |---|---|
 | `gitberth.db` (with `gitberth.db-wal` and `gitberth.db-shm` while it runs) | Settings, apps, ports, domains, deploy history and every secret, encrypted |
 | `keys/` | The keys those secrets are encrypted with |
-| `logs/` | Each deploy's log and the Dockerfile it used |
+| `logs/` | Each deploy's log and the Dockerfile (or Railpack plan) it used |
 | `stats.db` | The Health page's last 6 hours of readings and events |
 | `uptime.db` | The uptime checks' history and incidents, for the Uptime cards and the status page |
 | `audit.db` | The [audit log](audit-log.md) |

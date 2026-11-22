@@ -1328,6 +1328,14 @@ settings.system.git:
     apps can't deploy.
   more: reference/gitberth-settings#system
 
+settings.system.railpack:
+  title: Railpack
+  text: >-
+    The version of Railpack in this Gitberth image. It builds the projects Gitberth doesn't know and the apps set to
+    Railpack, in **gitberth-buildkit**, a BuildKit container Gitberth starts when a build needs it.
+  example: 0.43.0
+  more: reference/railpack#which-builder-runs-it
+
 settings.system.data:
   title: Data folder
   text: >-

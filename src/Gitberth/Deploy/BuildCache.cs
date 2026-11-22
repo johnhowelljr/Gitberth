@@ -13,9 +13,12 @@ public sealed record BuildCacheReport(BuildCacheUsage Usage, long Stale, int Kee
 
 /// <summary>
 /// Docker's build cache, for Settings › Disk: how big it is, and clearing it. Clearing is refused while a build runs,
-/// and a build that gets to its turn meanwhile waits for it, so no build ever loses its cache halfway through.
+/// and a build that gets to its turn meanwhile waits for it, so no build ever loses its cache halfway through. Clearing it
+/// clears Railpack's too: gitberth-buildkit and its volume go, and the next Railpack build makes them again.
 /// </summary>
-public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<BuildCache> logger, Audit.AuditLog? audit = null)
+/// <param name="buildKit">gitberth-buildkit, Railpack's own BuildKit; none in older tests.</param>
+public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<BuildCache> logger, Audit.AuditLog? audit = null,
+    Railpack.RailpackBuildKit? buildKit = null)
 {
     /// <summary>The cache's size as Docker adds it up.</summary>
     public Task<BuildCacheUsage> UsageAsync(CancellationToken ct = default) => api.BuildCacheAsync(ct);
@@ -59,7 +62,10 @@ public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<B
         {
             var freed = await api.PruneBuildCacheAsync(ct);
             logger.LogInformation("Cleared Docker's build cache: {Bytes} bytes freed", freed);
-            return new BuildCacheCleared(true, ClearedText(freed), freed);
+            var railpack = buildKit is null ? null : await buildKit.ClearAsync(ct);
+            if (railpack is not null) logger.LogInformation("Removed gitberth-buildkit and its cache: {Bytes} bytes freed", railpack.Freed);
+            var total = freed + (railpack?.Freed ?? 0);
+            return new BuildCacheCleared(true, ClearedText(total, railpack is not null), total);
         }
         catch (Exception ex) when (ex is DockerApiException or HttpRequestException or TimeoutException or IOException)
         {
@@ -69,7 +75,8 @@ public sealed class BuildCache(DockerApi api, DeployPipeline pipeline, ILogger<B
     }
 
     /// <summary>What clearing freed, and what it means for the next builds.</summary>
-    internal static string ClearedText(long freed) => freed > 0
-        ? $"Cleared the build cache: {Format.Memory(freed)} freed. The next builds take longer, since every step runs again."
+    /// <param name="railpack">gitberth-buildkit's cache went too.</param>
+    internal static string ClearedText(long freed, bool railpack = false) => freed > 0
+        ? $"Cleared the build cache: {Format.Memory(freed)} freed{(railpack ? ", Railpack's own cache included" : "")}. The next builds take longer, since every step runs again."
         : "Cleared the build cache: it held nothing to free. The next builds take longer, since every step runs again.";
 }

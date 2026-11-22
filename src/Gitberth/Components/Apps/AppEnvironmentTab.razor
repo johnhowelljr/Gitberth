@@ -255,8 +255,12 @@ else
 
     private RenderFragment Row(EnvRowDraft row, bool git) => __builder =>
     {
+        // A Git app's RAILPACK_ variable configures Railpack's build, so it's always build-time (the model's rule), and
+        // never secret: Railpack writes it into its plan and the image (RailpackSettings).
+        var railpack = git && EnvRules.IsRailpackKey(row.Key.Trim());
         // Secret by the owner's marking, or by its name or a password in a URL it carries (DATABASE_URL), which it always is.
-        var secret = row.IsSecret;
+        // A RAILPACK_ one is only when it was marked so before that rule: the save says what's wrong with one that holds a secret.
+        var secret = railpack ? row.Secret : row.IsSecret;
         var masked = secret && !revealed.Contains(row);
         // Any other app's variable set from its database is Gitberth's: shown, never edited here. A Git or Compose app's own
         // value of that name is replaced for production by the database's (a Compose app's of one of its parts too).
@@ -290,7 +294,11 @@ else
                 {
                     <span class="gb-default-tag" data-tip="app.env.from-image">image</span>
                 }
-                @if (git && row.BuildTime)
+                @if (railpack)
+                {
+                    <span class="gb-tag gb-tag--accent" data-tip="app.env.railpack">Build time</span>
+                }
+                else if (git && row.BuildTime)
                 {
                     <span class="gb-tag gb-tag--accent" data-tip="app.env.build-time">Build time</span>
                 }
@@ -336,14 +344,28 @@ else
                     </button>
                 }
                 <CopyButton Value="@row.Value" Label="@($"the value of {row.Key}")" />
-                @if (canMark)
+                @if (canMark && railpack)
+                {
+                    @* Off, and it stays off: Railpack writes it into its plan and the image. One marked secret before that rule can only be turned off. *@
+                    <button type="button" class="gb-iconbtn gb-secretbtn @(secret ? "on" : null)" aria-pressed="@(secret ? "true" : "false")" aria-label="@($"Secret: {row.Key}")"
+                            disabled="@(!secret)" data-tip="app.env.railpack-secret" @onclick="() => ToggleSecret(row)">
+                        <SvgIcon Icon="@(secret ? Icons.Material.Filled.Lock : Icons.Material.Outlined.LockOpen)" />
+                    </button>
+                }
+                else if (canMark)
                 {
                     <button type="button" class="gb-iconbtn gb-secretbtn @(secret ? "on" : null)" aria-pressed="@(secret ? "true" : "false")" aria-label="@($"Secret: {row.Key}")"
                             disabled="@row.AlwaysSecret" data-tip="app.env.secret-toggle" data-tip-detail="@SecretTitle(row)" @onclick="() => ToggleSecret(row)">
                         <SvgIcon Icon="@(secret ? Icons.Material.Filled.Lock : Icons.Material.Outlined.LockOpen)" />
                     </button>
                 }
-                @if (git && !row.Removed && !ReadOnly)
+                @if (git && !row.Removed && !ReadOnly && railpack)
+                {
+                    @* On, and it stays on: Railpack reads it while it plans and builds. *@
+                    <button type="button" class="gb-iconbtn gb-buildbtn" data-tip="app.env.railpack" aria-pressed="true" disabled
+                            aria-label="@($"Build time for {row.Key}")"><SvgIcon Icon="@Icons.Material.Outlined.Build" /></button>
+                }
+                else if (git && !row.Removed && !ReadOnly)
                 {
                     <button type="button" class="gb-iconbtn gb-buildbtn" data-tip="app.env.build-toggle" data-tip-detail="@(row.BuildTime ? "Passed to the build now." : "Not passed to the build now.")" aria-pressed="@(row.BuildTime ? "true" : "false")"
                             aria-label="@($"Build time for {row.Key}")" @onclick="() => ToggleBuild(row)"><SvgIcon Icon="@Icons.Material.Outlined.Build" /></button>
@@ -364,8 +386,13 @@ else
     {
         row.Key = key ?? "";
         if (Security.Masking.IsSecretName(row.Key)) row.Secret = true;
+        // As the model saves it (GitAppSettings.ApplyEnv), so nothing shows as changed once it's applied: build-time, and
+        // not marked secret (the save refuses one that holds a secret, saying why).
+        if (IsGitApp && EnvRules.IsRailpackKey(row.Key.Trim())) (row.BuildTime, row.Secret) = (true, false);
         return Changed.InvokeAsync();
     }
+
+    private bool IsGitApp => View.Summary.Source == AppSource.Git;
 
     private Task SetValue(EnvRowDraft row, string? value)
     {
@@ -380,6 +407,13 @@ else
 
     private Task ToggleSecret(EnvRowDraft row)
     {
+        // A Git app's RAILPACK_ variable is only ever turned off: Railpack writes it into its plan and the image.
+        if (IsGitApp && EnvRules.IsRailpackKey(row.Key.Trim()))
+        {
+            if (!row.Secret) return Task.CompletedTask;
+            row.Secret = false;
+            return Changed.InvokeAsync();
+        }
         if (row.AlwaysSecret) return Task.CompletedTask;
         row.Secret = !row.Secret;
         return Changed.InvokeAsync();
@@ -404,6 +438,7 @@ else
 
     private Task ToggleBuild(EnvRowDraft row)
     {
+        if (EnvRules.IsRailpackKey(row.Key.Trim())) return Task.CompletedTask;
         row.BuildTime = !row.BuildTime;
         return Changed.InvokeAsync();
     }
@@ -437,6 +472,9 @@ else
         var dialog = await Dialogs.ShowAsync<PasteEnvDialog>((string?)null, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
         if (await dialog.Result is not { Canceled: false, Data: string text } || Draft is null) return;
         var read = Draft.PasteEnv(text);
+        // A pasted RAILPACK_ variable is build-time and not marked secret, as the model saves it.
+        if (IsGitApp)
+            foreach (var row in Draft.Env.Where(r => r.IsNew && EnvRules.IsRailpackKey(r.Key.Trim()))) (row.BuildTime, row.Secret) = (true, false);
         Snackbar.Add($"Read {read} {(read == 1 ? "variable" : "variables")}. Nothing changes until you apply.", Severity.Info);
         await Changed.InvokeAsync();
     }

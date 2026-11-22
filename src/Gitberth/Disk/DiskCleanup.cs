@@ -41,6 +41,7 @@ internal sealed record DiskLook(DiskTier? Tier, DiskResult? Ran, DiskNotice Told
 /// </summary>
 /// <param name="imageService">Reads Docker's disk; none in tests, which give <see cref="ReadDisk"/>.</param>
 /// <param name="actions">Says which apps are being deleted, whose images the keep-set step leaves alone; none in older tests.</param>
+/// <param name="buildKit">gitberth-buildkit, whose own cache (Railpack's builds) is cleaned up too; none in older tests.</param>
 public sealed class DiskCleanup(
     DockerApi api,
     ImageService? imageService,
@@ -56,7 +57,8 @@ public sealed class DiskCleanup(
     ContainerStatsCollector? stats = null,
     TimeProvider? time = null,
     IImageEngine? engine = null,
-    AppActions? actions = null) : BackgroundService
+    AppActions? actions = null,
+    Railpack.RailpackBuildKit? buildKit = null) : BackgroundService
 {
     /// <summary>Its item on the attention board, and the source that keeps it.</summary>
     public const string ItemKey = "disk";
@@ -378,6 +380,8 @@ public sealed class DiskCleanup(
     private static IEnumerable<AuditChange> Changes(DiskResult r)
     {
         if (r.CacheBefore is { } before && r.CacheAfter is { } after) yield return new("Build cache", DiskText.Size(before), DiskText.Size(after));
+        if (r.RailpackBefore is { } railpack && (r.RailpackAfter ?? 0) != railpack)
+            yield return new("Railpack's build cache", DiskText.Size(railpack), DiskText.Size(r.RailpackAfter ?? 0));
         if (r.Images.Count > 0) yield return new("Images removed", null, DiskText.ImagesLine(r.Images));
         yield return new("Free", DiskText.Size(r.FreeBefore), DiskText.Size(r.FreeAfter));
     }
@@ -433,6 +437,23 @@ public sealed class DiskCleanup(
             problem ??= ex.Message;
         }
 
+        // 2b: gitberth-buildkit's own cache, where Railpack's builds run, by the same age while it runs; once it's stopped and
+        // no app builds with Railpack any more, the container and its volume go.
+        Railpack.RailpackCacheChange? railpack = null;
+        if (buildKit is not null)
+        {
+            try
+            {
+                railpack = await buildKit.CleanAsync(DiskRules.Until(tier, keepDays), await AnyRailpackAppAsync(ct), ct);
+                cacheFreed += railpack?.Freed ?? 0;
+            }
+            catch (Exception ex) when (Failed(ex, ct))
+            {
+                Warn(ex, "clear Railpack's build cache");
+                problem ??= ex.Message;
+            }
+        }
+
         // 3, 4 and 5: the images no app needs. One image Docker fails to remove is said once, and the rest go on.
         var removed = new List<string>();
         void Unremoved(Exception ex) => Warn(ex, "remove an image");
@@ -453,7 +474,14 @@ public sealed class DiskCleanup(
 
         var after = Disk();
         return new DiskResult(now, tier, by, Math.Max(cacheFreed, after.FreeBytes - before.FreeBytes), cacheFreed, cacheBefore, cacheAfter, removed,
-            before.FreeBytes, after.FreeBytes, after.TotalBytes, problem);
+            before.FreeBytes, after.FreeBytes, after.TotalBytes, problem, railpack?.Before, railpack is null ? null : railpack.After ?? 0);
+    }
+
+    // Whether an app still builds with Railpack: its Build says so, or Railpack built it last (a project Gitberth doesn't know).
+    private async Task<bool> AnyRailpackAppAsync(CancellationToken ct)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await db.Apps.AnyAsync(a => a.DockerfileMode == DockerfileMode.Railpack || a.DetectedKind == nameof(Detection.ProjectKind.Railpack), ct);
     }
 
     // The apps as they are now, and every image (by tag or ID) one of them names or keeps (KeptIds).

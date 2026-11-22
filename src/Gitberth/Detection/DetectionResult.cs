@@ -1,7 +1,8 @@
 namespace Gitberth.Detection;
 
 // Saved by name (AppDefinition.DetectedKind), so new kinds go at the end.
-public enum ProjectKind { Unknown, Dockerfile, DotNetWeb, DotNetWorker, DotNetWasm, NodeServer, NextJs, Nuxt, SvelteKit, NodeSpa, Static, Python, Go, Ruby, Php, Java, Rust, Deno }
+// Railpack: Railpack plans the build (RailpackDetection), for a project Gitberth doesn't know or an app set to Railpack.
+public enum ProjectKind { Unknown, Dockerfile, DotNetWeb, DotNetWorker, DotNetWasm, NodeServer, NextJs, Nuxt, SvelteKit, NodeSpa, Static, Python, Go, Ruby, Php, Java, Rust, Deno, Railpack }
 
 public static class ProjectKinds
 {
@@ -41,6 +42,17 @@ public sealed class DetectionResult
     public List<string> Evidence { get; } = [];
     public List<string> Warnings { get; } = [];
     public List<EnvSuggestion> EnvSuggestions { get; } = [];
+
+    /// <summary>
+    /// Gitberth found nothing it knows how to build (the analyzer's catch-all, "Unknown project type"), so under Detect
+    /// automatically Railpack builds it. Every Unknown Gitberth explains (an unreadable package.json, a .NET Framework
+    /// project, a subfolder outside the repo, a module of a bigger build…) leaves it false. On a Railpack result it stays
+    /// set: Railpack plans it because Gitberth couldn't.
+    /// </summary>
+    public bool Unrecognized { get; set; }
+
+    /// <summary>The plan behind a <see cref="ProjectKind.Railpack"/> result, for New app's card and create_app.</summary>
+    public global::Gitberth.Railpack.RailpackPlanResult? RailpackPlan { get; set; }
 
     public bool CanBuild => Kind != ProjectKind.Unknown;
 }

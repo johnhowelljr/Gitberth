@@ -238,6 +238,26 @@ public class ProjectAnalyzerTests
         var r = Analyze(repo);
         Assert.Equal(ProjectKind.Unknown, r.Kind);
         Assert.False(r.CanBuild);
+        // Nothing Gitberth knows, so Railpack is asked.
+        Assert.True(r.Unrecognized);
+    }
+
+    [Fact]
+    public void Only_the_unknown_gitberth_cant_explain_is_left_to_railpack()
+    {
+        using var framework = new TempRepo()
+            .With("Legacy.csproj", """<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003"><PropertyGroup><OutputType>Exe</OutputType><TargetFrameworkVersion>v4.8</TargetFrameworkVersion></PropertyGroup></Project>""");
+        using var badJson = new TempRepo().With("package.json", """{ "scripts": { "start": "node server.js" """);
+        using var site = new TempRepo().With("index.html", "<h1>hi</h1>").With("start.sh", "echo hi");
+
+        var outside = new ProjectAnalyzer().Analyze(site.Root, new AnalyzeOptions(AppDir: "../elsewhere"));
+        // Each of these is an Unknown Gitberth explains, and a deploy fails with its words, as before.
+        Assert.Equal(
+            [(ProjectKind.Unknown, ".NET Framework project", false), (ProjectKind.Unknown, "Node.js (unreadable package.json)", false), (ProjectKind.Unknown, "Subfolder outside the repo", false)],
+            new[] { Analyze(framework), Analyze(badJson), outside }.Select(r => (r.Kind, r.Title, r.Unrecognized)));
+        // Anything Gitberth builds itself stays Gitberth's.
+        var built = Analyze(site);
+        Assert.Equal((ProjectKind.Static, false), (built.Kind, built.Unrecognized));
     }
 
     [Fact]

@@ -24,8 +24,10 @@ public sealed record DiskRun(DateTime At, long Freed, long FreeAfter, string By,
 /// <param name="Images">The images it removed: tags by name, untagged ones by their short ID.</param>
 /// <param name="Freed">What the run freed: what the disk gained, and at least what the build cache freed.</param>
 /// <param name="Problem">What Docker (or Gitberth's database) said when a part of the run failed; null when none did.</param>
+/// <param name="RailpackBefore">gitberth-buildkit's cache (Railpack's builds) before the run, by its volume's size; null when it wasn't touched.</param>
+/// <param name="RailpackAfter">The same after the run: 0 when it went with its container.</param>
 public sealed record DiskResult(DateTime At, DiskTier Tier, string By, long Freed, long CacheFreed, long? CacheBefore, long? CacheAfter,
-    IReadOnlyList<string> Images, long FreeBefore, long FreeAfter, long Total, string? Problem = null)
+    IReadOnlyList<string> Images, long FreeBefore, long FreeAfter, long Total, string? Problem = null, long? RailpackBefore = null, long? RailpackAfter = null)
 {
     /// <summary>It removed something: build cache, or an image.</summary>
     [JsonIgnore]
