@@ -35,7 +35,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Test
-        run: dotnet test tests/Gitberth.Tests --nologo
+        run: dotnet test tests/Gitberth.Tests --nologo --logger "trx;LogFileName=unit.trx" --results-directory "$RUNNER_TEMP/unit"
+      - name: Each failed test as an annotation anyone can read (a job's log needs signing in)
+        if: failure()
+        run: |
+          trx="$RUNNER_TEMP/unit/unit.trx"
+          if [ ! -f "$trx" ]; then echo "::error title=Unit tests::No results: the tests didn't run (the Test step says why)."; exit 0; fi
+          grep -o '<UnitTestResult [^>]*outcome="Failed"[^>]*>' "$trx" | sed -E 's/.*testName="([^"]*)".*/::error title=Unit test failed::\1/' || true
 
   secrets:
     name: Secrets
