@@ -58,7 +58,8 @@ public sealed class DiskCleanup(
     TimeProvider? time = null,
     IImageEngine? engine = null,
     AppActions? actions = null,
-    Railpack.RailpackBuildKit? buildKit = null) : BackgroundService
+    Railpack.RailpackBuildKit? buildKit = null,
+    Backup.RestoreGate? restoreGate = null) : BackgroundService
 {
     /// <summary>Its item on the attention board, and the source that keeps it.</summary>
     public const string ItemKey = "disk";
@@ -101,7 +102,8 @@ public sealed class DiskCleanup(
             {
                 try
                 {
-                    await LookAsync(_time.GetUtcNow().UtcDateTime, stoppingToken);
+                    // Not while a restore runs: the images it loaded aren't any container's yet, and mustn't be tidied away.
+                    if (restoreGate?.Holding != true) await LookAsync(_time.GetUtcNow().UtcDateTime, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

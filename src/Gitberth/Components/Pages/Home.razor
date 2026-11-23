@@ -8,6 +8,7 @@
 @inject ContainerStatsCollector Stats
 @inject ImageService Images
 @inject IDbContextFactory<GitberthDb> Db
+@inject Gitberth.Backup.IRestoreService Restore
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
 @inject IDialogService Dialogs
@@ -43,6 +44,15 @@
 
 @* What Gitberth's own jobs say needs someone (Docker's disk getting full, a token about to expire), worst first. *@
 <AttentionBanners />
+
+@* A Gitberth with no apps yet could be a move from another machine; a restore under way says how it goes. *@
+@if (restoreBanner is { } rb)
+{
+    <Banner Tone="accent" Icon="@Icons.Material.Outlined.SettingsBackupRestore" Title="@rb.Title" Class="gb-restore-banner">
+        <ChildContent>@rb.Text</ChildContent>
+        <Actions><Btn Kind="BtnKind.Primary" Size="BtnSize.Sm" Href="@rb.Href">@rb.Action</Btn></Actions>
+    </Banner>
+}
 
 <div class="gb-hoststrip gb-kpis2" role="group" aria-label="Key figures">
     <a class="gb-hs" href="apps" data-tip="dashboard.kpi.apps">
@@ -162,6 +172,7 @@
     private string? refreshError;
     private string shownKey = "";
     private int refreshing;
+    private (string Title, string Text, string Action, string Href)? restoreBanner;
 
     private string HostName => Stats.Current.Host?.Name is { Length: > 0 } name ? name : "this host";
 
@@ -250,11 +261,13 @@
         kinds = await AppKinds.LoadAsync(Db);
         try { disk = Images.Disk(); }
         catch (Exception) { disk = null; }
+        try { restoreBanner = BackupText.Banner(Restore.Status(), Restore.CantRestore()); }
+        catch (Exception) { restoreBanner = null; }
         loaded = true;
         checkedAt = DateTime.UtcNow;
     }
 
-    private string ViewKey() => string.Join('|', DateTime.UtcNow.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture), refreshError, list.DockerError, Deploys24h,
+    private string ViewKey() => string.Join('|', DateTime.UtcNow.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture), refreshError, list.DockerError, Deploys24h, restoreBanner?.Text,
         string.Join(';', list.Apps.Select(a => $"{a.Key},{a.State},{a.StateText},{a.Pinned},{a.Update?.Available},{a.MemoryBytes / 1048576},{a.CpuPercent:0.0}")),
         string.Join(';', recent.Take(6).Select(r => $"{r.Item.At.Ticks}:{r.Item.Tone}:{r.Item.Text}")));
 

@@ -242,7 +242,7 @@ internal sealed class HostGates(TimeProvider time)
         }
     }
 
-    /// <summary>Gitberth and its version (Gitberth/1.7.0): the User-Agent every request for images and tags carries.</summary>
+    /// <summary>Gitberth and its version (Gitberth/1.8.0): the User-Agent every request for images and tags carries.</summary>
     public static ProductInfoHeaderValue UserAgent { get; } = new("Gitberth", AppVersion.Number);
 }
 

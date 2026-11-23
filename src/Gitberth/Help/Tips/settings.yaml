@@ -1122,6 +1122,109 @@ settings.databases.create:
     one was chosen.
   more: guides/databases#create-a-postgres-server
 
+# ---- Save and restore (Shared/BackupSection.razor, Pages/RestoringPage.razor) ----
+
+settings.backup:
+  title: Save and restore
+  text: >-
+    One file with everything this host runs: Gitberth's settings and secrets, every app, the other containers, their
+    volumes' data and the databases, compressed and encrypted with a passphrase you choose. Restored onto a fresh
+    install, here or on another machine, it brings all of it back.
+  more: guides/backups-and-restore
+
+settings.backup.items:
+  title: Save a backup
+  text: >-
+    Everything that can be saved, with its size on this host: an app's volumes and databases sit under it. Untick what
+    you don't need back, such as a cache's volume; unticking an app unticks what's under it. Gitberth's own data is
+    always saved.
+  more: guides/backups-and-restore#save-a-backup
+
+settings.backup.stop-everything:
+  title: Stop everything while saving
+  text: >-
+    Stops every running container (Gitberth aside) for the whole save, then starts exactly those again: one moment for
+    all of them, at the cost of downtime. The list is written down first, so a restart of Gitberth in the middle still
+    starts them. Off, databases are dumped while they serve, and a container pauses only while its volume is copied.
+  default: "Off"
+  more: guides/backups-and-restore#stop-everything-while-saving
+
+settings.backup.passphrase:
+  title: Passphrase
+  text: >-
+    The file is encrypted with a key made from it (AES-256-GCM), so only it opens the backup. At least 12 characters.
+    Gitberth never keeps it and nobody can recover it: keep it in a password manager, or the file can't be opened.
+  more: guides/backups-and-restore#the-file-is-compressed-and-encrypted
+
+settings.backup.passphrase-again:
+  title: Passphrase again
+  text: >-
+    The passphrase once more, so a typo can't make a file nobody can open. It must match the one beside it.
+  more: guides/backups-and-restore#save-a-backup
+
+settings.backup.save:
+  title: Save backup
+  text: >-
+    Your browser downloads the file while Gitberth makes it, so it never takes room on this host. The line under it
+    says what's being saved and how much is written, then how it ended.
+  more: guides/backups-and-restore#save-a-backup
+
+settings.backup.restore:
+  title: Restore from a file
+  text: >-
+    Brings a backup back onto this Gitberth while it has no apps: a fresh install, on this machine or another. You see
+    what the file holds before anything is restored.
+  more: guides/backups-and-restore#restore-a-backup
+
+settings.backup.choose-file:
+  title: Choose a backup file
+  text: >-
+    Uploads a `.gbak` file from **Save backup** to Gitberth, with its progress. Upload it from Gitberth's LAN address:
+    through a Cloudflare domain an upload stops at 100 MB.
+  more: guides/backups-and-restore#before-you-start
+
+settings.backup.restore-passphrase:
+  title: Its passphrase
+  text: >-
+    The passphrase the backup was saved with. It opens the file in Gitberth's memory only, and Gitberth forgets it once
+    the restore's first part is done.
+  more: guides/backups-and-restore#the-file-is-compressed-and-encrypted
+
+settings.backup.check:
+  title: Open the file
+  text: >-
+    Checks the passphrase and reads what the file holds, restoring nothing: where and when it was saved, what it brings
+    back, and what to know first. A wrong passphrase, or a file with a byte changed, is refused here.
+  more: guides/backups-and-restore#what-the-warnings-mean
+
+settings.backup.discard:
+  title: Remove the file
+  text: >-
+    Deletes the uploaded file from Gitberth without restoring it. The copy you keep elsewhere is untouched.
+  more: guides/backups-and-restore#restore-a-backup
+
+settings.backup.run:
+  title: Restore
+  text: >-
+    Asks you to type restore, then brings back everything the file holds and restarts Gitberth on its data. Afterwards
+    you sign in with the admin password of the machine the backup was saved on.
+  more: guides/backups-and-restore#steps
+
+settings.backup.restoring:
+  title: Restoring
+  text: >-
+    A restore's steps and log as it runs. First what comes from the file (volumes, databases, images, containers); then
+    Gitberth restarts on the saved data and deploys each Git and Compose app at the commit it ran. The page comes back
+    by itself after the restart.
+  more: guides/backups-and-restore#steps
+
+settings.backup.restore-log:
+  title: Restore log
+  text: >-
+    Everything the restore does, as it does it, with secrets masked. It's kept in Gitberth's data folder, so it carries
+    on across the restart.
+  more: guides/backups-and-restore#steps
+
 # ---- Admin password ----
 
 settings.password:

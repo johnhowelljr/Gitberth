@@ -111,7 +111,7 @@ public sealed class WordsAndLabelsTests : IDisposable
     public void The_settings_index_names_each_section_by_its_title()
     {
         Assert.Equal(["GitHub access", "GitHub integration", "GitLab", "Notifications", "Registries", "Updates", "Domains", "Uptime and status page",
-                "Keep apps running", "Network", "Own LAN addresses", "Deploys", "Disk", "Databases", "Admin password", "AI agents and API", "Audit log", "System"],
+                "Keep apps running", "Network", "Own LAN addresses", "Deploys", "Disk", "Databases", "Save and restore", "Admin password", "AI agents and API", "Audit log", "System"],
             SettingsPage.Toc.Select(t => t.Text));
         // Each entry has its own section and tip: keep and disk are the sections the keep-running check and the disk cleanup fill.
         Assert.Equal(SettingsPage.Toc.Length, SettingsPage.Toc.Select(t => t.Id).Distinct().Count());

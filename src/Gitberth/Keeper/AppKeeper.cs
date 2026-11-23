@@ -85,7 +85,8 @@ public sealed class AppKeeper(
     Lazy<PortChanger>? changer = null,
     StartupTasks? startup = null,
     TimeProvider? time = null,
-    ExpectedChanges? expected = null) : BackgroundService
+    ExpectedChanges? expected = null,
+    Backup.RestoreGate? restoreGate = null) : BackgroundService
 {
     /// <summary>Its items on the attention board.</summary>
     public const string Source = "keep-running";
@@ -158,7 +159,8 @@ public sealed class AppKeeper(
             {
                 try
                 {
-                    await PassAsync(_time.GetUtcNow().UtcDateTime, stoppingToken);
+                    // While a restore puts the host back, nothing is brought back by this check: the restore does it.
+                    if (restoreGate?.Holding != true) await PassAsync(_time.GetUtcNow().UtcDateTime, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

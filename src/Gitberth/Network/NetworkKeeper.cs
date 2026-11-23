@@ -19,7 +19,7 @@ namespace Gitberth.Network;
 /// What was kept for a container that's gone at two looks in a row is forgotten.
 /// </summary>
 public sealed class NetworkKeeper(NetworkService network, DockerApi api, ContainerEventWatcher events, ContainerLocks locks,
-    IDbContextFactory<GitberthDb> dbFactory, ILogger<NetworkKeeper> logger) : BackgroundService
+    IDbContextFactory<GitberthDb> dbFactory, ILogger<NetworkKeeper> logger, Backup.RestoreGate? restoreGate = null) : BackgroundService
 {
     public static readonly TimeSpan Every = TimeSpan.FromMinutes(10);
 
@@ -54,7 +54,8 @@ public sealed class NetworkKeeper(NetworkService network, DockerApi api, Contain
                 await Task.Delay(Every, stoppingToken);
                 try
                 {
-                    await ReconcileAsync(startsOnly: true, stoppingToken);
+                    // Not while a restore runs: the containers it hasn't brought back yet aren't gone.
+                    if (restoreGate?.Holding != true) await ReconcileAsync(startsOnly: true, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -74,7 +75,7 @@ public sealed class NetworkKeeper(NetworkService network, DockerApi api, Contain
     // Off the event loop, which goes on to the next event at once.
     private void OnStarted(string container)
     {
-        if (!_looking.TryAdd(container, 0)) return;
+        if (restoreGate?.Holding == true || !_looking.TryAdd(container, 0)) return;
         _ = Task.Run(async () =>
         {
             try

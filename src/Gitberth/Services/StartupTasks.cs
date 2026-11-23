@@ -27,7 +27,8 @@ public sealed class StartupTasks(
     PortChanger? changer = null,
     HostHelpers? helpers = null,
     NetworkKeeper? keeper = null,
-    Audit.AuditLog? audit = null) : BackgroundService
+    Audit.AuditLog? audit = null,
+    Backup.RestoreGate? restoreGate = null) : BackgroundService
 {
     private static readonly TimeSpan DockerRetry = TimeSpan.FromSeconds(10);
 
@@ -107,10 +108,13 @@ public sealed class StartupTasks(
         }
 
         // Git apps: their deploys' containers. Any other app's missing container is created again from its saved settings
-        // once the changes a restart cut short are settled (SettleAsync).
-        List<AppDefinition> apps;
-        await using (var db = await dbFactory.CreateDbContextAsync(stoppingToken))
-            apps = await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git || a.Source == AppSource.Compose).ToListAsync(stoppingToken);
+        // once the changes a restart cut short are settled (SettleAsync). Not while a restore runs: it deploys them itself,
+        // at the commit each ran rather than its branch's tip.
+        List<AppDefinition> apps = [];
+        if (restoreGate?.Holding == true) logger.LogInformation("A restore is running: it brings the apps back itself");
+        else
+            await using (var db = await dbFactory.CreateDbContextAsync(stoppingToken))
+                apps = await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git || a.Source == AppSource.Compose).ToListAsync(stoppingToken);
         foreach (var app in apps)
         {
             // A Compose app with a service's container missing comes back with its current release (or, with none kept, a deploy).
@@ -180,6 +184,7 @@ public sealed class StartupTasks(
             }
             if (helpers is not null) await QuietlyAsync(() => helpers.RemoveLeftoversAsync(ct), "Removing helper containers left behind failed");
             await QuietlyAsync(() => changer.RecoverAsync(ct), "Settling the port changes a restart cut short failed");
+            if (restoreGate?.Holding == true) return;
             if (keeper is not null) await QuietlyAsync(() => keeper.ReconcileAsync(ct), "Checking the networks Gitberth keeps containers on failed");
             await QuietlyAsync(() => CreateMissingAsync(ct), "Creating missing apps again failed");
         }

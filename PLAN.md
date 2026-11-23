@@ -73,7 +73,7 @@ Each language lives in its own folder under `src/Gitberth/Detection/` (`ILanguag
 
 One file with everything this host runs, to bring it all back on another machine: install, sign in, **Restore**, pick the file, and everything is running again once the repos are cloned and built.
 
-- [ ] **What's saved:**
+- [x] **What's saved:**
   - Gitberth's settings: the admin login, the GitHub and Cloudflare tokens, Health choices (titles, gathering, scheduled restarts) and every other setting.
   - Every app: repo, branch, folder, build settings, a custom Dockerfile, ports, environment variables with their secrets, volumes, limits, restart policy, health URL, domains, and the commit it runs.
   - Every other container on the host, such as Postgres or cloudflared: its image (with digest), command, environment, ports, volumes, networks and restart policy, as `docker inspect` has them.
@@ -85,14 +85,14 @@ One file with everything this host runs, to bring it all back on another machine
   - Saving changes nothing else on the host: it's a backup as much as a move.
   - The Health history, so the charts carry on.
   - A checkbox per container and volume, with its size, to leave things out (the sample containers, a cache).
-- [ ] **One encrypted file.** It's encrypted with a passphrase chosen when saving (AES-256-GCM, key from PBKDF2), since it holds every secret. Gitberth never keeps the passphrase. The file streams to and from disk, so a large one doesn't go through the browser connection: it downloads from a signed-in endpoint and uploads the same way.
-- [ ] **Restore onto a fresh install.** It reads the file, asks for the passphrase, and shows what it will bring back before doing anything. Then, with a live log like a deploy's:
+- [x] **One encrypted file.** It's encrypted with a passphrase chosen when saving (AES-256-GCM, key from PBKDF2), since it holds every secret. Gitberth never keeps the passphrase. The file streams to and from disk, so a large one doesn't go through the browser connection: it downloads from a signed-in endpoint and uploads the same way.
+- [x] **Restore onto a fresh install.** It reads the file, asks for the passphrase, and shows what it will bring back before doing anything. Then, with a live log like a deploy's:
   1. settings and secrets, re-encrypted for the new machine;
   2. the other containers, with their images pulled, volumes filled and databases loaded, started in an order that puts databases first;
   3. each app's volumes, then the app, deployed from GitHub at the commit it ran;
   4. the domains. With the same Cloudflare tunnel (cloudflared is restored with its token), they work as soon as the apps answer on their old host ports.
-- [ ] When restoring onto another machine while the original still runs, warn that the original should stop once the new one is up: two machines on the same Cloudflare tunnel share its visitors. Restoring a backup onto the same machine (after a reinstall, say) needs no such step.
-- [ ] Unit tests for the file format and every step, and a full save, wipe and restore on a test host as the end-to-end check.
+- [x] When restoring onto another machine while the original still runs, warn that the original should stop once the new one is up: two machines on the same Cloudflare tunnel share its visitors. Restoring a backup onto the same machine (after a reinstall, say) needs no such step.
+- [x] Unit tests for the file format and every step, and a full save, wipe and restore on a test host as the end-to-end check.
 
 ## M6: apps from Docker images
 

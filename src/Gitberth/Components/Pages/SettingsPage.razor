@@ -26,7 +26,7 @@
 
 <PageTitle>Settings · Gitberth</PageTitle>
 
-<PageHead Title="Settings" Tip="settings.page" Lead="GitHub, GitLab and registry access, notifications, domains, uptime checks and the status page, the network, updates, apps' databases, and this Gitberth installation.">
+<PageHead Title="Settings" Tip="settings.page" Lead="GitHub, GitLab and registry access, notifications, domains, uptime checks and the status page, the network, updates, apps' databases, backups, and this Gitberth installation.">
     <Crumbs><a href="apps">Apps</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /><span>Settings</span></Crumbs>
 </PageHead>
 
@@ -515,6 +515,8 @@
 
         <DatabaseServersSection />
 
+        <BackupSection />
+
         <section class="gb-card gb-sec" id="password" aria-labelledby="password-t">
             @Head("password-t", Icons.Material.Outlined.Lock, "Admin password", "Sign in as admin. Use at least 10 characters. Changing it signs every other browser out.", TocTip("password"))
             <div class="gb-sec-body">
@@ -596,6 +598,7 @@
         ("deploys", "Deploys", Icons.Material.Outlined.RocketLaunch, Tip: "settings.deploys"),
         ("disk", "Disk", Icons.Material.Outlined.Storage, Tip: "settings.disk"),
         ("databases", "Databases", GitberthIcons.Database, Tip: "settings.databases"),
+        ("backup", "Save and restore", Icons.Material.Outlined.SettingsBackupRestore, Tip: "settings.backup"),
         ("password", "Admin password", Icons.Material.Outlined.Lock, Tip: "settings.password"),
         ("agents", "AI agents and API", Icons.Material.Outlined.SmartToy, Tip: "settings.agents"),
         ("audit", "Audit log", Icons.Material.Outlined.Policy, Tip: "settings.audit"),

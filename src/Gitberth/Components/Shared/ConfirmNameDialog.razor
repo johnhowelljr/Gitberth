@@ -2,7 +2,7 @@
 <MudDialog>
     <TitleContent>
         <div class="gb-dialog-title">
-            <MudIcon Icon="@Icons.Material.Outlined.Delete" Color="Color.Error" />
+            <MudIcon Icon="@Icon" Color="Color.Error" />
             <span>@Title</span>
         </div>
     </TitleContent>
@@ -27,6 +27,8 @@
     /// <summary>What has to be typed.</summary>
     [Parameter] public string Name { get; set; } = "";
     [Parameter] public string ConfirmText { get; set; } = "Remove";
+    /// <summary>The title's icon: a bin for a removal, another for what isn't one (a restore).</summary>
+    [Parameter] public string Icon { get; set; } = Icons.Material.Outlined.Delete;
 
     private string? typed;
 

@@ -94,7 +94,7 @@ public sealed record DomainAdd(string? Error, SyncReport Report, bool NeedsHostB
 /// <param name="down">Which apps' domains show the down page (<see cref="DownWatcher"/>, and a deploy's swap); without it only a held-back protected domain does.</param>
 public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactory, SettingsService settings, CloudflareApi cloudflare, TunnelLocator tunnels, DockerCli docker,
     ILogger<DomainService> logger, Lazy<HostPortMap>? hostPorts = null, Lazy<AppActions>? actions = null, Lazy<AppSettingsService>? appSettings = null,
-    GitberthOptions? options = null, DownStates? down = null, Audit.AuditLog? audit = null)
+    GitberthOptions? options = null, DownStates? down = null, Audit.AuditLog? audit = null, Backup.RestoreGate? restoreGate = null)
 {
     public const string TurnedOff = "Domains are turned off in Settings, so Gitberth leaves Cloudflare alone.";
 
@@ -646,6 +646,8 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
     /// </summary>
     public async Task<SyncReport?> RetryRemovalsAsync(CancellationToken ct = default)
     {
+        // Not while a restore runs: it syncs once every app is back.
+        if (restoreGate?.Holding == true) return null;
         // Gitberth's own records first, without the lock: nearly always there's nothing pending.
         if (!await PendingAsync(ct)) return null;
         await _gate.WaitAsync(ct);
@@ -677,9 +679,13 @@ public sealed partial class DomainService(IDbContextFactory<GitberthDb> dbFactor
         return (await ChecksAsync(ct)).Count > 0;
     }
 
-    /// <summary>Makes the tunnel and DNS match Gitberth. See <see cref="SyncCoreAsync"/>.</summary>
+    /// <summary>
+    /// Makes the tunnel and DNS match Gitberth. See <see cref="SyncCoreAsync"/>. Nothing while a restore runs (each app's
+    /// deploy asks): the restore syncs once, when every app is back.
+    /// </summary>
     public async Task<SyncReport> SyncAsync(CancellationToken ct = default)
     {
+        if (restoreGate?.Holding == true) return new SyncReport([]);
         await _gate.WaitAsync(ct);
         try
         {

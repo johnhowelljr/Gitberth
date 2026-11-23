@@ -93,8 +93,108 @@
                 if (el) observer.observe(el);
             }
             return { dispose: () => observer.disconnect() };
+        },
+
+        // Settings › Save and restore: the browser downloads a save from its own address (the file is made as it's read),
+        // and keeps the page it's on.
+        download(url) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = '';
+            a.hidden = true;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        },
+
+        // The chosen backup file goes straight to Gitberth (POST url), never through the page's own connection, with the
+        // antiforgery token first (the sign-out form's, App.razor) so Gitberth checks it before it reads the file. The
+        // component hears Uploading(sent, total) a few times a second, and Uploaded(ok, aborted, status, answer) at the end.
+        backupUpload(inputId, url, dotnet) {
+            const input = document.getElementById(inputId);
+            const file = input?.files?.[0];
+            if (!file) {
+                dotnet.invokeMethodAsync('Uploaded', false, true, 0, '').catch(() => { });
+                return;
+            }
+            const form = new FormData();
+            form.append('__RequestVerificationToken', document.querySelector('#gb-logout input[name="__RequestVerificationToken"]')?.value ?? '');
+            form.append('file', file, file.name);
+            const xhr = new XMLHttpRequest();
+            window.gitberth.upload = xhr;
+            let last = 0;
+            xhr.upload.onprogress = e => {
+                const now = performance.now();
+                if (now - last < 250 && e.loaded < e.total) return;
+                last = now;
+                dotnet.invokeMethodAsync('Uploading', e.loaded, e.lengthComputable ? e.total : file.size).catch(() => { });
+            };
+            const end = aborted => {
+                if (window.gitberth.upload === xhr) window.gitberth.upload = null;
+                input.value = '';
+                const ok = !aborted && xhr.status >= 200 && xhr.status < 300;
+                dotnet.invokeMethodAsync('Uploaded', ok, aborted, xhr.status, (xhr.responseText || '').slice(0, 2000)).catch(() => { });
+            };
+            xhr.onload = () => end(false);
+            xhr.onerror = () => end(false);
+            xhr.onabort = () => end(true);
+            xhr.open('POST', url);
+            xhr.send(form);
+        },
+
+        backupUploadCancel() {
+            window.gitberth.upload?.abort();
+        },
+
+        // A restore: Gitberth restarts on the saved data partway through (phase 1 can end before the Restoring page has
+        // even been drawn), and the saved data signs this browser out (the saved machine's admin password and keys).
+        // Blazor's own reconnecting waits longer and longer, or for a click once the session is paused, so from Restore on,
+        // every 2 s ask Gitberth, as this browser, for an address that needs signing in (a help picture that isn't there:
+        // 404 while signed in). Once it sends the browser to its sign-in instead, open the Restoring page afresh: the
+        // sign-in comes first, then it. Also once it answers again after being down while the page is cut off. The
+        // reconnect box says why it's waiting. Settings starts it before the restore, the Restoring page again, and stops
+        // it once the restore has finished.
+        reloadAfterRestart(note) {
+            if (window.gitberth.restartWatch) return;
+            const box = document.getElementById('components-reconnect-modal');
+            if (note) {
+                const said = document.createElement('p');
+                said.className = 'gb-restart-note';
+                said.textContent = note;
+                (box?.querySelector('.components-reconnect-container') ?? box)?.appendChild(said);
+            }
+            let seenDown = false, asking = false;
+            window.gitberth.restartWatch = setInterval(async () => {
+                // One question at a time, each given up after 1.5 s: a connection to the Gitberth that went away can hang
+                // instead of failing, and a few hanging ones would hold up every request after them.
+                if (asking) return;
+                asking = true;
+                // Cut off: the reconnect box is up, or the page never got its connection (its splash is still there).
+                const splash = document.getElementById('gb-splash');
+                const cutOff = (!!splash && !splash.dataset.leaving)
+                    || (!!box && (box.open || /components-reconnect-(show|retrying|failed|paused|resume-failed)/.test(box.className)));
+                try {
+                    const answer = await fetch('help-media/restart-check', { cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(1500) });
+                    if (answer.type === 'opaqueredirect' || (seenDown && cutOff && answer.status > 0)) location.assign('restoring');
+                } catch {
+                    seenDown = true;
+                } finally {
+                    asking = false;
+                }
+            }, 2000);
+        },
+
+        stopRestartWatch() {
+            clearInterval(window.gitberth.restartWatch);
+            window.gitberth.restartWatch = null;
+            document.querySelectorAll('.gb-restart-note').forEach(n => n.remove());
         }
     };
+
+    // A Restoring page loaded afresh while Gitberth stops (Blazor's own reload, say) may never get its connection, so the
+    // watch starts with the page itself, not with the page's code; its line is the one the page shows.
+    if (/\/restoring$/.test(location.pathname))
+        window.gitberth.reloadAfterRestart(document.getElementById('restore-restart-note')?.textContent?.trim() ?? '');
 
     // Ctrl K (or Cmd K) goes to the top bar's search from anywhere; / goes to the page's own search when it has one
     // (the Apps list, the Help), else the top bar's, unless you're already typing somewhere.

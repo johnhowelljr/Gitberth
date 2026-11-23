@@ -34,7 +34,7 @@ Gitberth encrypts these at rest in its database, with ASP.NET Core Data Protecti
 API tokens aren't stored at all: only their SHA-256. The [audit log](../guides/audit-log.md) never holds a secret value,
 only its name.
 
-The keys are in `/data/keys`, in the same volume as the database. Anyone with a copy of the volume can read the secrets, so keep backups private. Keep the keys with the database: without them, Gitberth can't read the secrets, and tokens, passwords and variable values have to be entered again. **Settings › Registries** marks a sign-in whose password it can't read with **needs its password again: enter it below**.
+The keys are in `/data/keys`, in the same volume as the database. Anyone with a copy of the volume can read the secrets, so keep copies of it private. A backup from **Settings › Save and restore** carries the keys too, but the whole file is encrypted with a passphrase Gitberth never keeps (see [Back up and restore](../guides/backups-and-restore.md#the-file-is-compressed-and-encrypted)). Keep the keys with the database: without them, Gitberth can't read the secrets, and tokens, passwords and variable values have to be entered again. **Settings › Registries** marks a sign-in whose password it can't read with **needs its password again: enter it below**.
 
 **Where secrets go:**
 

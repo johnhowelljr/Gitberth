@@ -88,7 +88,8 @@ public sealed class RepoWatcher(
     SettingsService settings,
     WatchState state,
     ILogger<RepoWatcher> logger,
-    Previews.PreviewService? previews = null) : BackgroundService
+    Previews.PreviewService? previews = null,
+    Backup.RestoreGate? restoreGate = null) : BackgroundService
 {
     public const int DefaultIntervalSeconds = 30;
 
@@ -158,11 +159,15 @@ public sealed class RepoWatcher(
                 {
                     var interval = await settings.GetIntAsync(SettingKeys.WatchIntervalSeconds, DefaultIntervalSeconds, stoppingToken);
                     state.IntervalSeconds = Math.Clamp(interval, 10, 3600);
-                    await CheckAsync(stoppingToken);
-                    // Previews whose parent is gone or has previews turned off go.
-                    if (previews is not null) await previews.TidyAsync(stoppingToken);
-                    // A temporary container a deploy couldn't move visitors off goes as soon as the tunnel can be changed.
-                    await pipeline.TidyBridgesAsync(stoppingToken);
+                    // While a restore deploys each app at the commit it ran, no newer commit is deployed in its place.
+                    if (restoreGate?.Holding != true)
+                    {
+                        await CheckAsync(stoppingToken);
+                        // Previews whose parent is gone or has previews turned off go.
+                        if (previews is not null) await previews.TidyAsync(stoppingToken);
+                        // A temporary container a deploy couldn't move visitors off goes as soon as the tunnel can be changed.
+                        await pipeline.TidyBridgesAsync(stoppingToken);
+                    }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
