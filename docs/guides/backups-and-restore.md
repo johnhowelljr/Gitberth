@@ -1,6 +1,6 @@
 # Back up and restore
 
-**Settings › Save and restore** saves everything this host runs in one file: Gitberth's settings and secrets, every app, the other containers, the data in their volumes, and the databases. The file is compressed and encrypted with a passphrase you choose. Restore it onto a fresh install, on this machine or another, and everything comes back: the apps run again once their repos are cloned and built.
+**Settings › Save and restore** saves everything this host runs in one file: Gitberth's settings and secrets, every app, the other containers, the data in their volumes, and the databases. The file is compressed and encrypted with a passphrase you choose. Bring back the apps you pick into any Gitberth (an app deleted by mistake, say), or restore all of it onto a fresh install, on this machine or another: the apps run again once their repos are cloned and built.
 
 ## What a backup holds
 
@@ -42,29 +42,59 @@ On, Gitberth writes down which containers run, stops them all (itself aside), sa
 
 ## Restore a backup
 
-A backup is restored onto a Gitberth with no apps yet: a fresh install, on a new machine, or on this one after a reinstall.
+**Restore from a file** works in any Gitberth. Once the file is open, you pick what comes back:
 
-### Before you start
+- **Bring back one app**, or a few, into the Gitberth you use, as it runs: an app deleted by mistake, an app as it was when it was saved, or a copy of it next to the one you have. Nothing else here changes.
+- **Restore everything**, onto a Gitberth with no apps yet: a fresh install on a new machine, or on this one after a reinstall. Gitberth's own settings, tokens and history come back too.
+
+Open Gitberth by its LAN address to upload the file: through a Cloudflare domain, an upload stops at 100 MB.
+
+### Bring back one app
+
+1. Open **Settings › Save and restore** and, under **Restore from a file**, click **Choose a backup file…**. The file uploads with its progress.
+2. Type its passphrase and click **Open the file**. Gitberth lists what the file holds, and restores nothing yet.
+3. Tick the apps and containers to bring back; their volumes, databases and images come with them. Under each one you tick:
+   - one that isn't here (deleted, or saved on another machine) says **Comes back as it was**;
+   - one that's here offers **Replace it**, or **Restore as a copy named** with a name that's free here, like `website2`, which you can change.
+
+   A line under a row says what's worth knowing here, such as a host port another app has now.
+4. Click **Restore the picked items** and confirm; when one replaces what's here, type `restore`.
+5. The **Restoring** page shows each step and the live log. There's no restart: Gitberth keeps running, and its settings, tokens and other apps stay as they are. It says **Restored** when it's done.
+
+The file stays uploaded, so you can bring back more from it: open it again with its passphrase. **Remove the file** deletes it from Gitberth.
+
+| Choice | What happens |
+|---|---|
+| **Comes back as it was** | Its settings, variables (secrets too), ports, volumes with their files, database and domains come back under its own name, and it's deployed at the commit it ran; an app from an image is made again from its image. A host port another app has now gets a free one, and a domain another app has now is left off. |
+| **Replace it** | Its saved settings and data replace what it has now, under the same app: its volumes are emptied and filled from the file, and its database is restored. Its database as it is now is kept, renamed `<name>_before_<date and time>`, and the log names it. |
+| **Restore as a copy named …** | A new app with that name, next to the one here: its own container and volumes, free host ports, and a copy of its database under its own name, user and password. No domains, deploy hooks or previews. |
+
+A container that isn't an app (cloudflared, one started by hand) comes back from what `docker inspect` said about it. One whose name is taken here can be replaced or copied, not restored as itself.
+
+### Restore everything
+
+On a Gitberth with no apps yet, **Restore everything…** brings back all of it, Gitberth's own settings, tokens, keys and history too, then Gitberth restarts on them.
+
+#### Before you start
 
 - Install Gitberth on the new machine (see [Install](../getting-started/install.md)) and sign in with its own password. Its dashboard says **Moving from another machine? Restore a backup.**
-- Open Gitberth by its LAN address to upload the file: through a Cloudflare domain, an upload stops at 100 MB.
 - If the backup brings back cloudflared and the old machine still runs it, stop it there once the new one is up: two machines on the same tunnel share its visitors.
 
-### Steps
+#### Steps
 
 1. Open **Settings › Save and restore** (or click **Restore a backup** on the dashboard's banner) and, under **Restore from a file**, click **Choose a backup file…**. The file uploads with its progress.
 2. Type its passphrase and click **Open the file**. Gitberth reads what the file holds, and restores nothing yet: where and when it was saved, what it brings back, and what to know first (see [What the warnings mean](#what-the-warnings-mean)).
 
    ![Restore from a file: where and when the backup was saved, what it brings back, what to know first, and Restore…](../images/settings-restore-summary.webp)
 
-3. Click **Restore…** and type `restore` to confirm.
+3. Click **Restore everything…** and type `restore` to confirm.
 4. The **Restoring** page shows each step and the live log. First, from the file: networks, volumes and their data, images, database servers with their dumps loaded, and the other containers, databases first. Then Gitberth restarts on the saved data.
 5. The page comes back by itself after the restart. Sign in with the admin password of the machine the backup was saved on, not the new one's.
 6. Gitberth deploys each Git and Compose app at the commit it ran, one at a time, then routes the domains. The page says **Restored** when it's done.
 
 The uploaded file is deleted from Gitberth when the restore ends.
 
-### What the warnings mean
+#### What the warnings mean
 
 | Warning | What happens |
 |---|---|
@@ -79,7 +109,7 @@ The uploaded file is deleted from Gitberth when the restore ends.
 
 A warning in red stops the restore until it's dealt with; the others only say what will happen.
 
-### After a restore
+#### After a restore
 
 - **Secrets** read as before: the keys they're encrypted with come in the file. Tokens, registry sign-ins and variables need nothing.
 - **Your browsers** sign in again, with the saved machine's admin password.

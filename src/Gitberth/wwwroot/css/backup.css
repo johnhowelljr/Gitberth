@@ -16,6 +16,13 @@
 .gb-bk-s { font-size: 12px; color: var(--gb-text-3); overflow-wrap: anywhere; }
 .gb-bk-size { flex: none; font-size: 12.5px; color: var(--gb-text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* What a backup holds, to pick from: under a picked app, how it comes back (lined up with its name), and its note. */
+.gb-bk-row--pick { flex-wrap: wrap; }
+.gb-bk-pickopts { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding-left: 62px; }
+.gb-bk-opt { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; cursor: pointer; }
+.gb-bk-opt input[type=radio] { margin: 0; accent-color: var(--gb-accent-strong); cursor: pointer; }
+.gb-bk-copyname { width: 220px; max-width: 100%; }
+
 /* Restore from a file: its own heading under the save's, and the file picker (a button with the input inside it). */
 .gb-bk-sub { margin-top: 10px; padding-top: 16px; border-top: 1px solid var(--gb-line-1); }
 .gb-bk-file { position: relative; cursor: pointer; }

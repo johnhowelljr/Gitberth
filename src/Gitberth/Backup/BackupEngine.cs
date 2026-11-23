@@ -48,6 +48,12 @@ public interface IBackupEngine
     Task PauseContainerAsync(string idOrName, CancellationToken ct = default);
     Task UnpauseContainerAsync(string idOrName, CancellationToken ct = default);
 
+    /// <summary>POST containers/{id}/wait: its exit code, once it isn't running.</summary>
+    Task<int> WaitContainerAsync(string idOrName, CancellationToken ct = default);
+
+    /// <summary>DELETE volumes/{name}: only a restore's own throwaway volume, never anyone's data.</summary>
+    Task RemoveVolumeAsync(string name, CancellationToken ct = default);
+
     /// <summary>POST volumes/create: {Name, Driver, DriverOpts, Labels}.</summary>
     Task CreateVolumeAsync(JsonObject body, CancellationToken ct = default);
 

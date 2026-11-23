@@ -279,14 +279,16 @@ Under **Save a backup**:
 | **Passphrase** and **Passphrase again** | The passphrase the file is encrypted with, twice: at least 12 characters. Gitberth never keeps it: without it, the file can't be opened. | |
 | **Save backup** | The browser downloads `gitberth-backup-<date>.gbak` while Gitberth makes it. The line under it says what's being saved and how much is written, then **Saved 6 items: 1.1 GB, compressed and encrypted.**, or **The save failed: …** with why. | |
 
-Under **Restore from a file**, offered only while this Gitberth has no apps (otherwise it says why):
+Under **Restore from a file**, offered in any Gitberth (while a restore runs, it says so instead):
 
 | Field or button | What it does |
 |---|---|
 | **Choose a backup file…** | Uploads a `.gbak` file, with its progress and **Cancel**. Upload it from Gitberth's LAN address: through a Cloudflare domain an upload stops at 100 MB. |
-| **Its passphrase** and **Open the file** | Opens the file and reads what it holds, restoring nothing: where and when it was saved, by which Gitberth, what it brings back, and the warnings for this host. A wrong passphrase says **This passphrase doesn't open the file.**; a damaged file, one that isn't a backup, or one from a newer Gitberth says so in a banner. |
+| **Its passphrase** and **Open the file** | Opens the file and lists what it holds, restoring nothing: where and when it was saved, by which Gitberth, and each app and container with what's under it. A wrong passphrase says **This passphrase doesn't open the file.**; a damaged file, one that isn't a backup, or one from a newer Gitberth says so in a banner. |
+| The list's boxes | One per app and container in the file: tick what comes back. Its volumes, databases and images come with it. Under one that isn't here, **Comes back as it was**; under one that's here, **Replace it** or **Restore as a copy named** with a free name you can change. A line under a row says what's worth knowing here, such as a host port that's taken. See [Bring back one app](../guides/backups-and-restore.md#bring-back-one-app). |
+| **Restore the picked items** | Asks first (type `restore` when one replaces what's here), then opens the **Restoring** page: its steps and live log. There's no restart, and nothing else here changes. |
+| **Restore everything…** | Only on a Gitberth with no apps yet, with the warnings for this host. Asks you to type `restore`, then brings back all of it and opens the **Restoring** page. Gitberth restarts on the saved data partway through; afterwards you sign in with the admin password of the machine the backup was saved on. A warning in red keeps it off until it's dealt with. |
 | **Remove the file** | Deletes the uploaded file without restoring it. |
-| **Restore…** | Asks you to type `restore`, then starts the restore and opens the **Restoring** page: its steps and live log. Gitberth restarts on the saved data partway through; afterwards you sign in with the admin password of the machine the backup was saved on. A warning in red keeps it off until it's dealt with. |
 
 While this Gitberth has no apps, the dashboard says **Moving from another machine? Restore a backup.**, and while a
 restore runs, **A restore is running** with a link to its page.
@@ -345,7 +347,7 @@ What this Gitberth installation is talking to. Nothing here can be changed.
 | **git** | The version of git Gitberth uses, or **Not found**. |
 | **Railpack** | The version of Railpack in this image, and the state of gitberth-buildkit, where its builds run: `0.43.0 · builds in gitberth-buildkit (running)`, `(stopped until a build needs it)` or `(made on the first Railpack build)`. **Not in this image** for an image built without it. See [Railpack builds](railpack.md#which-builder-runs-it). |
 | **Data folder** | Where Gitberth keeps its data inside its container, `/data` in the published image. |
-| **Version** | Gitberth's version, and the commit a published image was built from, like `1.8.0 (3f9c2ab)`. |
+| **Version** | Gitberth's version, and the commit a published image was built from, like `1.9.0 (3f9c2ab)`. |
 
 ## Related
 

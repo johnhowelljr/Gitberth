@@ -24,4 +24,15 @@ public sealed class RestoreGate
     public void Close() => _holding = true;
 
     public void Open() => _holding = false;
+
+    // The apps a restore of picked items is bringing back, by slug: the keep-running check and the repo watcher skip them.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _apps = new(StringComparer.Ordinal);
+
+    /// <summary>A picked app (by its slug here) is being restored: Gitberth's jobs leave it alone until it's released.</summary>
+    public void Hold(string slug) => _apps[slug] = 0;
+
+    public void Release(string slug) => _apps.TryRemove(slug, out _);
+
+    /// <summary>Whether Gitberth's jobs leave the app alone now: a whole restore runs, or this app is being restored.</summary>
+    public bool Holds(Data.AppDefinition app) => _holding || _apps.ContainsKey(app.Slug);
 }

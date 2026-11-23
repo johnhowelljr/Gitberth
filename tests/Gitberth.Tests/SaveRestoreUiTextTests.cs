@@ -166,9 +166,33 @@ public sealed class SaveRestoreUiTextTests
         Assert.Null(BackupText.Banner(null, "This Gitberth has apps: a backup is restored onto a fresh install only."));
         var running = new RestoreStatus(true, false, 2, [new("a", "a", RestoreStepState.Done, null), new("b", "b", RestoreStepState.Running, null)], 0, DateTime.UtcNow);
         var busy = BackupText.Banner(running, "A restore is running.");
-        Assert.Equal(("A restore is running", "Gitberth is bringing a backup back: part 2 of 2, 1 of 2 steps done.", "restoring"), (busy?.Title, busy?.Text, busy?.Href));
+        Assert.Equal(("A restore is running", "Gitberth is bringing a backup back: 1 of 2 steps done.", "restoring"), (busy?.Title, busy?.Text, busy?.Href));
         // A restore that's over says nothing on the dashboard.
         Assert.Null(BackupText.Banner(running with { Active = false, Finished = true }, "This Gitberth has apps."));
+    }
+
+    [Fact]
+    public void Picked_items_say_how_each_comes_back_and_that_nothing_restarts()
+    {
+        Assert.Equal("website comes back as it was.", BackupText.PickLine(new RestorePick("app:1", RestoreAction.Restore), "website"));
+        Assert.Equal("website comes back as a copy named website2, next to it: its own container, volumes and database, free ports, no domains.",
+            BackupText.PickLine(new RestorePick("app:1", RestoreAction.Copy, "website2"), "website"));
+        Assert.StartsWith("website: its saved settings and data replace what it has now.", BackupText.PickLine(new RestorePick("app:1", RestoreAction.Replace), "website"));
+        Assert.Equal(("Restore 1 item?", "Restore 3 items?"), (BackupText.PickTitle(1), BackupText.PickTitle(3)));
+        // A copy's name is checked as New app checks an app's.
+        Assert.Null(BackupText.CopyNameProblem("website2"));
+        Assert.Equal("Give the app a name.", BackupText.CopyNameProblem(" "));
+        Assert.Equal("The name needs at least one letter or digit.", BackupText.CopyNameProblem("--"));
+
+        // The Restoring page of picked items: no parts, no restart.
+        var running = new RestoreStatus(true, false, 1, [new("a", "a", RestoreStepState.Running, null)], 0, DateTime.UtcNow);
+        Assert.Equal("Restoring the picked items", BackupText.Headline(running, picked: true));
+        Assert.Equal(BackupText.PickedNote, BackupText.Lead(running, picked: true));
+        Assert.Contains("no restart", BackupText.PickedNote);
+        Assert.Equal("Restored", BackupText.Headline(running with { Active = false, Finished = true }, picked: true));
+        Assert.Equal("The picked items are back. Each app's page says how it runs.", BackupText.Lead(running with { Active = false, Finished = true }, picked: true));
+        // A whole backup's page as before.
+        Assert.Equal("Restoring, part 1 of 2", BackupText.Headline(running));
     }
 
     [Fact]

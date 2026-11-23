@@ -261,7 +261,7 @@
         kinds = await AppKinds.LoadAsync(Db);
         try { disk = Images.Disk(); }
         catch (Exception) { disk = null; }
-        try { restoreBanner = BackupText.Banner(Restore.Status(), Restore.CantRestore()); }
+        try { restoreBanner = BackupText.Banner(Restore.Status(), Restore.CantRestoreEverything()); }
         catch (Exception) { restoreBanner = null; }
         loaded = true;
         checkedAt = DateTime.UtcNow;

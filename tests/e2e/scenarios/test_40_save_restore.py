@@ -17,27 +17,36 @@
   with the saved keys), the row through the app's own DATABASE_URL, redis's key, the same host port answering, and the
   restore's deploy at the saved commit. The uploaded file is gone, the restore's log holds no secret, and the dashboard
   offers no restore any more.
+- Picked items, into a Gitberth with other apps (plan2 P8): an app saved (a Git app with a volume marker, a secret and a
+  database row, Deploy on push off) and then deleted with its volumes and its database comes back picked from the
+  backup, with its data, the same host port and the saved commit, though the branch moved on; no restart. Then the same
+  app restored as a copy <name>2 next to it: both answer, the copy on another port, with the data and a database of
+  its own.
 
-About 4 minutes with the rig's test timings: one Git build before the save and one after, Postgres made once per rig
-volume. What it seeded is removed at the end; a Postgres server it found stays.
+About 4 minutes for the whole restore and 4 for the picked ones with the rig's test timings: one Git build before each
+save and one per restore, Postgres made once per rig volume. What they seeded is removed at the end; a Postgres server
+they found stays.
 """
 import os
 import re
 import secrets
 import shutil
 import tempfile
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
 from playwright.sync_api import TimeoutError as PlaywrightTimeout
 
 from e2e import config
 from e2e.engine import docker
+from e2e.gitberth import App
 from e2e.net import call, get, get_json
 from e2e.wait import until
 from test_09_scoped_variables import PRODUCTION_TAKES, add_variable, open_environment, wait_bar
 from test_10_build_time_secrets import apply_and_follow
 from test_19_declared_volumes import add_row
-from test_27_databases import SERVER, add_database, create_server, remove_server, wait_live
+from test_27_databases import SERVER, add_database, create_server, remove_server, url_parts, wait_live
 from test_29_mcp import make_token, tool
 
 # Test values that look like nothing real (R3): the passphrase, and the secret variable's value.
@@ -126,6 +135,11 @@ def upload_and_open(page, path):
     """Restore from a file: the file uploaded, a wrong passphrase refused (nothing opened), its own passphrase opening
     it. Returns the summary's text."""
     section = page.locator("#backup")
+    # A file left there before (an earlier restore's, or a run that stopped) goes first, so this one is the one opened.
+    left = section.get_by_role("button", name="Remove the file")
+    if left.count():
+        left.first.click()
+        section.locator(".gb-bk-picker:not([hidden])").wait_for(timeout=30_000)
     page.locator("#gb-restore-file").set_input_files(path)
     uploaded = section.locator("#bk-uploaded")
     until(lambda: uploaded.count() and "is uploaded" in uploaded.inner_text(), 300, "the file to be uploaded",
@@ -303,7 +317,7 @@ def test_a_saved_host_comes_back_on_a_wiped_gitberth(new_page, gitberth, github,
         summary = upload_and_open(page, path)
         assert app.name in summary and "admin password of the machine the backup was saved on" in summary, summary
         started = engine.inspect(config.GITBERTH_CONTAINER)["State"]["StartedAt"]
-        page.locator("#bk-summary").get_by_role("button", name="Restore…").click()
+        page.locator("#bk-summary").get_by_role("button", name="Restore everything…").click()
         dialog = page.locator(".mud-dialog")
         dialog.wait_for()
         confirm = dialog.get_by_role("button", name="Restore", exact=True)
@@ -368,3 +382,179 @@ def test_a_saved_host_comes_back_on_a_wiped_gitberth(new_page, gitberth, github,
             except Exception as e:  # noqa: BLE001 - cleaning up never hides the scenario's own failure
                 print(f"[e2e] couldn't remove what group 40 made: {e}")
         shutil.rmtree(folder, ignore_errors=True)
+
+
+# ---- Picked items, into a Gitberth with other apps (plan2 P8) ----
+
+def save_backup(gitberth, page, folder, wanted):
+    """Settings › Save and restore with only the wanted items ticked (the rig's own left out), downloaded; its path."""
+    section = open_section(gitberth, page)
+    keep_only(section, wanted)
+    section.locator("#bk-pass").fill(PASSPHRASE)
+    section.locator("#bk-pass-again").fill(PASSPHRASE)
+    button = section.get_by_role("button", name="Save backup")
+    until(button.is_enabled, 15, "Save backup to be offered", seen=lambda: flat(section.inner_text())[-400:])
+    with page.expect_download(timeout=120_000) as download:
+        button.click()
+    path = os.path.join(folder, download.value.suggested_filename)
+    download.value.save_as(path)
+    progress = section.locator("#bk-progress")
+    until(lambda: flat(progress.inner_text()).startswith("Saved"), 120, "the save to end", seen=lambda: flat(progress.inner_text()))
+    return path
+
+
+def delete_with_data(gitberth, page, app):
+    """The app's Remove, its named volumes and its databases' data too."""
+    gitberth.open(page, f"/apps/{app.key}/settings")
+    page.locator("#sec-remove").get_by_role("button", name=re.compile("^Remove")).click()
+    dialog = page.locator(".mud-dialog")
+    dialog.wait_for()
+    dialog.get_by_text("Also delete its named volumes").click()
+    dialog.get_by_text("Also delete their data").click()
+    dialog.get_by_role("button", name="Delete app").click()
+    page.wait_for_url(lambda u: urlsplit(u).path == "/apps", timeout=60_000)
+
+
+def restore_picked(gitberth, page, path, item, copy=False):
+    """Restore from a file: the backup's item picked, as it was or as a copy under the name offered, restored and followed
+    to Restored on a Restoring page that says nothing of a restart. Returns the copy's name, or None."""
+    gitberth.open(page, "/settings#backup")
+    page.locator("#backup #gb-restore-file").wait_for(state="attached", timeout=30_000)
+    upload_and_open(page, path)
+    summary = page.locator("#bk-summary")
+    row = summary.locator(f"li[data-item='{item}']")
+    row.locator("input[type=checkbox]").check()
+    name = None
+    if copy:
+        choice = row.get_by_role("radio", name=re.compile("^Restore as a copy named"))
+        if not choice.is_checked():
+            choice.check()
+        name = row.locator("input.gb-bk-copyname").input_value()
+    else:
+        until(lambda: "Comes back as it was." in flat(row.inner_text()), 10, "the row to say it comes back as it was", seen=row.inner_text)
+    summary.get_by_role("button", name="Restore the picked items").click()
+    gitberth.confirm(page, "Restore")
+    page.wait_for_url(re.compile(r"/restoring\?picked=1$"), timeout=60_000)
+    title = page.locator("h1.gb-display")
+    until(lambda: title.inner_text().strip().startswith("Restored"), 600, "the picked restore to end", interval=2, seen=lambda: restoring_text(page))
+    assert title.inner_text().strip() == "Restored", restoring_text(page)
+    assert page.locator("#restore-restart-note").count() == 0, "a restore of picked items says Gitberth restarts"
+    return name
+
+
+def wait_server(gitberth, page, engine):
+    """Settings › Databases says Gitberth uses the Postgres server, so an app's Add database is offered (else it says why
+    not)."""
+    def said():
+        gitberth.open(page, "/settings")
+        section = page.locator("#databases")
+        section.wait_for()
+        until(lambda: section.locator(".gb-skel").count() == 0, 30, "Settings › Databases to load", seen=section.inner_text)
+        return flat(section.inner_text())
+
+    def container():
+        c = engine.inspect(SERVER) or {}
+        return f"{(c.get('State') or {}).get('Status', 'none')}, on {sorted(((c.get('NetworkSettings') or {}).get('Networks') or {}))}"
+    until(lambda: "Gitberth uses it" in said(), 60, "Gitberth to use the Postgres server", interval=3,
+          seen=lambda: f"{said()[-600:]} | its container: {container()}")
+
+
+@pytest.fixture(scope="module")
+def picked_world(gitberth, github, engine, baseline):
+    """A Gitberth with other apps (its Postgres server): a Git app with a marker in its volume, a secret variable and a row
+    in a database of its own, Deploy on push off, saved; then a commit the restores mustn't take. What the scenarios made
+    is removed at the end."""
+    folder = tempfile.mkdtemp(prefix="gbe2e-picked-")
+    w = SimpleNamespace(slugs=[], made_server=not engine.exists(SERVER))
+    page = gitberth.new_page()
+    try:
+        print(f"[e2e] picked_world: the Postgres server: {create_server(gitberth, page, engine) or 'there already'}")
+        w.repo = github.create_repo(f"bp-{secrets.token_hex(2)}", files={"marker.txt": "picked v1"})
+        w.app = gitberth.create_git_app(page, w.repo.url)
+        w.slugs.append(w.app.slug)
+        first = gitberth.wait_deploy(w.app.id, timeout=420)
+        wait_server(gitberth, page, engine)
+        said = add_database(gitberth, page, w.app)
+        assert said.startswith("Added the database"), said
+        second = wait_live(gitberth, w.app, first["Id"])
+        open_environment(page, gitberth, w.app)
+        add_variable(page, SECRET_NAME, SECRET_VALUE)
+        wait_bar(page, lambda line: line.startswith(PRODUCTION_TAKES), "the apply bar to say production takes the variable")
+        third = apply_and_follow(page, gitberth)
+        assert third["Status"] == "Succeeded" and third["Id"] > second["Id"], third
+        token, _ = make_token(gitberth, page, f"bp-admin-{secrets.token_hex(2)}", "Admin")
+        error, done = tool(gitberth, token, "update_app_settings", {"app": w.app.key, "auto_deploy": False, "wait": True}, timeout=300)
+        assert not error, done
+        lan = gitberth.lan_url(w.app.id)
+        w.marker = f"marker-{secrets.token_hex(4)}"
+        assert call("POST", f"{lan}/file?path=/data/br-marker.txt", body=w.marker.encode())[0] == 200
+        w.row = f"row-{secrets.token_hex(4)}"
+        url = engine.env(w.app.container)["DATABASE_URL"]
+        engine.exec(SERVER, "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", url, "-c", f"CREATE TABLE notes (t text); INSERT INTO notes VALUES ('{w.row}');")
+        w.port = gitberth.db.web_port(w.app.id)["HostPort"]
+        w.sha = gitberth.db.app(w.app.slug)["CurrentCommit"]
+        w.item = f"app:{w.app.id}"
+        w.path = save_backup(gitberth, page, folder, {"gitberth", f"database:{SERVER}"} | {f"app:{a['Id']}" for a in gitberth.db.apps()})
+        assert w.repo.commit({"marker.txt": "picked v2"}, message="After the save")["sha"] != w.sha
+        page.context.close()
+        yield w
+    finally:
+        if not page.is_closed():
+            page.context.close()
+        if not config.KEEP:
+            cleanup = gitberth.new_page()
+            try:
+                for slug in reversed(w.slugs):
+                    if (row := gitberth.db.app(slug)) is not None:
+                        gitberth.wait_idle(row["Id"], timeout=300)
+                        gitberth.delete_app(cleanup, App(row["Id"], row["Slug"], row["Name"]))
+                if w.made_server and engine.exists(SERVER):
+                    remove_server(gitberth, cleanup, engine)
+            except Exception as e:  # noqa: BLE001 - cleaning up never hides a scenario's own failure
+                print(f"[e2e] couldn't remove what group 40's picked restores made: {e}")
+            finally:
+                cleanup.context.close()
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def test_a_deleted_app_comes_back_picked_from_the_backup(picked_world, new_page, gitberth, engine, scenario):
+    w = picked_world
+    page = new_page()
+    delete_with_data(gitberth, page, w.app)
+    gitberth.wait_app(w.app.slug, gone=True)
+    restore_picked(gitberth, page, w.path, w.item)
+
+    # Back under its own name: its data, its secret, its database, the same host port, the commit it ran.
+    row = gitberth.wait_app(w.app.slug, timeout=60)
+    container = row["Container"] or f"gb-{row['Slug']}"
+    assert gitberth.db.web_port(row["Id"])["HostPort"] == w.port
+    lan = gitberth.lan_url(row["Id"])
+    body = gitberth.wait_answers(lan, timeout=180)
+    assert body.get("commit") == w.sha, f"it runs {body.get('commit')}, not the saved commit {w.sha}"
+    assert get(f"{lan}/file?path=/data/br-marker.txt") == (200, w.marker)
+    assert (get_json(f"{lan}/env") or {}).get(SECRET_NAME) == SECRET_VALUE, "the secret variable didn't come back"
+    url = engine.env(container)["DATABASE_URL"]
+    assert engine.exec(SERVER, "psql", "-X", "-t", "-A", url, "-c", "SELECT t FROM notes").strip() == w.row
+
+
+def test_an_app_comes_back_as_a_copy_next_to_it(picked_world, new_page, gitberth, engine, scenario):
+    w = picked_world
+    page = new_page()
+    original = gitberth.db.app(w.app.slug)
+    assert original is not None, "the app isn't here to copy"
+    name = restore_picked(gitberth, page, w.path, w.item, copy=True)
+    assert name == f"{w.app.name}2", name
+    row = until(lambda: gitberth.db.one("SELECT * FROM Apps WHERE Name = ?", name), 60, "the copy in Gitberth's database")
+    w.slugs.append(row["Slug"])
+    assert row["Id"] != original["Id"] and row["Slug"] != original["Slug"], row
+
+    # Both answer: the copy on a port of its own, with the data, and a database of its own with the row.
+    copy_lan, lan = gitberth.lan_url(row["Id"]), gitberth.lan_url(original["Id"])
+    assert copy_lan != lan, "the copy got the original's host port"
+    gitberth.wait_answers(copy_lan, timeout=180)
+    gitberth.wait_answers(lan, timeout=60)
+    assert get(f"{copy_lan}/file?path=/data/br-marker.txt") == (200, w.marker)
+    copy_url = engine.env(row["Container"] or f"gb-{row['Slug']}")["DATABASE_URL"]
+    url = engine.env(original["Container"] or f"gb-{original['Slug']}")["DATABASE_URL"]
+    assert url_parts(copy_url)[5] != url_parts(url)[5] and url_parts(copy_url)[1] != url_parts(url)[1], "the copy uses the original's database"
+    assert engine.exec(SERVER, "psql", "-X", "-t", "-A", copy_url, "-c", "SELECT t FROM notes").strip() == w.row

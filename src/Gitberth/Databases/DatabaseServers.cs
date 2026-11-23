@@ -59,8 +59,11 @@ public sealed class DatabaseServers(DockerCli docker, SettingsService settings, 
     /// <summary>The image a server Gitberth sets up runs.</summary>
     public const string ServerImage = "postgres:18";
 
-    // How long a sign-in check of a server is good for: pages ask often, and each check is a docker exec.
+    // How long a sign-in check of a server is good for: pages ask often, and each check is a docker exec. A check that
+    // failed is good for less: a server just made (or started) refuses sign-ins for its first seconds, and shouldn't show
+    // "No server yet" for half a minute after it's ready.
     private static readonly TimeSpan ProbeFor = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan FailedProbeFor = TimeSpan.FromSeconds(5);
 
     private readonly ConcurrentDictionary<string, (DateTime At, int? Version, string? Problem)> _probes = new(StringComparer.Ordinal);
     private ServerCreation? _creation;
@@ -153,7 +156,7 @@ public sealed class DatabaseServers(DockerCli docker, SettingsService settings, 
         if (problem is null)
         {
             var key = d.Id + "|" + user;
-            if (!_probes.TryGetValue(key, out var probe) || Now() - probe.At > ProbeFor)
+            if (!_probes.TryGetValue(key, out var probe) || Now() - probe.At > (probe.Problem is null ? ProbeFor : FailedProbeFor))
             {
                 probe = await ProbeAsync(d.Name, user, info?.Password, ct);
                 _probes[key] = probe;

@@ -187,7 +187,8 @@ public sealed class RepoWatcher(
         HashSet<int> busy;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {
-            apps = await Watched(db.Apps.AsNoTracking()).ToListAsync(ct);
+            // An app a restore is bringing back is deployed by the restore, at the commit it ran.
+            apps = (await Watched(db.Apps.AsNoTracking()).ToListAsync(ct)).Where(a => restoreGate?.Holds(a) != true).ToList();
             busy = (await db.Deployments
                 .Where(d => d.Status == DeployStatus.Queued || d.Status == DeployStatus.Cloning || d.Status == DeployStatus.Building || d.Status == DeployStatus.Starting)
                 .Select(d => d.AppId)

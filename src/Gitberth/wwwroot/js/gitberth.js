@@ -193,7 +193,8 @@
 
     // A Restoring page loaded afresh while Gitberth stops (Blazor's own reload, say) may never get its connection, so the
     // watch starts with the page itself, not with the page's code; its line is the one the page shows.
-    if (/\/restoring$/.test(location.pathname))
+    // Picked items (?picked) come back with no restart: nothing to watch for.
+    if (/\/restoring$/.test(location.pathname) && !new URLSearchParams(location.search).has('picked'))
         window.gitberth.reloadAfterRestart(document.getElementById('restore-restart-note')?.textContent?.trim() ?? '');
 
     // Ctrl K (or Cmd K) goes to the top bar's search from anywhere; / goes to the page's own search when it has one

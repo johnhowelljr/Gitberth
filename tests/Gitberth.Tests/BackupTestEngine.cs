@@ -4,6 +4,8 @@ using System.Text.Json.Nodes;
 using Gitberth.Backup;
 using Gitberth.Data;
 using Gitberth.Docker;
+using Gitberth.Security;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -36,7 +38,8 @@ internal sealed class BackupHost : IDisposable
         public void StopApplication() => Stops++;
     }
 
-    public BackupHost()
+    /// <param name="migrated">Its database made by migrations, as Gitberth makes it (a restore reads a saved one so).</param>
+    public BackupHost(bool migrated = false)
     {
         var dir = Path.Combine(Path.GetTempPath(), "gitberth-backup-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(dir);
@@ -44,9 +47,17 @@ internal sealed class BackupHost : IDisposable
         Options = new GitberthOptions { DataDir = dir, RunningInContainer = true, OwnContainer = ((string)self["Id"]!)[..12] };
         Db = new Factory(new DbContextOptionsBuilder<GitberthDb>().UseSqlite($"Data Source={Options.DbPath}").Options);
         using var db = Db.CreateDbContext();
-        db.Database.EnsureCreated();
+        if (migrated) db.Database.Migrate();
+        else db.Database.EnsureCreated();
         db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+        _protector = new Lazy<SecretProtector>(() =>
+            new SecretProtector(DataProtectionProvider.Create(new DirectoryInfo(Options.KeysDir), b => b.SetApplicationName("Gitberth"))));
     }
+
+    private readonly Lazy<SecretProtector> _protector;
+
+    /// <summary>Its secrets' protector: a key ring of its own in its keys folder, as Gitberth's (made when first used).</summary>
+    public SecretProtector Protector => _protector.Value;
 
     public BackupTestEngine Engine { get; } = new();
     public GitberthOptions Options { get; }
@@ -57,8 +68,14 @@ internal sealed class BackupHost : IDisposable
 
     public BackupService Backup() => new(Engine, Db, Options, NullLogger<BackupService>.Instance) { Iterations = 1000, ChunkSize = 4096 };
 
-    public RestoreService Restore() =>
-        new(Engine, Db, Options, Gate, NullLogger<RestoreService>.Instance, App) { ExitDelay = TimeSpan.Zero, DatabaseReady = TimeSpan.FromSeconds(5) };
+    /// <param name="values">A copy's database URLs, as Gitberth's databases would give them.</param>
+    /// <param name="chooseSlug">New app's naming, as Gitberth's apps would answer.</param>
+    public RestoreService Restore(Func<int, CancellationToken, Task<IReadOnlyList<Databases.ProvidedVariable>>>? values = null,
+        Func<string, CancellationToken, Task<Services.NetworkName>>? chooseSlug = null) =>
+        new(Engine, Db, Options, Gate, NullLogger<RestoreService>.Instance, App, Protector)
+        {
+            ExitDelay = TimeSpan.Zero, DatabaseReady = TimeSpan.FromSeconds(5), CopyValues = values, ChooseSlug = chooseSlug,
+        };
 
     /// <summary>Gitberth's own files, as a running Gitberth has them (its database is the host's own).</summary>
     public void Files(string key)
@@ -113,6 +130,15 @@ internal sealed class BackupTestEngine : IBackupEngine
         + string.Concat(Enumerable.Range(2, 300).Select(i => $"INSERT INTO orders VALUES ({i}, 'note {i % 7}');\n"));
 
     public List<string> Loaded { get; } = [];
+
+    /// <summary>What psql prints for the names query (PostgresSql.Names): "d:shop", "r:shop"…</summary>
+    public List<string> PgNames { get; } = ["d:postgres", "r:postgres"];
+
+    /// <summary>Every script of Gitberth's own psql ran (ON_ERROR_STOP=1), as "&lt;container&gt;: &lt;script&gt;".</summary>
+    public List<string> Scripts { get; } = [];
+
+    /// <summary>What pg_restore was given, by "&lt;container&gt;/&lt;database&gt;": pg_dump's archive and the role it ran as.</summary>
+    public Dictionary<string, string> Restored { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Every change and stream, in order: "create web", "start web", "pause web", "volume web-data", "put helper v", "exec db pg_dumpall"…</summary>
     public List<string> Calls { get; } = [];
@@ -365,6 +391,32 @@ internal sealed class BackupTestEngine : IBackupEngine
         return Task.CompletedTask;
     }
 
+    public Task RemoveVolumeAsync(string name, CancellationToken ct = default)
+    {
+        Call("volume-rm " + name);
+        lock (_gate)
+        {
+            Volumes.Remove(name);
+            Files.Remove(name);
+        }
+        return Task.CompletedTask;
+    }
+
+    // A helper that runs to its end (emptying a volume): its volume's files are gone.
+    public Task<int> WaitContainerAsync(string idOrName, CancellationToken ct = default)
+    {
+        Call("wait " + idOrName);
+        lock (_gate)
+        {
+            var c = Get(idOrName);
+            if ((c["Config"]?["Entrypoint"] as JsonArray)?.FirstOrDefault()?.GetValue<string>() == "find")
+                foreach (var m in (c["Mounts"] as JsonArray ?? []).OfType<JsonObject>().Where(m => (string?)m["Destination"] == "/v"))
+                    Files.Remove((string)m["Name"]!);
+            c["State"] = State(false);
+        }
+        return Task.FromResult(0);
+    }
+
     public Task<string> CreateNetworkAsync(JsonObject body, CancellationToken ct = default)
     {
         Call("network " + body["Name"]);
@@ -411,6 +463,20 @@ internal sealed class BackupTestEngine : IBackupEngine
             case "pg_dumpall":
                 if (stdout is not null) await stdout.WriteAsync(Encoding.UTF8.GetBytes(Dump), ct);
                 return new ExecResult(0, "");
+            case "psql" when command.Contains("ON_ERROR_STOP=1"):
+                // A script of Gitberth's own, as the server's admin: the names query answers PgNames.
+                var script = await TextAsync(stdin, ct);
+                lock (_gate) Scripts.Add($"{container}: {script}");
+                if (script.Contains("FROM pg_database", StringComparison.Ordinal) && stdout is not null)
+                    await stdout.WriteAsync(Encoding.UTF8.GetBytes(string.Join("\n", PgNames) + "\n"), ct);
+                return new ExecResult(0, "");
+            case "pg_dump":
+                if (stdout is not null) await stdout.WriteAsync(Encoding.UTF8.GetBytes($"PGDMP {command[command.ToList().IndexOf("-d") + 1]}"), ct);
+                return new ExecResult(0, "");
+            case "pg_restore":
+                var archive = await TextAsync(stdin, ct);
+                lock (_gate) Restored[$"{container}/{command[command.ToList().IndexOf("-d") + 1]}"] = $"{archive} {command.First(c => c.StartsWith("--role=", StringComparison.Ordinal))}";
+                return new ExecResult(0, "");
             case "psql":
                 var dump = new MemoryStream();
                 if (stdin is not null) await stdin.CopyToAsync(dump, ct);
@@ -419,6 +485,14 @@ internal sealed class BackupTestEngine : IBackupEngine
             default:
                 return new ExecResult(0, "");
         }
+    }
+
+    private static async Task<string> TextAsync(Stream? stream, CancellationToken ct)
+    {
+        if (stream is null) return "";
+        var bytes = new MemoryStream();
+        await stream.CopyToAsync(bytes, ct);
+        return Encoding.UTF8.GetString(bytes.ToArray());
     }
 
     public Task<Stream> SaveImagesAsync(IReadOnlyList<string> names, CancellationToken ct = default)
