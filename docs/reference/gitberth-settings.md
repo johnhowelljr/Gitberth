@@ -347,7 +347,7 @@ What this Gitberth installation is talking to. Nothing here can be changed.
 | **git** | The version of git Gitberth uses, or **Not found**. |
 | **Railpack** | The version of Railpack in this image, and the state of gitberth-buildkit, where its builds run: `0.43.0 · builds in gitberth-buildkit (running)`, `(stopped until a build needs it)` or `(made on the first Railpack build)`. **Not in this image** for an image built without it. See [Railpack builds](railpack.md#which-builder-runs-it). |
 | **Data folder** | Where Gitberth keeps its data inside its container, `/data` in the published image. |
-| **Version** | Gitberth's version, and the commit a published image was built from, like `1.8.0 (3f9c2ab)`. |
+| **Version** | Gitberth's version, and the commit a published image was built from, like `1.9.0 (3f9c2ab)`. |
 
 ## Related
 
