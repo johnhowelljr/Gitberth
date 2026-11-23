@@ -400,6 +400,43 @@ public class ProcNetTests
     }
 
     [Fact]
+    public async Task A_read_that_fails_doesnt_hide_the_network_the_last_good_one_saw()
+    {
+        var calls = new List<IReadOnlyList<string>>();
+        var fail = false;
+        var docker = Cli(calls, async ct =>
+        {
+            if (!fail) return new ProcessResult(0, HelperOutput(), "");
+            // A busy engine: the helper doesn't finish in time.
+            await Task.Delay(Timeout.Infinite, ct);
+            return new ProcessResult(0, "", "");
+        });
+        var scanner = new HostScanner(docker, Options, NullLogger<HostScanner>.Instance) { InContainer = true, HelperTimeout = TimeSpan.FromMilliseconds(200) };
+        Assert.Equal("10.1.1.80", (await scanner.LatestAsync()).Address);
+
+        // A read that fails is kept, and says why...
+        fail = true;
+        scanner.Forget();
+        var failed = await scanner.GetAsync();
+        Assert.NotNull(failed.Error);
+        Assert.Same(failed, scanner.Last);
+
+        // ...but the host's network, which rarely changes, still comes from the last read that worked: Settings' own LAN
+        // addresses keep their subnet, and every page its LAN address.
+        var latest = await scanner.LatestAsync();
+        Assert.Null(latest.Error);
+        Assert.Equal(("eth0", "10.1.1.80"), (latest.Interface, latest.Address));
+        Assert.Equal("10.1.1.80", await scanner.DetectedAddressAsync());
+
+        // Once a read works again, that one counts.
+        fail = false;
+        scanner.Forget();
+        var again = await scanner.GetAsync();
+        Assert.Null(again.Error);
+        Assert.Same(again, await scanner.LatestAsync());
+    }
+
+    [Fact]
     public async Task A_scan_from_before_a_container_started_or_stopped_is_read_again()
     {
         var calls = new List<IReadOnlyList<string>>();

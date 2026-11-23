@@ -200,6 +200,11 @@ def test_a_failed_deploy_reaches_every_destination_and_a_success_once_its_on(des
     assert live["title"] == f"{app.name} is live", live
     assert live["description"] == f"Deploy #{three['Id']} (New commit, commit {sha[:7]}) succeeded.", live
     assert live["url"] == f"{ui}apps/{app.id}/deployments/{three['Id']}", live
+    # Every destination has the success before the build breaks: each delivery goes on by itself, so a late one (the
+    # mail, say) would come after the failure's marker and read as the failure's.
+    for host in ("slack", "ntfy", "webhook"):
+        notify.wait(since, HOSTS[host])
+    notify.wait_mail(since)
 
     # A build that fails: every destination hears of it, in its own shape, with the link to the log.
     since = standins.seq()

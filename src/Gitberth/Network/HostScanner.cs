@@ -25,6 +25,8 @@ public sealed partial class HostScanner(DockerCli docker, GitberthOptions option
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private HostScan? _last;
+    // The last scan that worked: the host's network, which rarely changes, outlives a read that fails (see LatestAsync).
+    private HostScan? _good;
     // A scan read before this is out of date (see Forget).
     private DateTime _notBefore = DateTime.MinValue;
     private string? _image;
@@ -71,6 +73,7 @@ public sealed partial class HostScanner(DockerCli docker, GitberthOptions option
             if (scan.Error is not null && !_failing) logger.LogWarning("Couldn't read the host's sockets: {Error}", scan.Error);
             else if (scan.Error is null && _failing) logger.LogInformation("Reading the host's sockets works again");
             _failing = scan.Error is not null;
+            if (scan.Error is null) _good = scan;
             return _last = scan;
         }
         finally
@@ -84,13 +87,15 @@ public sealed partial class HostScanner(DockerCli docker, GitberthOptions option
 
     /// <summary>
     /// The last scan whatever its age, read again in the background when it's out of date: for what rarely changes, like
-    /// the host's LAN address, so no page waits on the helper. Only the very first look waits for one.
+    /// the host's LAN address, so no page waits on the helper. Only the very first look waits for one. A read that failed
+    /// (a busy engine that didn't run the helper in time, say) doesn't hide what the last one that worked saw: that one
+    /// stands until a read works again.
     /// </summary>
     public async Task<HostScan> LatestAsync(CancellationToken ct = default)
     {
         if (_last is not { } last) return await GetAsync(ct);
         if (Fresh(last, null) is null) RefreshInBackground();
-        return last;
+        return last.Error is not null && _good is { } good ? good : last;
     }
 
     /// <summary>The host's LAN address as last detected (see <see cref="LatestAsync"/>); null when it couldn't be.</summary>
