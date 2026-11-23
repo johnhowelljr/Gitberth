@@ -268,6 +268,8 @@ Choosing the default and setting up a server are recorded in the audit log.
 One file with everything this host runs, compressed and encrypted with a passphrase, to bring it all back here or on
 another machine. See [Back up and restore](../guides/backups-and-restore.md).
 
+![Settings, Save and restore: what's saved with each size, Stop everything while saving, the passphrase twice and Save backup](../images/settings-backup.webp)
+
 Under **Save a backup**:
 
 | Field or button | What it does | Default |

@@ -54,6 +54,9 @@ A backup is restored onto a Gitberth with no apps yet: a fresh install, on a new
 
 1. Open **Settings › Save and restore** (or click **Restore a backup** on the dashboard's banner) and, under **Restore from a file**, click **Choose a backup file…**. The file uploads with its progress.
 2. Type its passphrase and click **Open the file**. Gitberth reads what the file holds, and restores nothing yet: where and when it was saved, what it brings back, and what to know first (see [What the warnings mean](#what-the-warnings-mean)).
+
+   ![Restore from a file: where and when the backup was saved, what it brings back, what to know first, and Restore…](../images/settings-restore-summary.webp)
+
 3. Click **Restore…** and type `restore` to confirm.
 4. The **Restoring** page shows each step and the live log. First, from the file: networks, volumes and their data, images, database servers with their dumps loaded, and the other containers, databases first. Then Gitberth restarts on the saved data.
 5. The page comes back by itself after the restart. Sign in with the admin password of the machine the backup was saved on, not the new one's.

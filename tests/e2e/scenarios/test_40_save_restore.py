@@ -70,13 +70,14 @@ def save_rows(section):
 
 
 def keep_only(section, wanted):
-    """Unticks every row but the wanted items and what's under them; returns the ids left ticked."""
+    """Unticks every top-level row but the wanted items (what's under a row follows it); returns the ids left ticked."""
     for item, parent, ticked, free in save_rows(section):
-        if ticked and free and item not in wanted and parent not in wanted:
-            box = section.locator(f".gb-bk-list li[data-item='{item}'] input[type=checkbox]")
-            # One its parent took with it is unticked already.
-            if box.is_checked():
-                box.uncheck()
+        if parent is None and ticked and free and item not in wanted:
+            section.locator(f".gb-bk-list li[data-item='{item}'] input[type=checkbox]").uncheck()
+            # Its children are unticked by the page's next render: wait for it, so no click races it (a click on a child
+            # the render just unticked would tick it, and its parent, again).
+            until(lambda: not any(t for _, p, t, _ in save_rows(section) if p == item), 15, f"what's under {item} to follow it",
+                  seen=lambda: [r for r in save_rows(section) if r[1] == item])
     return {item for item, _, ticked, _ in save_rows(section) if ticked}
 
 
