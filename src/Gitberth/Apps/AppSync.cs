@@ -19,7 +19,8 @@ namespace Gitberth.Apps;
 /// <param name="changer">The change engine, whose ends it follows; without it (in tests) only starts are followed.</param>
 /// <param name="audit">Where a recreate made outside Gitberth is recorded, as Docker's; none in older tests.</param>
 public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, IDbContextFactory<GitberthDb> dbFactory, IChangeJournal journal,
-    NetworkService network, ActivityLog activity, ILogger<AppSync> logger, PortChanger? changer = null, Audit.AuditLog? audit = null) : BackgroundService
+    NetworkService network, ActivityLog activity, ILogger<AppSync> logger, PortChanger? changer = null, Audit.AuditLog? audit = null,
+    Backup.RestoreGate? restoreGate = null) : BackgroundService
 {
     // One look per container at a time: the starts of a restart loop don't pile up.
     private readonly ConcurrentDictionary<string, byte> _looking = new(StringComparer.Ordinal);
@@ -93,7 +94,8 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
     // Off the event loop, which goes on to the next event at once.
     private void OnStarted(string container)
     {
-        if (!_looking.TryAdd(container, 0)) return;
+        // A restore's containers are its own: they're not "recreated outside Gitberth".
+        if (restoreGate?.Holding == true || !_looking.TryAdd(container, 0)) return;
         _ = Task.Run(async () =>
         {
             using var actor = Audit.AuditScope.Begin(Audit.AuditActor.System(Audit.AuditVia.Docker));

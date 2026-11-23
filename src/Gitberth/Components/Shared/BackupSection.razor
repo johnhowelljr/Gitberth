@@ -1,0 +1,466 @@
+@using Gitberth.Backup
+@inject IBackupService Backup
+@inject IRestoreService Restore
+@inject IJSRuntime JS
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@*
+    Settings › Save and restore (src/Gitberth/Backup): one compressed, encrypted file with everything this host runs,
+    downloaded as it's made; and such a file from another machine restored onto this one while it has no apps yet. The
+    file never goes through the page's own connection: it downloads from GET backup/download/<ticket> and uploads to
+    POST backup/upload (gitberth.js).
+*@
+<section class="gb-card gb-sec" id="backup" aria-labelledby="backup-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.SettingsBackupRestore" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3"><span id="backup-t">Save and restore</span><Tip Key="settings.backup" /></div>
+            <p>One file with everything this host runs, compressed and encrypted with a passphrase, to bring it all back here or on another machine.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        <div class="gb-h3">Save a backup<Tip Key="settings.backup.items" /></div>
+        @if (items is null)
+        {
+            @if (readProblem is { } problem)
+            {
+                <p class="gb-help">What can be saved couldn't be read: @problem.TrimEnd('.').</p>
+            }
+            else
+            {
+                <div class="gb-skel" style="height:120px"></div>
+            }
+        }
+        else
+        {
+            <ul class="gb-bk-list" aria-label="What's saved">
+                @foreach (var item in items)
+                {
+                    @Row(item, pickable: true)
+                }
+            </ul>
+            <p class="gb-help" id="bk-total">@BackupText.Total(items, ticked)</p>
+
+            <SwitchRow Title="Stop everything while saving" Value="stopAll" ValueChanged="v => stopAll = v" Disabled="Saving" Tip="settings.backup.stop-everything"
+                       Sub="One moment for every container, at the cost of downtime for the whole save: Gitberth notes which containers run, stops them, saves, and starts exactly those again. Off, databases are dumped while they serve, and a container pauses only while its own volume is copied." />
+
+            <div class="gb-fgrid">
+                <Field Label="Passphrase" For="bk-pass" Tip="settings.backup.passphrase" Help="@($"{BackupText.MinPassphrase} characters at least. {BackupText.NeverKept}")" Error="@BackupText.TooShort(pass)">
+                    <input id="bk-pass" type="password" class="gb-input" value="@pass" @oninput="e => pass = e.Value?.ToString()" autocomplete="new-password" disabled="@Saving" />
+                </Field>
+                <Field Label="Passphrase again" For="bk-pass-again" Tip="settings.backup.passphrase-again" Error="@BackupText.Mismatch(pass, passAgain)">
+                    <input id="bk-pass-again" type="password" class="gb-input" value="@passAgain" @oninput="e => passAgain = e.Value?.ToString()" autocomplete="new-password" disabled="@Saving" />
+                </Field>
+            </div>
+
+            <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Download" OnClick="SaveAsync" Busy="startingSave" Tip="settings.backup.save"
+                     Disabled="@(Saving || !BackupText.CanSave(pass, passAgain))">Save backup</Btn>
+            </div>
+        }
+        @* Always there, so screen readers announce the save's progress as it changes. *@
+        <div role="status" class="gb-stack" id="bk-progress" style="gap:6px">
+            @if (progress is { } p)
+            {
+                @if (BackupText.Fraction(p) is { } f && p.Problem is null)
+                {
+                    <div class="gb-progress"><i style="width:@((f * 100).ToString("0.#", CultureInfo.InvariantCulture))%"></i></div>
+                }
+                <div class="gb-impact-row gb-tone-@(p.Problem is not null ? "critical" : p.Done ? "good" : "accent")">
+                    <SvgIcon Icon="@(p.Problem is not null ? Icons.Material.Outlined.ErrorOutline : p.Done ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.Download)" />
+                    <span>@BackupText.Progress(p)</span>
+                </div>
+            }
+            else if (ticket is not null)
+            {
+                <p class="gb-help">Starting the download of @ticket.FileName…</p>
+            }
+        </div>
+
+        <div class="gb-h3 gb-bk-sub" id="restore-from-file">Restore from a file<Tip Key="settings.backup.restore" /></div>
+        @if (lastRestore is { } last)
+        {
+            <p class="gb-help">@(last.Active ? "A restore is running." : $"The last restore: {BackupText.Headline(last)}.") <a href="restoring">Its steps and log ›</a></p>
+        }
+        @if (cantRestore is { } why)
+        {
+            <p class="gb-help" id="bk-cant-restore">@why</p>
+        }
+        else
+        {
+            @* The picker stays in the page, hidden, while its file uploads: gitberth.js reads the file from it. *@
+            <div class="gb-row gb-row--wrap gb-bk-picker" hidden="@(uploading || uploadedBytes is not null)">
+                <label class="gb-btn gb-bk-file" data-tip="settings.backup.choose-file">
+                    <SvgIcon Icon="@Icons.Material.Outlined.UploadFile" />Choose a backup file…
+                    <input id="gb-restore-file" type="file" accept=".gbak" class="gb-sr-only" @onchange="UploadAsync" />
+                </label>
+                <span class="gb-help">A <code>.gbak</code> file from <strong>Save backup</strong>, on this machine or another. It goes to Gitberth as it is: nothing is restored before you see what it holds.</span>
+            </div>
+            @if (uploadError is { } failed && !uploading && uploadedBytes is null)
+            {
+                <Banner Tone="critical" Title="Not uploaded" OnDismiss="() => uploadError = null">@failed</Banner>
+            }
+        }
+        @if (cantRestore is not null || (!uploading && uploadedBytes is null))
+        {
+            @* The picker above, or the line saying why there's none, is all there is. *@
+        }
+        else if (uploading)
+        {
+            <div class="gb-stack" style="gap:6px" role="status">
+                <div class="gb-progress"><i style="width:@((BackupText.UploadFraction(sent, total) * 100).ToString("0.#", CultureInfo.InvariantCulture))%"></i></div>
+                <div class="gb-row gb-row--wrap" style="justify-content:space-between">
+                    <span class="gb-help">@BackupText.Uploading(fileName, sent, total)</span>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Close" OnClick="CancelUploadAsync">Cancel</Btn>
+                </div>
+            </div>
+        }
+        else if (summary is null)
+        {
+            <div class="gb-impact-row"><SvgIcon Icon="@Icons.Material.Outlined.InsertDriveFile" /><span id="bk-uploaded">@BackupText.Uploaded(fileName, uploadedBytes ?? 0)</span></div>
+            <div class="gb-setrow">
+                <Field Label="Its passphrase" For="bk-restore-pass" Tip="settings.backup.restore-passphrase" Error="@(checkProblem == UploadProblem.WrongPassphrase ? checkError : null)">
+                    <input id="bk-restore-pass" type="password" class="gb-input" value="@restorePass" autocomplete="off"
+                           @oninput="e => { restorePass = e.Value?.ToString(); if (checkProblem == UploadProblem.WrongPassphrase) checkError = null; }" @onkeydown="CheckOnEnterAsync" />
+                </Field>
+                <div class="gb-row gb-row--wrap" style="padding-bottom:22px">
+                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.LockOpen" OnClick="CheckAsync" Busy="checking" Disabled="@string.IsNullOrEmpty(restorePass)" Tip="settings.backup.check">Open the file</Btn>
+                    <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Delete" OnClick="DiscardAsync" Disabled="checking" Tip="settings.backup.discard">Remove the file</Btn>
+                </div>
+            </div>
+            @if (checkError is { } said && checkProblem != UploadProblem.WrongPassphrase)
+            {
+                <Banner Tone="critical" Title="@BackupText.CheckTitle(checkProblem)">@said</Banner>
+            }
+        }
+        else
+        {
+            var s = summary;
+            <div class="gb-stack" id="bk-summary" style="gap:12px">
+                <div class="gb-stack" style="gap:2px">
+                    <span class="gb-bk-made">@BackupText.Made(s)</span>
+                    <span class="gb-help">@BackupText.Holds(s.Items)</span>
+                </div>
+                <ul class="gb-bk-list" aria-label="What the backup holds">
+                    @foreach (var item in s.Items)
+                    {
+                        @Row(item, pickable: false)
+                    }
+                </ul>
+                @foreach (var w in s.Warnings)
+                {
+                    <Banner Tone="@(w.Blocks ? "critical" : "warn")" Title="@BackupText.WarningTitle(w.Kind)">@w.Message</Banner>
+                }
+                <div class="gb-impact-row gb-tone-accent" id="bk-sign-in-note"><SvgIcon Icon="@Icons.Material.Outlined.Key" /><span>@BackupText.SignInNote</span></div>
+                <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                    <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Delete" OnClick="DiscardAsync" Disabled="startingRestore" Tip="settings.backup.discard">Remove the file</Btn>
+                    <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.SettingsBackupRestore" OnClick="RestoreAsync" Busy="startingRestore" Tip="settings.backup.run"
+                         Disabled="@s.Warnings.Any(w => w.Blocks)">Restore…</Btn>
+                </div>
+            </div>
+        }
+    </div>
+</section>
+
+@code {
+    // What can be saved, and what's ticked; read again while Docker measures sizes.
+    private IReadOnlyList<BackupItem>? items;
+    private HashSet<string> ticked = new(StringComparer.Ordinal);
+    private string? readProblem;
+    private int measuring;
+    private bool stopAll, startingSave;
+    private string? pass, passAgain;
+    // The save on its way to the browser: its ticket, and its progress as last read.
+    private SaveTicket? ticket;
+    private SaveProgress? progress;
+
+    // Restore from a file.
+    private string? cantRestore, fileName, uploadError, restorePass, checkError;
+    private RestoreStatus? lastRestore;
+    private long? uploadedBytes;
+    private bool uploading, checking, startingRestore;
+    private long sent, total;
+    private UploadProblem checkProblem;
+    private BackupSummary? summary;
+
+    private Timer? timer;
+    private int ticking;
+    private DotNetObjectReference<BackupSection>? self;
+
+    // A save runs from its Save backup until its progress says it's over, or its ticket is gone.
+    private bool saveOver;
+    private int ticks;
+    private bool Saving => ticket is not null && !saveOver && progress is not { Done: true } and not { Problem: not null };
+
+    protected override async Task OnInitializedAsync()
+    {
+        ReadRestore();
+        await ReadItemsAsync(first: true);
+        timer = new Timer(_ => Tick(), null, 1000, 1000);
+    }
+
+    public void Dispose()
+    {
+        timer?.Dispose();
+        self?.Dispose();
+    }
+
+    private void ReadRestore()
+    {
+        try
+        {
+            cantRestore = Restore.CantRestore();
+            uploadedBytes = Restore.UploadedBytes();
+            lastRestore = Restore.Status();
+        }
+        catch (Exception ex)
+        {
+            cantRestore = $"Restoring can't be offered: {ex.Message.TrimEnd('.')}.";
+        }
+    }
+
+    // Sizes come as Docker measures them: the list is read again every 5 seconds (2 minutes at most) while one is missing,
+    // keeping what's ticked; an item new since then gets its own default.
+    private async Task ReadItemsAsync(bool first = false)
+    {
+        try
+        {
+            var read = await Backup.ItemsAsync();
+            if (first || items is null) ticked = BackupText.Defaults(read);
+            else foreach (var item in read.Where(i => items.All(o => o.Id != i.Id) && (i.Included || i.Required))) ticked.Add(item.Id);
+            items = read;
+            readProblem = null;
+            measuring = read.Any(i => i.Bytes is null && BackupText.Measured(i.Kind)) ? measuring + 1 : 0;
+        }
+        catch (Exception ex)
+        {
+            readProblem = ex.Message;
+        }
+    }
+
+    private void Tick()
+    {
+        // A slow read mustn't stack the next one on it.
+        if (Interlocked.Exchange(ref ticking, 1) == 1) return;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                var changed = false;
+                ticks++;
+                if (ticket is not null && Saving)
+                {
+                    // A ticket Gitberth doesn't know any more ended (the last line stays), or expired before the download began.
+                    if (Backup.Progress(ticket.Id) is { } now) progress = now;
+                    else if (progress is not null) saveOver = true;
+                    else if (DateTime.UtcNow > ticket.ExpiresAt)
+                    {
+                        ticket = null;
+                        Snackbar.Add("The download never started, so nothing was saved: save again.", Severity.Warning);
+                    }
+                    changed = true;
+                }
+                if (measuring is > 0 and <= 24 && ticks % 5 == 0 && !Saving)
+                {
+                    await ReadItemsAsync();
+                    changed = true;
+                }
+                if (changed) StateHasChanged();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref ticking, 0);
+            }
+        });
+    }
+
+    private RenderFragment Row(BackupItem item, bool pickable) => @<li class="gb-bk-row @(item.Parent is null ? null : "gb-bk-row--child")" data-item="@item.Id" data-parent="@item.Parent" @key="item.Id">
+        <label class="gb-bk-pick">
+            @if (pickable)
+            {
+                <input type="checkbox" checked="@(item.Required || ticked.Contains(item.Id))" disabled="@(item.Required || Saving)"
+                       @onchange="e => Toggle(item, e.Value is true)" aria-label="@($"Save {item.Title}")" />
+            }
+            <span class="gb-bk-icon"><SvgIcon Icon="@KindIcon(item.Kind)" /></span>
+            <span class="gb-bk-text">
+                <span class="gb-bk-t">@item.Title</span>
+                @if (item.Detail is { Length: > 0 } detail)
+                {
+                    <span class="gb-bk-s">@detail</span>
+                }
+            </span>
+        </label>
+        @if (item.Required && pickable)
+        {
+            <span class="gb-tag">Always saved</span>
+        }
+        <span class="gb-bk-size">@BackupText.Size(item)</span>
+    </li>;
+
+    private static string KindIcon(BackupItemKind kind) => kind switch
+    {
+        BackupItemKind.GitberthData => Icons.Material.Outlined.Dns,
+        BackupItemKind.App => Icons.Material.Outlined.GridView,
+        BackupItemKind.Volume => Icons.Material.Outlined.Storage,
+        BackupItemKind.Database => GitberthIcons.Database,
+        BackupItemKind.Image => Icons.Material.Outlined.Layers,
+        _ => Icons.Material.Outlined.ViewInAr,
+    };
+
+    private void Toggle(BackupItem item, bool on)
+    {
+        if (items is not null) ticked = BackupText.Toggle(items, ticked, item.Id, on);
+    }
+
+    // ---- Saving ----
+
+    private async Task SaveAsync()
+    {
+        if (items is null || !BackupText.CanSave(pass, passAgain)) return;
+        startingSave = true;
+        try
+        {
+            var choice = new BackupChoice(ticked.Where(id => items.Any(i => i.Id == id)).ToHashSet(StringComparer.Ordinal), stopAll);
+            var made = await Backup.StartSaveAsync(choice, pass!);
+            (ticket, progress, saveOver) = (made, null, false);
+            // Only the ticket stays: the passphrase is the save's alone now.
+            (pass, passAgain) = (null, null);
+            await JS.InvokeVoidAsync("gitberth.download", BackupText.DownloadUrl(made.Id));
+            Snackbar.Add($"Saving {made.FileName}: your browser downloads it as it's made.", Severity.Info);
+        }
+        catch (ArgumentException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"The save didn't start: {ex.Message.TrimEnd('.')}.", Severity.Error);
+        }
+        finally
+        {
+            startingSave = false;
+        }
+    }
+
+    // ---- Restore from a file ----
+
+    private async Task UploadAsync(ChangeEventArgs e)
+    {
+        var path = e.Value?.ToString();
+        if (string.IsNullOrEmpty(path)) return;
+        // The browser says C:\fakepath\name: the name alone.
+        fileName = path.Replace('\\', '/').Split('/')[^1];
+        (uploading, sent, total, uploadError, checkError, summary) = (true, 0, 0, null, null, null);
+        self ??= DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("gitberth.backupUpload", "gb-restore-file", BackupText.UploadUrl, self);
+        }
+        catch (Exception ex)
+        {
+            (uploading, uploadError) = (false, $"The file wasn't uploaded: {ex.Message.TrimEnd('.')}.");
+        }
+    }
+
+    [JSInvokable]
+    public void Uploading(long sentBytes, long totalBytes)
+    {
+        (sent, total) = (sentBytes, totalBytes);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void Uploaded(bool ok, bool aborted, int status, string? answer)
+    {
+        uploading = false;
+        if (!ok && !aborted) uploadError = BackupText.UploadFailed(status, answer);
+        ReadRestore();
+        if (ok && uploadedBytes is null) uploadError = "The file went up, but Gitberth doesn't have it: try again.";
+        if (aborted) Snackbar.Add("The upload was cancelled.", Severity.Info);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task CancelUploadAsync() => await JS.InvokeVoidAsync("gitberth.backupUploadCancel");
+
+    private async Task CheckOnEnterAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrEmpty(restorePass) && !checking) await CheckAsync();
+    }
+
+    private async Task CheckAsync()
+    {
+        checking = true;
+        (checkError, checkProblem) = (null, UploadProblem.None);
+        try
+        {
+            var check = await Restore.CheckAsync(restorePass ?? "");
+            if (check is { Problem: UploadProblem.None, Summary: { } read }) summary = read;
+            else (checkProblem, checkError) = (check.Problem, BackupText.CheckProblem(check.Problem, check.Message));
+        }
+        catch (Exception ex)
+        {
+            (checkProblem, checkError) = (UploadProblem.NotABackup, $"The file couldn't be read: {ex.Message.TrimEnd('.')}.");
+        }
+        finally
+        {
+            checking = false;
+        }
+    }
+
+    private async Task DiscardAsync()
+    {
+        try
+        {
+            await Restore.DiscardUploadAsync();
+            (summary, restorePass, checkError, checkProblem, fileName) = (null, null, null, UploadProblem.None, null);
+            ReadRestore();
+            Snackbar.Add("The uploaded file was removed.", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't remove it: {ex.Message.TrimEnd('.')}.", Severity.Error);
+        }
+    }
+
+    private async Task RestoreAsync()
+    {
+        if (summary is not { } s) return;
+        var dialog = await Dialogs.ShowAsync<ConfirmNameDialog>(null, new DialogParameters<ConfirmNameDialog>
+        {
+            { x => x.Title, "Restore this backup?" },
+            { x => x.Lines, BackupText.ConfirmLines(s) },
+            { x => x.Name, "restore" },
+            { x => x.ConfirmText, "Restore" },
+            { x => x.Icon, Icons.Material.Outlined.SettingsBackupRestore },
+        }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        if (await dialog.Result is not { Canceled: false }) return;
+        startingRestore = true;
+        try
+        {
+            // Before the restore starts: Gitberth can restart on the saved data before the Restoring page is even drawn.
+            await JS.InvokeVoidAsync("gitberth.reloadAfterRestart", BackupText.RestartNote);
+            await Restore.StartAsync(restorePass ?? "");
+            restorePass = null;
+            Nav.NavigateTo("restoring");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"The restore didn't start: {ex.Message.TrimEnd('.')}.", Severity.Error);
+            ReadRestore();
+            try
+            {
+                await JS.InvokeVoidAsync("gitberth.stopRestartWatch");
+            }
+            catch (JSException)
+            {
+            }
+        }
+        finally
+        {
+            startingRestore = false;
+        }
+    }
+}

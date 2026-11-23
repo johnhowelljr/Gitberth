@@ -68,7 +68,7 @@ demo server, `homelab` at `192.168.50.10`; yours show your own host's name and a
 
 | | |
 |---|---|
-| [Backups and restore](guides/backups-and-restore.md) | What to back up, and moving Gitberth to a new machine. |
+| [Backups and restore](guides/backups-and-restore.md) | Everything in one compressed, encrypted file, and moving Gitberth to a new machine with it. |
 | [Updating Gitberth](guides/updating-gitberth.md) | Getting a new version, pinning one, and going back. |
 | [Troubleshooting](guides/troubleshooting.md) | What a message means and what to do about it. |
 | [FAQ](faq.md) | Short answers to common questions. |

@@ -32,11 +32,17 @@ var builder = WebApplication.CreateBuilder(args);
 var options = GitberthOptions.FromConfiguration(builder.Configuration, builder.Environment.ContentRootPath);
 foreach (var dir in new[] { options.DataDir, options.KeysDir, options.LogsDir, options.WorkDir })
     Directory.CreateDirectory(dir);
+// A restore's first phase staged the backup's data and restarted Gitberth: it goes in place now, before anything opens the
+// database, the keys or the histories (Settings › Save and restore).
+var restored = Gitberth.Backup.RestoreBoot.SwapStaged(options);
 builder.Services.AddSingleton(options);
 // The audit log: every change to the system, who made it and how it ended (/data/audit.db). Its writer is flushed when
 // Gitberth stops: registered first among the hosted services, it's the last to stop.
 builder.Services.AddSingleton<Gitberth.Audit.AuditLog>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<Gitberth.Audit.AuditLog>());
+// Save and restore's start-up work, before every other job: what a save stopped or paused is brought back, and a
+// restore's second phase runs (its gate, closed from the start, holds the other jobs off until every app is back).
+builder.Services.AddHostedService<Gitberth.Backup.RestoreRunner>();
 builder.Services.AddSingleton<Gitberth.Audit.AuditSettings>();
 // What Gitberth is about to change in Docker (DockerCli and DockerApi register it), so its own events aren't recorded as
 // changes made outside Gitberth.
@@ -209,6 +215,14 @@ builder.Services.AddSingleton<IHealthProbe, HealthProbe>();
 builder.Services.AddSingleton<ActivityLog>();
 builder.Services.AddSingleton<AppCatalog>();
 builder.Services.AddSingleton<AppSettingsService>();
+// Save and restore (Settings › Save and restore): one compressed, encrypted file with everything this host runs, restored
+// onto a fresh install in two phases around a restart. While a restore runs, the background jobs hold off (RestoreGate).
+builder.Services.AddSingleton(_ => new Gitberth.Backup.RestoreGate(options));
+builder.Services.AddSingleton<Gitberth.Backup.IBackupEngine>(sp => sp.GetRequiredService<DockerApi>());
+builder.Services.AddSingleton<Gitberth.Backup.BackupService>();
+builder.Services.AddSingleton<Gitberth.Backup.IBackupService>(sp => sp.GetRequiredService<Gitberth.Backup.BackupService>());
+builder.Services.AddSingleton<Gitberth.Backup.RestoreService>();
+builder.Services.AddSingleton<Gitberth.Backup.IRestoreService>(sp => sp.GetRequiredService<Gitberth.Backup.RestoreService>());
 // Images, registries and updates (through the Engine API: pulls, /distribution and /auth; New app also reads an image's
 // config from its registry before it's pulled), and new apps from any source.
 builder.Services.AddSingleton<RegistryService>();
@@ -304,6 +318,7 @@ builder.Services.AddDiskCare();
 builder.Services.AddCredentialWatch();
 
 var app = builder.Build();
+if (restored is not null) app.Logger.LogWarning("Restore: {Restored}", restored);
 
 await using (var db = await app.Services.GetRequiredService<IDbContextFactory<GitberthDb>>().CreateDbContextAsync())
 {
@@ -397,6 +412,8 @@ app.MapGet("/account/renew", async (HttpContext context, AdminAuthService auth, 
 
 // The audit log's export: the page's filtered view as CSV or JSON Lines, for signed-in people.
 Gitberth.Audit.AuditEndpoints.Map(app);
+// Save and restore's file: the save's download, made while it's sent, and the restore's upload (signed in only).
+Gitberth.Backup.BackupEndpoints.Map(app);
 // The app templates' icons, for New app's gallery (signed in only).
 Gitberth.Templates.TemplateEndpoints.Map(app);
 // The help's pictures and the tips' catalog (signed in only).

@@ -1,8 +1,8 @@
 # Gitberth's settings
 
-The **Settings** page holds the settings for Gitberth as a whole: GitHub, GitLab and registry access, notifications, image updates, domains, uptime checks and the status page, keeping apps running, the network, deploys, Docker's disk, apps' databases, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
+The **Settings** page holds the settings for Gitberth as a whole: GitHub, GitLab and registry access, notifications, image updates, domains, uptime checks and the status page, keeping apps running, the network, deploys, Docker's disk, apps' databases, saving and restoring backups, the admin password, tokens for AI agents and the API, the audit log, and what this installation runs on. Open it from **Settings** at the bottom of the sidebar, or from the account menu (**A**) at the top right. Each app has its own settings on its page instead; see [App settings](app-settings.md).
 
-The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **GitLab**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Keep apps running**, **Network**, **Own LAN addresses**, **Deploys**, **Disk**, **Databases**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
+The list on the left jumps to each section: **GitHub access**, **GitHub integration**, **GitLab**, **Notifications**, **Registries**, **Updates**, **Domains** (the **Domains (Cloudflare)** section), **Uptime and status page**, **Keep apps running**, **Network**, **Own LAN addresses**, **Deploys**, **Disk**, **Databases**, **Save and restore**, **Admin password**, **AI agents and API**, **Audit log** and **System**. Each section saves on its own, and every change is recorded in the [audit log](../guides/audit-log.md).
 
 ![The Settings page](../images/settings.webp)
 
@@ -263,6 +263,34 @@ role of its own, or a Redis. See [Databases](../guides/databases.md).
 
 Choosing the default and setting up a server are recorded in the audit log.
 
+## Save and restore
+
+One file with everything this host runs, compressed and encrypted with a passphrase, to bring it all back here or on
+another machine. See [Back up and restore](../guides/backups-and-restore.md).
+
+![Settings, Save and restore: what's saved with each size, Stop everything while saving, the passphrase twice and Save backup](../images/settings-backup.webp)
+
+Under **Save a backup**:
+
+| Field or button | What it does | Default |
+|---|---|---|
+| The list | Everything that can be saved, each with its size on this host (**measuring…** while Docker measures a volume): **Gitberth's data** (always saved), each app with its volumes and databases under it, database servers (dumped while they serve), other containers such as cloudflared, and images only this host has. Unticking an app unticks what's under it; ticking a volume ticks its app. The line under it sums up what's chosen, like **6 items chosen: about 1.2 GB before compression.** | Everything ticked but caches and samples |
+| **Stop everything while saving** | Stops every running container (Gitberth aside) for the whole save, then starts exactly those again: one moment for all of them, at the cost of downtime. The list is written down first, so a restart of Gitberth in the middle still starts them again. Off, databases are dumped while they serve, and a container is paused only while its own volume is copied. | Off |
+| **Passphrase** and **Passphrase again** | The passphrase the file is encrypted with, twice: at least 12 characters. Gitberth never keeps it: without it, the file can't be opened. | |
+| **Save backup** | The browser downloads `gitberth-backup-<date>.gbak` while Gitberth makes it. The line under it says what's being saved and how much is written, then **Saved 6 items: 1.1 GB, compressed and encrypted.**, or **The save failed: …** with why. | |
+
+Under **Restore from a file**, offered only while this Gitberth has no apps (otherwise it says why):
+
+| Field or button | What it does |
+|---|---|
+| **Choose a backup file…** | Uploads a `.gbak` file, with its progress and **Cancel**. Upload it from Gitberth's LAN address: through a Cloudflare domain an upload stops at 100 MB. |
+| **Its passphrase** and **Open the file** | Opens the file and reads what it holds, restoring nothing: where and when it was saved, by which Gitberth, what it brings back, and the warnings for this host. A wrong passphrase says **This passphrase doesn't open the file.**; a damaged file, one that isn't a backup, or one from a newer Gitberth says so in a banner. |
+| **Remove the file** | Deletes the uploaded file without restoring it. |
+| **Restore…** | Asks you to type `restore`, then starts the restore and opens the **Restoring** page: its steps and live log. Gitberth restarts on the saved data partway through; afterwards you sign in with the admin password of the machine the backup was saved on. A warning in red keeps it off until it's dealt with. |
+
+While this Gitberth has no apps, the dashboard says **Moving from another machine? Restore a backup.**, and while a
+restore runs, **A restore is running** with a link to its page.
+
 ## Admin password
 
 The section says **Sign in as admin. Use at least 10 characters. Changing it signs every other browser out.**
@@ -317,7 +345,7 @@ What this Gitberth installation is talking to. Nothing here can be changed.
 | **git** | The version of git Gitberth uses, or **Not found**. |
 | **Railpack** | The version of Railpack in this image, and the state of gitberth-buildkit, where its builds run: `0.43.0 · builds in gitberth-buildkit (running)`, `(stopped until a build needs it)` or `(made on the first Railpack build)`. **Not in this image** for an image built without it. See [Railpack builds](railpack.md#which-builder-runs-it). |
 | **Data folder** | Where Gitberth keeps its data inside its container, `/data` in the published image. |
-| **Version** | Gitberth's version, and the commit a published image was built from, like `1.7.0 (3f9c2ab)`. |
+| **Version** | Gitberth's version, and the commit a published image was built from, like `1.8.0 (3f9c2ab)`. |
 
 ## Related
 

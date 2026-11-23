@@ -45,7 +45,7 @@ public sealed record AutoWindow(TimeOnly From, TimeOnly To)
 /// changes nothing in Docker otherwise.
 /// </summary>
 public sealed class UpdateWatcher(UpdateService updates, SettingsService settings, GitberthOptions options, ILogger<UpdateWatcher> logger,
-    TimeProvider? time = null) : BackgroundService
+    TimeProvider? time = null, Backup.RestoreGate? restoreGate = null) : BackgroundService
 {
     /// <summary>Hours between checks of a reference (1 to 168); 6 when unset.</summary>
     public const string CheckHoursKey = "updates.checkHours";
@@ -91,7 +91,8 @@ public sealed class UpdateWatcher(UpdateService updates, SettingsService setting
             {
                 try
                 {
-                    await RunOnceAsync(stoppingToken);
+                    // Not while a restore brings the host back: the images it pulls are the ones the old host ran.
+                    if (restoreGate?.Holding != true) await RunOnceAsync(stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
                 {

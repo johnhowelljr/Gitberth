@@ -16,8 +16,14 @@ function handleReconnectStateChanged(event) {
     } else if (event.detail.state === "failed") {
         document.addEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
     } else if (event.detail.state === "rejected") {
-        location.reload();
+        reloadUnlessRestoring();
     }
+}
+
+// While a restore restarts Gitberth (gitberth.js, reloadAfterRestart), that watch loads the page again once Gitberth is
+// back: a reload now can reach the Gitberth that's stopping, and leave a page that never gets its connection.
+function reloadUnlessRestoring() {
+    if (!window.gitberth?.restartWatch) location.reload();
 }
 
 async function retry() {
@@ -34,7 +40,7 @@ async function retry() {
             // We'll reload the page so the user can continue using the app as quickly as possible.
             const resumeSuccessful = await Blazor.resumeCircuit();
             if (!resumeSuccessful) {
-                location.reload();
+                reloadUnlessRestoring();
             } else {
                 reconnectModal.close();
             }
@@ -49,7 +55,7 @@ async function resume() {
     try {
         const successful = await Blazor.resumeCircuit();
         if (!successful) {
-            location.reload();
+            reloadUnlessRestoring();
         }
     } catch {
         reconnectModal.classList.replace("components-reconnect-paused", "components-reconnect-resume-failed");

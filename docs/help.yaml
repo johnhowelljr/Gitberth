@@ -120,6 +120,8 @@ routes:
     page: guides/audit-log#find-a-change
   - route: /settings
     page: reference/gitberth-settings
+  - route: /restoring
+    page: guides/backups-and-restore#restore-a-backup
   - route: /status
     page: guides/uptime-and-status-page#the-status-page
   - route: /down-page/**

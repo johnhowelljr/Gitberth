@@ -199,6 +199,31 @@ def test_step_02_standins(github, gitlab, cloudflare, standins, demo):
     seed_uptime_kuma(DockerHub(standins), demo.kuma_digest)
 
 
+def test_settings_restore_summary(gitberth, shooter, tmp_path):
+    """Restore from a file's summary, while Gitberth has no apps yet (the only time it's offered): what step 1 started
+    by hand (redis and whoami) and the image built on the host saved through Save backup, the file uploaded and opened
+    with its passphrase, pictured, then removed again without restoring anything."""
+    page = shooter.page()
+    s = settings_section(shooter, page, "backup")
+    until(lambda: "measuring…" not in s.inner_text(), 120, "the list's sizes", seen=lambda: flat(s.inner_text())[:400])
+    s.locator("#bk-pass").fill("correct horse battery")
+    s.locator("#bk-pass-again").fill("correct horse battery")
+    with page.expect_download(timeout=300_000) as download:
+        s.get_by_role("button", name="Save backup").click()
+    path = str(tmp_path / download.value.suggested_filename)
+    download.value.save_as(path)
+    page.locator("#gb-restore-file").set_input_files(path)
+    s.locator("#bk-uploaded").wait_for(timeout=300_000)
+    s.locator("#bk-restore-pass").fill("correct horse battery")
+    s.get_by_role("button", name="Open the file").click()
+    summary = s.locator("#bk-summary")
+    summary.wait_for(timeout=120_000)
+    page.wait_for_timeout(500)
+    shooter.detail(page, summary, "settings-restore-summary")
+    summary.get_by_role("button", name="Remove the file").click()
+    gitberth.snackbar(page, "removed")
+
+
 # ======================================================================== Settings
 
 def test_step_03_settings_github(gitberth, shooter, demo):
@@ -955,11 +980,16 @@ def test_settings(shooter):
     ("notifications", "settings-notifications"), ("registries", "settings-registries"), ("updates", "settings-updates"),
     ("domains", "settings-domains"), ("uptime", "settings-uptime"), ("network", "settings-network"),
     ("own-lan", "settings-own-lan"), ("deploys", "settings-deploys"), ("databases", "settings-databases"),
-    ("audit", "settings-audit"), ("keep", "settings-keep"), ("disk", "settings-disk"),
+    ("audit", "settings-audit"), ("keep", "settings-keep"), ("disk", "settings-disk"), ("backup", "settings-backup"),
 ])
 def test_settings_section(shooter, sid, name):
     page = shooter.page()
     s = settings_section(shooter, page, sid)
+    if sid == "backup":
+        # Every size measured (Docker walks the volumes), and a passphrase typed, as someone about to save would have it.
+        until(lambda: "measuring…" not in s.inner_text(), 120, "Save and restore's sizes", seen=lambda: flat(s.inner_text())[:400])
+        s.locator("#bk-pass").fill("correct horse battery")
+        s.locator("#bk-pass-again").fill("correct horse battery")
     shooter.quiet(page)
     shooter.detail(page, s, name)
 

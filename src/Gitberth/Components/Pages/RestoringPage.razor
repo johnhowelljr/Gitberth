@@ -1,0 +1,171 @@
+@page "/restoring"
+@using Gitberth.Backup
+@inject IRestoreService Restore
+@inject IJSRuntime JS
+@implements IDisposable
+
+@*
+    A restore as it runs (Settings › Save and restore › Restore): its steps and its log, read once a second. Both live in
+    files under /data, so the page carries on across the restart in the middle: the browser comes back by itself, the
+    saved machine's admin password signs it in, and the sign-in returns here.
+*@
+<PageTitle>Restoring · Gitberth</PageTitle>
+
+<PageHead Title="@(status is null ? "Restore" : BackupText.Headline(status))" Tip="settings.backup.restoring" Lead="@(status is null ? null : BackupText.Lead(status))">
+    <Crumbs>
+        <a href="settings">Settings</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+        <a href="settings#backup">Save and restore</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
+        <span>Restoring</span>
+    </Crumbs>
+    <ChildContent>
+        @if (status is { } s)
+        {
+            <div class="gb-hero-meta">
+                @if (s.Finished)
+                {
+                    <span class="gb-pill2 gb-tone-@(s.Failed == 0 ? "good" : "warn")"><i class="gb-st-dot @(s.Failed == 0 ? "gb-st-dot--running" : null)"></i>@(s.Failed == 0 ? "Done" : "Done, with failures")</span>
+                }
+                else if (s.Active)
+                {
+                    <span class="gb-pill2 gb-tone-accent"><i class="gb-st-dot gb-st-dot--running"></i>Running · part @Math.Clamp(s.Phase, 1, 2) of 2</span>
+                }
+                else
+                {
+                    <span class="gb-pill2 gb-tone-warn"><i class="gb-st-dot"></i>Stopped</span>
+                }
+                <span class="gb-t3" id="restore-steps-count">@BackupText.Steps(s)</span>
+                <span class="gb-t3">started @s.StartedAt.ToLocalTime().ToString("d MMM HH:mm", CultureInfo.InvariantCulture)</span>
+            </div>
+            @if (s is { Active: true, Finished: false, Phase: <= 1 })
+            {
+                <div class="gb-impact-row gb-tone-accent gb-bk-restart" id="restore-restart-note"><SvgIcon Icon="@Icons.Material.Outlined.RestartAlt" /><span>@BackupText.RestartNote</span></div>
+            }
+        }
+    </ChildContent>
+    <Actions>
+        @if (status is { Finished: true })
+        {
+            <Btn Kind="BtnKind.Primary" Href="apps" Icon="@Icons.Material.Outlined.GridView">Open the apps</Btn>
+        }
+    </Actions>
+</PageHead>
+
+@if (status is null)
+{
+    <div class="gb-card">
+        <EmptyState Icon="@Icons.Material.Outlined.SettingsBackupRestore" Title="No restore has run on this Gitberth">
+            <ChildContent>A backup is restored from Settings › Save and restore, onto a Gitberth with no apps yet.</ChildContent>
+            <Actions><Btn Href="settings#backup" Icon="@Icons.Material.Outlined.SettingsBackupRestore">Save and restore</Btn></Actions>
+        </EmptyState>
+    </div>
+}
+else
+{
+    <div class="gb-bk-restoring">
+        <SectionCard Title="Steps" Icon="@Icons.Material.Outlined.Checklist" Sub="@BackupText.Steps(status)" Id="restore-steps">
+            <ol class="gb-csteps" aria-label="Steps">
+                @foreach (var step in status.Steps)
+                {
+                    var state = BackupText.StepClass(step.State);
+                    <li class="gb-cstep gb-cstep--@state" aria-current="@(state == "now" ? "step" : null)" data-step="@step.Id" @key="step.Id">
+                        <span class="gb-cstep-mark">
+                            @if (step.State == RestoreStepState.Done)
+                            {
+                                <SvgIcon Icon="@Icons.Material.Outlined.Check" />
+                            }
+                            else if (step.State == RestoreStepState.Failed)
+                            {
+                                <SvgIcon Icon="@Icons.Material.Outlined.Close" />
+                            }
+                            else if (step.State == RestoreStepState.Skipped)
+                            {
+                                <SvgIcon Icon="@Icons.Material.Outlined.Remove" />
+                            }
+                        </span>
+                        <div class="gb-cstep-t">
+                            @step.Title
+                            @if (step.Note is { Length: > 0 } note)
+                            {
+                                <div class="gb-cstep-next">@note</div>
+                            }
+                        </div>
+                        <span class="gb-cstep-time">@(step.State switch { RestoreStepState.Skipped => "skipped", RestoreStepState.Failed => "failed", _ => null })</span>
+                    </li>
+                }
+            </ol>
+        </SectionCard>
+        <LogView Lines="lines" Title="Restore log" Height="64vh" EmptyText="The log starts with the first step." Tip="settings.backup.restore-log" />
+    </div>
+}
+
+@code {
+    private RestoreStatus? status;
+    private readonly List<string> lines = [];
+    private Timer? timer;
+    private int ticking;
+
+    protected override void OnInitialized()
+    {
+        Read();
+        if (status is { Finished: true }) return;
+        timer = new Timer(_ =>
+        {
+            if (Interlocked.Exchange(ref ticking, 1) == 1) return;
+            _ = InvokeAsync(() =>
+            {
+                try
+                {
+                    Read();
+                    StateHasChanged();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref ticking, 0);
+                }
+            });
+        }, null, 1000, 1000);
+    }
+
+    // Across Gitberth's restart: gitberth.js asks every 2 s whether Gitberth has signed this browser out (the saved data)
+    // and opens this page afresh once it has (its sign-in first). Settings started it before the restore; here again for a
+    // page opened on its own, and stopped once the restore has finished.
+    private bool watching, stopped;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            if (status is { Finished: true })
+            {
+                if (!stopped) await JS.InvokeVoidAsync("gitberth.stopRestartWatch");
+                stopped = true;
+            }
+            else if (!watching)
+            {
+                watching = true;
+                await JS.InvokeVoidAsync("gitberth.reloadAfterRestart", BackupText.RestartNote);
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    // The steps as they stand, and the log's lines added since the last read. Once it has finished, one last read and no
+    // more; until then it's read on, a moment between the two parts included.
+    private void Read()
+    {
+        try
+        {
+            status = Restore.Status();
+            lines.AddRange(Restore.LogLines(lines.Count));
+        }
+        catch (Exception)
+        {
+            // A file being swapped at the restart: the next second reads it again.
+        }
+        if (status is { Finished: true }) timer?.Change(Timeout.Infinite, Timeout.Infinite);
+    }
+
+    public void Dispose() => timer?.Dispose();
+}

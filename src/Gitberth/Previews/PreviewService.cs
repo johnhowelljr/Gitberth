@@ -99,7 +99,8 @@ public sealed class PreviewService(
     Security.SecretProtector? protector = null,
     Audit.AuditLog? audit = null,
     Databases.DatabaseService? databases = null,
-    GitLabApi? gitLab = null)
+    GitLabApi? gitLab = null,
+    Backup.RestoreGate? restoreGate = null)
 {
     /// <summary>How often a repo's pull requests are asked for at most when nothing says they changed.</summary>
     internal TimeSpan PullsEvery { get; set; } = TimeSpan.FromMinutes(5);
@@ -137,6 +138,8 @@ public sealed class PreviewService(
     public async Task CheckRepoAsync(string owner, string repo, RemoteInfo remote, bool poked, IReadOnlyList<AppDefinition> watched,
         IReadOnlySet<int> busy, CancellationToken ct = default)
     {
+        // While a restore runs, previews wait: they're made again once their parents are back.
+        if (restoreGate?.Holding == true) return;
         var parents = watched.Where(a => a.ParentAppId is null && a.PreviewMode != PreviewMode.Off).ToList();
         if (parents.Count == 0) return;
         var open = await PullsAsync(owner, repo, remote.PullHeads, poked, ct);
@@ -169,6 +172,7 @@ public sealed class PreviewService(
     /// </summary>
     public async Task TidyAsync(CancellationToken ct = default)
     {
+        if (restoreGate?.Holding == true) return;
         List<(int Id, int? Parent)> orphans;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
         {

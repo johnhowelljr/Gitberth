@@ -90,6 +90,12 @@ factor = 0.75
 # 5 tests in 51 s, redis:8-alpine already pulled; a fresh rig volume adds that pull once); minutes is the estimate for
 # production timings (three 15 s stay-up checks, and a minute's hold instead of hubWait's 10 s).
 "39" = { file = "test_39_docker_hub.py", minutes = 2.5, test_minutes = 1.0 }
+# Save and restore: Settings › Save and restore's passphrase checks, then a Git app (volume marker, secret, a Postgres
+# database with a row), its Postgres server and a redis app saved through the page, the host wiped (Gitberth's data volume
+# emptied, its apps' containers, volumes and images removed), and the file restored through the page across Gitberth's
+# restart. Estimates (design D7: about 4 minutes): two Git builds, Postgres made once per rig volume; minutes adds
+# production's stay-up checks. Refresh both from a run's junit.xml.
+"40" = { file = "test_40_save_restore.py", minutes = 6, test_minutes = 4 }
 
 [aliases]
 # The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside
@@ -108,7 +114,7 @@ factor = 0.75
 # Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
 "@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34",
-           "35", "36", "37", "38", "39"]
+           "35", "36", "37", "38", "39", "40"]
 "@release" = ["@full", "31"]  # and every template: + 16-30 min
 "@none" = []
 # Single tests the rules name.
@@ -148,6 +154,9 @@ factor = 0.75
 "@t33-fork" = ["test_33_gitlab.py::test_a_forks_merge_request_gets_no_preview_until_forks_are_on"]
 "@t33-instant" = ["test_33_gitlab.py::test_instant_deploys_add_the_project_hook_and_a_push_deploys_at_once"]
 "@t33-api" = ["test_33_gitlab.py::test_an_agent_creates_an_app_from_a_gitlab_project_over_the_api"]
+# Save and restore: the Settings section alone (seconds), or the whole save, wipe and restore.
+"@t40-section" = ["test_40_save_restore.py::test_settings_offers_save_backup_only_for_a_passphrase_typed_twice"]
+"@t40-restore" = ["test_40_save_restore.py::test_a_saved_host_comes_back_on_a_wiped_gitberth"]
 
 # Minutes of the single tests that aliases name (a class counts with its fixture). Any other single test counts as its
 # group's minutes divided by its number of tests.
@@ -166,6 +175,8 @@ factor = 0.75
 "test_29_mcp.py::test_an_agent_deploys_an_app_over_mcp_and_the_api_as_its_token" = 1.6
 "test_30_templates.py::test_the_gallery_lists_searches_and_filters_the_templates" = 0.1
 "test_32_agent_templates.py::test_an_agent_installs_a_template_with_its_database_and_deletes_it" = 1.25
+"test_40_save_restore.py::test_settings_offers_save_backup_only_for_a_passphrase_typed_twice" = 0.15
+"test_40_save_restore.py::test_a_saved_host_comes_back_on_a_wiped_gitberth" = 5.85
 
 # The same with test timings, measured (impact.py minutes --timings test; the first rig run of 2026-11-16).
 [test_minutes]
@@ -183,6 +194,9 @@ factor = 0.75
 # the token saved, the app made and deployed). A @t33 scenario chosen alone (any but settings and api) sets it up too:
 # about a minute more than its share of the group.
 "test_33_gitlab.py::test_new_app_from_a_private_project_in_a_nested_group_needs_the_token" = 1.32
+# Estimates for save and restore's two (design D7), until a run measures them.
+"test_40_save_restore.py::test_settings_offers_save_backup_only_for_a_passphrase_typed_twice" = 0.15
+"test_40_save_restore.py::test_a_saved_host_comes_back_on_a_wiped_gitberth" = 3.85
 
 # How the template smoke is split into shards: heavier templates count for more (the default is 1).
 [templates]
@@ -905,6 +919,7 @@ refine = [
     { match = 'KeepRunningSection|id="keep"|\("keep"', groups = ["35"] },
     { match = 'DiskSection|id="disk"|\("disk"', groups = ["36", "@t22-cache"] },
     { match = 'DatabaseServersSection', groups = ["27"] },
+    { match = 'BackupSection|id="backup"|\("backup"', groups = ["@t40-section"] },
     { match = 'ApiTokensSection', groups = ["29"] },
     { match = 'AuditLogSection', groups = ["@t24-audit"] },
     { match = '[Gg]it[Ll]ab', groups = ["@t20-settings", "@t33-settings"] },
@@ -992,7 +1007,7 @@ refine = [
 globs = ["src/Gitberth/Components/Apps/RemoveAppDialog.razor",
          "src/Gitberth/Components/Shared/DeleteAppDialog.razor",
          "src/Gitberth/Components/Shared/ConfirmNameDialog.razor"]
-groups = ["05", "24", "27", "30"]
+groups = ["05", "24", "27", "30", "@t40-restore"]   # ConfirmNameDialog: Restore… types "restore"
 
 [[rule]]
 globs = ["src/Gitberth/Components/Apps/NetworkTab.razor", "src/Gitberth/Components/Shared/Network/**",
@@ -1017,6 +1032,7 @@ groups = ["01", "20"]
 refine = [
     { match = 'Running|[Mm]ember|Compose', groups = ["01", "@t28-repo"] },
     { match = '[Gg]it[Ll]ab|RepoFullName', groups = ["20", "@t33-new"] },
+    { match = '[Rr]estore|[Bb]ackup', groups = ["40"] },   # the dashboard's banner: a restore offered, or running
 ]
 
 [[rule]]
@@ -1031,6 +1047,7 @@ globs = ["src/Gitberth/Components/Shared/CopyButton.razor", "src/Gitberth/Compon
 groups = ["20", "23", "27"]                    # gitberth.js also removes the splash every scenario waits for
 refine = [
     { match = 'focusIn', groups = ["01", "20", "34"] },   # the top bar's search (Ctrl K) and the help's
+    { match = 'backupUpload|download|[Uu]pload|reloadAfterRestart', groups = ["40"] },   # Save and restore's download, upload and restart
 ]
 
 [[rule]]
@@ -1101,6 +1118,14 @@ groups = ["37", "15"]                          # 15: the refusals each feature s
 globs = ["src/Gitberth/Health/AttentionBoard.cs", "src/Gitberth/Components/Shared/AttentionBanners.razor",
          "src/Gitberth/Components/Layout/AttentionPill.razor"]
 groups = ["37", "20"]                          # the dashboard's banners and the top bar's pill
+
+# --- save and restore (40): the file, saving and restoring (Backup/), Settings › Save and restore, the Restoring page.
+# Program.cs (the endpoints, the boot swap) and the Docker client's new calls keep their own rules (@wide).
+[[rule]]
+globs = ["src/Gitberth/Backup/**", "src/Gitberth/Components/Shared/BackupSection.razor", "src/Gitberth/Components/Shared/BackupText.cs",
+         "src/Gitberth/Components/Pages/RestoringPage.razor", "src/Gitberth/wwwroot/css/backup.css",
+         "src/Gitberth/Components/Layout/ReconnectModal.razor.js"]   # its reload waits while a restore restarts Gitberth
+groups = ["40"]
 
 
 # ===== E. Folders (new files and anything not named above) =====
