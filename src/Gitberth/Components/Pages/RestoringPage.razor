@@ -11,7 +11,7 @@
 *@
 <PageTitle>Restoring · Gitberth</PageTitle>
 
-<PageHead Title="@(status is null ? "Restore" : BackupText.Headline(status))" Tip="settings.backup.restoring" Lead="@(status is null ? null : BackupText.Lead(status))">
+<PageHead Title="@(status is null ? "Restore" : BackupText.Headline(status, Picked))" Tip="settings.backup.restoring" Lead="@(status is null ? null : BackupText.Lead(status, Picked))">
     <Crumbs>
         <a href="settings">Settings</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
         <a href="settings#backup">Save and restore</a><SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" />
@@ -27,7 +27,7 @@
                 }
                 else if (s.Active)
                 {
-                    <span class="gb-pill2 gb-tone-accent"><i class="gb-st-dot gb-st-dot--running"></i>Running · part @Math.Clamp(s.Phase, 1, 2) of 2</span>
+                    <span class="gb-pill2 gb-tone-accent"><i class="gb-st-dot gb-st-dot--running"></i>@(Picked ? "Running" : $"Running · part {Math.Clamp(s.Phase, 1, 2)} of 2")</span>
                 }
                 else
                 {
@@ -36,7 +36,7 @@
                 <span class="gb-t3" id="restore-steps-count">@BackupText.Steps(s)</span>
                 <span class="gb-t3">started @s.StartedAt.ToLocalTime().ToString("d MMM HH:mm", CultureInfo.InvariantCulture)</span>
             </div>
-            @if (s is { Active: true, Finished: false, Phase: <= 1 })
+            @if (!Picked && s is { Active: true, Finished: false, Phase: <= 1 })
             {
                 <div class="gb-impact-row gb-tone-accent gb-bk-restart" id="restore-restart-note"><SvgIcon Icon="@Icons.Material.Outlined.RestartAlt" /><span>@BackupText.RestartNote</span></div>
             }
@@ -99,6 +99,12 @@ else
 }
 
 @code {
+    // ?picked=1: picked apps restored into this Gitberth as it runs (Settings › Restore the picked items): no parts, no
+    // restart, nothing to watch for. Without it, a whole backup.
+    [SupplyParameterFromQuery(Name = "picked")] public string? PickedQuery { get; set; }
+
+    private bool Picked => !string.IsNullOrEmpty(PickedQuery);
+
     private RestoreStatus? status;
     private readonly List<string> lines = [];
     private Timer? timer;
@@ -140,7 +146,7 @@ else
                 if (!stopped) await JS.InvokeVoidAsync("gitberth.stopRestartWatch");
                 stopped = true;
             }
-            else if (!watching)
+            else if (!watching && !Picked)
             {
                 watching = true;
                 await JS.InvokeVoidAsync("gitberth.reloadAfterRestart", BackupText.RestartNote);

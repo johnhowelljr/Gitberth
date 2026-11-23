@@ -104,12 +104,42 @@ public enum UploadProblem
     /// <summary>Made by a newer Gitberth than this one: update Gitberth first.</summary>
     TooNew,
 
-    /// <summary>This Gitberth already has apps: a backup is restored onto a fresh install only.</summary>
+    /// <summary>A restore can't start here now (one is running): the message says why.</summary>
     NotEmpty,
 }
 
-/// <summary>The uploaded file checked with a passphrase: its summary, or why not.</summary>
-public sealed record UploadCheck(UploadProblem Problem, string? Message, BackupSummary? Summary);
+/// <summary>
+/// The uploaded file checked with a passphrase: its summary, or why not; and how each of its apps and containers stands
+/// against this Gitberth, for picking what comes back.
+/// </summary>
+/// <param name="Targets">One per top-level app or container of the backup, in the summary's order.</param>
+/// <param name="Everything">The whole backup can be restored here (a Gitberth with no apps): its settings and data too.</param>
+public sealed record UploadCheck(UploadProblem Problem, string? Message, BackupSummary? Summary,
+    IReadOnlyList<RestoreTarget>? Targets = null, bool Everything = false);
+
+/// <summary>What happens to one picked app or container of a backup in this Gitberth.</summary>
+public enum RestoreAction
+{
+    /// <summary>It isn't here (deleted, or saved on another machine): it comes back as it was, under its own name.</summary>
+    Restore,
+
+    /// <summary>It's here: its saved settings and data replace what it has now. Its current database is kept under another name.</summary>
+    Replace,
+
+    /// <summary>It comes back next to what's here, under a new name: its own container and volumes, free ports, a copy of its database, no domains.</summary>
+    Copy,
+}
+
+/// <summary>One app or container the owner picked to restore into this Gitberth, and how.</summary>
+/// <param name="ItemId">A top-level item of the backup's summary: "app:&lt;id&gt;" or "container:&lt;name&gt;".</param>
+/// <param name="NewName">For Copy, the copy's name ("website2"); null otherwise.</param>
+public sealed record RestorePick(string ItemId, RestoreAction Action, string? NewName = null);
+
+/// <summary>How one top-level app or container of a backup stands against this Gitberth, before the owner picks.</summary>
+/// <param name="Here">An app or container with its name is here now: it can be replaced or copied, not restored as itself.</param>
+/// <param name="CopyName">A name free here for a copy ("website2").</param>
+/// <param name="Note">One sentence about it here ("Port 3000 is taken here: it gets a free one."), or null.</param>
+public sealed record RestoreTarget(string ItemId, bool Here, string CopyName, string? Note);
 
 /// <summary>Where one step of a restore stands.</summary>
 public enum RestoreStepState { Waiting, Running, Done, Skipped, Failed }
@@ -141,11 +171,17 @@ public interface IBackupService
     SaveProgress? Progress(string ticketId);
 }
 
-/// <summary>Restoring: an uploaded file checked, then restored onto this (fresh) Gitberth.</summary>
+/// <summary>
+/// Restoring: an uploaded file checked, then what the owner picks restored into this Gitberth (any Gitberth, apps or not);
+/// or, on a Gitberth with no apps yet, the whole backup.
+/// </summary>
 public interface IRestoreService
 {
-    /// <summary>Null when a backup can be restored here; else why not (this Gitberth has apps, a restore is running).</summary>
+    /// <summary>Null when a restore can start here (picked items, into any Gitberth); else why not (a restore is running).</summary>
     string? CantRestore();
+
+    /// <summary>Null when the whole backup can be restored here (a Gitberth with no apps yet); else why not.</summary>
+    string? CantRestoreEverything();
 
     /// <summary>Whether a file was uploaded (POST /backup/upload) and not yet restored or discarded, and its size.</summary>
     long? UploadedBytes();
@@ -154,11 +190,20 @@ public interface IRestoreService
     Task<UploadCheck> CheckAsync(string passphrase, CancellationToken ct = default);
 
     /// <summary>
-    /// Starts the restore: phase 1 runs now (the passphrase stays in memory only for it), then Gitberth restarts on the saved
-    /// data and phase 2 runs by itself. Returns once phase 1 has started.
+    /// Starts restoring the whole backup (a Gitberth with no apps only): phase 1 runs now (the passphrase stays in memory only
+    /// for it), then Gitberth restarts on the saved data and phase 2 runs by itself. Returns once phase 1 has started.
     /// </summary>
-    /// <exception cref="InvalidOperationException">CantRestore says why, or the check didn't pass.</exception>
+    /// <exception cref="InvalidOperationException">CantRestoreEverything says why, or the check didn't pass.</exception>
     Task StartAsync(string passphrase, CancellationToken ct = default);
+
+    /// <summary>
+    /// Starts restoring the picked apps and containers into this Gitberth, each as its pick says, without restarting Gitberth
+    /// and without touching anything else here (other apps, settings, tokens, history). Status and LogLines follow it. Returns
+    /// once it has started.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">CantRestore says why, the check didn't pass, or a pick doesn't fit (unknown
+    /// item, Restore of one that's here, Copy without a free name).</exception>
+    Task StartAsync(string passphrase, IReadOnlyList<RestorePick> picks, CancellationToken ct = default);
 
     /// <summary>The restore running or last finished; null when none was ever started.</summary>
     RestoreStatus? Status();

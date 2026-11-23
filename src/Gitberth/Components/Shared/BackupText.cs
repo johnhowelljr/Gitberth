@@ -1,6 +1,7 @@
 using System.Globalization;
 using Gitberth.Backup;
 using Gitberth.Disk;
+using Gitberth.Services;
 
 namespace Gitberth.Components.Shared;
 
@@ -127,7 +128,7 @@ public static class BackupText
         UploadProblem.WrongPassphrase => "This passphrase doesn't open the file.",
         UploadProblem.Damaged => "The file was changed or cut short after it was saved, so none of it is trusted.",
         UploadProblem.TooNew => "A newer Gitberth made this file: update Gitberth first.",
-        UploadProblem.NotEmpty => "This Gitberth has apps already: a backup is restored onto a fresh install only.",
+        UploadProblem.NotEmpty => "A restore is running: open the file again once it has ended.",
         _ => "The file can't be restored.",
     };
 
@@ -138,7 +139,7 @@ public static class BackupText
         UploadProblem.WrongPassphrase => "Wrong passphrase",
         UploadProblem.Damaged => "The file is damaged",
         UploadProblem.TooNew => "Made by a newer Gitberth",
-        UploadProblem.NotEmpty => "This Gitberth isn't empty",
+        UploadProblem.NotEmpty => "Not now",
         _ => "It can't be restored",
     };
 
@@ -194,19 +195,43 @@ public static class BackupText
         SignInNote,
     ];
 
+    // ---- Picking what comes back ----
+
+    /// <summary>What restoring picked items leaves alone: the line beside its button and on the Restoring page.</summary>
+    public const string PickedNote =
+        "Picked apps come back into this Gitberth as it runs: no restart, and its settings, tokens and other apps stay as they are.";
+
+    /// <summary>Under a picked row that isn't here: what happens to it.</summary>
+    public const string AsItWas = "Comes back as it was.";
+
+    /// <summary>Why the copy's name can't be used, or null when it can.</summary>
+    public static string? CopyNameProblem(string? name) => AppService.NameProblem(name);
+
+    /// <summary>The picks as the confirmation lists them, one line each.</summary>
+    public static string PickLine(RestorePick pick, string title) => pick.Action switch
+    {
+        RestoreAction.Replace => $"{title}: its saved settings and data replace what it has now. Its database as it is now is kept under another name.",
+        RestoreAction.Copy => $"{title} comes back as a copy named {pick.NewName}, next to it: its own container, volumes and database, free ports, no domains.",
+        _ => $"{title} comes back as it was.",
+    };
+
+    /// <summary>"Restore 2 items?"</summary>
+    public static string PickTitle(int count) => $"Restore {Count(count, "item")}?";
+
     // ---- The Restoring page ----
 
-    /// <summary>The page's title line: where the restore stands.</summary>
-    public static string Headline(RestoreStatus s) =>
+    /// <summary>The page's title line: where the restore stands; <paramref name="picked"/> for picked items (no parts, no restart).</summary>
+    public static string Headline(RestoreStatus s, bool picked = false) =>
         s.Finished ? s.Failed == 0 ? "Restored" : $"Restored, but {Count(s.Failed, "step")} failed"
-        : s.Active ? $"Restoring, part {Math.Clamp(s.Phase, 1, 2).ToString(CultureInfo.InvariantCulture)} of 2"
+        : s.Active ? picked ? "Restoring the picked items" : $"Restoring, part {Math.Clamp(s.Phase, 1, 2).ToString(CultureInfo.InvariantCulture)} of 2"
         : "The restore stopped";
 
     /// <summary>The line under it.</summary>
-    public static string Lead(RestoreStatus s) =>
-        s.Finished ? s.Failed == 0 ? "Everything the backup holds is back. Each app's page says how it runs."
+    public static string Lead(RestoreStatus s, bool picked = false) =>
+        s.Finished ? s.Failed == 0 ? picked ? "The picked items are back. Each app's page says how it runs." : "Everything the backup holds is back. Each app's page says how it runs."
             : "The rest is back. The log says why each failed step failed; fix it on the app's page."
-        : s.Active ? s.Phase <= 1
+        : s.Active ? picked ? PickedNote
+            : s.Phase <= 1
             ? "Volumes, databases, images and containers come from the file first, then Gitberth restarts on the saved data."
             : "Gitberth runs on the saved data now. It deploys each Git and Compose app at the commit it ran, one at a time, then routes the domains."
         : "It ended before every step was done. The log says where it stopped.";
@@ -234,12 +259,14 @@ public static class BackupText
 
     // ---- The dashboard ----
 
-    /// <summary>The dashboard's banner: a restore that runs, or a Gitberth with no apps that could take one; null for neither.</summary>
-    public static (string Title, string Text, string Action, string Href)? Banner(RestoreStatus? status, string? cantRestore) =>
+    /// <summary>
+    /// The dashboard's banner: a restore that runs, or a Gitberth with no apps that could take a whole backup
+    /// (<paramref name="cantRestoreEverything"/> null); null for neither.
+    /// </summary>
+    public static (string Title, string Text, string Action, string Href)? Banner(RestoreStatus? status, string? cantRestoreEverything) =>
         status is { Active: true, Finished: false }
-            ? ("A restore is running", $"Gitberth is bringing a backup back: part {Math.Clamp(status.Phase, 1, 2).ToString(CultureInfo.InvariantCulture)} of 2, {Steps(status)}.",
-               "See how it goes", "restoring")
-        : cantRestore is null
+            ? ("A restore is running", $"Gitberth is bringing a backup back: {Steps(status)}.", "See how it goes", "restoring")
+        : cantRestoreEverything is null
             ? ("Moving from another machine? Restore a backup.",
                "This Gitberth has no apps yet. A backup saved in Settings › Save and restore on the other machine brings all of its apps here at once.",
                "Restore a backup", "settings#backup")

@@ -1128,8 +1128,8 @@ settings.backup:
   title: Save and restore
   text: >-
     One file with everything this host runs: Gitberth's settings and secrets, every app, the other containers, their
-    volumes' data and the databases, compressed and encrypted with a passphrase you choose. Restored onto a fresh
-    install, here or on another machine, it brings all of it back.
+    volumes' data and the databases, compressed and encrypted with a passphrase you choose. Pick apps from it to bring
+    back into any Gitberth, or restore all of it onto one with no apps yet.
   more: guides/backups-and-restore
 
 settings.backup.items:
@@ -1172,8 +1172,8 @@ settings.backup.save:
 settings.backup.restore:
   title: Restore from a file
   text: >-
-    Brings a backup back onto this Gitberth while it has no apps: a fresh install, on this machine or another. You see
-    what the file holds before anything is restored.
+    Brings apps back from a backup into this Gitberth: the ones you pick (an app deleted by mistake, say), or everything
+    onto a Gitberth with no apps yet. You see what the file holds before anything is restored.
   more: guides/backups-and-restore#restore-a-backup
 
 settings.backup.choose-file:
@@ -1204,19 +1204,46 @@ settings.backup.discard:
   more: guides/backups-and-restore#restore-a-backup
 
 settings.backup.run:
-  title: Restore
+  title: Restore everything
   text: >-
-    Asks you to type restore, then brings back everything the file holds and restarts Gitberth on its data. Afterwards
-    you sign in with the admin password of the machine the backup was saved on.
+    Offered on a Gitberth with no apps yet. Asks you to type restore, then brings back everything the file holds and
+    restarts Gitberth on its data. Afterwards you sign in with the admin password of the machine the backup was saved on.
   more: guides/backups-and-restore#steps
+
+settings.backup.pick:
+  title: Pick what comes back
+  text: >-
+    Tick the apps and containers to bring back into this Gitberth; their volumes, databases and images come with them.
+    One that isn't here comes back as it was. One that's here is replaced, or comes back as a copy next to it.
+  more: guides/backups-and-restore#bring-back-one-app
+
+settings.backup.replace:
+  title: Replace it
+  text: >-
+    Its saved settings and data replace what it has now: its volumes are emptied and filled from the file, and its
+    database is restored. Its database as it is now is kept under another name, and the log names it.
+  more: guides/backups-and-restore#bring-back-one-app
+
+settings.backup.copy:
+  title: Restore as a copy
+  text: >-
+    It comes back as a new app with this name, next to the one here: its own container, volumes and database, free
+    host ports, and no domains, deploy hooks or previews.
+  more: guides/backups-and-restore#bring-back-one-app
+
+settings.backup.restore-picked:
+  title: Restore the picked items
+  text: >-
+    Brings back what's ticked, as each row says, into this Gitberth as it runs: no restart, and nothing else here
+    changes. Replacing asks you to type restore first.
+  more: guides/backups-and-restore#bring-back-one-app
 
 settings.backup.restoring:
   title: Restoring
   text: >-
-    A restore's steps and log as it runs. First what comes from the file (volumes, databases, images, containers); then
-    Gitberth restarts on the saved data and deploys each Git and Compose app at the commit it ran. The page comes back
-    by itself after the restart.
-  more: guides/backups-and-restore#steps
+    A restore's steps and log as it runs. Picked apps come back as Gitberth runs. A whole backup comes from the file
+    first; then Gitberth restarts on the saved data, deploys each app at the commit it ran, and the page comes back by itself.
+  more: guides/backups-and-restore#restore-a-backup
 
 settings.backup.restore-log:
   title: Restore log

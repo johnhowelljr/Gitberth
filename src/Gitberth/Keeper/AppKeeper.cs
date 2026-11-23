@@ -283,6 +283,8 @@ public sealed class AppKeeper(
         {
             ct.ThrowIfCancellationRequested();
             if (own.Name is { } me && app.ContainerName == me) continue;
+            // An app a restore is bringing back is the restore's until it's done.
+            if (restoreGate?.Holds(app) == true) continue;
             if (app.DesiredState != DesiredState.Running)
             {
                 // Stopped in Gitberth: whatever went before is over, giving up included.

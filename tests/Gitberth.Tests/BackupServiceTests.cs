@@ -37,6 +37,8 @@ public sealed class BackupServiceTests
         public Task PauseContainerAsync(string idOrName, CancellationToken ct = default) => throw Refused();
         public Task UnpauseContainerAsync(string idOrName, CancellationToken ct = default) => throw Refused();
         public Task CreateVolumeAsync(JsonObject body, CancellationToken ct = default) => throw Refused();
+        public Task RemoveVolumeAsync(string name, CancellationToken ct = default) => throw Refused();
+        public Task<int> WaitContainerAsync(string idOrName, CancellationToken ct = default) => throw Refused();
         public Task<string> CreateNetworkAsync(JsonObject body, CancellationToken ct = default) => throw Refused();
         public Task<Stream> GetArchiveAsync(string container, string path, CancellationToken ct = default) => throw Refused();
         public Task PutArchiveAsync(string container, string path, Stream tar, CancellationToken ct = default) => throw Refused();

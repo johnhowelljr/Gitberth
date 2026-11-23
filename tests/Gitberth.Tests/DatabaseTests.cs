@@ -348,6 +348,27 @@ public sealed class DatabaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task A_server_still_starting_is_checked_again_within_seconds_and_a_good_check_is_kept()
+    {
+        var now = new DateTime(2026, 11, 23, 12, 0, 0, DateTimeKind.Utc);
+        var servers = new DatabaseServers(new DockerCli(_options) { Runner = _host.RunAsync }, new SettingsService(_db, _protector), _options,
+            NullLogger<DatabaseServers>.Instance) { Now = () => now };
+        _host.Starting = true;
+        Assert.False(Assert.Single(await servers.ListAsync()).Usable);
+
+        // Ready seconds later: the refused check isn't kept for half a minute, so the server isn't "No server yet" meanwhile.
+        _host.Starting = false;
+        now = now.AddSeconds(6);
+        Assert.True(Assert.Single(await servers.ListAsync()).Usable);
+
+        // A check that passed is kept: no psql for the next 30 seconds.
+        var probes = _host.Execs.Count(e => e.Stdin == PostgresSql.Probe);
+        now = now.AddSeconds(20);
+        Assert.True(Assert.Single(await servers.ListAsync()).Usable);
+        Assert.Equal(probes, _host.Execs.Count(e => e.Stdin == PostgresSql.Probe));
+    }
+
+    [Fact]
     public async Task A_server_gitberth_cant_use_says_why()
     {
         _host.Containers.Add(PostgresHost.Server("analytics", network: "bridge"));
@@ -796,6 +817,8 @@ internal sealed class PostgresHost
     /// <summary>Called on each redis-cli ping; with <see cref="PingAnswers"/> off, the Redis never answers.</summary>
     public Action? OnPing { get; set; }
     public bool PingAnswers { get; set; } = true;
+    /// <summary>The servers still start: psql's sign-in is refused, as in a server's first seconds.</summary>
+    public bool Starting { get; set; }
     /// <summary>Roles that sign in with a password, and the databases each owns (pg_authid and pg_database, for a copy's check).</summary>
     public Dictionary<string, (string Password, HashSet<string> Owns)> Logins { get; } = new(StringComparer.Ordinal);
 
@@ -905,6 +928,8 @@ internal sealed class PostgresHost
         }
         var server = Containers.First(c => c.Name == container);
         var sql = options?.Stdin ?? "";
+        if (sql == PostgresSql.Probe && Starting)
+            return Fail("psql: error: connection to server on socket \"/var/run/postgresql/.s.PGSQL.5432\" failed: FATAL:  the database system is starting up", 2);
         if (sql == PostgresSql.Probe) return Ok($"180001|{(server.User == "postgres" ? "t" : "f")}\n");
         if (sql == PostgresSql.Names) return Ok(string.Concat(Databases.Select(d => $"d:{d}\n")) + string.Concat(Roles.Select(r => $"r:{r}\n")));
         if (sql.StartsWith("CREATE ROLE", StringComparison.Ordinal))

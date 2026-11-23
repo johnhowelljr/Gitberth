@@ -93,9 +93,10 @@ factor = 0.75
 # Save and restore: Settings › Save and restore's passphrase checks, then a Git app (volume marker, secret, a Postgres
 # database with a row), its Postgres server and a redis app saved through the page, the host wiped (Gitberth's data volume
 # emptied, its apps' containers, volumes and images removed), and the file restored through the page across Gitberth's
-# restart. Estimates (design D7: about 4 minutes): two Git builds, Postgres made once per rig volume; minutes adds
-# production's stay-up checks. Refresh both from a run's junit.xml.
-"40" = { file = "test_40_save_restore.py", minutes = 6, test_minutes = 4 }
+# restart; and picked items into a Gitberth with other apps: a deleted app restored, then restored as a copy beside it.
+# Estimates (the whole restore measured at 2.4 min on rig b, 2026-11-23; the picked ones about 4 more, plan2 P8): Git
+# builds, Postgres made once per rig volume; minutes adds production's stay-up checks. Refresh both from a run's junit.xml.
+"40" = { file = "test_40_save_restore.py", minutes = 10, test_minutes = 6.5 }
 
 [aliases]
 # The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside

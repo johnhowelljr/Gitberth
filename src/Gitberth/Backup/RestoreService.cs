@@ -19,7 +19,7 @@ namespace Gitberth.Backup;
 /// (<see cref="RestoreBoot"/>), and phase 2 (<see cref="RestoreRunner"/>) deploys the apps again. Each step is written to
 /// plan.json as it ends.
 /// </summary>
-public sealed class RestoreService : IRestoreService
+public sealed partial class RestoreService : IRestoreService
 {
     /// <summary>How long a database server is waited for to take connections after it starts.</summary>
     internal TimeSpan DatabaseReady { get; init; } = TimeSpan.FromMinutes(3);
@@ -33,20 +33,43 @@ public sealed class RestoreService : IRestoreService
     private readonly RestoreGate _gate;
     private readonly IHostApplicationLifetime? _lifetime;
     private readonly ILogger<RestoreService> _logger;
+    private readonly Security.SecretProtector? _protector;
+    private readonly Services.AppActions? _actions;
+    private readonly AppCatalog? _catalog;
+    private readonly Domains.DomainService? _domains;
+    private readonly HostPortMap? _hostPorts;
+    private readonly Databases.DatabaseService? _databases;
+    private readonly Services.AppService? _apps;
     private readonly BackupPaths _paths;
     private readonly object _planGate = new();
     private RestorePlanState? _plan;
     private Task? _phaseOne;
 
+    /// <param name="protector">This Gitberth's, which a picked app's saved secrets are encrypted with again.</param>
+    /// <param name="actions">Deploys a picked Git or Compose app, and makes a picked image app's container again.</param>
+    /// <param name="catalog">Brings a picked app's row in line with its container.</param>
+    /// <param name="domains">Syncs a picked app's domains.</param>
+    /// <param name="hostPorts">Finds a picked app a free host port when its own is taken.</param>
+    /// <param name="databases">A copy's own database URLs, for its container's environment.</param>
+    /// <param name="apps">Checks a copy's name as New app checks one.</param>
     public RestoreService(IBackupEngine engine, IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options, RestoreGate gate,
-        ILogger<RestoreService> logger, IHostApplicationLifetime? lifetime = null)
+        ILogger<RestoreService> logger, IHostApplicationLifetime? lifetime = null, Security.SecretProtector? protector = null,
+        Services.AppActions? actions = null, AppCatalog? catalog = null, Domains.DomainService? domains = null, HostPortMap? hostPorts = null,
+        Databases.DatabaseService? databases = null, Services.AppService? apps = null)
     {
+        _databases = databases;
+        _apps = apps;
         _engine = engine;
         _dbFactory = dbFactory;
         _options = options;
         _gate = gate;
         _logger = logger;
         _lifetime = lifetime;
+        _protector = protector;
+        _actions = actions;
+        _catalog = catalog;
+        _domains = domains;
+        _hostPorts = hostPorts;
         _paths = new BackupPaths(options);
         Log = new RestoreLog(_paths);
         _plan = RestorePlanState.Load(_paths);
@@ -63,12 +86,14 @@ public sealed class RestoreService : IRestoreService
     /// <summary>What happens when phase 1 ends: Gitberth exits, and Docker starts it again (tests count it instead).</summary>
     internal Action? Exit { get; init; }
 
-    public string? CantRestore()
+    public string? CantRestore() => Running ? "A restore is running." : null;
+
+    public string? CantRestoreEverything()
     {
         if (Running) return "A restore is running.";
         using var db = _dbFactory.CreateDbContext();
         return db.Apps.Any()
-            ? "This Gitberth already has apps: a backup is restored onto a fresh install only (install Gitberth on the new machine, then restore there)."
+            ? "This Gitberth already has apps: pick the apps to bring back. The whole backup is restored onto a Gitberth with no apps yet."
             : null;
     }
 
@@ -103,23 +128,32 @@ public sealed class RestoreService : IRestoreService
         if (!File.Exists(_paths.Upload)) return new UploadCheck(UploadProblem.NotABackup, "No file was uploaded.", null);
         if (CantRestore() is { } why) return new UploadCheck(UploadProblem.NotEmpty, why, null);
         BackupManifest manifest;
+        Dictionary<int, SavedAppRows> saved;
         try
         {
-            manifest = await ReadManifestAsync(passphrase, ct);
+            // The key is made once, for the manifest and the backup's own data (its apps, read to compare with what's here).
+            await using (var file = OpenUpload())
+            {
+                var (header, _) = await BackupReader.ReadHeaderAsync(file, ct);
+                using var key = await Task.Run(() => BackupKey.ForFile(header, passphrase), ct);
+                manifest = await ReadManifestAsync(key, ct);
+                if (await TooNewAsync(manifest, ct) is { } newer) return new UploadCheck(UploadProblem.TooNew, newer, null);
+                saved = await SavedAppsOrNoneAsync(manifest, key, ct);
+            }
         }
         catch (BackupFileException ex)
         {
             return new UploadCheck(ex.Problem, ex.Message, null);
         }
-        if (await TooNewAsync(manifest, ct) is { } newer) return new UploadCheck(UploadProblem.TooNew, newer, null);
         var warnings = await WarningsAsync(manifest, ct);
         return new UploadCheck(UploadProblem.None, null,
-            new BackupSummary(manifest.GitberthVersion, manifest.SavedAt, manifest.Host, manifest.Architecture, manifest.DockerVersion, manifest.Items, warnings));
+            new BackupSummary(manifest.GitberthVersion, manifest.SavedAt, manifest.Host, manifest.Architecture, manifest.DockerVersion, manifest.Items, warnings),
+            await TargetsAsync(manifest, saved, ct), CantRestoreEverything() is null);
     }
 
     public async Task StartAsync(string passphrase, CancellationToken ct = default)
     {
-        if (CantRestore() is { } why) throw new InvalidOperationException(why);
+        if (CantRestoreEverything() is { } why) throw new InvalidOperationException(why);
         var check = await CheckAsync(passphrase, ct);
         if (check.Problem != UploadProblem.None || check.Summary is null) throw new InvalidOperationException(check.Message ?? "This file can't be restored.");
         if (check.Summary.Warnings.FirstOrDefault(w => w.Blocks) is { } blocking) throw new InvalidOperationException(blocking.Message);
@@ -140,9 +174,10 @@ public sealed class RestoreService : IRestoreService
                 throw new InvalidOperationException("A restore is running.");
             }
             _gate.Close();
-            // The same backup's restore that stopped in its first phase goes on from where it was; anything else starts anew.
+            // The same backup's whole restore that stopped in its first phase goes on from where it was; anything else (a
+            // restore of picked items from the same file among them) starts anew.
             var old = Plan;
-            var resume = old is not null && old.Of(manifest) && !old.PhaseOneDone;
+            var resume = old is not null && old.Of(manifest) && !old.PhaseOneDone && old.Step("gitberth") is not null;
             var plan = resume ? old! : RestorePlanState.New(manifest, DateTime.UtcNow);
             if (!resume) Log.Clear();
             plan.Finished = false;
@@ -729,14 +764,17 @@ public sealed class RestoreService : IRestoreService
     /// A folder's tar extracted under <paramref name="root"/>: each entry must stay inside it, and an entry whose path goes
     /// through a link (one the extraction itself made: the folder is new) is skipped, so nothing is written through a link.
     /// </summary>
-    internal static async Task ExtractAsync(Stream tar, string root, CancellationToken ct)
+    /// <param name="rename">An entry's name to the one it's written under (null: left out); each entry as named when none.</param>
+    internal static async Task ExtractAsync(Stream tar, string root, CancellationToken ct, Func<string, string?>? rename = null)
     {
         root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         Directory.CreateDirectory(root);
         var reader = new TarReader(tar, leaveOpen: true);
         while (await reader.GetNextEntryAsync(copyData: false, ct) is { } entry)
         {
-            var target = Path.GetFullPath(Path.Combine(root, entry.Name.TrimStart('/')));
+            var named = rename is null ? entry.Name : rename(entry.Name);
+            if (named is null) continue;
+            var target = Path.GetFullPath(Path.Combine(root, named.TrimStart('/')));
             if (!target.StartsWith(root, StringComparison.Ordinal) || ThroughLink(root, target)) continue;
             switch (entry.EntryType)
             {

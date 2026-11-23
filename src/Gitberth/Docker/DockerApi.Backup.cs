@@ -63,6 +63,21 @@ public sealed partial class DockerApi : IBackupEngine
     public async Task CreateVolumeAsync(JsonObject body, CancellationToken ct = default) =>
         await SendAsync(HttpMethod.Post, "volumes/create", body, ct: ct);
 
+    /// <summary>
+    /// DELETE volumes/{name}: a restore's own throwaway volume (its throwaway database server's), never one with anyone's
+    /// data. One that's gone counts as removed.
+    /// </summary>
+    public async Task RemoveVolumeAsync(string name, CancellationToken ct = default)
+    {
+        try
+        {
+            await SendAsync(HttpMethod.Delete, $"volumes/{Uri.EscapeDataString(name)}", ct: ct);
+        }
+        catch (DockerApiException ex) when (ex.NotFound)
+        {
+        }
+    }
+
     /// <summary>GET containers/{id}/archive?path=: a tar of the path (a folder's entries start with its name), streamed.</summary>
     public async Task<Stream> GetArchiveAsync(string container, string path, CancellationToken ct = default) =>
         await GetStreamAsync($"containers/{Uri.EscapeDataString(container)}/archive?path={Uri.EscapeDataString(path)}", ct);

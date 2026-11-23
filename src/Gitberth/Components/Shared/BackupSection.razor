@@ -147,18 +147,28 @@
                 <ul class="gb-bk-list" aria-label="What the backup holds">
                     @foreach (var item in s.Items)
                     {
-                        @Row(item, pickable: false)
+                        @PickRow(item)
                     }
                 </ul>
-                @foreach (var w in s.Warnings)
+                <p class="gb-help" id="bk-picked-note"><Tip Key="settings.backup.pick">@BackupText.PickedNote</Tip></p>
+                @if (everything)
                 {
-                    <Banner Tone="@(w.Blocks ? "critical" : "warn")" Title="@BackupText.WarningTitle(w.Kind)">@w.Message</Banner>
+                    @* The whole backup, on a Gitberth with no apps yet: its warnings, and the restart's sign-in. *@
+                    @foreach (var w in s.Warnings)
+                    {
+                        <Banner Tone="@(w.Blocks ? "critical" : "warn")" Title="@BackupText.WarningTitle(w.Kind)">@w.Message</Banner>
+                    }
+                    <div class="gb-impact-row gb-tone-accent" id="bk-sign-in-note"><SvgIcon Icon="@Icons.Material.Outlined.Key" /><span><strong>Restore everything:</strong> @BackupText.SignInNote</span></div>
                 }
-                <div class="gb-impact-row gb-tone-accent" id="bk-sign-in-note"><SvgIcon Icon="@Icons.Material.Outlined.Key" /><span>@BackupText.SignInNote</span></div>
                 <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
                     <Btn Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Delete" OnClick="DiscardAsync" Disabled="startingRestore" Tip="settings.backup.discard">Remove the file</Btn>
-                    <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.SettingsBackupRestore" OnClick="RestoreAsync" Busy="startingRestore" Tip="settings.backup.run"
-                         Disabled="@s.Warnings.Any(w => w.Blocks)">Restore…</Btn>
+                    @if (everything)
+                    {
+                        <Btn Kind="BtnKind.Danger" Icon="@Icons.Material.Outlined.SettingsBackupRestore" OnClick="RestoreAsync" Busy="startingRestore" Tip="settings.backup.run"
+                             Disabled="@(startingRestore || s.Warnings.Any(w => w.Blocks))">Restore everything…</Btn>
+                    }
+                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Restore" OnClick="RestorePickedAsync" Busy="startingRestore" Tip="settings.backup.restore-picked"
+                         Disabled="@(startingRestore || !picks.Values.Any(p => p.On) || PickProblem is not null)">Restore the picked items</Btn>
                 </div>
             </div>
         }
@@ -185,6 +195,21 @@
     private long sent, total;
     private UploadProblem checkProblem;
     private BackupSummary? summary;
+    // What can be picked (the backup's top-level apps and containers, as they stand here), what's picked and how, and
+    // whether the whole backup can come back here (a Gitberth with no apps yet).
+    private IReadOnlyList<RestoreTarget> targets = [];
+    private Dictionary<string, Pick> picks = new(StringComparer.Ordinal);
+    private bool everything;
+
+    private sealed class Pick
+    {
+        public bool On;
+        public RestoreAction Action;
+        public string CopyName = "";
+    }
+
+    // Why the picks can't go yet: a copy without a good name.
+    private string? PickProblem => picks.Values.Where(p => p is { On: true, Action: RestoreAction.Copy }).Select(p => BackupText.CopyNameProblem(p.CopyName)).FirstOrDefault(p => p is not null);
 
     private Timer? timer;
     private int ticking;
@@ -310,6 +335,57 @@
         _ => Icons.Material.Outlined.ViewInAr,
     };
 
+    // A row of what the backup holds: its top-level apps and containers can be picked (what's under one comes with it);
+    // under a picked one, how it comes back, and what's worth knowing about it here.
+    private RenderFragment PickRow(BackupItem item) => @<li class="gb-bk-row gb-bk-row--pick @(item.Parent is null ? null : "gb-bk-row--child")" data-item="@item.Id" data-parent="@item.Parent" @key="item.Id">
+        <label class="gb-bk-pick">
+            @if (picks.TryGetValue(item.Id, out var pick))
+            {
+                <input type="checkbox" checked="@pick.On" disabled="@startingRestore" @onchange="e => pick.On = e.Value is true" aria-label="@($"Restore {item.Title}")" />
+            }
+            <span class="gb-bk-icon"><SvgIcon Icon="@KindIcon(item.Kind)" /></span>
+            <span class="gb-bk-text">
+                <span class="gb-bk-t">@item.Title</span>
+                @if (item.Detail is { Length: > 0 } detail)
+                {
+                    <span class="gb-bk-s">@detail</span>
+                }
+            </span>
+        </label>
+        @* Its size as saved; none when the save didn't know it (nothing is being measured in a file). *@
+        <span class="gb-bk-size">@(item.Bytes is { } bytes ? Gitberth.Disk.DiskText.Size(bytes) : null)</span>
+        @if (targets.FirstOrDefault(t => t.ItemId == item.Id) is { } target && picks.TryGetValue(item.Id, out var p) && (p.On || target.Note is { Length: > 0 }))
+        {
+            <div class="gb-bk-pickopts">
+                @if (p.On && target.Here)
+                {
+                    <div class="gb-stack" role="radiogroup" aria-label="@($"How {item.Title} comes back")" style="gap:6px">
+                        <label class="gb-bk-opt" data-tip="settings.backup.replace">
+                            <input type="radio" name="@($"bk-how-{item.Id}")" checked="@(p.Action == RestoreAction.Replace)" @onchange="() => p.Action = RestoreAction.Replace" />Replace it
+                        </label>
+                        <label class="gb-bk-opt" data-tip="settings.backup.copy">
+                            <input type="radio" name="@($"bk-how-{item.Id}")" checked="@(p.Action == RestoreAction.Copy)" @onchange="() => p.Action = RestoreAction.Copy" />Restore as a copy named
+                            <input class="gb-input gb-input--sm gb-input--mono gb-bk-copyname" value="@p.CopyName" aria-label="@($"The name of {item.Title}'s copy")" spellcheck="false"
+                                   @oninput="e => { p.CopyName = e.Value?.ToString() ?? string.Empty; p.Action = RestoreAction.Copy; }" />
+                        </label>
+                        @if (p.Action == RestoreAction.Copy && BackupText.CopyNameProblem(p.CopyName) is { } bad)
+                        {
+                            <span class="gb-field-error">@bad</span>
+                        }
+                    </div>
+                }
+                else if (p.On)
+                {
+                    <span class="gb-help">@BackupText.AsItWas</span>
+                }
+                @if (target.Note is { Length: > 0 } note)
+                {
+                    <span class="gb-help gb-bk-note">@note</span>
+                }
+            </div>
+        }
+    </li>;
+
     private void Toggle(BackupItem item, bool on)
     {
         if (items is not null) ticked = BackupText.Toggle(items, ticked, item.Id, on);
@@ -397,7 +473,13 @@
         try
         {
             var check = await Restore.CheckAsync(restorePass ?? "");
-            if (check is { Problem: UploadProblem.None, Summary: { } read }) summary = read;
+            if (check is { Problem: UploadProblem.None, Summary: { } read })
+            {
+                (summary, targets, everything) = (read, check.Targets ?? [], check.Everything);
+                // Nothing picked yet; one that's here would come back as a copy unless Replace is chosen.
+                picks = targets.ToDictionary(t => t.ItemId, t => new Pick { Action = t.Here ? RestoreAction.Copy : RestoreAction.Restore, CopyName = t.CopyName },
+                    StringComparer.Ordinal);
+            }
             else (checkProblem, checkError) = (check.Problem, BackupText.CheckProblem(check.Problem, check.Message));
         }
         catch (Exception ex)
@@ -416,6 +498,7 @@
         {
             await Restore.DiscardUploadAsync();
             (summary, restorePass, checkError, checkProblem, fileName) = (null, null, null, UploadProblem.None, null);
+            (targets, picks, everything) = ([], new(StringComparer.Ordinal), false);
             ReadRestore();
             Snackbar.Add("The uploaded file was removed.", Severity.Info);
         }
@@ -425,12 +508,59 @@
         }
     }
 
+    // The picked apps and containers, into this Gitberth as it runs: a confirmation (restore typed when one replaces what's
+    // here), then the Restoring page, which knows there's no restart.
+    private async Task RestorePickedAsync()
+    {
+        if (summary is not { } s || PickProblem is not null) return;
+        var chosen = picks.Where(p => p.Value.On)
+            .Select(p => new RestorePick(p.Key, p.Value.Action, p.Value.Action == RestoreAction.Copy ? p.Value.CopyName.Trim() : null))
+            .ToList();
+        if (chosen.Count == 0) return;
+        var lines = chosen.Select(p => BackupText.PickLine(p, s.Items.FirstOrDefault(i => i.Id == p.ItemId)?.Title ?? p.ItemId))
+            .Append(BackupText.PickedNote).ToList();
+        bool go;
+        if (chosen.Any(p => p.Action == RestoreAction.Replace))
+        {
+            var dialog = await Dialogs.ShowAsync<ConfirmNameDialog>(null, new DialogParameters<ConfirmNameDialog>
+            {
+                { x => x.Title, BackupText.PickTitle(chosen.Count) },
+                { x => x.Lines, lines },
+                { x => x.Name, "restore" },
+                { x => x.ConfirmText, "Restore" },
+                { x => x.Icon, Icons.Material.Outlined.Restore },
+            }, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+            go = await dialog.Result is { Canceled: false };
+        }
+        else
+        {
+            go = await Dialogs.ShowMessageBoxAsync(BackupText.PickTitle(chosen.Count), string.Join(" ", lines), yesText: "Restore", cancelText: "Cancel") == true;
+        }
+        if (!go) return;
+        startingRestore = true;
+        try
+        {
+            await Restore.StartAsync(restorePass ?? "", chosen);
+            restorePass = null;
+            Nav.NavigateTo("restoring?picked=1");
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"The restore didn't start: {ex.Message.TrimEnd('.')}.", Severity.Error);
+            ReadRestore();
+        }
+        finally
+        {
+            startingRestore = false;
+        }
+    }
+
     private async Task RestoreAsync()
     {
         if (summary is not { } s) return;
         var dialog = await Dialogs.ShowAsync<ConfirmNameDialog>(null, new DialogParameters<ConfirmNameDialog>
         {
-            { x => x.Title, "Restore this backup?" },
+            { x => x.Title, "Restore everything from this backup?" },
             { x => x.Lines, BackupText.ConfirmLines(s) },
             { x => x.Name, "restore" },
             { x => x.ConfirmText, "Restore" },

@@ -78,6 +78,10 @@ public sealed class BackupRestoreTests
         Assert.Contains(check.Summary.Items, i => i.Id == "volume:web-data");
         Assert.Contains(check.Summary.Warnings, w => w.Kind == RestoreWarningKind.TunnelElsewhere && !w.Blocks);
         Assert.DoesNotContain(check.Summary.Warnings, w => w.Blocks);
+        // A Gitberth with no apps takes the whole backup; each top-level container is a target of its own, none here.
+        Assert.True(check.Everything);
+        Assert.Equal(["container:cloudflare-tunnel", "container:db", "container:tool", "container:web"], check.Targets!.Select(t => t.ItemId).Order(StringComparer.Ordinal));
+        Assert.Equal(new RestoreTarget("container:web", false, "web2", null), check.Targets!.Single(t => t.ItemId == "container:web"));
         Assert.Empty(host.Engine.Calls);
 
         await restore.StartAsync(BackupHost.Passphrase);
@@ -222,7 +226,7 @@ public sealed class BackupRestoreTests
     }
 
     [Fact]
-    public async Task A_Gitberth_with_apps_restores_nothing_and_says_why()
+    public async Task A_Gitberth_with_apps_takes_picked_items_but_never_the_whole_backup()
     {
         using var host = Fresh();
         await using (var db = host.Db.CreateDbContext())
@@ -231,10 +235,35 @@ public sealed class BackupRestoreTests
             await db.SaveChangesAsync();
         }
         var restore = host.Restore();
-        Assert.Contains("fresh install", restore.CantRestore());
-        await Assert.ThrowsAsync<InvalidOperationException>(() => restore.ReceiveAsync(new MemoryStream("GBAK"u8.ToArray()), default));
-        await Assert.ThrowsAsync<InvalidOperationException>(() => restore.StartAsync(BackupHost.Passphrase));
+        Assert.Null(restore.CantRestore());
+        Assert.Contains("already has apps", restore.CantRestoreEverything());
+        await restore.ReceiveAsync(new MemoryStream("GBAK"u8.ToArray()), default);
+        var why = await Assert.ThrowsAsync<InvalidOperationException>(() => restore.StartAsync(BackupHost.Passphrase));
+        Assert.Contains("already has apps", why.Message);
         Assert.Equal(UploadProblem.NotABackup, (await restore.CheckAsync(BackupHost.Passphrase)).Problem);
+    }
+
+    [Fact]
+    public async Task Restoring_everything_after_a_picked_restore_of_the_same_file_restores_everything()
+    {
+        using var old = new BackupHost();
+        var file = await SaveAsync(old);
+        using var host = Fresh();
+        var restore = host.Restore();
+        await restore.ReceiveAsync(new MemoryStream(file), default);
+        await restore.StartAsync(BackupHost.Passphrase, [new RestorePick("container:tool", RestoreAction.Restore)]);
+        await restore.PhaseOne;
+        Assert.True(restore.Status()!.Finished);
+        Assert.Contains("create tool", host.Engine.Calls);
+
+        // Not taken for the picked restore going on: a whole restore of its own, from its first step.
+        await restore.StartAsync(BackupHost.Passphrase);
+        var steps = restore.Status()!.Steps;
+        Assert.Contains(steps, s => s.Id == "gitberth");
+        Assert.DoesNotContain(steps, s => s.Id.StartsWith("container:tool:", StringComparison.Ordinal));
+        await restore.PhaseOne;
+        Assert.Equal(RestoreStepState.Done, restore.Status()!.Steps.Single(s => s.Id == "gitberth").State);
+        Assert.True(File.Exists(host.Paths.StagedReady));
     }
 
     [Fact]
