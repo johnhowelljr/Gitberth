@@ -39,7 +39,8 @@
 #   E2E_DIND_IMAGE, E2E_DIND_ARGS   the rig's engine (docker:29-dind) and dockerd's flags, e.g. --registry-mirror=...
 #   E2E_HOSTNAME       the rig's host name (gbe2e-host), E2E_LAN_SUBNET, E2E_LAN_GATEWAY and E2E_RIG_IP its LAN,
 #   E2E_GITBERTH_IMAGE the name Gitberth's image runs under (gitberth:e2e), and E2E_HIDE_RIG=1 the rig's own containers
-#                      out of Gitberth's pages (its helper label): the docs' screenshots (shots/run.sh) set them
+#                      out of Gitberth's pages (its helper label): the docs' screenshots (shots/run.sh) set them, and
+#                      E2E_SHOTS_ONLY=a,b, the pictures they keep
 #   E2E_NUGET_VOLUME   the unit tests' NuGet cache (gbe2e-nuget)
 # Everything it makes on this host is named gitberth-e2e or gbe2e-*. It never touches anything else.
 set -eu
@@ -185,7 +186,7 @@ inner() {
     *) refuse "E2E_TIMINGS is test or production, not $E2E_TIMINGS" ;;
   esac
   docker exec -e E2E_PUBLIC_HOST="$RIG_IP" -e E2E_KEEP="${E2E_KEEP:-}" -e E2E_TEMPLATES="${E2E_TEMPLATES:-}" \
-    -e E2E_GITBERTH_IMAGE="${E2E_GITBERTH_IMAGE:-}" -e E2E_HIDE_RIG="${E2E_HIDE_RIG:-}" "$@"
+    -e E2E_GITBERTH_IMAGE="${E2E_GITBERTH_IMAGE:-}" -e E2E_HIDE_RIG="${E2E_HIDE_RIG:-}" -e E2E_SHOTS_ONLY="${E2E_SHOTS_ONLY:-}" "$@"
 }
 
 # ---- the unit tests: on a copy of the tree, so a checkout never gets root's bin/ and obj/

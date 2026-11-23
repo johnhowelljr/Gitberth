@@ -212,13 +212,16 @@ runner() {
   hosts=""
   for h in github.com www.github.com api.github.com codeload.github.com uploads.github.com raw.githubusercontent.com \
            objects.githubusercontent.com api.cloudflare.com gitlab.e2e.test gitlab.com; do hosts="$hosts --add-host $h:$STANDIN_IP"; done
+  # The tree's own docs pictures, read-only: the docs' screenshots keep only a picture that looks different.
+  docs=""
+  [ ! -d "$SRC/docs/images" ] || docs="-v $SRC/docs/images:/docs-images:ro -e E2E_DOCS_IMAGES=/docs-images"
   # shellcheck disable=SC2086
-  docker run --rm --name gbe2e-runner --network "$NET" --shm-size 1g --label "$RIG_LABEL" $hosts \
+  docker run --rm --name gbe2e-runner --network "$NET" --shm-size 1g --label "$RIG_LABEL" $hosts $docs \
     -v gbe2e-trust:/trust:ro -e SSL_CERT_FILE=/trust/gitberth-bundle.pem \
     -v /var/run/docker.sock:/var/run/docker.sock -v "$E2E":/e2e:ro -v gitberth_gitberth-data:/gbdata -v "$OUT":/out \
     -e E2E_GITBERTH_URL=http://gitberth:8080 -e E2E_STANDIN_URL="http://$STANDIN:8099" -e E2E_ADMIN_PASSWORD="$pw" \
     -e E2E_PUBLIC_HOST="$PUBLIC_HOST" -e E2E_KEEP="${E2E_KEEP:-}" -e E2E_TEMPLATES="${E2E_TEMPLATES:-}" \
-    -e E2E_GITBERTH_CONTAINER=gitberth -e E2E_OUT=/out \
+    -e E2E_SHOTS_ONLY="${E2E_SHOTS_ONLY:-}" -e E2E_GITBERTH_CONTAINER=gitberth -e E2E_OUT=/out \
     -w /e2e/scenarios gbe2e-runner:latest python3 -m pytest -p no:cacheprovider "$@"
 }
 

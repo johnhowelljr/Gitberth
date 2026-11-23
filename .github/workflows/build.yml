@@ -73,10 +73,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check the map and the selector
+      - name: Check the maps and the selectors
         run: |
           python3 tests/e2e/impact.py check
           python3 -m unittest discover -s tests/e2e -p impact_test.py
+          python3 tests/e2e/shots/stale.py check
+          python3 -m unittest discover -s tests/e2e/shots -p stale_test.py
       - name: The change's tier
         env:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}

@@ -4,6 +4,7 @@ and the Shooter, which takes a picture, checks it shows only the docs' example v
 
 Not the scenarios' conftest: nothing here signs in as the scenarios' bot or removes what it made. The session starts from
 the fresh Gitberth and empty stand-ins `run.sh test` gives it."""
+import base64
 import json
 import os
 import re
@@ -32,6 +33,32 @@ from relay import Relay  # noqa: E402
 W, H, DPR = 1440, 900, 2
 OUT = os.path.join(config.OUT, "images")
 RAW = os.path.join(config.OUT, "raw")
+# The pictures this run keeps (run.sh sets it from stale.py): the stale ones. One taken on the way to them (a step's
+# own) isn't kept. Unset: every picture.
+ONLY = frozenset(n for n in os.environ.get("E2E_SHOTS_ONLY", "").split(",") if n) or None
+# docs/images as the tree has it (the rig mounts it): a picture that looks the same as its own there isn't kept.
+DOCS = os.environ.get("E2E_DOCS_IMAGES", "")
+# Looks the same: the same size, with at most this share of its pixels noticeably different (an encoder's or
+# anti-aliasing's noise; a changed word or icon is far more).
+SAME = 0.00002
+# Each picture kept, or found the same: "<name> kept|same", for taken.toml (run.sh).
+TAKEN = os.path.join(config.OUT, "taken.txt")
+# The share of two pictures' pixels that differ noticeably, in the framer's page; -1 when their sizes differ.
+DIFFERENCE = """async ([a, b]) => {
+    const bitmap = async src => createImageBitmap(await (await fetch(src)).blob());
+    const [x, y] = await Promise.all([bitmap(a), bitmap(b)]);
+    if (x.width !== y.width || x.height !== y.height) return -1;
+    const pixels = image => {
+        const c = new OffscreenCanvas(image.width, image.height).getContext('2d', { willReadFrequently: true });
+        c.drawImage(image, 0, 0);
+        return c.getImageData(0, 0, image.width, image.height).data;
+    };
+    const p = pixels(x), q = pixels(y);
+    let n = 0;
+    for (let i = 0; i < p.length; i += 4)
+        if (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2]) + Math.abs(p[i + 3] - q[i + 3]) > 48) n++;
+    return n / (x.width * x.height);
+}"""
 
 # What a picture must never show: the rig's and the server's own addresses and ports, and names that give the rig away.
 NOT_EXAMPLES = [
@@ -127,7 +154,8 @@ def demo():
 class Shooter:
     """Pages as the docs show them (1440 x 900, twice the pixels, dark, UTC), and their pictures: window() for the whole
     window, detail() for one element with a margin around it. Each is checked for values that aren't the docs' examples,
-    framed (frame.py) and saved as images/<name>.webp, with the raw PNG in raw/."""
+    framed (frame.py) and saved as images/<name>.webp, with the raw PNG in raw/; but not one this run doesn't take
+    (E2E_SHOTS_ONLY), one taken after a test failed, nor one that looks as docs/images has it."""
 
     def __init__(self, browser, gitberth):
         self.browser = browser
@@ -267,25 +295,64 @@ class Shooter:
             self.problems[name] = sorted(set(hits))
 
     def save(self, name, png, kind, page, width, height):
+        """Keeps the picture in images/ when it's one this run takes (ONLY), no test failed before it, and it looks
+        different from docs/images' own; a picture showing values that aren't the docs' examples fails the test and is
+        never kept."""
         path = page.evaluate("location.pathname")
         with open(os.path.join(RAW, name + ".png"), "wb") as f:
             f.write(png)
         with open(os.path.join(RAW, name + ".json"), "w", encoding="utf-8") as f:
             json.dump({"name": name, "kind": kind, "path": path, "width": width, "height": height, "dpr": DPR}, f)
-        webp = self.framer.frame(png, kind, width, height, path)
         out = os.path.join(OUT, name + ".webp")
-        with open(out, "wb") as f:
-            f.write(webp)
-        self.made[name] = (kind, width, height, len(webp))
-        print(f"[shots] {name}: {kind} {width}x{height}, {len(webp) // 1024} KB")
+        if ONLY is not None and name not in ONLY:
+            print(f"[shots] {name}: not stale, not kept")
+            return out
+        if REPORT["failed"]:
+            # What it shows may be off: a step that failed didn't set its part of the demo up. The next run takes it.
+            print(f"[shots] {name}: taken after a test failed, not kept")
+            REPORT["after_failure"].append(name)
+            return out
         if name in self.problems:
             raise AssertionError(f"{name} shows values that aren't the docs' examples: {'; '.join(self.problems[name])}")
+        webp = self.framer.frame(png, kind, width, height, path)
+        share = self.difference(name, webp)
+        if share is not None and 0 <= share <= SAME:
+            outcome = "same"
+            print(f"[shots] {name}: looks as docs/images has it ({share:.4%} of its pixels differ), not kept")
+        else:
+            outcome = "kept"
+            with open(out, "wb") as f:
+                f.write(webp)
+            seen = "new" if share is None else "another size" if share < 0 else f"{share:.2%} of its pixels differ"
+            print(f"[shots] {name}: {kind} {width}x{height}, {len(webp) // 1024} KB ({seen})")
+        self.made[name] = (kind, width, height, len(webp))
+        with open(TAKEN, "a", encoding="utf-8") as f:
+            f.write(f"{name} {outcome}\n")
         return out
+
+    def difference(self, name, webp):
+        """How much of the picture differs from docs/images' own: a share of its pixels, -1 when their sizes differ,
+        None when docs/images has none to compare with."""
+        old = os.path.join(DOCS, name + ".webp") if DOCS else ""
+        if not os.path.isfile(old):
+            return None
+        with open(old, "rb") as f:
+            before = f.read()
+        if before == webp:
+            return 0.0
+
+        def url(data):
+            return "data:image/webp;base64," + base64.b64encode(data).decode()
+        try:
+            return self.framer.page.evaluate(DIFFERENCE, [url(before), url(webp)])
+        except Exception as e:  # noqa: BLE001 - kept, as when there's nothing to compare with
+            print(f"[shots] {name}: couldn't compare it with docs/images' ({str(e).splitlines()[0][:160]}), kept")
+            return None
 
 
 # ---- the report ----
 
-REPORT = {"started": time.time(), "failed": []}
+REPORT = {"started": time.time(), "failed": [], "after_failure": []}
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -318,6 +385,15 @@ def pytest_terminal_summary(terminalreporter):
     except OSError:
         pass
     lines.append(f"PICTURES: {len(made)}: " + ", ".join(f"{n} ({s // 1024} KB)" for n, s in made.items()))
+    try:
+        with open(TAKEN, encoding="utf-8") as fh:
+            same = [n for n, outcome in (line.split() for line in fh if line.strip()) if outcome == "same"]
+    except OSError:
+        same = []
+    if same:
+        lines.append(f"LOOKED THE SAME, NOT KEPT: {len(same)}: " + ", ".join(same))
+    if REPORT["after_failure"]:
+        lines.append(f"TAKEN AFTER A FAILURE, NOT KEPT: {len(REPORT['after_failure'])}: " + ", ".join(REPORT["after_failure"]))
     for name, when, message in REPORT["failed"]:
         lines.append(f"FAILED: {name} ({when}): " + message.replace("\n", "\n  "))
     os.makedirs(config.OUT, exist_ok=True)

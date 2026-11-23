@@ -1,0 +1,282 @@
+# Which of the docs' pictures a change makes stale. tests/e2e/shots/stale.py reads this file, and shots/run.sh retakes
+# only the stale pictures: those that show a file that changed after the commit they were last taken from (taken.toml).
+# When none is stale, nothing runs. Paths are repo-relative globs, as in ../impact.toml: "*" stays within a folder, "**"
+# crosses folders. "@name" stands for a [sets] entry's globs. List what a picture shows: its page or section, the
+# components drawn in it, its styles, and the files its words come from when they aren't in the component (a backup's
+# warnings, a guide's text). stale.py check checks the map: every picture docs/images has and test_shots.py takes is
+# here, and every glob matches a file.
+version = 1
+
+# What every picture shows: Gitberth's look (its theme, global styles and fonts), the building blocks on every page
+# (buttons, fields, banners, switches, tips, icons, badges, little charts), and the frame around each picture.
+all = [
+  "src/Gitberth/wwwroot/app.css",
+  "src/Gitberth/wwwroot/fonts/**",
+  "src/Gitberth/wwwroot/css/tips.css",
+  "src/Gitberth/Components/App.razor",
+  "src/Gitberth/Components/GitberthTheme.cs",
+  "src/Gitberth/Components/Shared/AccessTag.razor",
+  "src/Gitberth/Components/Shared/AddressValue.razor",
+  "src/Gitberth/Components/Shared/AppKinds.cs",
+  "src/Gitberth/Components/Shared/AppLogo.razor",
+  "src/Gitberth/Components/Shared/AppStatus.cs",
+  "src/Gitberth/Components/Shared/Banner.razor",
+  "src/Gitberth/Components/Shared/Btn.razor",
+  "src/Gitberth/Components/Shared/BtnKind.cs",
+  "src/Gitberth/Components/Shared/ChartMath.cs",
+  "src/Gitberth/Components/Shared/CodeBlock.razor",
+  "src/Gitberth/Components/Shared/CopyButton.razor",
+  "src/Gitberth/Components/Shared/CopyText.razor",
+  "src/Gitberth/Components/Shared/DeployPill.razor",
+  "src/Gitberth/Components/Shared/EmptyState.razor",
+  "src/Gitberth/Components/Shared/Field.razor",
+  "src/Gitberth/Components/Shared/GitberthIcons.cs",
+  "src/Gitberth/Components/Shared/HeroStat.razor",
+  "src/Gitberth/Components/Shared/Logo.razor",
+  "src/Gitberth/Components/Shared/LogoCatalog*.cs",
+  "src/Gitberth/Components/Shared/Meter.razor",
+  "src/Gitberth/Components/Shared/PageHead.razor",
+  "src/Gitberth/Components/Shared/PageHeader.razor",
+  "src/Gitberth/Components/Shared/PageHelpLink.razor",
+  "src/Gitberth/Components/Shared/PortChip.razor",
+  "src/Gitberth/Components/Shared/Section.razor",
+  "src/Gitberth/Components/Shared/SectionCard.razor",
+  "src/Gitberth/Components/Shared/Seg.razor",
+  "src/Gitberth/Components/Shared/SegOption.cs",
+  "src/Gitberth/Components/Shared/SettingsSection.razor",
+  "src/Gitberth/Components/Shared/SourceBadge.razor",
+  "src/Gitberth/Components/Shared/Sparkline.razor",
+  "src/Gitberth/Components/Shared/SparkPath.cs",
+  "src/Gitberth/Components/Shared/StatusDot.razor",
+  "src/Gitberth/Components/Shared/StatusLabel.razor",
+  "src/Gitberth/Components/Shared/SvgIcon.razor",
+  "src/Gitberth/Components/Shared/SwitchRow.razor",
+  "src/Gitberth/Components/Shared/TabBar.razor",
+  "src/Gitberth/Components/Shared/TabItem.cs",
+  "src/Gitberth/Components/Shared/TimeChart.razor",
+  "src/Gitberth/Components/Shared/Tip.razor",
+  "src/Gitberth/Components/Shared/Waffle.razor",
+  "src/Gitberth/Components/Shared/WatchBadge.razor",
+  "tests/e2e/shots/frame.py",
+]
+
+# What a whole-window picture shows around its page: the sidebar, the top bar and its menus. A detail picture (one
+# section or dialog) doesn't show them, and neither do the whole-window pictures in window_except: the sign-in page and
+# the public pages have none.
+window = ["src/Gitberth/Components/Layout/**"]
+window_except = ["down-page", "login", "status-page"]
+
+# A change to one of these files counts only within its section: from the first line `from` matches to the next line
+# `to` matches, or the file's end. gitberth.js holds every page's scripts; only its charts' (Shared/TimeChart.razor's,
+# its last section) are in pictures.
+[only_within]
+"src/Gitberth/wwwroot/js/gitberth.js" = { from = "^// -+ Charts" }
+
+[sets]
+# An app's page: its hero (name, status, actions) and tabs.
+app-page = [
+  "src/Gitberth/Components/Pages/AppPage.razor",
+  "src/Gitberth/Components/Shared/AppHero.razor",
+  "src/Gitberth/Components/Apps/KeeperBanner.razor",
+]
+# An app's Overview tab: its cards, and its CPU and memory charts (drawn by gitberth.js).
+overview = [
+  "src/Gitberth/Components/Apps/AppOverviewTab.razor",
+  "src/Gitberth/Components/Shared/ActivityTimeline.razor",
+  "src/Gitberth/Components/Apps/UptimeCard.razor",
+  "src/Gitberth/Components/Shared/ScheduledJobsCard.razor",
+  "src/Gitberth/Components/Apps/DatabasesCard.razor",
+  "src/Gitberth/wwwroot/css/uptime.css",
+  "src/Gitberth/wwwroot/js/gitberth.js",
+]
+# An app's Settings tab, around its sections.
+app-settings = [
+  "src/Gitberth/Components/Apps/AppSettingsTab.razor",
+  "src/Gitberth/Components/Shared/ApplyBar.razor",
+]
+# New app, around each source's form.
+new-app = [
+  "src/Gitberth/Components/NewApp/NewAppPage.razor",
+  "src/Gitberth/Components/NewApp/NewAppState.cs",
+  "src/Gitberth/wwwroot/css/network-newapp.css",
+]
+# New app's Configure step: the settings a new app starts with.
+configure = [
+  "src/Gitberth/Components/NewApp/ConfigureForm.razor",
+  "src/Gitberth/Components/NewApp/ParseIssues.razor",
+  "src/Gitberth/Components/Shared/Network/PortsTable.razor",
+  "src/Gitberth/Components/Apps/ResourceFields.razor",
+  "src/Gitberth/Components/Apps/SettingsAdvanced.razor",
+  "src/Gitberth/Components/Apps/SettingsLabels.razor",
+  "src/Gitberth/Components/Apps/SettingsLogging.razor",
+  "src/Gitberth/Components/Shared/EnvEditor.razor",
+  "src/Gitberth/Components/Shared/VolumesEditor.razor",
+]
+# Gitberth's Settings page: its sections are drawn in it, or in a component of their own besides.
+settings = ["src/Gitberth/Components/Pages/SettingsPage.razor"]
+# Save and restore, and what a backup holds and warns about.
+backup = [
+  "src/Gitberth/Components/Shared/BackupSection.razor",
+  "src/Gitberth/Components/Shared/BackupText.cs",
+  "src/Gitberth/wwwroot/css/backup.css",
+  "src/Gitberth/Backup/**",
+]
+# The templates: the gallery, a template's page and its first steps, from the catalog.
+templates = [
+  "src/Gitberth/Components/NewApp/TemplateSource.razor",
+  "src/Gitberth/wwwroot/css/templates.css",
+  "src/Gitberth/Templates/**",
+]
+# An app's network: ports, addresses, domains, networks and the changes to them.
+network = [
+  "src/Gitberth/Components/Shared/Network/**",
+  "src/Gitberth/wwwroot/css/network-newapp.css",
+]
+# The tag picker (its styles are in network-newapp.css).
+tags = [
+  "src/Gitberth/Components/Shared/TagPicker.razor",
+  "src/Gitberth/Components/Shared/TagPickerDialog.razor",
+  "src/Gitberth/Components/Shared/ImagePickerText.cs",
+  "src/Gitberth/wwwroot/css/network-newapp.css",
+]
+# New app's Registry source: Docker Hub's search and Popular (New app opens on it).
+registry = [
+  "src/Gitberth/Components/NewApp/RegistrySource.razor",
+  "src/Gitberth/Components/Shared/ImagePickerText.cs",
+]
+# A log, as Gitberth shows one.
+log = [
+  "src/Gitberth/Components/Shared/LogView.razor",
+  "src/Gitberth/Components/Shared/LogLine.cs",
+]
+# A change applied after a review: its steps.
+change = [
+  "src/Gitberth/Components/Shared/ChangeDialog.razor",
+  "src/Gitberth/Components/Shared/Network/ChangeSteps.razor",
+  "src/Gitberth/Components/Shared/Network/ChangeText.cs",
+]
+# The Apps list's rows.
+apps = [
+  "src/Gitberth/Components/Pages/Apps.razor",
+  "src/Gitberth/Components/Apps/AppRow.razor",
+  "src/Gitberth/Components/Apps/AppListView.cs",
+]
+# The public pages Gitberth serves itself.
+public = ["src/Gitberth/Public/**"]
+
+[pictures]
+app-activity = ["@app-page", "src/Gitberth/Components/Apps/AppActivityTab.razor", "src/Gitberth/Components/Shared/ActivityTimeline.razor"]
+app-compose-services = ["src/Gitberth/Components/Apps/ComposeServicesCard.razor"]
+app-databases = ["@app-settings", "src/Gitberth/Components/Apps/DatabasesSection.razor"]
+app-deploy-hooks = ["@app-settings", "src/Gitberth/Components/Apps/DeployHooksSection.razor"]
+app-environment = [
+  "@app-page",
+  "src/Gitberth/Components/Apps/AppEnvironmentTab.razor",
+  "src/Gitberth/Components/Shared/EnvEditor.razor",
+  "src/Gitberth/Components/Shared/RepoVariablesEditor.razor",
+]
+app-logs = ["@app-page", "@log", "src/Gitberth/Components/Shared/ContainerLogs.razor"]
+# The menu open over website's Overview.
+app-more-menu = ["@app-page", "@overview", "src/Gitberth/Components/Apps/AppCommands.cs"]
+app-network = ["@app-page", "@network", "src/Gitberth/Components/Apps/NetworkTab.razor"]
+app-overview = ["@app-page", "@overview"]
+app-previews = ["@app-page", "src/Gitberth/Components/Apps/AppPreviewsTab.razor"]
+app-settings = ["@app-page", "@app-settings", "src/Gitberth/Components/Apps/ResourceFields.razor", "src/Gitberth/Components/Apps/ComposeSourceSection.razor"]
+app-settings-build = ["@app-settings"]
+app-settings-restart = ["@app-settings", "src/Gitberth/Components/Shared/RestartScheduleButton.razor", "src/Gitberth/Components/Shared/RestartScheduleDialog.razor"]
+app-settings-tags = ["@tags"]
+app-settings-updates = ["@app-settings"]
+app-uptime = ["src/Gitberth/Components/Apps/UptimeCard.razor", "src/Gitberth/wwwroot/css/uptime.css"]
+apps-list = ["@apps", "src/Gitberth/Components/Apps/HostStrip.razor"]
+apps-row-menu = ["@apps", "src/Gitberth/Components/Apps/AppCommands.cs"]
+audit-log = [
+  "src/Gitberth/Components/Pages/AuditLog.razor",
+  "src/Gitberth/Components/Pages/AuditLog.razor.css",
+  "src/Gitberth/Components/Shared/AuditLook.cs",
+  "src/Gitberth/Audit/AuditText.cs",
+]
+change-dialog = ["@change"]
+dashboard = [
+  "src/Gitberth/Components/Pages/Home.razor",
+  "src/Gitberth/Components/Shared/ActivityTimeline.razor",
+  "src/Gitberth/Components/Shared/AttentionBanners.razor",
+  "src/Gitberth/Components/Apps/AppRow.razor",
+]
+deploy-log = ["@log", "src/Gitberth/Components/Pages/DeploymentView.razor", "src/Gitberth/Components/Shared/DeploymentLog.razor"]
+down-page = ["@public"]
+health = ["src/Gitberth/Components/Pages/Health.razor", "src/Gitberth/Components/Shared/RestartScheduleButton.razor"]
+# Its charts are drawn by gitberth.js.
+health-charts = ["src/Gitberth/Components/Pages/Health.razor", "src/Gitberth/wwwroot/js/gitberth.js"]
+# The Help menu open over Apps.
+help-menu = ["@apps", "src/Gitberth/Components/Layout/HelpMenu.razor"]
+# The guide it shows, as Gitberth's Help draws it.
+help-page = [
+  "src/Gitberth/Components/Pages/HelpPage.razor",
+  "src/Gitberth/Components/Shared/HelpNav.razor",
+  "src/Gitberth/wwwroot/css/help.css",
+  "src/Gitberth/wwwroot/js/help.js",
+  "src/Gitberth/Help/*.cs",
+  "src/Gitberth/wwwroot/lib/mermaid/**",
+  "docs/help.yaml",
+  "docs/guides/deploys-and-rollbacks.md",
+]
+login = ["src/Gitberth/Components/Pages/Login.razor", "src/Gitberth/Components/Layout/EmptyLayout.razor"]
+network-check-port = ["src/Gitberth/Components/Pages/NetworkPage.razor", "src/Gitberth/Components/Pages/NetworkPageView.cs", "src/Gitberth/wwwroot/css/network-page.css"]
+network-page = ["src/Gitberth/Components/Pages/NetworkPage.razor", "src/Gitberth/Components/Pages/NetworkPageView.cs", "src/Gitberth/wwwroot/css/network-page.css"]
+new-app-configure = ["@new-app", "@configure", "src/Gitberth/Components/NewApp/CreatePreview.razor"]
+new-app-git-compose = ["@new-app", "src/Gitberth/Components/NewApp/GitSource.razor", "src/Gitberth/Components/NewApp/ComposeWholeForm.razor"]
+new-app-github = ["@new-app", "src/Gitberth/Components/NewApp/GitSource.razor"]
+new-app-github-settings = ["@new-app", "@configure", "src/Gitberth/Components/NewApp/GitSource.razor"]
+new-app-gitlab = ["@new-app", "src/Gitberth/Components/NewApp/GitSource.razor"]
+new-app-local = ["@new-app", "src/Gitberth/Components/NewApp/LocalSource.razor"]
+new-app-paste = ["@new-app", "src/Gitberth/Components/NewApp/HandSource.razor"]
+new-app-paste-compose = ["@new-app", "src/Gitberth/Components/NewApp/HandSource.razor", "src/Gitberth/Components/NewApp/ComposeWholeForm.razor"]
+# What Railpack says it will build.
+new-app-railpack = ["@new-app", "src/Gitberth/Components/NewApp/GitSource.razor", "src/Gitberth/Railpack/**"]
+new-app-registry = ["@new-app", "@registry", "@tags"]
+new-app-review = ["@new-app", "src/Gitberth/Components/NewApp/CreatePreview.razor"]
+# New app as it opens: the sources, and the Registry source's search and Popular.
+new-app-sources = ["@new-app", "@registry"]
+new-app-tags = ["@registry", "@tags"]
+notification-dialog = ["src/Gitberth/Components/Shared/DestinationDialog.razor"]
+own-lan-address = [
+  "src/Gitberth/Components/Shared/Network/LanAddressCard.razor",
+  "src/Gitberth/Components/Shared/Network/LanAddressCheck.cs",
+  "src/Gitberth/Components/Shared/Network/LanBlockText.cs",
+  "src/Gitberth/wwwroot/css/network-newapp.css",
+]
+publish-port-dialog = ["@change", "@network"]
+remove-app-dialog = ["src/Gitberth/Components/Apps/RemoveAppDialog.razor"]
+scheduled-jobs = ["src/Gitberth/Components/Shared/ScheduledJobsCard.razor"]
+settings = ["@settings"]
+settings-agents = ["@settings", "src/Gitberth/Components/Shared/ApiTokensSection.razor"]
+settings-audit = ["@settings", "src/Gitberth/Components/Shared/AuditLogSection.razor"]
+settings-backup = ["@settings", "@backup"]
+settings-databases = ["@settings", "src/Gitberth/Components/Shared/DatabaseServersSection.razor"]
+settings-deploys = ["@settings"]
+settings-disk = ["@settings", "src/Gitberth/Components/Shared/DiskSection.razor", "src/Gitberth/Components/Shared/BuildCacheRow.razor"]
+settings-domains = ["@settings"]
+settings-github = ["@settings"]
+settings-github-integration = ["@settings"]
+settings-gitlab = ["@settings", "src/Gitberth/Components/Shared/GitLabSection.razor"]
+settings-keep = ["@settings", "src/Gitberth/Components/Shared/KeepRunningSection.razor"]
+settings-network = ["@settings"]
+settings-notifications = ["@settings", "src/Gitberth/Components/Shared/NotificationsSection.razor"]
+# What it says about the host's network and the block.
+settings-own-lan = ["@settings", "src/Gitberth/Components/Shared/Network/LanBlockText.cs", "src/Gitberth/Network/LanAddresses.cs"]
+settings-previews = ["@app-settings", "src/Gitberth/Components/Apps/PreviewSettingsSection.razor"]
+settings-registries = ["@settings"]
+settings-restore-summary = ["@settings", "@backup"]
+settings-updates = ["@settings"]
+settings-uptime = ["@settings", "src/Gitberth/Components/Shared/UptimeSection.razor", "src/Gitberth/wwwroot/css/uptime.css"]
+status-page = ["@public"]
+# The deploy page a template's install lands on, with its First steps box.
+template-first-steps = ["@templates", "@log", "src/Gitberth/Components/Pages/DeploymentView.razor", "src/Gitberth/Components/Shared/DeploymentLog.razor"]
+# Both drawn inside New app (its breadcrumbs and steps; the gallery shows the sources too).
+template-gallery = ["@new-app", "@templates"]
+template-page = ["@new-app", "@templates"]
+# The tip open on website's Settings tab: Gather stats's, from app.yaml.
+tip-open = ["@app-page", "@app-settings", "src/Gitberth/wwwroot/js/tips.js", "src/Gitberth/Help/Tips/app.yaml"]
+update-available = ["src/Gitberth/Components/Apps/AppOverviewTab.razor", "src/Gitberth/Images/UpdateService.cs"]
+update-dialog = ["@change", "src/Gitberth/Components/Pages/AppPage.razor"]
+update-rollback = ["src/Gitberth/Components/Apps/AppOverviewTab.razor", "src/Gitberth/Images/UpdateService.cs"]

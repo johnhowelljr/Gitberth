@@ -177,12 +177,31 @@ removes only those names. (The `docker:29-dind` image stays, since other things 
 
 ## The docs' screenshots
 
-`tests/e2e/shots/` takes every picture `docs/` shows. It's on demand only: never in an impact plan, the full suite or CI.
+`tests/e2e/shots/` takes the pictures `docs/` shows. It's on demand only: never in an impact plan, the full suite or CI.
+It takes only the pictures a change made stale, and keeps only those that look different.
 
 ```sh
-sh tests/e2e/shots/run.sh                                     # every picture, into docs/images (WebP)
+sh tests/e2e/shots/run.sh                                     # the stale pictures, into docs/images (WebP)
+sh tests/e2e/shots/run.sh --also dashboard,settings           # those too, stale or not
+sh tests/e2e/shots/run.sh --all                               # every picture
 sh tests/e2e/shots/run.sh -k "step or dashboard or settings"  # every set-up step, and the pictures named
 ```
+
+A picture is stale when a file it shows changed after the commit it was last taken from, or the shot that takes it
+changed. `shots/pictures.toml` lists what each picture shows: its page or section, the components drawn in it, its
+styles, and where its words come from when that isn't the component. Files every picture shows are under `all` (the
+theme, the building blocks), and the sidebar and top bar under `window`, for the whole-window pictures.
+`shots/taken.toml` says which commit each picture was last taken from. `shots/stale.py plan` lists the stale pictures
+and why; with none, `run.sh` does nothing. It reads `test_shots.py` with `ast` to know which test takes each picture
+and whether a shot, or a helper or constant it uses, changed. A change in another file the shots import, such as
+`demo.py`, isn't seen: name the pictures it changes with `--also`.
+
+The run takes every set-up step and the shots of the stale pictures. A picture is kept only when it looks different
+from the one in `docs/images`: same size, with more than 0.002% of its pixels noticeably different. The pictures the
+steps take on the way aren't kept. After the run, `taken.toml` says the pictures taken (kept or not) were taken from the
+head commit. Commit it with the pictures. `run.sh` needs Python 3.11 or later and git: the tree's own checkout, or
+`E2E_SHOTS_GIT` naming a clone and `E2E_SHOTS_HEAD` the commit the tree is. `shots/stale.py check` checks the map
+against the tree, as CI does.
 
 It runs `run.sh test` on rig c (`E2E_INSTANCE` picks another) made to look like the docs' example home server: host
 name `homelab` (`E2E_HOSTNAME`), the LAN 192.168.50.0/24 with Gitberth at `http://192.168.50.10:8080`
