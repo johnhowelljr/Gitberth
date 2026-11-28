@@ -1,0 +1,129 @@
+@using Gitberth.Health
+@inject HealthRules Rules
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@*
+    An app's own health alerts and unhealthy restarts (its Settings tab; src/Gitberth/Health/HealthRules.cs): Gitberth's
+    defaults, numbers of its own, or no alerts; and whether Gitberth restarts it when Docker says it's unhealthy. Kept by
+    container name, so it works for every container, and saved at once (it changes nothing in the container).
+*@
+<SettingsSection Id="sec-alerts" Title="Health alerts and restarts" Icon="@Icons.Material.Outlined.NotificationImportant" Changed="@Dirty" Description="@Line" Tip="app.settings.alerts">
+    <Field Label="Alerts" Tip="app.settings.alerts.mode">
+        <Seg T="AppAlertMode" Options="ModeOptions" Value="draft.Alerts" ValueChanged="v => draft = draft with { Alerts = v }" Label="Health alerts for this app" />
+    </Field>
+    @if (draft.Alerts == AppAlertMode.Own)
+    {
+        <div class="gb-fgrid gb-fgrid--4">
+            <Field Label="CPU above" For="aa-cpu" Tip="app.settings.alerts.cpu">
+                <label class="gb-input"><input id="aa-cpu" type="number" min="@HealthRules.MinPercent" max="@HealthRules.MaxPercent" value="@draft.CpuPercent"
+                       @onchange="e => draft = draft with { CpuPercent = Int(e.Value, draft.CpuPercent) }" /><span class="gb-input-suffix">%</span></label>
+            </Field>
+            <Field Label="For" For="aa-cpu-min" Tip="app.settings.alerts.cpu-minutes">
+                <label class="gb-input"><input id="aa-cpu-min" type="number" min="@HealthRules.MinMinutes" max="@HealthRules.MaxMinutes" value="@draft.CpuMinutes"
+                       @onchange="e => draft = draft with { CpuMinutes = Int(e.Value, draft.CpuMinutes) }" /><span class="gb-input-suffix">min</span></label>
+            </Field>
+            <Field Label="Memory above" For="aa-mem" Tip="app.settings.alerts.memory">
+                <label class="gb-input"><input id="aa-mem" type="number" min="@HealthRules.MinPercent" max="@HealthRules.MaxPercent" value="@draft.MemoryPercent"
+                       @onchange="e => draft = draft with { MemoryPercent = Int(e.Value, draft.MemoryPercent) }" /><span class="gb-input-suffix">%</span></label>
+            </Field>
+            <Field Label="For" For="aa-mem-min" Tip="app.settings.alerts.memory-minutes">
+                <label class="gb-input"><input id="aa-mem-min" type="number" min="@HealthRules.MinMinutes" max="@HealthRules.MaxMinutes" value="@draft.MemoryMinutes"
+                       @onchange="e => draft = draft with { MemoryMinutes = Int(e.Value, draft.MemoryMinutes) }" /><span class="gb-input-suffix">min</span></label>
+            </Field>
+        </div>
+    }
+    <SwitchRow Title="Restart it when it turns unhealthy" Value="@(draft.RestartUnhealthy && !Self)" ValueChanged="v => draft = draft with { RestartUnhealthy = v }" Disabled="@Self"
+               Tip="app.settings.alerts.restart" Sub="@RestartSub" />
+    @if (Problem is { } problem)
+    {
+        <p class="gb-help gb-tone-warning">@problem</p>
+    }
+    <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+        <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveAsync" Busy="saving" Disabled="@(!Dirty || Problem is not null)"
+             Tip="app.settings.alerts.save">Save alerts and restarts</Btn>
+    </div>
+</SettingsSection>
+
+@code {
+    /// <summary>The app's container: what its choices are kept by.</summary>
+    [Parameter, EditorRequired] public string Container { get; set; } = "";
+
+    /// <summary>Gitberth's own container: alerts, but never restarted by itself.</summary>
+    [Parameter] public bool Self { get; set; }
+
+    private AppHealthRules saved = new(), draft = new();
+    private bool saving;
+
+    private static readonly IReadOnlyList<SegOption<AppAlertMode>> ModeOptions =
+    [
+        new(AppAlertMode.Defaults, "Gitberth's defaults", Tip: "app.settings.alerts.defaults"),
+        new(AppAlertMode.Own, "Its own", Tip: "app.settings.alerts.own"),
+        new(AppAlertMode.Off, "Off", Tip: "app.settings.alerts.off"),
+    ];
+
+    private bool Dirty => draft != saved;
+
+    private string? Problem => draft.Alerts == AppAlertMode.Own ? HealthRules.Problem(draft.CpuPercent, draft.CpuMinutes, draft.MemoryPercent, draft.MemoryMinutes) : null;
+
+    private string Line
+    {
+        get
+        {
+            var r = HealthRules.For(Rules.Current with { Apps = Rules.Current.Apps.SetItem(Container, saved) }, Container);
+            var alerts = !Rules.Current.Alerts.On ? "Health alerts are off in Settings"
+                : r.On ? $"Alerts at CPU {r.CpuPercent}% for {r.CpuMinutes} min and memory {r.MemoryPercent}% for {r.MemoryMinutes} min" : "No health alerts";
+            var restarts = Self ? "never restarted by Gitberth" : !Rules.Current.RestartUnhealthy ? "unhealthy restarts are off in Settings"
+                : saved.RestartUnhealthy ? "restarted when it turns unhealthy" : "not restarted when unhealthy";
+            return $"{alerts}; {restarts}.";
+        }
+    }
+
+    private string RestartSub => Self
+        ? "Gitberth never restarts itself."
+        : "When Docker says its health check keeps failing, Gitberth restarts it: at most 3 times in an hour, then it tells you and leaves it." +
+          (Rules.Current.RestartUnhealthy ? "" : " Off for every app in Settings › Keep apps running.");
+
+    private string? loadedFor;
+
+    // Read when it opens on a container; the page drawing again keeps what's being typed.
+    protected override void OnParametersSet()
+    {
+        if (loadedFor == Container) return;
+        loadedFor = Container;
+        draft = saved = Rules.App(Container);
+    }
+
+    protected override void OnInitialized() => Rules.Changed += OnChanged;
+
+    public void Dispose() => Rules.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(() =>
+    {
+        var was = saved;
+        saved = Rules.App(Container);
+        if (draft == was) draft = saved;
+        StateHasChanged();
+    });
+
+    private static int Int(object? value, int fallback) => int.TryParse(value?.ToString(), out var n) ? n : fallback;
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        try
+        {
+            await Rules.SetAppAsync(Container, draft);
+            saved = draft = Rules.App(Container);
+            Snackbar.Add("Saved its health alerts and restarts.", Severity.Success);
+        }
+        catch (ArgumentException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

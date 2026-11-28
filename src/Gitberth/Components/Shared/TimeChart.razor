@@ -169,7 +169,7 @@
     private object[] Point(int i) =>
     [
         UnixMs(Times[i]),
-        Format.Clock(Times[i]),
+        When(Times[i]),
         Series.Select(s => s.Values[i] is { } v ? Math.Round(v, 3) : (double?)null).ToArray(),
         Series.Select(s => s.Values[i] is { } v ? ValueFormat(v) : null).ToArray(),
     ];
@@ -190,8 +190,11 @@
 
     private static long UnixMs(DateTime utc) => (long)(utc - DateTime.UnixEpoch).TotalMilliseconds;
 
-    private static string Ago(TimeSpan span) => span.TotalMinutes >= 120 ? $"{span.TotalHours:0} h ago" : $"{span.TotalMinutes:0} min ago";
+    // builder A: a window of days (the Health page's 7, 30 and 90) says days, and its points their date too.
+    private string When(DateTime t) => Window > TimeSpan.FromHours(24) ? Format.Local(t) : Format.Clock(t);
+
+    private static string Ago(TimeSpan span) => span.TotalHours >= 48 ? $"{span.TotalDays:0} d ago" : span.TotalMinutes >= 120 ? $"{span.TotalHours:0} h ago" : $"{span.TotalMinutes:0} min ago";
 
     private static string Span(TimeSpan span) =>
-        span.TotalMinutes >= 120 ? $"{span.TotalHours:0} hours" : span == TimeSpan.FromHours(1) ? "hour" : $"{span.TotalMinutes:0} minutes";
+        span.TotalHours >= 48 ? $"{span.TotalDays:0} days" : span.TotalMinutes >= 120 ? $"{span.TotalHours:0} hours" : span == TimeSpan.FromHours(1) ? "hour" : $"{span.TotalMinutes:0} minutes";
 }

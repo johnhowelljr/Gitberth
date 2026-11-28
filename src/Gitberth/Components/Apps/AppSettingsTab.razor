@@ -446,6 +446,9 @@ else
             <SettingsAdvanced Draft="Draft" ReadOnly="@(f => RO(f))" Changed="Changed" ImageStopSignal="@image?.StopSignal" />
             }
 
+            @* ---- builder A: its health alerts and unhealthy restarts, kept by container name ---- *@
+            <AppHealthSettings Container="@app.Container" Self="@(app.Role == ContainerRole.Self)" />
+
             @if (app.Role != ContainerRole.Self)
             {
                 <SettingsSection Id="sec-remove" Title="@($"Remove {app.Title}")" Icon="@Icons.Material.Outlined.Delete" Danger="true" Tip="app.settings.remove"

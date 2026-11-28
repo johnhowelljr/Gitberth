@@ -87,6 +87,8 @@ The events are switches under **Tell me when**. With no destination the section 
 | **Docker's disk gets full** | Free space drops under the warning line (see [Disk](#disk)), again when it's so low Gitberth stops pulling images, and once there's room again. | On |
 | **An automatic backup fails** | A scheduled backup or **Back up now** didn't reach its destination: once, again when the reason changes or a day later, and once a backup works again (see [Automatic backups](#automatic-backups)). | On |
 | **A new version is out** | A new version of Gitberth (see [Updates](#updates)), or a newer image of an app set to **Tell me**: once for each; and how an update of Gitberth itself ended. | On |
+| **An app's CPU or memory stays high** | Above the line of [Health alerts](#health-alerts) (or the app's own) for its minutes, and once it's back under. | On |
+| **Gitberth restarts an unhealthy app** | Each restart of an app Docker says is unhealthy, and once more if Gitberth stops trying after 3 in an hour (see [Keep apps running](#keep-apps-running)). | On |
 | **Previews too** | Deploys of previews as well. | Off |
 
 Each destination's row shows where it goes without its secret (`https://discord.com/…`), and how its last message went: **Sent 2 min ago** or **Failed 2 min ago** with the reason. An app's own **Notifications** switch (its Settings tab, **General**) leaves it out; the line under the switches counts the apps left out.
@@ -191,8 +193,22 @@ stopped, in Gitberth or with `docker stop`, stays stopped. See
 | **Bring apps back by themselves** | Every 30 seconds Gitberth looks at every app that's meant to run and brings back one that stopped by itself: up to 4 tries in a row (at once, then 1, 5 and 15 minutes after the try before), then it tells you and only tries every 6 hours. Off, every stopped app is left as it is. Saved at once. | On |
 | **Gitberth stopped bringing these back** | Shown only when there are some: each app it gave up on, why, and when. **Start** starts it as its own Start button does; its tries count from the first again. | |
 | The line under them | How many times Gitberth brought an app back in the last 24 hours, and which apps, like **Brought back 3 times in the last 24 hours: orders-api and website.** | |
+| **Restart apps that turn unhealthy** | Every 30 seconds Gitberth restarts a running container Docker says is unhealthy: at most 3 times in an hour, then it tells you and leaves it as it is until its health check passes again or someone restarts it. An app can be left out on its Settings tab. The apps it stopped restarting are named under the switch. Saved at once. See [When an app turns unhealthy](../guides/health-and-monitoring.md#when-an-app-turns-unhealthy). | On |
 
-Every change of the switch is recorded in the audit log.
+Every change of the switches is recorded in the audit log.
+
+## Health alerts
+
+A notification, an entry in the app's Activity, and a banner on the dashboard when an app's CPU or memory stays high, and again once it's back under. See [Health alerts](../guides/health-and-monitoring.md#health-alerts).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Alert on high CPU and memory** | On or off, for every app. | On |
+| **CPU above** and **For** | The line: the app's average CPU over that many minutes, as a share of its CPU limit, or of the host's CPUs when it has none. 10 to 100%, 1 to 60 minutes. | 90% for 10 minutes |
+| **Memory above** and **For** | The same for memory, against its memory limit, or the host's memory. | 90% for 5 minutes |
+| **Save** | Saves the four numbers and the switch. | |
+
+The line under the fields names the apps that are high now, and how many have numbers of their own or no alerts (each app's **Settings** tab, **Health alerts and restarts**). Every change is recorded in the audit log.
 
 ## Network
 

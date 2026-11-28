@@ -1,6 +1,6 @@
 # Health and monitoring
 
-Gitberth records the CPU, memory and network traffic of every container on the host every 5 seconds, including the ones it didn't start, such as cloudflared and Gitberth itself. It keeps 6 hours of readings, across its own restarts, and marks deploys, restarts, crashes and health changes on the charts. This page covers the **Health** page, an app's own charts, and health checks: how to add one and what Gitberth does with it.
+Gitberth records the CPU, memory and network traffic of every container on the host every 5 seconds, including the ones it didn't start, such as cloudflared and Gitberth itself. It keeps every reading for 6 hours, then 5-minute averages for 14 days and hourly ones for 90 days, across its own restarts, and marks deploys, restarts, crashes and health changes on the charts. This page covers the **Health** page, an app's own charts, health alerts, and health checks: how to add one and what Gitberth does with it, including restarting an app that turns unhealthy.
 
 ## The Health page
 
@@ -9,7 +9,7 @@ Click **Health** in the sidebar. The page lists every container that runs on the
 ![The Health page](../images/health.webp)
 
 - **The header** shows the host's name, its CPUs, its memory and how many containers run. **Live** with the time of the last reading means the page is current. **Not updating** means Gitberth can't read Docker right now, and the last readings stay on screen.
-- **1 hour** shows every reading. **6 hours** shows 30-second averages.
+- **1 hour** shows every reading. **6 hours** shows 30-second averages. **24 hours** shows 5-minute averages, **7 days** and **30 days** hourly ones, and **90 days** 3-hour ones (see [How long readings are kept](#how-long-readings-are-kept)).
 - **Find a container** searches by name, title or image. **Busiest first** and **A to Z** set the order.
 - The twelve busiest show first. **Show the other …** lists the rest.
 - **Each row** shows the container's name (and its image), its state, a CPU sparkline with the latest reading, its memory, and what happened to it in the time shown, like `1 deploy · 2 restarts`. An app that's [checked from outside](uptime-and-status-page.md) also shows how that stands, like **Uptime: up**.
@@ -72,11 +72,34 @@ Turn off **Gather stats** above a container's charts. It moves to **Not gatherin
 
 ## An app's own charts
 
-An app's **Overview** tab has a **Resources** card with its **CPU** and **Memory** charts. **1 h** shows the last hour, every 5 seconds; **6 h** shows the last 6 hours, every 30 seconds. The card says how long the app was last down, and **Open in Health** opens its row on the Health page.
+An app's **Overview** tab has a **Resources** card with its **CPU** and **Memory** charts. **1 h** shows the last hour, every 5 seconds; **6 h** shows the last 6 hours, every 30 seconds; **24 h**, **7 d**, **30 d** and **90 d** show the averages Gitberth keeps for longer. The card says how long the app was last down, and **Open in Health** opens its row on the Health page.
 
 ![An app's Overview tab](../images/app-overview.webp)
 
 When stats aren't gathered for the app, the card says **Stats aren't gathered for it**, with **Turn it on in Settings**.
+### How long readings are kept
+
+| What | Kept | Shown by |
+|---|---|---|
+| Every 5-second reading | 6 hours | **1 hour** (as they are) and **6 hours** (30-second averages) |
+| 5-minute averages and peaks of CPU and memory, and network averages | 14 days | **24 hours** |
+| 1-hour averages and peaks | 90 days | **7 days**, **30 days**, and **90 days** (3-hour averages) |
+
+Gitberth works the averages out from the readings as each 5 minutes ends, in its `stats.db`. A chart of days shows each point's date and time, and its axis counts days. The marks for deploys, restarts and crashes go back 6 hours.
+
+## Health alerts
+
+When an app's CPU or memory stays high, Gitberth tells you: a [notification](notifications.md) (**An app's CPU or memory stays high**), an entry in the app's Activity, and a banner on the dashboard that stays while it's high. Once it's back under, it says so and the banner goes.
+
+**Settings › Health alerts** sets the line for every app:
+
+| Field | What it means | Default |
+|---|---|---|
+| **Alert on high CPU and memory** | On or off for every app. | On |
+| **CPU above** and **For** | The average CPU over that many minutes, as a share of the app's CPU limit, or of the host's CPUs when it has none. | 90% for 10 minutes |
+| **Memory above** and **For** | The average memory over that many minutes, as a share of the app's memory limit, or of the host's memory when it has none. | 90% for 5 minutes |
+
+An alert starts when the average over its minutes is above the line, and ends once every reading of those minutes is back under it. An app's own line is on its **Settings** tab, under **Health alerts and restarts**: **Gitberth's defaults**, **Its own** (the same four numbers), or **Off**. The choice is kept by container name, so it works for every container, and it changes nothing in the container itself. What's high is remembered across Gitberth's restarts, so a restart doesn't tell it again.
 
 The app's header also shows its uptime, CPU (with a sparkline) and memory, against its limit when it has one.
 
@@ -119,7 +142,15 @@ The field shows for Git apps and for apps with a web port.
 - **Checks the health URL.** After the container is up, Gitberth requests the health URL on the web port. Any answer below 400 passes; redirects aren't followed. A deploy tries every 2 seconds for up to 60 seconds.
 - **Rolls back when they fail.** If the new container reports unhealthy, never reports healthy in time, or the health URL doesn't answer, the old container keeps running (or comes back), and the deploy log or change dialog says which check failed.
 
-Gitberth doesn't restart a container that turns unhealthy later. To restart an app now and then, give it a scheduled restart (see [Scheduled jobs and restarts](scheduled-jobs-and-restarts.md)).
+- **Restarts an app that turns unhealthy later.** See [When an app turns unhealthy](#when-an-app-turns-unhealthy).
+
+To restart an app now and then whatever its health, give it a scheduled restart (see [Scheduled jobs and restarts](scheduled-jobs-and-restarts.md)).
+
+### When an app turns unhealthy
+
+With **Restart apps that turn unhealthy** on in **Settings › Keep apps running** (it is unless you turn it off), Gitberth looks at every running container every 30 seconds, and restarts one Docker says is unhealthy: at most 3 times in an hour. If it turns unhealthy again after that, Gitberth stops restarting it and tells you: a notification, a banner on the dashboard (**… stays unhealthy**) and an entry in its Activity. It leaves the app running as it is until its health check passes again or someone restarts it, then it starts counting afresh.
+
+It never restarts an app while a deploy, a change or a deletion has it, or while Gitberth holds it for a change, and never Gitberth itself or its helpers. Each restart goes to the app's Activity, the audit log (as Gitberth, through the keep-running check) and, with **Gitberth restarts an unhealthy app** on in **Settings › Notifications**, a notification. To leave one app out, turn off **Restart it when it turns unhealthy** on its **Settings** tab, under **Health alerts and restarts**. A restart keeps the container's files, so an app that turns unhealthy because of something it wrote stays unhealthy: that's when Gitberth stops trying.
 
 ## When an app stops by itself
 

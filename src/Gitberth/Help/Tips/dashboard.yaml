@@ -111,6 +111,20 @@ dashboard.backups-failing:
     says why; **Open automatic backups** shows the last runs and **Test the destination**. It goes once a backup works.
   more: guides/automatic-backups#when-a-backup-fails
 
+dashboard.resources-high:
+  title: An app's CPU or memory is high
+  text: >-
+    Its average stayed above its health alert's line for the alert's minutes. The banner goes once every reading of those
+    minutes is back under it; **Health** shows its charts.
+  more: guides/health-and-monitoring#health-alerts
+
+dashboard.unhealthy-gave-up:
+  title: An app stays unhealthy
+  text: >-
+    Docker says its health check keeps failing, and Gitberth restarted it 3 times in an hour, so it stopped trying. Its
+    log says why; it's tried again once its check passes or someone restarts it.
+  more: guides/health-and-monitoring#when-an-app-turns-unhealthy
+
 dashboard.recent-deploys:
   title: Recent deploys
   text: >-

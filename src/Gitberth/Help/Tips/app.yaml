@@ -498,8 +498,15 @@ app.overview.range.hour:
 app.overview.range.six-hours:
   title: 6 hours
   text: >-
-    The last 6 hours, as an average of every 30 seconds. Gitberth keeps 6 hours of readings, across its own restarts.
+    The last 6 hours, as an average of every 30 seconds. Gitberth keeps 6 hours of readings, then averages for 90 days.
   more: guides/health-and-monitoring#an-apps-own-charts
+
+app.overview.range.longer:
+  title: Longer ranges
+  text: >-
+    24 hours as 5-minute averages, 7 and 30 days as hourly ones, 90 days as 3-hour ones, from what Gitberth keeps of its
+    readings.
+  more: guides/health-and-monitoring#how-long-readings-are-kept
 
 app.overview.chart.cpu:
   title: CPU
@@ -1466,6 +1473,83 @@ app.settings.pids:
   text: >-
     How many processes it may run at once, a guard against a runaway one. Empty: no limit.
   more: reference/app-settings#resources
+
+# ---- Settings: Health alerts and restarts (builder A) ----
+
+app.settings.alerts:
+  title: Health alerts and restarts
+  text: >-
+    When this app's CPU or memory counts as high, and whether Gitberth restarts it when Docker says it's unhealthy. Kept
+    by its container's name, and saved at once: nothing in the container changes.
+  more: reference/app-settings#health-alerts-and-restarts
+
+app.settings.alerts.mode:
+  title: Alerts
+  text: >-
+    Gitberth's defaults from Settings › Health alerts, numbers of its own, or no alerts for this app.
+  default: Gitberth's defaults
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.defaults:
+  title: Gitberth's defaults
+  text: >-
+    The line Settings › Health alerts sets for every app, now and when it changes.
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.own:
+  title: Its own
+  text: >-
+    Numbers for this app only: a busy database may run near its limit all day, a small tool never should.
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.off:
+  title: Off
+  text: >-
+    No health alerts for this app, whatever Settings › Health alerts says.
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.cpu:
+  title: CPU above
+  text: >-
+    The share of its CPU limit (or of the host's CPUs, when it has none) its average must stay above, from 10 to 100%.
+  default: 90%
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.cpu-minutes:
+  title: For
+  text: >-
+    How many minutes the CPU average is taken over, from 1 to 60. It ends once every reading of them is back under.
+  default: 10 minutes
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.memory:
+  title: Memory above
+  text: >-
+    The share of its memory limit (or of the host's memory, when it has none) its average must stay above, from 10 to
+    100%.
+  default: 90%
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.memory-minutes:
+  title: For
+  text: >-
+    How many minutes the memory average is taken over, from 1 to 60. It ends once every reading of them is back under.
+  default: 5 minutes
+  more: guides/health-and-monitoring#health-alerts
+
+app.settings.alerts.restart:
+  title: Restart it when it turns unhealthy
+  text: >-
+    When Docker says its health check keeps failing, Gitberth restarts it, at most 3 times in an hour; then it tells you
+    and leaves it. Off, this app is left as it is. Settings › Keep apps running turns it off for every app.
+  default: "On"
+  more: guides/health-and-monitoring#when-an-app-turns-unhealthy
+
+app.settings.alerts.save:
+  title: Save alerts and restarts
+  text: >-
+    Saves this section at once. Nothing in the container changes, so nothing restarts.
+  more: reference/app-settings#health-alerts-and-restarts
 
 # ---- Settings: Health check ----
 

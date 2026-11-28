@@ -110,7 +110,7 @@ public sealed class WordsAndLabelsTests : IDisposable
     [Fact]
     public void The_settings_index_names_each_section_by_its_title()
     {
-        Assert.Equal(["GitHub access", "GitHub integration", "GitLab", "Notifications", "Registries", "Updates", "Domains", "Uptime and status page",
+        Assert.Equal(["GitHub access", "GitHub integration", "GitLab", "Notifications", "Registries", "Updates", "Domains", "Uptime and status page", "Health alerts",
                 "Keep apps running", "Network", "Own LAN addresses", "Deploys", "Disk", "Databases", "Automatic backups", "Save and restore", "Admin password", "AI agents and API",
                 "Audit log", "System"],
             SettingsPage.Toc.Select(t => t.Text));

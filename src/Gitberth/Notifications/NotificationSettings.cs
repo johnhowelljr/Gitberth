@@ -22,7 +22,7 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
         NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down, NotifyEvent.CertificateExpiring,
         NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow,
         // ---- builder A ----
-        NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable,
+        NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.HighCpu, NotifyEvent.UnhealthyRestarted,
         // [builder B, B2]
         NotifyEvent.JobFailed,
     ];
@@ -37,7 +37,7 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
         NotifyEvent.DeployFailed, NotifyEvent.DeploySucceeded, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down,
         NotifyEvent.BroughtBack, NotifyEvent.CertificateExpiring, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow,
         // ---- builder A ----
-        NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable,
+        NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.HighCpu, NotifyEvent.UnhealthyRestarted,
         // [builder B, B2]
         NotifyEvent.JobFailed,
     ];
@@ -76,6 +76,7 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
         // ---- builder A ----
         NotifyEvent.BackupOk => _events.Contains(NotifyEvent.BackupFailed),
         NotifyEvent.GitberthUpdated or NotifyEvent.GitberthUpdateFailed => _events.Contains(NotifyEvent.UpdateAvailable),
+        NotifyEvent.HighMemory or NotifyEvent.ResourcesOk => _events.Contains(NotifyEvent.HighCpu),
         // [builder B, B2]
         NotifyEvent.JobOk => _events.Contains(NotifyEvent.JobFailed),
         _ => _events.Contains(e),
@@ -164,6 +165,8 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
         // ---- builder A ----
         NotifyEvent.BackupFailed => "an automatic backup fails",
         NotifyEvent.UpdateAvailable => "a new version is out",
+        NotifyEvent.HighCpu => "an app's CPU or memory stays high",
+        NotifyEvent.UnhealthyRestarted => "Gitberth restarts an unhealthy app",
         // [builder B, B2]
         NotifyEvent.JobFailed => "a scheduled command fails",
         _ => throw new ArgumentException($"{e} isn't chosen in Settings.", nameof(e)),

@@ -393,6 +393,21 @@ settings.notifications.update-available:
   default: "On"
   more: guides/notifications#what-youre-told-about
 
+settings.notifications.high-usage:
+  title: An app's CPU or memory stays high
+  text: >-
+    Above the line Settings › Health alerts sets (or the app's own) for its minutes, and once every reading of them is
+    back under it.
+  default: "On"
+  more: guides/health-and-monitoring#health-alerts
+
+settings.notifications.unhealthy-restarted:
+  title: Gitberth restarts an unhealthy app
+  text: >-
+    Each restart of an app Docker says is unhealthy, and once more if Gitberth stops trying after 3 restarts in an hour.
+  default: "On"
+  more: guides/health-and-monitoring#when-an-app-turns-unhealthy
+
 settings.notifications.disk-low:
   title: Docker's disk gets full
   text: >-
@@ -748,6 +763,60 @@ settings.updates.policy.auto:
     fails. Databases, Gitberth itself and Compose containers only tell you.
   more: guides/updates#automatic-updates
 
+# ---- Health alerts (builder A) ----
+
+settings.health-alerts:
+  title: Health alerts
+  text: >-
+    A notification, an Activity entry and a dashboard banner when an app's CPU or memory stays high, and again once it's
+    back under. These numbers are every app's unless it has its own, on its Settings tab.
+  more: reference/gitberth-settings#health-alerts
+
+settings.health-alerts.on:
+  title: Alert on high CPU and memory
+  text: >-
+    On or off for every app. CPU counts against the app's CPU limit, or the host's CPUs; memory against its memory limit,
+    or the host's memory.
+  default: "On"
+  more: guides/health-and-monitoring#health-alerts
+
+settings.health-alerts.cpu:
+  title: CPU above
+  text: >-
+    The share of an app's CPU limit (or of the host's CPUs, when it has none) its average must stay above, from 10 to
+    100%.
+  default: 90%
+  more: guides/health-and-monitoring#health-alerts
+
+settings.health-alerts.cpu-minutes:
+  title: For
+  text: >-
+    How many minutes the CPU average is taken over, from 1 to 60. The alert ends once every reading of them is back under.
+  default: 10 minutes
+  more: guides/health-and-monitoring#health-alerts
+
+settings.health-alerts.memory:
+  title: Memory above
+  text: >-
+    The share of an app's memory limit (or of the host's memory, when it has none) its average must stay above, from 10
+    to 100%.
+  default: 90%
+  more: guides/health-and-monitoring#health-alerts
+
+settings.health-alerts.memory-minutes:
+  title: For
+  text: >-
+    How many minutes the memory average is taken over, from 1 to 60. The alert ends once every reading of them is back
+    under.
+  default: 5 minutes
+  more: guides/health-and-monitoring#health-alerts
+
+settings.health-alerts.save:
+  title: Save
+  text: >-
+    Saves the switch and the four numbers. An alert that's on now ends by the new line.
+  more: reference/gitberth-settings#health-alerts
+
 # ---- Domains (Cloudflare) ----
 
 settings.domains:
@@ -925,6 +994,15 @@ settings.keep.enabled:
     every stopped app is left as it is.
   default: "On"
   more: guides/health-and-monitoring#when-an-app-stops-by-itself
+
+settings.keep.unhealthy:
+  title: Restart apps that turn unhealthy
+  text: >-
+    Every 30 seconds Gitberth restarts a running app Docker says is unhealthy: at most 3 times in an hour, then it tells
+    you and leaves it until its health check passes again or someone restarts it. Never Gitberth itself, and never while
+    a deploy or a change has the app.
+  default: "On"
+  more: guides/health-and-monitoring#when-an-app-turns-unhealthy
 
 settings.keep.gave-up:
   title: Gitberth stopped bringing these back

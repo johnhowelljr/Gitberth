@@ -602,6 +602,8 @@ Access: **Admin** · idempotent
 | `disk_low` | boolean | no | When Docker's disk gets full (and has room again). |
 | `backup_failed` | boolean | no | When an automatic backup fails (and works again). |
 | `update_available` | boolean | no | When a new version of Gitberth, or a newer image of an app set to Tell me, is out (and how Gitberth's own update went). |
+| `high_usage` | boolean | no | When an app's CPU or memory stays above its health alert's line (and is back under it). |
+| `unhealthy_restarted` | boolean | no | When Gitberth restarts an app Docker says is unhealthy (and when it stops trying). |
 | `job_failed` | boolean | no | When a scheduled command fails (and passes again). |
 | `previews` | boolean | no | About previews' deploys too. |
 

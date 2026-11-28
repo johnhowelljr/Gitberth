@@ -36,6 +36,8 @@ public sealed class SettingsAdminTools(NotificationSettings notifications, Setti
         [Description("When Docker's disk gets full (and has room again).")] bool? disk_low = null,
         [Description("When an automatic backup fails (and works again).")] bool? backup_failed = null,
         [Description("When a new version of Gitberth, or a newer image of an app set to Tell me, is out (and how Gitberth's own update went).")] bool? update_available = null,
+        [Description("When an app's CPU or memory stays above its health alert's line (and is back under it).")] bool? high_usage = null,
+        [Description("When Gitberth restarts an app Docker says is unhealthy (and when it stops trying).")] bool? unhealthy_restarted = null,
         // [builder B, B2]
         [Description("When a scheduled command fails (and passes again).")] bool? job_failed = null,
         [Description("About previews' deploys too.")] bool? previews = null,
@@ -47,6 +49,7 @@ public sealed class SettingsAdminTools(NotificationSettings notifications, Setti
             (NotifyEvent.Unhealthy, unhealthy), (NotifyEvent.Down, down), (NotifyEvent.BroughtBack, brought_back),
             (NotifyEvent.CertificateExpiring, certificate_expiring), (NotifyEvent.TokenExpiring, token_expiring), (NotifyEvent.DiskLow, disk_low),
             (NotifyEvent.BackupFailed, backup_failed), (NotifyEvent.UpdateAvailable, update_available),
+            (NotifyEvent.HighCpu, high_usage), (NotifyEvent.UnhealthyRestarted, unhealthy_restarted),
             // [builder B, B2]
             (NotifyEvent.JobFailed, job_failed),
         };

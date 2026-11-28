@@ -77,8 +77,40 @@ public sealed class ContainerStatsCollector(
     // Config.Image of the containers Docker lists by their image's ID, by container ID. Only the sampling loop touches this.
     private readonly Dictionary<string, string> _configImages = new(StringComparer.Ordinal);
     private DockerHostInfo? _host;
-    private DateTime _pruned;
+    private DateTime _pruned, _rolled;
     private bool _saveFailing;
+
+    // builder A: how often the readings are rolled up (each 5-minute step once it's done; a minute late at most).
+    private static readonly TimeSpan RollEvery = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// A range's points for every container (or one's): every reading or the 30-second averages from what the sampler holds,
+    /// else stats.db's roll-ups (averages; 90 days as 3-hour averages of the hourly ones). Empty when stats.db can't be read.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, IReadOnlyList<StatsPoint>>> RangeAsync(ChartRange range, string? container = null, CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        if (!ChartRanges.Stored(range))
+            return Current.Containers.Where(c => container is null || c.Name == container)
+                .ToDictionary(c => c.Name, c => range == ChartRange.Hour ? c.Recent : c.History, StringComparer.Ordinal);
+        try
+        {
+            var rolled = await store.LoadRolledAsync(range != ChartRange.Day, now - ChartRanges.Window(range), container, ct);
+            return rolled.ToDictionary(r => r.Key, r =>
+            {
+                var points = r.Value.Select(p => p.Average).ToList();
+                // An hour stamped at its end belongs to the 3 hours it ends in, so it's grouped by the moment before.
+                return range == ChartRange.Quarter
+                    ? (IReadOnlyList<StatsPoint>)Averages(points.Select(p => p with { Time = p.Time.AddTicks(-1) }).ToList(), ChartRanges.Step(range), now)
+                    : points;
+            }, StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Couldn't read the longer history from stats.db");
+            return new Dictionary<string, IReadOnlyList<StatsPoint>>();
+        }
+    }
 
     /// <summary>The latest readings. Replaced as a whole after each sample, so it's safe to read from any thread.</summary>
     public HealthSnapshot Current { get; private set; } = HealthSnapshot.Empty;
@@ -259,6 +291,12 @@ public sealed class ContainerStatsCollector(
         try
         {
             await store.AddPointsAsync(fresh, ct);
+            // builder A: the longer history, rolled up from the readings as each 5 minutes finish (and pruned by kind).
+            if (now - _rolled > RollEvery)
+            {
+                await store.RollUpAsync(now, ct);
+                _rolled = now;
+            }
             if (now - _pruned > PruneEvery)
             {
                 await store.PruneAsync(now - Kept, now - ContainerEventWatcher.Kept, ct);

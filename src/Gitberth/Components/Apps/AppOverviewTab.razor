@@ -1,5 +1,7 @@
 @inject ActivityLog Activity
 @inject HealthSettings HealthSettings
+@* builder A: the longer chart ranges *@
+@inject ContainerStatsCollector Stats
 @inject DomainService Domains
 
 @*
@@ -53,9 +55,9 @@
             <ComposeServicesCard View="View" />
         }
 
-        <SectionCard Title="Resources" Icon="@Icons.Material.Outlined.Speed" Tip="app.overview.resources" Sub="@(longView ? "Last 6 hours · every 30 s" : "Last hour · every 5 s")">
+        <SectionCard Title="Resources" Icon="@Icons.Material.Outlined.Speed" Tip="app.overview.resources" Sub="@ChartRanges.Sub(range)">
             <Actions>
-                <Seg T="bool" Options="WindowOptions" Value="longView" ValueChanged="v => longView = v" Label="Time range" />
+                <Seg T="ChartRange" Options="WindowOptions" Value="range" ValueChanged="SetRangeAsync" Label="Time range" />
             </Actions>
             <ChildContent>
                 @if (!HealthSettings.IsGathered(App.Container))
@@ -74,13 +76,13 @@
                 else
                 {
                     var times = Points.Select(p => p.Time).ToList();
-                    var window = longView ? TimeSpan.FromHours(6) : TimeSpan.FromHours(1);
-                    var gap = longView ? TimeSpan.FromSeconds(90) : TimeSpan.FromSeconds(15);
+                    var window = ChartRanges.Window(range);
+                    var gap = ChartRanges.Gap(range);
                     <div class="gb-grid-2">
-                        <TimeChart @key="@($"cpu-{longView}")" Title="CPU" Tip="app.overview.chart.cpu" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
+                        <TimeChart @key="@($"cpu-{range}")" Title="CPU" Tip="app.overview.chart.cpu" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
                                    Series="@([new ChartSeries("CPU", 1, Points.Select(p => (double?)p.Cpu).ToArray())])" Current="[Points.LastOrDefault().Cpu]"
                                    ValueFormat="Format.Cpu" Floor="5" Area="true" Marks="Health.Marks" Down="Health.Down" MarkLabels="true" />
-                        <TimeChart @key="@($"memory-{longView}")" Title="Memory" Tip="app.overview.chart.memory" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
+                        <TimeChart @key="@($"memory-{range}")" Title="Memory" Tip="app.overview.chart.memory" Subject="@App.Title" Times="times" End="DateTime.UtcNow" Window="window" MaxGap="gap"
                                    Series="@([new ChartSeries("Memory", 2, Points.Select(p => p.Memory).ToArray())])"
                                    Current="[Health.MemoryBytes is { } bytes ? (double)bytes : null]" ValueNote="@(Health.MemoryLimit is ulong limit and > 0 && limit < (HostMemory ?? ulong.MaxValue) ? $"of {Format.Memory(limit)}" : "no limit")"
                                    ValueFormat="Format.Memory" Floor="@(64.0 * 1024 * 1024)" BinaryAxis="true" Area="true" Marks="Health.Marks" Down="Health.Down" />
@@ -333,17 +335,61 @@
     [Parameter] public EventCallback Changed { get; set; }
 
     private IReadOnlyList<ActivityItem>? activity;
-    private bool longView;
+    // ---- builder A: the charts' range, and the longer ranges' points from stats.db's roll-ups (read again each minute) ----
+    private ChartRange range;
+    private IReadOnlyList<StatsPoint>? stored;
+    private DateTime storedAt;
     private string? loadedFor;
     // Whether domains are on in Settings and Cloudflare has a token: why a running app's domain doesn't answer.
     private bool domainsOn = true, tokenSaved = true;
 
     private AppSummary App => View.Summary;
 
-    private static readonly IReadOnlyList<SegOption<bool>> WindowOptions =
-        [new(false, "1 h", Tip: "app.overview.range.hour"), new(true, "6 h", Tip: "app.overview.range.six-hours")];
+    private static readonly IReadOnlyList<SegOption<ChartRange>> WindowOptions =
+    [
+        new(ChartRange.Hour, "1 h", Tip: "app.overview.range.hour"),
+        new(ChartRange.SixHours, "6 h", Tip: "app.overview.range.six-hours"),
+        new(ChartRange.Day, "24 h", Tip: "app.overview.range.longer"),
+        new(ChartRange.Week, "7 d", Tip: "app.overview.range.longer"),
+        new(ChartRange.Month, "30 d", Tip: "app.overview.range.longer"),
+        new(ChartRange.Quarter, "90 d", Tip: "app.overview.range.longer"),
+    ];
 
-    private IReadOnlyList<StatsPoint> Points => Health is null ? [] : longView ? Health.History : Health.Recent;
+    private IReadOnlyList<StatsPoint> Points => Health is null ? [] : range switch
+    {
+        ChartRange.Hour => Health.Recent,
+        ChartRange.SixHours => Health.History,
+        _ => StoredPoints(),
+    };
+
+    // The roll-ups, read when the range is picked and again once a minute has passed (the page draws on every reading).
+    private IReadOnlyList<StatsPoint> StoredPoints()
+    {
+        if (DateTime.UtcNow - storedAt > TimeSpan.FromMinutes(1))
+        {
+            storedAt = DateTime.UtcNow;
+            _ = InvokeAsync(LoadStoredAsync);
+        }
+        return stored ?? [];
+    }
+
+    private async Task SetRangeAsync(ChartRange next)
+    {
+        range = next;
+        stored = null;
+        if (ChartRanges.Stored(next)) await LoadStoredAsync();
+    }
+
+    private async Task LoadStoredAsync()
+    {
+        storedAt = DateTime.UtcNow;
+        var wanted = range;
+        var points = (await Stats.RangeAsync(wanted, App.Container)).GetValueOrDefault(App.Container) ?? [];
+        if (wanted != range) return;
+        stored = points;
+        StateHasChanged();
+    }
+    // ---- end builder A ----
 
     private bool Connectable => App.Running && (App.Role == ContainerRole.Database || ConnectionDetails.EngineOf(App.Image) is not null);
 

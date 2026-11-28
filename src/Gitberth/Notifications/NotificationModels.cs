@@ -17,7 +17,8 @@ public enum SmtpSecurity { StartTls, None }
 /// or refused by its service (TokenRefused goes with TokenExpiring). BackupFailed and BackupOk are an automatic backup
 /// failing and working again (BackupOk goes with BackupFailed). UpdateAvailable is a new version of Gitberth or of an
 /// app's image set to Tell me; GitberthUpdated and GitberthUpdateFailed how Gitberth's own update ended (both go with
-/// UpdateAvailable).
+/// UpdateAvailable). HighCpu and HighMemory are an app's CPU or memory staying above its alert's line, ResourcesOk both back
+/// under it (both go with HighCpu); UnhealthyRestarted Gitberth restarting an app Docker says is unhealthy, or giving up.
 /// </summary>
 public enum NotifyEvent
 {
@@ -27,6 +28,8 @@ public enum NotifyEvent
     BackupFailed, BackupOk,
     // ---- builder A: updates ----
     UpdateAvailable, GitberthUpdated, GitberthUpdateFailed,
+    // ---- builder A: health alerts and unhealthy restarts ----
+    HighCpu, HighMemory, ResourcesOk, UnhealthyRestarted,
     // [builder B, B2] A scheduled command's run failed, or passed again after failing (JobOk goes with JobFailed).
     JobFailed, JobOk,
 }

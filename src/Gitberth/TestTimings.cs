@@ -50,6 +50,15 @@ public sealed class TestTimings
                 keeper.PassEvery = v;
                 keeper.Grace = v;
                 keeper.FirstPassAfter = v;
+                // builder A: the look for unhealthy apps keeps the same pace.
+                if (sp.GetService<UnhealthyRestarts>() is { } unhealthy) unhealthy.PassEvery = v;
+            }),
+        // builder A: an alert's minutes (CPU above 90% for 10 minutes lasts 10 of these); the hour of unhealthy restarts stays.
+        ["alertMinute"] = new("how long a minute of a health alert's window lasts",
+            sp => sp.GetService<Health.ResourceAlerts>()?.MinuteLength ?? TimeSpan.FromMinutes(1),
+            (sp, v) =>
+            {
+                if (sp.GetService<Health.ResourceAlerts>() is { } alerts) alerts.MinuteLength = v;
             }),
         // Answers are still kept as long as ever (10 minutes; 2 for a basic search or a missing repository).
         ["hubWait"] = new("how long Docker Hub or a registry that couldn't be reached is left alone, and the longest one that asked Gitberth to wait is held",

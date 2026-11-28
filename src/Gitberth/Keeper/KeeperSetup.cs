@@ -14,6 +14,9 @@ public static class KeeperSetup
         // One instance, as a service too: pages ask it what it says of an app, and the tests make its passes by hand.
         services.AddSingleton<AppKeeper>();
         services.AddHostedService(sp => sp.GetRequiredService<AppKeeper>());
+        // Apps Docker says are unhealthy, restarted (at most 3 times in an hour); its switch is in HealthRules.
+        services.AddSingleton<UnhealthyRestarts>();
+        services.AddHostedService(sp => sp.GetRequiredService<UnhealthyRestarts>());
         return services;
     }
 }

@@ -42,9 +42,10 @@ services:
       # keep-running check looks every 3 s instead of 30 (a stopped app waits 3 s too, and the first look comes 3 s after
       # start), and Docker Hub or a registry that couldn't be reached is left alone 10 s instead of a minute (one that
       # asked Gitberth to wait, at most 10 s: its shortest honoured wait anyway), so one scenario's Docker Hub outage never
-      # holds up the next. Unset: these. Set but empty (E2E_TEST_TIMINGS=, or E2E_TIMINGS=production with run.sh): as an
+      # holds up the next. (builder A) A health alert's minute lasts a second (alertMinute=1: CPU above 90% for 10 minutes
+      # is 10 s here). Unset: these. Set but empty (E2E_TEST_TIMINGS=, or E2E_TIMINGS=production with run.sh): as an
       # install runs.
-      GITBERTH_TEST_TIMINGS: "${E2E_TEST_TIMINGS-stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2,keepEvery=3,hubWait=10}"
+      GITBERTH_TEST_TIMINGS: "${E2E_TEST_TIMINGS-stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2,keepEvery=3,hubWait=10,alertMinute=1}"
       # (builder A) Gitberth's "published" image in the rig: its own gitberth:<tag> builds, so Settings › Updates can update
       # it to a newer one a scenario builds (test_44). An install never sets it: there it's ghcr.io/johnhowelljr/gitberth.
       GITBERTH_UPDATE_IMAGE: gitberth

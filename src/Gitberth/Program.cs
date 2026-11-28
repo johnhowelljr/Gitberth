@@ -353,6 +353,10 @@ builder.Services.AddSingleton(_ => Gitberth.Help.TipCatalog.Bundled);
 // that keeps items there, registered by its own folder: apps that should run brought back (Keeper), Docker's disk kept
 // from filling up (Disk), and the tokens Gitberth uses watched before they expire (Credentials).
 builder.Services.AddSingleton<AttentionBoard>();
+// ---- builder A: health alerts (Settings › Health alerts, each app's own), and the rules unhealthy restarts follow.
+builder.Services.AddSingleton<Gitberth.Health.HealthRules>();
+builder.Services.AddSingleton<Gitberth.Health.ResourceAlerts>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Gitberth.Health.ResourceAlerts>());
 builder.Services.AddAppKeeper();
 builder.Services.AddDiskCare();
 builder.Services.AddCredentialWatch();
@@ -367,6 +371,7 @@ await using (var db = await app.Services.GetRequiredService<IDbContextFactory<Gi
 }
 await app.Services.GetRequiredService<AdminAuthService>().EnsureAdminPasswordAsync();
 await app.Services.GetRequiredService<HealthSettings>().LoadAsync();
+await app.Services.GetRequiredService<Gitberth.Health.HealthRules>().LoadAsync();  // builder A: health alerts' and restarts' rules
 await app.Services.GetRequiredService<ContainerTitles>().LoadAsync();
 await app.Services.GetRequiredService<RestartSchedules>().LoadAsync();
 await app.Services.GetRequiredService<NotificationSettings>().LoadAsync();

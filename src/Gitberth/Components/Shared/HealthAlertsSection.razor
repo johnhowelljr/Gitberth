@@ -1,0 +1,107 @@
+@using Gitberth.Health
+@inject HealthRules Rules
+@inject ResourceAlerts Alerts
+@inject ContainerTitles Titles
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@*
+    Settings › Health alerts (src/Gitberth/Health/ResourceAlerts.cs): when an app's CPU or memory counts as high, for every
+    app that has no numbers of its own (its Settings tab), and which apps are high now.
+*@
+<section class="gb-card gb-sec" id="health-alerts" aria-labelledby="health-alerts-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.NotificationImportant" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3"><span id="health-alerts-t">Health alerts</span><Tip Key="settings.health-alerts" /></div>
+            <p>A notification, an Activity entry and a banner when an app's CPU or memory stays high, and again once it's back under.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        <SwitchRow Title="Alert on high CPU and memory" Value="@draft.On" ValueChanged="v => draft = draft with { On = v }" Tip="settings.health-alerts.on"
+                   Sub="CPU counts against the app's CPU limit, or the host's CPUs when it has none; memory against its memory limit, or the host's memory." />
+        @if (draft.On)
+        {
+            <div class="gb-fgrid gb-fgrid--4">
+                <Field Label="CPU above" For="ha-cpu" Tip="settings.health-alerts.cpu">
+                    <label class="gb-input"><input id="ha-cpu" type="number" min="@HealthRules.MinPercent" max="@HealthRules.MaxPercent" value="@draft.CpuPercent"
+                           @onchange="e => draft = draft with { CpuPercent = Int(e.Value, draft.CpuPercent) }" /><span class="gb-input-suffix">%</span></label>
+                </Field>
+                <Field Label="For" For="ha-cpu-min" Tip="settings.health-alerts.cpu-minutes">
+                    <label class="gb-input"><input id="ha-cpu-min" type="number" min="@HealthRules.MinMinutes" max="@HealthRules.MaxMinutes" value="@draft.CpuMinutes"
+                           @onchange="e => draft = draft with { CpuMinutes = Int(e.Value, draft.CpuMinutes) }" /><span class="gb-input-suffix">min</span></label>
+                </Field>
+                <Field Label="Memory above" For="ha-mem" Tip="settings.health-alerts.memory">
+                    <label class="gb-input"><input id="ha-mem" type="number" min="@HealthRules.MinPercent" max="@HealthRules.MaxPercent" value="@draft.MemoryPercent"
+                           @onchange="e => draft = draft with { MemoryPercent = Int(e.Value, draft.MemoryPercent) }" /><span class="gb-input-suffix">%</span></label>
+                </Field>
+                <Field Label="For" For="ha-mem-min" Tip="settings.health-alerts.memory-minutes">
+                    <label class="gb-input"><input id="ha-mem-min" type="number" min="@HealthRules.MinMinutes" max="@HealthRules.MaxMinutes" value="@draft.MemoryMinutes"
+                           @onchange="e => draft = draft with { MemoryMinutes = Int(e.Value, draft.MemoryMinutes) }" /><span class="gb-input-suffix">min</span></label>
+                </Field>
+            </div>
+        }
+        @if (Problem is { } problem)
+        {
+            <p class="gb-help gb-tone-warning">@problem</p>
+        }
+        <p class="gb-help" id="ha-now">@Now</p>
+        <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+            <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveAsync" Busy="saving" Disabled="@(draft == Rules.Current.Alerts || Problem is not null)"
+                 Tip="settings.health-alerts.save">Save</Btn>
+        </div>
+    </div>
+</section>
+
+@code {
+    private AlertRules draft = new();
+    private bool saving;
+
+    private string? Problem => draft.On ? HealthRules.Problem(draft.CpuPercent, draft.CpuMinutes, draft.MemoryPercent, draft.MemoryMinutes) : null;
+
+    // Which apps are high now, and how many have their own numbers or none.
+    private string Now
+    {
+        get
+        {
+            var high = Alerts.Alerting;
+            var own = Rules.Current.Apps.Values.Count(a => a.Alerts == AppAlertMode.Own);
+            var off = Rules.Current.Apps.Values.Count(a => a.Alerts == AppAlertMode.Off);
+            var line = high.Count == 0 ? "Nothing is high now." : "High now: " + string.Join(", ", high.Keys.Select(n => Titles.For(n) ?? n)) + ".";
+            if (own > 0) line += $" {own} {(own == 1 ? "app has" : "apps have")} numbers of {(own == 1 ? "its" : "their")} own.";
+            if (off > 0) line += $" {off} {(off == 1 ? "app has" : "apps have")} no alerts.";
+            return line + " Each app's own are on its Settings tab.";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        draft = Rules.Current.Alerts;
+        Rules.Changed += OnChanged;
+    }
+
+    public void Dispose() => Rules.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private static int Int(object? value, int fallback) => int.TryParse(value?.ToString(), out var n) ? n : fallback;
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+        try
+        {
+            await Rules.SaveAlertsAsync(draft);
+            draft = Rules.Current.Alerts;
+            Snackbar.Add(draft.On ? "Saved. Health alerts use these numbers now." : "Saved. Health alerts are off.", Severity.Success);
+        }
+        catch (ArgumentException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+}

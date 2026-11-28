@@ -287,6 +287,12 @@ def test_a_failing_health_check_is_told_and_its_passing_again(destinations, gitb
     app = apps.track(gitberth.create_git_app(page, repo.url))
     gitberth.wait_deploy(app.id, timeout=420)
     url = gitberth.lan_url(app.id)
+    # (builder A) Gitberth restarts an app that turns unhealthy: this one is left as it is, so the notices are its check's.
+    gitberth.open(page, f"/apps/{app.container}/settings#sec-alerts")
+    alerts = page.locator("#sec-alerts")
+    alerts.get_by_role("switch", name="Restart it when it turns unhealthy", exact=True).click()
+    alerts.get_by_role("button", name="Save alerts and restarts").click()
+    until(lambda: "not restarted when unhealthy" in flat(alerts.inner_text()), 15, "its unhealthy restarts to be off")
 
     since = standins.seq()
     assert call("POST", f"{url}/sick?on=1", b"", {})[0] == 200

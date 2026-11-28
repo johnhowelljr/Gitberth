@@ -105,6 +105,9 @@ factor = 0.75
 # Gitberth updating itself: to a newer build of itself (gitberth:9.9.1, the GitHub stand-in's newest release), then to a
 # broken one that the updater undoes, then back to gitberth:e2e. Three swaps of Gitberth's container; estimate.
 "44" = { file = "test_44_self_update.py", minutes = 5, test_minutes = 4 }
+# Health alerts (a busy container of its own, the rig's alert minute of a second), unhealthy restarts (3, then it stops)
+# and the 7-day range over seeded hourly roll-ups. No app is built; estimate.
+"45" = { file = "test_45_health_alerts.py", minutes = 4, test_minutes = 3 }
 # Deploy a folder (B6): a static site zip and a Node app's folder (the browser's folder upload) made in New app and
 # deployed, the Node app's new version through the API with a token, and a zip-slip archive refused. Estimates: two first
 # builds (nginx and node pulled once per rig volume) and one more; minutes adds production's stay-up checks.
@@ -136,7 +139,7 @@ factor = 0.75
 # Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
 "@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34",
-           "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "46"]
+           "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46"]
 "@release" = ["@full", "31"]  # and every template: + 16-30 min
 "@none" = []
 # Single tests the rules name.
@@ -1198,6 +1201,17 @@ groups = ["37", "20"]                          # the dashboard's banners and the
 globs = ["src/Gitberth/Backup/AutoBackups.cs", "src/Gitberth/Backup/AutoBackupConfig.cs", "src/Gitberth/Backup/AutoDestinations.cs",
          "src/Gitberth/Backup/S3Client.cs", "src/Gitberth/Components/Shared/AutoBackupSection.razor", "src/Gitberth/Components/Shared/AutoBackupView.cs"]
 groups = ["41"]
+
+# --- health alerts, the longer history and unhealthy restarts (45); 21 leaves its unhealthy app out of the restarts.
+[[rule]]
+globs = ["src/Gitberth/Health/HealthRules.cs", "src/Gitberth/Health/ResourceAlerts.cs", "src/Gitberth/Health/ChartRange.cs",
+         "src/Gitberth/Health/StatsStore.cs", "src/Gitberth/Health/ContainerStatsCollector.cs",
+         "src/Gitberth/Components/Shared/HealthAlertsSection.razor", "src/Gitberth/Components/Shared/AppHealthSettings.razor"]
+groups = ["45"]
+
+[[rule]]
+globs = ["src/Gitberth/Keeper/UnhealthyRestarts.cs"]
+groups = ["45", "21"]
 
 # --- Gitberth updating itself (44): the check, Update now, the updater and its way back, the card, /healthz's version.
 [[rule]]

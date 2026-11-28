@@ -2,6 +2,8 @@
 @inject AppKeeper Keeper
 @inject KeeperSettings Switch
 @inject AppActions Actions
+@inject Gitberth.Health.HealthRules Rules
+@inject UnhealthyRestarts Unhealthy
 @inject ISnackbar Snackbar
 @implements IDisposable
 
@@ -17,6 +19,14 @@
     <div class="gb-sec-body">
         <SwitchRow @key="@($"keep{switchKey}")" Title="Bring apps back by themselves" Value="@on" ValueChanged="SetAsync" Disabled="busy" Tip="settings.keep.enabled"
                    Sub="Every 30 seconds Gitberth looks at every app that's meant to run. One that crashed and that Docker won't restart, one that stopped when Docker or the host restarted, or one whose container is gone is started again: up to 4 times in a row, then Gitberth stops and tells you. An app you stopped, in Gitberth or with docker stop, stays stopped." />
+        @* ---- builder A: unhealthy apps restarted ---- *@
+        <SwitchRow @key="@($"unhealthy{switchKey}")" Title="Restart apps that turn unhealthy" Value="@Rules.Current.RestartUnhealthy" ValueChanged="SetUnhealthyAsync" Disabled="busy"
+                   Tip="settings.keep.unhealthy"
+                   Sub="When Docker says an app's health check keeps failing, Gitberth restarts it: at most 3 times in an hour, then it tells you and leaves it running until its check passes again or someone restarts it. An app can be left out on its Settings tab." />
+        @if (Unhealthy.GaveUp.Count > 0)
+        {
+            <p class="gb-help" id="keep-unhealthy">Gitberth stopped restarting @string.Join(", ", Unhealthy.GaveUp): each stays unhealthy after 3 restarts in an hour.</p>
+        }
         @if (Keeper.GaveUp.Count > 0)
         {
             <div class="gb-h3" style="margin-top:6px">Gitberth stopped bringing these back<Tip Key="settings.keep.gave-up" /></div>
@@ -51,6 +61,7 @@
     {
         Keeper.Changed += Refresh;
         Switch.Changed += Refresh;
+        Rules.Changed += Refresh;
         await ReadAsync();
     }
 
@@ -58,6 +69,7 @@
     {
         Keeper.Changed -= Refresh;
         Switch.Changed -= Refresh;
+        Rules.Changed -= Refresh;
     }
 
     private void Refresh() => _ = InvokeAsync(async () =>
@@ -93,6 +105,24 @@
         }
     }
 
+    private async Task SetUnhealthyAsync(bool value)
+    {
+        busy = true;
+        try
+        {
+            await Rules.SetRestartUnhealthyAsync(value);
+            Snackbar.Add(value ? "Gitberth restarts apps that turn unhealthy now." : "Gitberth no longer restarts apps that turn unhealthy.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save it: {ex.Message}", Severity.Error);
+            switchKey++;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
     private async Task StartAsync(KeepGaveUp app)
     {
         starting = app.Key;

@@ -125,6 +125,10 @@ public static class NotificationFormats
         NotifyEvent.UpdateAvailable => "update.available",
         NotifyEvent.GitberthUpdated => "gitberth.updated",
         NotifyEvent.GitberthUpdateFailed => "gitberth.update-failed",
+        NotifyEvent.HighCpu => "resources.cpu-high",
+        NotifyEvent.HighMemory => "resources.memory-high",
+        NotifyEvent.ResourcesOk => "resources.ok",
+        NotifyEvent.UnhealthyRestarted => "app.unhealthy-restarted",
         // [builder B, B2]
         NotifyEvent.JobFailed => "job.failed",
         NotifyEvent.JobOk => "job.ok",

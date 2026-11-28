@@ -251,7 +251,7 @@ public sealed class NotificationTests : IDisposable
         // Chosen in 1.2 as a plain list: what it says, and the kinds added since (an app down, a certificate, an app brought
         // back, a token, Docker's disk) as their defaults say.
         Assert.True(NotificationSettings.ParseEvents("""["Crashed","Nonsense","Test"]""").SetEquals([NotifyEvent.Crashed, NotifyEvent.Down, NotifyEvent.CertificateExpiring,
-            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow, NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.JobFailed]));
+            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow, NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.HighCpu, NotifyEvent.UnhealthyRestarted, NotifyEvent.JobFailed]));
         Assert.Empty(NotificationSettings.ParseMuted("[]"));
     }
 
@@ -262,7 +262,7 @@ public sealed class NotificationTests : IDisposable
         const string saved = """{"on":["CertificateExpiring","Crashed","DeployFailed","Unhealthy"],"known":["DeployFailed","DeploySucceeded","Crashed","Unhealthy","Down","CertificateExpiring"]}""";
         var on = NotificationSettings.ParseEvents(saved);
         Assert.True(on.SetEquals([NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.CertificateExpiring,
-            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow, NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.JobFailed]), string.Join(", ", on.Order()));
+            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow, NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.HighCpu, NotifyEvent.UnhealthyRestarted, NotifyEvent.JobFailed]), string.Join(", ", on.Order()));
         // Saved again now, every kind is known: one turned off stays off.
         var written = NotificationSettings.WriteEvents(on.Remove(NotifyEvent.DiskLow));
         Assert.DoesNotContain(NotifyEvent.DiskLow, NotificationSettings.ParseEvents(written));
@@ -307,6 +307,8 @@ public sealed class NotificationTests : IDisposable
             [NotifyEvent.DiskLow] = "Docker's disk gets full",
             [NotifyEvent.BackupFailed] = "an automatic backup fails",
             [NotifyEvent.UpdateAvailable] = "a new version is out",
+            [NotifyEvent.HighCpu] = "an app's CPU or memory stays high",
+            [NotifyEvent.UnhealthyRestarted] = "Gitberth restarts an unhealthy app",
             [NotifyEvent.JobFailed] = "a scheduled command fails",
         };
         // Every switch Settings has is here: a new one needs its words.

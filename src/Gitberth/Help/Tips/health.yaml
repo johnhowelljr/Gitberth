@@ -44,8 +44,15 @@ health.window.hour:
 health.window.6h:
   title: 6 hours
   text: >-
-    The last 6 hours, as 30-second averages: everything Gitberth keeps.
+    The last 6 hours, as 30-second averages of every reading.
   more: guides/health-and-monitoring#the-health-page
+
+health.window.longer:
+  title: Longer ranges
+  text: >-
+    24 hours as 5-minute averages, 7 and 30 days as hourly ones, 90 days as 3-hour ones. Gitberth works them out from the
+    readings as each 5 minutes end, and keeps them 14 and 90 days.
+  more: guides/health-and-monitoring#how-long-readings-are-kept
 
 health.order.busiest:
   title: Busiest first

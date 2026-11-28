@@ -240,6 +240,16 @@ deploy, and the Health page marks when it starts failing.
 | **Retries** | Failed checks in a row before it's unhealthy. | 3 | Recreate |
 | **Grace period** | Seconds after it starts during which failures don't count. | 0 | Recreate |
 
+### Health alerts and restarts
+
+The app's own [health alerts](../guides/health-and-monitoring.md#health-alerts) and whether Gitberth restarts it when it [turns unhealthy](../guides/health-and-monitoring.md#when-an-app-turns-unhealthy). Every app has it, Compose apps and Gitberth itself too. Kept by container name and saved with **Save alerts and restarts**: nothing in the container changes.
+
+| Field | What it does | Default |
+|---|---|---|
+| **Alerts** | **Gitberth's defaults** (Settings › Health alerts), **Its own** (the four numbers below), or **Off**. | **Gitberth's defaults** |
+| **CPU above**, **For**, **Memory above**, **For** | With **Its own**: the app's line, 10 to 100% and 1 to 60 minutes. | 90% for 10 min, 90% for 5 min |
+| **Restart it when it turns unhealthy** | Gitberth restarts it when Docker says it's unhealthy, at most 3 times in an hour, while Settings › Keep apps running has it on. Never for Gitberth itself. | On |
+
 ### Labels
 
 Notes on the container that other tools read, such as Traefik, Watchtower or Homepage. Each label is a row with its value;

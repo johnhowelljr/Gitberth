@@ -20,7 +20,7 @@
     with a sparkline and its memory; a row opens to its charts. The page stays short: the busiest dozen show, the rest
     one click away, and stopped containers fold together.
 *@
-<PageHead Title="Health" Tip="health.page" Lead="Every container on this host, read every 5 seconds and kept 6 hours, across Gitberth's own restarts. 100% CPU is one full core.">
+<PageHead Title="Health" Tip="health.page" Lead="Every container on this host, read every 5 seconds: every reading for 6 hours, then 5-minute and hourly averages for 14 and 90 days, across Gitberth's own restarts. 100% CPU is one full core.">
     <ChildContent>
         @if (snapshot.Host is { } host)
         {
@@ -33,7 +33,7 @@
         }
     </ChildContent>
     <Actions>
-        <Seg T="bool" Options="WindowOptions" Value="longView" ValueChanged="v => longView = v" Label="How much of the charts to show" />
+        <Seg T="ChartRange" Options="RangeOptions" Value="range" ValueChanged="SetRangeAsync" Label="How much of the charts to show" />
         @if (snapshot.SampledAt is { } at)
         {
             <span class="gb-pill2 @(snapshot.Error is null ? "gb-tone-good" : "gb-tone-warn")" data-tip="health.live">
@@ -70,7 +70,7 @@ else if (snapshot.Containers.Count == 0)
 else
 {
     var end = snapshot.SampledAt.Value;
-    var window = longView ? ContainerStatsCollector.Kept : ContainerStatsCollector.RecentWindow;
+    var window = ChartRanges.Window(range);
     var gathered = Shown(c => HealthSettings.IsGathered(c.Name));
     var up = gathered.Where(c => c.IsUp).ToList();
     var down = gathered.Where(c => !c.IsUp).ToList();
@@ -89,7 +89,7 @@ else
     <div class="gb-alist" role="list" aria-label="Containers">
         <div class="gb-hrow gb-arow-head" aria-hidden="true">
             <span style="padding-left:44px">Container</span><span data-tip="health.column.state">State</span><span data-tip="health.column.cpu">CPU</span><span data-tip="health.column.memory">Memory</span>
-            @if (longView)
+            @if (range != ChartRange.Hour)
             {
                 <span class="gb-c-ev" data-tip="health.column.events-6h">Last 6 hours</span>
             }
@@ -171,13 +171,49 @@ else
     private readonly HashSet<string> tables = new(StringComparer.Ordinal);
     // The rows opened to their charts.
     private readonly HashSet<string> open = new(StringComparer.Ordinal);
-    // The last 6 hours as 30-second averages, or the last hour with every reading.
-    private bool longView;
+    // builder A: how much the charts show, and the longer ranges' points as stats.db rolled them up (read again each minute).
+    private ChartRange range;
+    private IReadOnlyDictionary<string, IReadOnlyList<StatsPoint>>? stored;
+    private DateTime storedAt;
     private bool byName, showAll, stoppedOpen;
     private string query = "";
     private string? scrollTo;
 
-    private static readonly IReadOnlyList<SegOption<bool>> WindowOptions = [new(false, "1 hour", Tip: "health.window.hour"), new(true, "6 hours", Tip: "health.window.6h")];
+    private static readonly IReadOnlyList<SegOption<ChartRange>> RangeOptions =
+    [
+        new(ChartRange.Hour, "1 hour", Tip: "health.window.hour"),
+        new(ChartRange.SixHours, "6 hours", Tip: "health.window.6h"),
+        new(ChartRange.Day, "24 hours", Tip: "health.window.longer"),
+        new(ChartRange.Week, "7 days", Tip: "health.window.longer"),
+        new(ChartRange.Month, "30 days", Tip: "health.window.longer"),
+        new(ChartRange.Quarter, "90 days", Tip: "health.window.longer"),
+    ];
+
+    // A range's points for a container: what the sampler holds for the hour and the 6 hours, else the roll-ups.
+    private IReadOnlyList<StatsPoint> PointsOf(ContainerHealth c) => range switch
+    {
+        ChartRange.Hour => c.Recent,
+        ChartRange.SixHours => c.History,
+        _ => stored?.GetValueOrDefault(c.Name) ?? [],
+    };
+
+    // The events go back 6 hours at most.
+    private TimeSpan EventsWindow => range == ChartRange.Hour ? ContainerStatsCollector.RecentWindow : ContainerStatsCollector.Kept;
+
+    private async Task SetRangeAsync(ChartRange next)
+    {
+        range = next;
+        stored = null;
+        if (ChartRanges.Stored(next)) await LoadStoredAsync();
+    }
+
+    private async Task LoadStoredAsync()
+    {
+        storedAt = DateTime.UtcNow;
+        var wanted = range;
+        var points = await Stats.RangeAsync(wanted);
+        if (wanted == range) stored = points;
+    }
 
     private static readonly IReadOnlyList<SegOption<bool>> SortOptions = [new(false, "Busiest first", Tip: "health.order.busiest"), new(true, "A to Z")];
 
@@ -207,6 +243,7 @@ else
     private void OnUpdated() => _ = InvokeAsync(async () =>
     {
         snapshot = Stats.Current;
+        if (ChartRanges.Stored(range) && DateTime.UtcNow - storedAt > TimeSpan.FromMinutes(1)) await LoadStoredAsync();
         // A container from an app created since the page opened.
         if (snapshot.Containers.Any(c => c.AppSlug is { } slug && !appsBySlug.ContainsKey(slug))) await LoadAppsAsync();
         StateHasChanged();
@@ -290,7 +327,7 @@ else
                     <span class="gb-num">@(c.MemoryBytes is { } bytes ? Format.Memory(bytes) : "–")@(limited ? $" of {Format.Memory(c.MemoryLimit!.Value)}" : "")</span>
                     <Meter Fraction="@(c.MemoryBytes is { } b && (limited ? c.MemoryLimit : snapshot.Host?.MemoryBytes) is ulong top and > 0 ? (double)b / top : null)" Limited="limited" />
                 </div>
-                <div class="gb-c-ev gb-t3" style="font-size:12.5px">@Summary(c, end - window)</div>
+                <div class="gb-c-ev gb-t3" style="font-size:12.5px">@Summary(c, end - EventsWindow)</div>
                 <div class="gb-arow-actions">
                     <button type="button" class="gb-grp-chev @(expanded ? null : "closed")" aria-expanded="@(expanded ? "true" : "false")" aria-controls="@($"hc-body-{c.Name}")"
                             aria-label="@(expanded ? $"Hide {title}'s charts" : $"Show {title}'s charts")" @onclick="() => Toggle(c.Name)">
@@ -307,13 +344,13 @@ else
 
     private RenderFragment Charts(ContainerHealth c, string title, DateTime end, TimeSpan window, StatsPoint? latest)
     {
-        var points = longView ? c.History : c.Recent;
+        var points = PointsOf(c);
         var times = points.Select(p => p.Time).ToArray();
         // Averages are a step apart, so a line only breaks where a whole step is missing.
-        var gap = longView ? ContainerStatsCollector.HistoryStep * 1.5 : ContainerStatsCollector.MaxGap;
+        var gap = ChartRanges.Gap(range);
         var asTable = tables.Contains(c.Name);
         var networkNote = NetworkNote(c);
-        var empty = c.IsUp ? Collecting : $"No readings in the last {(longView ? "6 hours" : "hour")}";
+        var empty = c.IsUp && !ChartRanges.Stored(range) ? Collecting : $"No readings in {ChartRanges.InWords(range)}";
         var (sinceLabel, since) = Since(c);
         return @<div class="gb-hbody" id="@($"hc-body-{c.Name}")">
             <div class="gb-row" style="flex-wrap:wrap;gap:8px 18px;margin-bottom:12px;font-size:12.5px">
@@ -349,13 +386,13 @@ else
                         </table>
                     }
                     <table class="gb-mini-table">
-                        <caption class="gb-sr-only">Readings for @title, newest first@(longView ? ", averaged over 30 seconds" : "")</caption>
+                        <caption class="gb-sr-only">Readings for @title, newest first@(ChartRanges.Averaged(range))</caption>
                         <thead><tr><th>Time</th><th>CPU</th><th>Memory</th>@if (networkNote is null) { <th>In</th><th>Out</th> }</tr></thead>
                         <tbody>
                             @foreach (var p in Enumerable.Reverse(points))
                             {
                                 <tr @key="p.Time">
-                                    <td>@Format.Clock(p.Time)</td>
+                                    <td>@(ChartRanges.Stored(range) ? Format.Local(p.Time) : Format.Clock(p.Time))</td>
                                     <td>@Format.Cpu(p.Cpu)</td>
                                     <td>@(p.Memory is { } memory ? Format.Memory(memory) : "–")</td>
                                     @if (networkNote is null)
@@ -377,15 +414,15 @@ else
             {
                 <div class="gb-grid-3">
                     @* Keyed by the view, so switching it sends each chart its points afresh. *@
-                    <TimeChart @key="@($"cpu-{longView}")" Title="CPU" Tip="health.chart.cpu" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
+                    <TimeChart @key="@($"cpu-{range}")" Title="CPU" Tip="health.chart.cpu" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
                                Series="CpuSeries(points)" Current="[latest?.Cpu]" ValueFormat="Format.Cpu" Floor="5" Area="true"
                                Marks="c.Marks" Down="c.Down" MarkLabels="true" EmptyText="@empty" />
-                    <TimeChart @key="@($"memory-{longView}")" Title="Memory" Tip="health.chart.memory" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
+                    <TimeChart @key="@($"memory-{range}")" Title="Memory" Tip="health.chart.memory" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
                                Series="MemorySeries(points)" Current="[c.MemoryBytes is { } bytes ? (double)bytes : null]" ValueNote="@MemoryLimit(c)"
                                ValueFormat="Format.Memory" Floor="MemoryFloor" BinaryAxis="true" Area="true" Marks="c.Marks" Down="c.Down" EmptyText="@empty" />
                     @if (networkNote is null)
                     {
-                        <TimeChart @key="@($"network-{longView}")" Title="Network" Tip="health.chart.network" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
+                        <TimeChart @key="@($"network-{range}")" Title="Network" Tip="health.chart.network" Subject="@title" Times="times" End="end" Window="window" MaxGap="gap"
                                    Series="NetworkSeries(points)" Current="[latest?.RxRate, latest?.TxRate]" ValueFormat="Format.Rate" Floor="10000"
                                    Marks="c.Marks" Down="c.Down" EmptyText="@empty" />
                     }
