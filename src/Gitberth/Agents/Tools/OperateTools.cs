@@ -43,6 +43,8 @@ public sealed class OperateTools(AgentContext ctx, AppActions actions, AppServic
         {
             sha = commit.Trim().ToLowerInvariant();
             if (sha.Length is < 7 or > 40 || !GitClient.IsSha(sha)) throw new ToolError("commit is a commit's SHA: 7 to 40 hex characters, like 1d2948c.");
+            // [builder B, B6] An uploaded app builds its newest upload: a new version comes as an upload, not a commit.
+            if (row.FromUpload) throw new ToolError($"{view.Summary.Title} is an uploaded app: deploy_app builds its newest upload, so commit doesn't apply. POST a new one to /api/v1/apps/{view.Summary.Key}/upload.");
             if (row.Source != AppSource.Git) throw new ToolError($"{view.Summary.Title} is a Compose app: it deploys its file as it is, so commit doesn't apply.");
             if (row.IsPreview) throw new ToolError($"{view.Summary.Title} is a preview: it builds its branch's newest commit. promote_preview puts its commit into production.");
         }
@@ -149,7 +151,7 @@ public sealed class OperateTools(AgentContext ctx, AppActions actions, AppServic
         CancellationToken ct = default)
     {
         var view = await ctx.AppAsync(app, ct);
-        if (view.Summary.Source is AppSource.Git or AppSource.Compose)
+        if (view.Summary.Source is AppSource.Git or AppSource.Compose or AppSource.Upload)
             throw new ToolError($"{view.Summary.Title} is built or deployed by Gitberth: deploy_app brings it up to date.");
         var status = await updates.CheckAsync(view.Summary.Key, ct);
         return new
@@ -174,7 +176,7 @@ public sealed class OperateTools(AgentContext ctx, AppActions actions, AppServic
         CancellationToken ct = default)
     {
         var view = await ctx.AppAsync(app, ct);
-        if (view.Summary.Source is AppSource.Git or AppSource.Compose)
+        if (view.Summary.Source is AppSource.Git or AppSource.Compose or AppSource.Upload)
             throw new ToolError($"{view.Summary.Title} is built or deployed by Gitberth: deploy_app brings it up to date.");
         if (AppCommands.Refusal(view.Summary, ContainerAction.Restart) is { } refusal) throw ToolError.Conflict(refusal);
         var prepared = await updates.PrepareAsync(view.Summary.Key, ct: ct);

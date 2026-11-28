@@ -128,7 +128,8 @@ else
     private LanAddressView? lan;
     private DomainsOverview? domains;
 
-    private bool IsGit => App.Summary.Source == AppSource.Git;
+    // An uploaded app's ports are kept and deployed as a Git app's are.
+    private bool IsGit => App.Summary.Source is AppSource.Git or AppSource.Upload;
     private bool Database => App.Summary.Role == ContainerRole.Database;
     private string NetworkName => IsGit && App.Row is { } row ? row.Slug : App.Summary.Container;
     private HostPortOwner Self => IsGit && App.Row is { } row ? new HostPortOwner(row.ContainerName, row.Id) : new HostPortOwner(Container: App.Summary.Container);

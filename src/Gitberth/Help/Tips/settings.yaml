@@ -377,6 +377,22 @@ settings.notifications.tokens:
   default: "On"
   more: guides/troubleshooting#tokens-and-sign-ins
 
+settings.notifications.backup-failed:
+  title: An automatic backup fails
+  text: >-
+    A scheduled backup, or Back up now, didn't reach its destination: told once, again when the reason changes or a day
+    later while it keeps failing, and once more when a backup works again.
+  default: "On"
+  more: guides/automatic-backups#when-a-backup-fails
+
+settings.notifications.update-available:
+  title: A new version is out
+  text: >-
+    A new version of Gitberth, or a newer image of an app set to Tell me: told once for each. How an update of Gitberth
+    itself ended goes with it.
+  default: "On"
+  more: guides/notifications#what-youre-told-about
+
 settings.notifications.disk-low:
   title: Docker's disk gets full
   text: >-
@@ -626,8 +642,65 @@ settings.registries.remove:
 settings.updates:
   title: Updates
   text: >-
-    How often Gitberth looks for newer images, the hours in which apps set to update on their own may do it, and the
-    choice a new app starts with. Git apps don't use these: they deploy from their branch.
+    Gitberth's own new versions first; then how often Gitberth looks for newer images, the hours in which apps set to
+    update on their own may do it, and the choice a new app starts with. Git apps don't use these: they deploy from their
+    branch.
+  more: guides/updates
+
+settings.updates.gitberth:
+  title: Gitberth
+  text: >-
+    The version this Gitberth runs and the newest release, asked of GitHub a few minutes after Gitberth starts and then
+    every 6 hours. A newer one shows with its notes, and Gitberth can update itself to it: it keeps a copy of its data and
+    goes back by itself if the new version doesn't start.
+  more: guides/updating-gitberth#update-from-gitberth
+
+settings.updates.gitberth.check:
+  title: Check now
+  text: >-
+    Asks GitHub for Gitberth's newest release now, instead of waiting for the next check. A pre-release is never offered.
+  more: guides/updating-gitberth#update-from-gitberth
+
+settings.updates.gitberth.update-now:
+  title: Update Gitberth
+  text: >-
+    Pulls the new version, checks that it's that version, copies Gitberth's data into a volume of its own (like
+    gitberth-data-before-1.9.0), and starts the updater, which swaps Gitberth's container. Your apps keep running, and this page comes back by itself. If
+    the new version doesn't start within 3 minutes, the old one comes back with its data as it was.
+  more: guides/updating-gitberth#update-from-gitberth
+
+settings.updates.gitberth.policy:
+  title: When a new version comes out
+  text: >-
+    What Gitberth does when GitHub has a newer release: tell you, update by itself between 03:00 and 05:00, or nothing
+    but show it here.
+  default: Tell me
+  more: guides/updating-gitberth#when-a-new-version-comes-out
+
+settings.updates.gitberth.policy.tell:
+  title: Tell me
+  text: >-
+    A notification once for each new version (A new version is out, in Settings › Notifications), and Update on this card.
+  more: guides/updating-gitberth#when-a-new-version-comes-out
+
+settings.updates.gitberth.policy.auto:
+  title: Update by itself
+  text: >-
+    Gitberth updates itself between 03:00 and 05:00 in its time zone, once no deploy, backup or restore runs, the same
+    way Update does. A Gitberth that can't replace itself tells you instead.
+  more: guides/updating-gitberth#when-a-new-version-comes-out
+
+settings.updates.gitberth.policy.nothing:
+  title: Do nothing
+  text: >-
+    The new version only shows on this card: no notification, and no update until you click Update.
+  more: guides/updating-gitberth#when-a-new-version-comes-out
+
+settings.updates.images:
+  title: Apps' images
+  text: >-
+    How often apps' images are checked for a newer version, when apps set to Automatically update, and the choice a new
+    app starts with. Git apps don't use these: they deploy from their branch.
   more: guides/updates
 
 settings.updates.check-every:
@@ -664,7 +737,8 @@ settings.updates.policy.off:
 settings.updates.policy.notify:
   title: Tell me
   text: >-
-    A badge shows on the app when its registry has a newer image, and you update it with one click.
+    A badge shows on the app when its registry has a newer image, a notification says so once, and you update it with one
+    click.
   more: guides/updates#update-choices
 
 settings.updates.policy.auto:
@@ -1251,6 +1325,286 @@ settings.backup.restore-log:
     Everything the restore does, as it does it, with secrets masked. It's kept in Gitberth's data folder, so it carries
     on across the restart.
   more: guides/backups-and-restore#steps
+
+settings.backup.auto-restore:
+  title: Restore from automatic backups
+  text: >-
+    The automatic backups at their destination, newest first, with their size and the key they're locked with. One you
+    pick is fetched into Gitberth as an uploaded file would be; then open it with its passphrase and pick what comes back.
+  more: guides/automatic-backups#restore-an-automatic-backup
+
+settings.backup.auto-list:
+  title: List them
+  text: >-
+    Reads the destination's list of automatic backups: every Gitberth's that saves there, each with its date, size, host
+    and key. Nothing is fetched yet.
+  more: guides/automatic-backups#restore-an-automatic-backup
+
+settings.backup.auto-use:
+  title: Use this one
+  text: >-
+    Fetches this backup from the destination into Gitberth, in place of a file from your browser, with its progress.
+    Then open it with the passphrase it was made with.
+  more: guides/automatic-backups#restore-an-automatic-backup
+
+# ---- Automatic backups (Shared/AutoBackupSection.razor) ----
+
+settings.backup.auto:
+  title: Automatic backups
+  text: >-
+    Backups on a schedule, with no one there: the same items as Save a backup, to a folder on this host, a network share,
+    an FTP server or an S3 bucket, encrypted so only your passphrase opens them. Gitberth keeps the newest few there.
+  more: guides/automatic-backups
+
+settings.backup.auto.now:
+  title: Back up now
+  text: >-
+    Makes an automatic backup now, to the destination as saved, whatever the schedule. Not while a backup is downloaded
+    to your browser or a restore runs.
+  more: guides/automatic-backups#set-them-up
+
+settings.backup.auto.passphrase:
+  title: Passphrase for automatic backups
+  text: >-
+    Opens every automatic backup made with it. Gitberth keeps only a key that can lock files, never the passphrase, so
+    it can make backups but can't open them. At least 12 characters: keep it in a password manager.
+  more: guides/automatic-backups#the-passphrase
+
+settings.backup.auto.change-passphrase:
+  title: Change passphrase
+  text: >-
+    Sets a new passphrase with a key of its own: new backups are locked with it. Files made before still open with the
+    passphrase they were made with, and each one shows its key.
+  more: guides/automatic-backups#the-passphrase
+
+settings.backup.auto.set-passphrase:
+  title: Set passphrase
+  text: >-
+    Makes the key automatic backups are locked with, from the passphrase typed twice. It takes a second on purpose.
+  more: guides/automatic-backups#the-passphrase
+
+settings.backup.auto.schedule:
+  title: When
+  text: >-
+    Every day or week at a time of Gitberth's time zone, or every few hours. A backup missed while Gitberth was down
+    runs once, 5 minutes after it starts. Off, none runs on its own.
+  default: "Off"
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.schedule.off:
+  title: "Off"
+  text: >-
+    No backup runs on its own. Back up now still works once a destination and a passphrase are set.
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.schedule.daily:
+  title: Every day
+  text: >-
+    One backup a day, at the time beside it, in Gitberth's time zone.
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.schedule.weekly:
+  title: Every week
+  text: >-
+    One backup a week, on the day and at the time beside it, in Gitberth's time zone.
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.schedule.hours:
+  title: Every N hours
+  text: >-
+    A backup every few hours (1 to 168), counted from the last one.
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.day:
+  title: Day
+  text: >-
+    The day of the week a weekly backup runs.
+  default: Sunday
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.at:
+  title: At
+  text: >-
+    The time of day it runs, in Gitberth's time zone (TZ in its .env). Pick a quiet hour: what's saved keeps running,
+    and a volume's users pause for the moment its copy takes.
+  default: "03:00"
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.every:
+  title: Every
+  text: >-
+    How many hours between two backups, counted from when the last one started.
+  default: "24"
+  more: guides/automatic-backups#when-they-run
+
+settings.backup.auto.where:
+  title: Where
+  text: >-
+    One destination for every automatic backup: a folder on this host (a disk mounted there, say), a network share, an
+    FTP server, or an S3-compatible bucket. A backup goes there as it's made, never staged on Gitberth's own disk.
+  more: guides/automatic-backups#where-they-go
+
+settings.backup.auto.where.folder:
+  title: A folder on this host
+  text: >-
+    A folder of the Docker host, by its whole path. Best on another disk than Docker's, mounted there: a backup on the
+    same disk goes with it.
+  more: guides/automatic-backups#a-folder-on-this-host
+
+settings.backup.auto.where.smb:
+  title: A network share (SMB)
+  text: >-
+    A Windows or NAS share, through smbclient in a helper container Gitberth builds once from Alpine.
+  more: guides/automatic-backups#a-network-share-smb
+
+settings.backup.auto.where.ftp:
+  title: An FTP server
+  text: >-
+    A NAS or server that takes FTP, through curl in the same helper as SMB's. TLS is used whenever the server offers it.
+  more: guides/automatic-backups#an-ftp-server
+
+settings.backup.auto.where.s3:
+  title: An S3 bucket
+  text: >-
+    AWS S3, Backblaze B2, Wasabi, MinIO or Cloudflare R2: a backup goes up in parts of 32 MiB as it's made.
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.ftp-address:
+  title: Address
+  text: >-
+    The server and the folder, as `ftp://server/folder`: TLS when the server offers it, and a server whose certificate
+    this host doesn't trust is refused. `ftps://` uses TLS from the first byte. The folder is made when it isn't there.
+  example: ftp://nas/backups/gitberth
+  more: guides/automatic-backups#an-ftp-server
+
+settings.backup.auto.ftp-user:
+  title: User
+  text: >-
+    The account that may write to the folder. It and the password stay in a file inside the helper, never on a command
+    line.
+  more: guides/automatic-backups#an-ftp-server
+
+settings.backup.auto.ftp-password:
+  title: Password
+  text: >-
+    The account's password, kept encrypted with Gitberth's other secrets. Leave it empty to keep the saved one.
+  more: guides/automatic-backups#an-ftp-server
+
+settings.backup.auto.folder:
+  title: Folder on this host
+  text: >-
+    Its whole path on the Docker host, like `/mnt/backups`. It's made when it isn't there. Not the host's root or its
+    system folders.
+  example: /mnt/backups
+  more: guides/automatic-backups#a-folder-on-this-host
+
+settings.backup.auto.share:
+  title: Share
+  text: >-
+    The server's name or address and the share, as `//server/share`, with a folder in it if you like:
+    `//nas/backups/gitberth`. The folder is made when it isn't there.
+  example: //192.168.1.20/backups
+  more: guides/automatic-backups#a-network-share-smb
+
+settings.backup.auto.smb-user:
+  title: User
+  text: >-
+    The account that may write to the share. Only it and the password open the share; they stay in a file inside the
+    helper, never on a command line.
+  more: guides/automatic-backups#a-network-share-smb
+
+settings.backup.auto.smb-password:
+  title: Password
+  text: >-
+    The account's password, kept encrypted with Gitberth's other secrets. Leave it empty to keep the saved one.
+  more: guides/automatic-backups#a-network-share-smb
+
+settings.backup.auto.smb-domain:
+  title: Domain
+  text: >-
+    The account's domain or workgroup, when the share asks for one. Most home NAS boxes don't.
+  more: guides/automatic-backups#a-network-share-smb
+
+settings.backup.auto.s3-endpoint:
+  title: Endpoint
+  text: >-
+    The service's address: Backblaze B2, Wasabi, MinIO and Cloudflare R2 each give one. Leave it empty for AWS S3,
+    whose address comes from the region.
+  example: https://s3.us-west-004.backblazeb2.com
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.s3-region:
+  title: Region
+  text: >-
+    The bucket's region, as the service names it. Cloudflare R2 takes `auto`.
+  example: us-east-1
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.s3-bucket:
+  title: Bucket
+  text: >-
+    The bucket's name. It must exist: Gitberth doesn't make one.
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.s3-prefix:
+  title: Folder in the bucket
+  text: >-
+    Where in the bucket the backups go, like `backups/gitberth`. Empty, they go at its top.
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.s3-access-key:
+  title: Access key
+  text: >-
+    The key's ID. Give it only what backups need: put, get, list and delete in this bucket.
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.s3-secret:
+  title: Secret key
+  text: >-
+    The key's secret, kept encrypted with Gitberth's other secrets. Leave it empty to keep the saved one.
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.s3-path-style:
+  title: Path-style addresses
+  text: >-
+    The bucket in the address's path (endpoint/bucket/file), which MinIO and most services take. AWS S3 uses its own,
+    the bucket in the host name, unless the bucket's name has dots.
+  more: guides/automatic-backups#an-s3-compatible-bucket
+
+settings.backup.auto.test:
+  title: Test the destination
+  text: >-
+    Writes a small file there, lists it, reads it back and removes it, with the settings as they're typed (not saved
+    yet). Each step says how it went.
+  more: guides/automatic-backups#where-they-go
+
+settings.backup.auto.keep:
+  title: Keep the last
+  text: >-
+    How many of this Gitberth's automatic backups stay at the destination (1 to 365): after each one, older ones go.
+    Only its own automatic files are counted and removed, never another file there.
+  default: "7"
+  more: guides/automatic-backups#keep-the-last-n
+
+settings.backup.auto.what:
+  title: What's saved
+  text: >-
+    The same list as Save a backup's, chosen once. What you untick is kept as left out, so an app you add later is
+    saved by itself. A host folder over 2 GiB is left out unless you tick it.
+  more: guides/automatic-backups#whats-saved
+
+settings.backup.auto.save:
+  title: Save
+  text: >-
+    Saves when, where, how many to keep and what's saved. Changing the schedule counts it from now.
+  more: guides/automatic-backups#set-them-up
+
+settings.backup.auto.runs:
+  title: The last runs
+  text: >-
+    The last 20 automatic backups: when, how each started, its size and how long it took, or why it failed. The audit
+    log has each one too.
+  more: guides/automatic-backups#when-a-backup-fails
 
 # ---- Admin password ----
 

@@ -1,7 +1,7 @@
 # Add an app
 
-**New app**, in the top bar, makes an app from wherever it comes from: your code in a Git repository, an image from a
-registry or already on the host, a pasted `docker run` command or Compose file, or a template. This page covers the New
+**New app**, in the top bar, makes an app from wherever it comes from: your code in a Git repository or a folder you
+upload, an image from a registry or already on the host, a pasted `docker run` command or Compose file, or a template. This page covers the New
 app page itself: the sources it offers and the three steps every app goes through. Each source's own guide has the
 details.
 
@@ -13,6 +13,7 @@ opens.
 | Card | Use it for | Guide |
 |---|---|---|
 | **Git repository** | Your own code on GitHub or GitLab. Gitberth works out how to build it, and deploys every new commit. | [Deploy an app from GitHub or GitLab](deploy-from-github.md) |
+| **Upload a folder** | A folder from your computer, or a .zip or .tar.gz of one, with no repository. Gitberth works out what it is and brings it up; a new upload is a new version. | [Deploy a folder](deploy-a-folder.md) |
 | **Registry image** | A ready-made image from Docker Hub, ghcr.io or your own registry, kept up to date. | [Run an image from a registry](run-a-registry-image.md) |
 | **Local image** | An image that's already on this host, with no pull. The card says how many the host has. | [Use an image that's already on the host](use-a-local-image.md) |
 | **By hand** | A pasted `docker run` command or Compose file (one app with all its services), or a blank form. | [Paste a docker run command or a Compose file](paste-docker-run-or-compose.md) |
@@ -34,8 +35,9 @@ starts, and after.
 3. **Create.** The review of what will be made. Nothing exists yet. Click **Create and start**, or **Change settings** to
    go back to Configure. See [Create](#create).
 
-A **Git repository**, a whole Compose file and a template work a little differently: their settings are on the source's
-own page, and **Create and deploy** (or **Install**) creates the app and starts its first deploy at once.
+A **Git repository**, an uploaded folder, a whole Compose file and a template work a little differently: their settings
+are on the source's own page, and **Create and deploy** (**Deploy** for a folder, **Install** for a template) creates the
+app and starts its first deploy at once.
 
 [App settings](../reference/app-settings.md) describes each field, as the app's own **Settings** tab has it later.
 

@@ -62,7 +62,7 @@ Each app has an **Updates** choice in its **Settings › Image** section:
 | Choice | What Gitberth does |
 |---|---|
 | **When I ask** | Nothing's checked until you ask, and no badge shows. **Check for update** on the app's page asks, and you update it with **Update**. |
-| **Tell me** | Checks on the schedule. A badge appears on the app when there's a newer image, and you update it with **Update**. |
+| **Tell me** | Checks on the schedule. A badge appears on the app when there's a newer image, a [notification](notifications.md) says so once (**A new version is out**), and you update it with **Update**. |
 | **Automatically** | Checks on the schedule, and updates the app by itself in the hours set in **Settings › Updates**. |
 
 ![An app's Settings tab, Image section, with its Updates choice](../images/app-settings-updates.webp)
@@ -75,7 +75,7 @@ The choice a new app gets is **New apps from an image** in **Settings › Update
 **Automatically** is never used for:
 
 - **A database.** The choice is greyed out with **Never for a database.**, because a new version can change its data files.
-- **Gitberth itself.** Update it as in [Updating Gitberth](updating-gitberth.md).
+- **Gitberth itself.** It has its own choice in **Settings › Updates**: see [Updating Gitberth](updating-gitberth.md#update-from-gitberth).
 - **A container that Compose, Swarm or Kubernetes looks after.** Those only tell you.
 
 ## Update an app

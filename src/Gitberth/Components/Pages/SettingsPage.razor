@@ -238,6 +238,8 @@
         <section class="gb-card gb-sec" id="updates" aria-labelledby="updates-t">
             @Head("updates-t", Icons.Material.Outlined.CloudDownload, "Updates", "How often images are checked for a newer version, and when apps may update on their own.", TocTip("updates"))
             <div class="gb-sec-body">
+                <GitberthUpdateCard />
+                <div class="gb-h3 gb-bk-sub">Apps' images<Tip Key="settings.updates.images" /></div>
                 <div class="gb-fgrid">
                     <Field Label="Check for updates every" For="upd-hours" Tip="settings.updates.check-every" Help="One request per image, however many apps use it. Docker Hub allows plenty at 6 hours." Error="@HoursProblem">
                         <label class="gb-input"><input id="upd-hours" type="number" min="1" max="168" value="@checkHours" @onchange="e => checkHours = int.TryParse(e.Value?.ToString(), out var h) ? h : 0" /><span class="gb-input-suffix">hours</span></label>
@@ -515,6 +517,8 @@
 
         <DatabaseServersSection />
 
+        <AutoBackupSection />
+
         <BackupSection />
 
         <section class="gb-card gb-sec" id="password" aria-labelledby="password-t">
@@ -598,6 +602,7 @@
         ("deploys", "Deploys", Icons.Material.Outlined.RocketLaunch, Tip: "settings.deploys"),
         ("disk", "Disk", Icons.Material.Outlined.Storage, Tip: "settings.disk"),
         ("databases", "Databases", GitberthIcons.Database, Tip: "settings.databases"),
+        ("auto-backup", "Automatic backups", Icons.Material.Outlined.Schedule, Tip: "settings.backup.auto"),
         ("backup", "Save and restore", Icons.Material.Outlined.SettingsBackupRestore, Tip: "settings.backup"),
         ("password", "Admin password", Icons.Material.Outlined.Lock, Tip: "settings.password"),
         ("agents", "AI agents and API", Icons.Material.Outlined.SmartToy, Tip: "settings.agents"),

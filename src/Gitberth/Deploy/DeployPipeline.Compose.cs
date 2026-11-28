@@ -154,6 +154,9 @@ public sealed partial class DeployPipeline
             : ComposeTransform.KeepUnchanged(plan.Model, JsonNode.Parse(await File.ReadAllTextAsync(runningFile, CancellationToken.None)) as JsonObject);
         if (unchanged.Count > 0) log.Line($"Unchanged since the release that runs, so not restarted: {string.Join(", ", unchanged)}.");
 
+        // Its config files (B3), each in its service's volumes.
+        await AddComposeConfigMountsAsync(app, plan.Model, log);
+
         // The file this deploy runs, kept with its release: a rollback brings it up again as it is.
         var own = (JsonObject)plan.Model[ComposeTransform.OwnKey]!;
         own["file"] = Path.GetRelativePath(source.ReleaseDir, source.ComposePath).Replace('\\', '/');
@@ -164,6 +167,8 @@ public sealed partial class DeployPipeline
         dep.Images = new ComposeImages(plan.Images, new Dictionary<string, string>()).ToJson();
 
         await SetStatusAsync(db, dep, DeployStatus.Starting);
+        // The new release's release command (B2), in a one-off container of its service, before it's brought up.
+        if (RunsComposeRelease(app, request, dep)) await Commands.RunForComposeAsync(app, Composer, file, source.ProjectDir, log, ct);
         var shareKey = ComposeNames.EveryServiceSharedKey(app.ParentAppId ?? app.Id);
         var everyShared = await db.Settings.AsNoTracking().AnyAsync(s => s.Key == shareKey && s.Value == "true", CancellationToken.None);
         var outcome = await ComposeUpAsync(app, dep, plan, target.WebService, file, source.ProjectDir, history, releases, unchanged, everyShared, log, ct);
@@ -180,7 +185,8 @@ public sealed partial class DeployPipeline
         ComposeReleases releases, DeployLog log, CancellationToken ct)
     {
         releases.EnsureRoot();
-        if (!app.FromRepo)
+        // An inline Compose app's file is Gitberth's own; a repo's and an upload's are in their files.
+        if (app.Source == Apps.AppSource.Compose)
         {
             var yaml = app.ComposeYamlProtected is { Length: > 0 } stored ? protector.TryUnprotect(stored) : "";
             if (yaml.Length == 0)
@@ -197,11 +203,11 @@ public sealed partial class DeployPipeline
 
         var (commit, srcDir) = await FetchSourceAsync(db, app, dep, fetch, workDir, log, ct);
         var appDir = app.Subdirectory?.Trim().Trim('/') ?? "";
-        var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist on {app.Branch}.");
+        var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist {Where(app)}.");
         var name = app.ComposeFile is { Length: > 0 } f ? f.Trim().Trim('/') : ComposeFiles.Find(folder).FirstOrDefault()
-            ?? throw new DeployException($"There's no Compose file in {(appDir.Length > 0 ? appDir + "/" : "the repo's root")} on {app.Branch}.");
+            ?? throw new DeployException($"There's no Compose file in {(appDir.Length > 0 ? appDir + "/" : RootWords(app))} {Where(app)}.");
         if (Inside(folder, name, mustBeFolder: false) is null)
-            throw new DeployException($"There's no {name} in {(appDir.Length > 0 ? appDir + "/" : "the repo's root")} on {app.Branch} any more. Pick the Compose file again in the app's settings.");
+            throw new DeployException($"There's no {name} in {(appDir.Length > 0 ? appDir + "/" : RootWords(app))} {Where(app)} any more. Pick the Compose file again in the app's settings.");
         // Gitberth reads the Compose file and the .env itself: never through a link that leads out of the repo (a pull
         // request's .env -> /proc/1/environ would be Gitberth's own environment).
         if (ComposeTransform.LinksOut(srcDir, Path.Combine(folder, name)))

@@ -1,6 +1,8 @@
 # Back up and restore
 
-**Settings › Save and restore** saves everything this host runs in one file: Gitberth's settings and secrets, every app, the other containers, the data in their volumes, and the databases. The file is compressed and encrypted with a passphrase you choose. Bring back the apps you pick into any Gitberth (an app deleted by mistake, say), or restore all of it onto a fresh install, on this machine or another: the apps run again once their repos are cloned and built.
+**Settings › Save and restore** saves everything this host runs in one file: Gitberth's settings and secrets, every app, the other containers, the data in their volumes and host folders, and the databases. The file is compressed and encrypted with a passphrase you choose. Bring back the apps you pick into any Gitberth (an app deleted by mistake, say), or restore all of it onto a fresh install, on this machine or another: the apps run again once their repos are cloned and built.
+
+To save one on a schedule, to a folder, a network share or an S3 bucket, see [Automatic backups](automatic-backups.md).
 
 ## What a backup holds
 
@@ -9,6 +11,7 @@
 | Gitberth's data (always) | Its database (settings, apps, ports, domains, variables, deploy history), the keys its secrets are encrypted with, the Health, uptime and audit history, and Compose apps' releases. Copied from a consistent snapshot while Gitberth runs. |
 | Apps | Their settings come with Gitberth's data. A Git or Compose app is built again from its repo, at the commit it ran; an app from an image is made again from its image. |
 | Volumes | Their files. The containers that use a volume are paused for the moment its copy takes, then go on. |
+| Host folders | A folder of the host a container mounts (`/srv/photos:/photos`), listed under that container: its files, copied the same way. One over 2 GiB is left unticked. Never Docker's socket, the host's system folders or Gitberth's own data ([more](automatic-backups.md#host-folders)). |
 | Database servers | Postgres, MySQL and MariaDB are dumped with their own tools, which take a consistent copy while they keep serving. Their own data volumes aren't copied: the dump is. |
 | Other containers | cloudflared, a container started by hand, an app's Redis: everything `docker inspect` says about them (image, command, environment, ports, volumes, networks, restart policy). |
 | Images only this host has | Saved whole, so their apps can come back. An image from a registry is pulled again instead. |
@@ -104,7 +107,7 @@ The uploaded file is deleted from Gitberth when the restore ends.
 | **A volume here holds data already** | A volume with a saved volume's name has files. They're kept, and the saved ones aren't copied over them. |
 | **Another kind of CPU** | The backup was saved on another architecture (`amd64` and `arm64`, say). Images that only the old host had may not run. |
 | **Docker is older here** | This host's Docker is older than the old one's, or older than Gitberth needs. |
-| **A host folder isn't here** | A folder a container mounted from the old host doesn't exist here: it's made empty. Copy its files over yourself. |
+| **A host folder isn't here** | A folder a container mounted from the old host doesn't exist here: it's made, and filled when the backup holds it. Otherwise copy its files over yourself. |
 | **Not enough disk space** | What the backup holds doesn't fit. Free some room first: the restore can't start until it does. |
 
 A warning in red stops the restore until it's dealt with; the others only say what will happen.

@@ -331,7 +331,7 @@ public sealed class BackupFileTests
         using var key = BackupKey.ForNewFile(Passphrase, Iterations, Chunk);
         var header = key.Header.ToBytes();
         var newer = (byte[])header.Clone();
-        newer[9] = 2;
+        newer[9] = BackupFormat.Newest + 1;
         Assert.Equal(UploadProblem.TooNew, Assert.Throws<BackupFileException>(() => BackupHeader.Parse(newer)).Problem);
         Assert.Equal(UploadProblem.NotABackup, Assert.Throws<BackupFileException>(() => BackupHeader.Parse("PK\u0003\u0004 a zip file"u8)).Problem);
         var greedy = (byte[])header.Clone();

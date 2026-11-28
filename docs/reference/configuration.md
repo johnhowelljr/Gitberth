@@ -57,6 +57,7 @@ After you change `.env` or `docker-compose.yml`, run `docker compose up -d` in `
 | `ASPNETCORE_HTTP_PORTS` | The port Gitberth listens on inside its container. The image sets it. | `8080` |
 | `DOTNET_RUNNING_IN_CONTAINER` | Set by the .NET base image. Gitberth reads it to know it runs in a container: it then keeps its data in `/data`, finds its own container, and can run its helper containers. | `true` in the image |
 | `GITBERTH_UPTIME_CONNECT_TO` | A diagnostic setting: `host[:port]` (443 when there's no port). Every [uptime check](../guides/uptime-and-status-page.md) over HTTPS connects there instead of where the domain's DNS leads, keeping the domain as the request's host and TLS server name. Gitberth's test rig uses it to stand in for Cloudflare's edge; leave it unset. | Unset |
+| `GITBERTH_UPDATE_IMAGE` | A diagnostic setting: the image that counts as Gitberth's published one when it [updates itself](../guides/updating-gitberth.md#update-from-gitberth). Gitberth's test rig sets it to its own builds; leave it unset. | `ghcr.io/johnhowelljr/gitberth` |
 
 Only the first three, plus `GITBERTH_PORT` and `GITBERTH_IMAGE` (which the compose file reads, not Gitberth), belong in `.env` for a normal install. To change one of the others, add it under `environment:` in `docker-compose.yml`.
 

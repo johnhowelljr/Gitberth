@@ -380,7 +380,9 @@ public static class ContainerSpecFactory
     public static ContainerSpec For(AppDefinition app, string image, IReadOnlyList<EnvValue> env, string network, IReadOnlyList<string>? logOptions = null,
         IReadOnlyList<PortMapping>? ports = null, string? name = null, string? restartPolicy = null, bool bridge = false,
         (int Id, DeployTrigger Trigger)? deploy = null, IReadOnlyList<AppNetwork>? networks = null, bool gatewayPriority = true, bool lanIpv4Only = false,
-        IReadOnlyDictionary<string, string>? networkIds = null, bool railpackImage = false) => new()
+        IReadOnlyDictionary<string, string>? networkIds = null, bool railpackImage = false,
+        // [builder B, B3] The app's config files, each a read-only bind mount of its own (Workbench.ConfigFiles).
+        IReadOnlyList<VolumeMount>? configMounts = null) => new()
     {
         ShellCommand = railpackImage,
         LogOptions = logOptions ?? [],
@@ -394,6 +396,7 @@ public static class ContainerSpecFactory
         Env = env,
         Volumes = app.Volumes.OrderBy(v => v.Id)
             .Select(v => new VolumeMount { Source = VolumeNames.Resolve(app.Slug, v.Source), Target = v.Target, ReadOnly = v.ReadOnly })
+            .Concat(configMounts ?? [])
             .ToList(),
         MemoryMb = app.MemoryLimitMb,
         Cpus = app.CpuLimit,

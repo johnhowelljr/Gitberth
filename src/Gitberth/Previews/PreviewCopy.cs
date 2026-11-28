@@ -44,6 +44,11 @@ public static class PreviewCopy
         // A preview's new commits go through its parent's build filters: copied before each deploy, which reads them.
         preview.WatchPaths = parent.WatchPaths;
         preview.IgnoredPaths = parent.IgnoredPaths;
+        // [builder B, B2] The parent's release command runs before each of the preview's versions takes over too (with the
+        // preview's own variables and databases), as the parent's start-time migrations run in it.
+        preview.ReleaseCommand = parent.ReleaseCommand;
+        preview.ReleaseTimeoutMinutes = parent.ReleaseTimeoutMinutes;
+        preview.ReleaseService = parent.ReleaseService;
 
         var ports = Ports(parent.Ports, preview.Ports, preview.DetectedPort);
         if (PortsKey(ports) != PortsKey(preview.Ports.OrderBy(p => p.Id)))

@@ -237,6 +237,8 @@ class GitHub:
             self.users = {}
             self.deliveries = []
             self.limits = RateLimits()
+            # builder A: each repo's newest release, by owner/repo in lower case (set through the control API).
+            self.releases = {}
             # Comment and status IDs are past 2**31, as GitHub's are now: a 32-bit ID would break on them.
             self._ids = {"repo": 700000000, "pull": 900000000, "hook": 400000000, "comment": 2600000000, "status": 3000000000}
             shutil.rmtree(self.root, ignore_errors=True)
@@ -432,6 +434,8 @@ class GitHub:
         ("PATCH", r"^/repos/(?P<o>[^/]+)/(?P<r>[^/]+)/hooks/(?P<id>\d+)$", "update_hook"),
         ("DELETE", r"^/repos/(?P<o>[^/]+)/(?P<r>[^/]+)/hooks/(?P<id>\d+)$", "delete_hook"),
         ("POST", r"^/repos/(?P<o>[^/]+)/(?P<r>[^/]+)/hooks/(?P<id>\d+)/pings$", "ping_hook"),
+        # builder A: Gitberth's own newest release (Settings › Updates › Gitberth), as the control API sets it.
+        ("GET", r"^/repos/(?P<o>[^/]+)/(?P<r>[^/]+)/releases/latest$", "latest_release"),
     ]
     _compiled = [(m, re.compile(p), fn) for m, p, fn in ROUTES]
 
@@ -545,6 +549,28 @@ class GitHub:
         u.update({"name": "E2E Bot", "company": None, "blog": "", "location": None, "email": None, "bio": None,
                   "public_repos": 0, "followers": 0, "following": 0, "created_at": "2020-01-01T00:00:00Z", "updated_at": iso()})
         return 200, u, None
+
+    # ---- builder A: releases ----
+
+    def latest_release(self, req, tok, o, r):
+        """GitHub's latest release: never a draft or a pre-release (the control API refuses those for it), a 404 when the
+        repo has none. Anyone may read a public repo's releases, with a token or without; none of the stand-in's own
+        repos needs to exist for it (Gitberth asks about its own, johnhowelljr/Gitberth)."""
+        release = self.releases.get(f"{o}/{r}".lower())
+        if release is None:
+            raise ApiError(404, "Not Found")
+        return 200, release, None
+
+    def set_latest_release(self, owner, repo, tag, name=None, body=None, published_at=None):
+        full = f"{owner}/{repo}"
+        rid = self.next_id("release")
+        self.releases[full.lower()] = {
+            "id": rid, "node_id": node_id("RE_", rid), "tag_name": tag, "target_commitish": "main", "name": name or tag,
+            "body": body or "", "draft": False, "prerelease": False, "created_at": published_at or iso(),
+            "published_at": published_at or iso(), "html_url": f"{WEB}/{full}/releases/tag/{tag}",
+            "url": f"{API}/repos/{full}/releases/{rid}", "author": self.user_json("e2e-bot"), "assets": [],
+        }
+        return self.releases[full.lower()]
 
     def rate_limit(self, req, tok):
         # It doesn't count against the limit it shows.

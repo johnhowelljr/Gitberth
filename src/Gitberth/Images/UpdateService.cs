@@ -85,14 +85,18 @@ public sealed partial class UpdateService : IHookUpdates
     /// <param name="Image">The image it runs, as Docker describes it; null when Docker didn't say.</param>
     /// <param name="Policy">Its row's update policy; Tell me for a container without a row.</param>
     internal sealed record Followed(string Key, int? AppId, ImageReference Reference, int? RegistryId, string RunningId, IReadOnlyList<string> RunningDigests,
-        JsonObject? Image, UpdatePolicy Policy);
+        JsonObject? Image, UpdatePolicy Policy, string? Name = null);
 
     public UpdateService(AppCatalog catalog, AppSettingsService settings, ImageService images, PortChanger changer, IContainerEngine engine,
         IDbContextFactory<GitberthDb> dbFactory, ActivityLog activity, ILogger<UpdateService> logger, Audit.AuditLog? audit = null,
-        Credentials.CredentialSignals? signals = null)
+        Credentials.CredentialSignals? signals = null, Notifications.Notifier? notifier = null)
         : this(new LiveSteps(catalog, settings, changer, engine, activity), images, dbFactory, logger, audit, signals)
     {
+        Notifier = notifier;
     }
+
+    /// <summary>Where a newer image of an app set to Tell me is told (UpdateAvailable, builder A); none in tests that don't ask.</summary>
+    internal Notifications.Notifier? Notifier { get; init; }
 
     /// <param name="audit">Where updates found, applied, failed and rolled back are recorded; none in older tests.</param>
     /// <param name="signals">Where a registry turning a saved sign-in away (or taking it) is reported, for the token watch.</param>
@@ -457,6 +461,11 @@ public sealed partial class UpdateService : IHookUpdates
                 {
                     AppId = f.AppId, Container = f.Key, Target = f.Reference.Familiar, Changes = [new("Newest digest", before is null ? null : Abbrev(before), Abbrev(latest))],
                 });
+                // ---- builder A: an app set to Tell me is told too (UpdateAvailable), once per newer image; a muted one isn't.
+                if (f.Policy == UpdatePolicy.Notify && Notifier is { } notifier)
+                    notifier.Publish(new Notifications.Notice(Notifications.NotifyEvent.UpdateAvailable, Notifications.NoticeLevel.Info, $"A newer image of {f.Name ?? f.Key} is out",
+                        $"{f.Reference.Familiar} has a newer image ({Abbrev(latest)}). Update it from its page when you like: the image it runs now is kept for Roll back.",
+                        await notifier.LinkAsync($"apps/{Uri.EscapeDataString(f.Key)}", ct), f.Name ?? f.Key, f.Key, Now) { AppId = f.AppId });
             }
         }
         return due;
@@ -473,7 +482,8 @@ public sealed partial class UpdateService : IHookUpdates
     {
         List<AppDefinition> rows;
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))
-            rows = await db.Apps.AsNoTracking().Where(a => a.UpdatePolicy == UpdatePolicy.Auto && a.Source != AppSource.Git && a.Source != AppSource.Compose).ToListAsync(ct);
+            // [builder B, B6] An uploaded app is built from its upload, as a Git app from its repo: never an image update's.
+            rows = await db.Apps.AsNoTracking().Where(a => a.UpdatePolicy == UpdatePolicy.Auto && a.Source != AppSource.Git && a.Source != AppSource.Compose && a.Source != AppSource.Upload).ToListAsync(ct);
         var updated = new List<string>();
         foreach (var row in rows)
         {
@@ -717,7 +727,7 @@ public sealed partial class UpdateService : IHookUpdates
             if (ImageReference.Parse(tracked) is not { Digest: null } reference) continue;
             var runningId = Str(c, "ImageID");
             var image = await ByIdAsync(runningId, ct);
-            followed.Add(new Followed(name, row?.Id, reference, row?.RegistryId, runningId, Digests(image), image, row?.UpdatePolicy ?? UpdatePolicy.Notify));
+            followed.Add(new Followed(name, row?.Id, reference, row?.RegistryId, runningId, Digests(image), image, row?.UpdatePolicy ?? UpdatePolicy.Notify, row?.Name));
         }
         return followed;
     }

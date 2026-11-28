@@ -58,6 +58,8 @@ public sealed record BridgeCheck(bool Ok, string? Why)
 /// <param name="gitLab">GitLab's API, which a GitLab app's build filters ask what a push changed (its compare); without it git compares the commits.</param>
 /// <param name="railpack">Plans a Railpack build (railpack prepare); without it (in older tests) there's no Railpack, as in an image without it.</param>
 /// <param name="buildKit">gitberth-buildkit, where Railpack builds run; without it (in tests) one is made over <paramref name="docker"/>.</param>
+/// <param name="uploads">An uploaded app's kept uploads, which its deploys unpack; without it (in tests) one is made over <paramref name="options"/>.</param>
+/// <param name="commands">Runs an app's release command before a new version takes over; without it (in tests) one is made over <paramref name="docker"/>.</param>
 public sealed partial class DeployPipeline(
     IDbContextFactory<GitberthDb> dbFactory,
     GitClient git,
@@ -83,7 +85,10 @@ public sealed partial class DeployPipeline(
     Templates.TemplateBuiltIns? builtIns = null,
     GitLabApi? gitLab = null,
     Railpack.IRailpackPlanner? railpack = null,
-    Railpack.RailpackBuildKit? buildKit = null)
+    Railpack.RailpackBuildKit? buildKit = null,
+    Sources.UploadStore? uploads = null,
+    ReleaseCommands? commands = null,
+    Workbench.ConfigFiles? configFiles = null)
 {
     // How long a report may hold a deploy up: GitHub being slow never delays the next deploy for long.
     private static readonly TimeSpan ReportTimeout = TimeSpan.FromSeconds(10);
@@ -327,7 +332,9 @@ public sealed partial class DeployPipeline(
                         Branch: request.GitRef is null || request.GitRef == OwnBranchRef(app) ? null : await PromotedBranchAsync(db, app.Id, request.GitRef));
             // What the build fetches: one commit of the app's own branch asked for by name (deploy_app's commit, checked to be on
             // the branch when it's fetched); the promoted preview's exact commit; the preview's ref; the branch's tip otherwise.
-            var fetch = request.GitRef is { } gitRef && gitRef == OwnBranchRef(app) ? new BuildSource(null, request.Commit, Promoted: false)
+            // An uploaded app's: the upload asked for (its SHA-256), else its newest.
+            var fetch = app.FromUpload ? new BuildSource(null, request.Commit, Promoted: false)
+                : request.GitRef is { } gitRef && gitRef == OwnBranchRef(app) ? new BuildSource(null, request.Commit, Promoted: false)
                 : request.GitRef is not null ? new BuildSource(request.GitRef, request.Commit, Promoted: true)
                 : preview is not null ? new BuildSource(preview.Ref, null, Promoted: false)
                 : new BuildSource(null, null, Promoted: false);
@@ -355,7 +362,7 @@ public sealed partial class DeployPipeline(
                     foreach (var line in DescribeVercelVariables(runtimeEnv, facts)) log.Line(line);
                     runtimeEnv = VercelEnv.AddTo(runtimeEnv, VercelEnv.For(facts));
                 }
-                else
+                else if (app.FromRepo)
                 {
                     log.Line("Vercel's variables are turned off for this app.");
                 }
@@ -368,6 +375,8 @@ public sealed partial class DeployPipeline(
                 // An image Railpack built listens on PORT: the web container port, given now, so a port change needs no build.
                 var unported = runtimeEnv;
                 if (prepared.Railpack) runtimeEnv = WithRailpackPort(unported, PortsFor(app, prepared.Port), log);
+                // A new version's release command (B2) runs before it takes over; one that fails keeps the running version.
+                if (ReleaseCommands.Runs(app, request.Build, prepared.Image)) await ReleaseAsync(app, prepared.Image, runtimeEnv, prepared.Railpack, log, ct);
                 outcome = await SwapAsync(app, prepared.Image, runtimeEnv, PortsFor(app, prepared.Port), (dep.Id, dep.Trigger), log, ct,
                     railpack: prepared.Railpack, mayMove: prepared.Railpack);
                 // It listens on one other port: the web port moves there, and the swap runs once more (plan D4).
@@ -907,7 +916,7 @@ public sealed partial class DeployPipeline(
         Directory.CreateDirectory(buildDir);
 
         var appDir = app.Subdirectory?.Trim().Trim('/') ?? "";
-        var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist on {app.Branch}.");
+        var folder = Inside(srcDir, appDir) ?? throw new DeployException($"The subfolder '{app.Subdirectory}' doesn't exist {Where(app)}.");
 
         // Vercel's variables are there while it builds too (front ends build NEXT_PUBLIC_VERCEL_URL in). What the build
         // finds out goes on the image, so a later recreate from it sets the same ones.
@@ -923,6 +932,8 @@ public sealed partial class DeployPipeline(
     private async Task<(CommitInfo Commit, string SrcDir)> FetchSourceAsync(GitberthDb db, AppDefinition app, Deployment dep, BuildSource fetch, string workDir,
         DeployLog log, CancellationToken ct)
     {
+        // An uploaded app's source is its upload, unpacked as safely as it was when it came.
+        if (app.FromUpload) return await FetchUploadAsync(db, app, dep, fetch.Commit, workDir, log, ct);
         DeployPaths.TryDeleteDirectory(workDir);
         var srcDir = Path.Combine(workDir, "src");
         Directory.CreateDirectory(workDir);
@@ -1309,13 +1320,15 @@ public sealed partial class DeployPipeline(
     /// <param name="Deploy">This deploy, recorded on the containers it starts.</param>
     /// <param name="Railpack">The image is Railpack's: a Command runs through its bash -c, and the container has to open its web port.</param>
     /// <param name="MayMove">The web port may move to the one other port the app listens on (once a deploy).</param>
+    /// <param name="ConfigMounts">The app's config files (B3), each mounted read-only at its path.</param>
     private sealed record SwapContext(IReadOnlyList<string> LogOptions, IReadOnlyList<AppNetwork> Networks, IReadOnlyDictionary<string, string> NetworkIds,
-        bool GatewayPriority, bool LanIpv4Only, (int Id, DeployTrigger Trigger) Deploy, bool Railpack = false, bool MayMove = false);
+        bool GatewayPriority, bool LanIpv4Only, (int Id, DeployTrigger Trigger) Deploy, bool Railpack = false, bool MayMove = false,
+        IReadOnlyList<VolumeMount>? ConfigMounts = null);
 
     private ContainerSpec Spec(AppDefinition app, string image, List<EnvValue> env, IReadOnlyList<PortMapping> ports, SwapContext with,
         string? name = null, string? restartPolicy = null, bool bridge = false) =>
         ContainerSpecFactory.For(app, image, env, options.Network, with.LogOptions, ports, name, restartPolicy, bridge, with.Deploy,
-            with.Networks, with.GatewayPriority, with.LanIpv4Only, with.NetworkIds, railpackImage: with.Railpack);
+            with.Networks, with.GatewayPriority, with.LanIpv4Only, with.NetworkIds, railpackImage: with.Railpack, configMounts: with.ConfigMounts);
 
     /// <param name="ports">What to publish. The app's saved ports only change once the swap has worked.</param>
     /// <param name="deploy">This deploy, recorded on the containers it starts.</param>
@@ -1351,7 +1364,8 @@ public sealed partial class DeployPipeline(
         var (gatewayPriority, lanIpv4Only) = await HostTraitsAsync();
         // Read under the app's lock, which joining a network takes too: a network joined while the image built isn't lost.
         var (saved, there, ids) = await NetworksAsync(app, log);
-        var with = new SwapContext(await docker.GetLogOptionsAsync(), there, ids, gatewayPriority, lanIpv4Only, deploy, railpack, mayMove);
+        var with = new SwapContext(await docker.GetLogOptionsAsync(), there, ids, gatewayPriority, lanIpv4Only, deploy, railpack, mayMove,
+            await ConfigMountsAsync(app, log));
         if (hadOld)
         {
             var bridge = await CanBridgeAsync(app, ports);

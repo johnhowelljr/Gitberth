@@ -71,13 +71,23 @@ public sealed class BackupReader : IDisposable
         return await OpenAsync(input, header, headerBytes, key, ct);
     }
 
-    /// <summary>The file's header, read from its start.</summary>
+    /// <summary>The file's header, read from its start: format 1's 43 bytes, or format 2's with its blobs.</summary>
     public static async Task<(BackupHeader Header, byte[] Bytes)> ReadHeaderAsync(Stream input, CancellationToken ct = default)
     {
         var headerBytes = new byte[BackupFormat.HeaderBytes];
         var read = await input.ReadAtLeastAsync(headerBytes, headerBytes.Length, throwOnEndOfStream: false, ct);
         if (read < 10) throw new BackupFileException(UploadProblem.NotABackup, "This isn't a Gitberth backup file.");
-        return (BackupHeader.Parse(headerBytes.AsSpan(0, read)), headerBytes);
+        // Format 2 goes on past format 1's 43 bytes: read what it says it needs, never past its end (the body follows).
+        while (read == headerBytes.Length && BackupHeader.Needed(headerBytes, out var complete) is var needed && !(complete && needed == read))
+        {
+            if (needed <= read) throw new BackupFileException(UploadProblem.Damaged, "This backup's header is damaged.");
+            var more = new byte[needed];
+            headerBytes.CopyTo(more, 0);
+            read += await input.ReadAtLeastAsync(more.AsMemory(read), needed - read, throwOnEndOfStream: false, ct);
+            headerBytes = more;
+            if (read < needed) throw new BackupFileException(UploadProblem.Damaged, "This backup's header is damaged.");
+        }
+        return (BackupHeader.Parse(headerBytes.AsSpan(0, read)), headerBytes.Length == read ? headerBytes : headerBytes[..read]);
     }
 
     private static async Task<BackupReader> OpenAsync(Stream input, BackupHeader header, byte[] headerBytes, BackupKey key, CancellationToken ct)
@@ -224,8 +234,9 @@ public sealed class BackupReader : IDisposable
         catch (AuthenticationTagMismatchException)
         {
             // The first chunk not opening is nearly always the wrong passphrase (or a changed header), unless it opens as
-            // the other kind of chunk: then the key is right, and the file was cut short after it or added to.
-            if (_counter != 0) throw Damaged();
+            // the other kind of chunk: then the key is right, and the file was cut short after it or added to. A sealed
+            // file's passphrase was proven already (it unsealed the file's key): any chunk that doesn't open is damage.
+            if (_counter != 0 || Header.Version == BackupFormat.Sealed) throw Damaged();
             BackupFormat.Nonce(_nonce, _prefix, _counter, !last);
             try
             {

@@ -50,7 +50,16 @@ internal sealed class PickPlan
     /// <summary>The app's ID here, once its rows are written.</summary>
     public int? AppId { get; set; }
 
+    /// <summary>The host folders its containers mount that the backup holds.</summary>
+    public List<SavedHostFolder> Folders { get; } = [];
+
+    /// <summary>A copy's own folders: each saved folder's path to the copy's, next to it (/srv/photos-website2).</summary>
+    public Dictionary<string, string> FolderRenames { get; } = new(StringComparer.Ordinal);
+
     public string Rename(string saved) => Renames.TryGetValue(saved, out var here) ? here : saved;
+
+    /// <summary>A bind's source here: a copy's own folder for a saved one, else the same path.</summary>
+    public string Folder(string source) => HostFolders.Clean(source) is { } path && FolderRenames.TryGetValue(path, out var copy) ? copy : source;
 
     public bool IsApp => Saved is not null;
 }
@@ -251,6 +260,11 @@ public sealed partial class RestoreService
                 plan = AppPlan(pick, item, rows, containers, volumes, here, copies);
             }
             else plan = ContainerPlan(pick, item, containers, volumes, here, copies);
+            // Its host folders the backup holds; a copy gets its own of each, next to the original (it shares none).
+            var names = plan.Containers.Select(c => c.Name).ToHashSet(StringComparer.Ordinal);
+            plan.Folders.AddRange(manifest.HostFolders.Where(f => f.Part is not null && f.Users.Any(names.Contains)));
+            if (pick.Action == RestoreAction.Copy)
+                foreach (var folder in plan.Folders) plan.FolderRenames[folder.Path] = HostFolders.CopyPath(folder.Path, plan.Slug);
             await CheckPickAsync(plan, manifest, here, plans, ct);
             plans.Add(plan);
         }
@@ -326,19 +340,22 @@ public sealed partial class RestoreService
     }
 
     // A folder of the host one of its containers writes to (a socket aside, and a Compose app's own folder, which a copy
-    // gets its own of), or a Git app's.
+    // gets its own of), or a Git app's. A folder the backup holds gets the copy's own (not for a Compose app, whose file
+    // names its folders itself).
     private static string? SharedFolder(PickPlan plan)
     {
         var own = plan.Saved is { } saved ? $"/compose/{saved.App.Slug}/" : null;
+        var moved = plan.Saved?.App.IsCompose == true ? new HashSet<string>(StringComparer.Ordinal) : plan.FolderRenames.Keys.ToHashSet(StringComparer.Ordinal);
         foreach (var c in plan.Containers)
             foreach (var m in (c.Inspect["Mounts"] as JsonArray ?? []).OfType<JsonObject>().Where(m => BackupInventory.Str(m, "Type") == "bind"))
             {
                 var source = BackupInventory.Str(m, "Source");
                 var writes = m["RW"] is not JsonValue rw || !rw.TryGetValue<bool>(out var w) || w;
-                if (writes && source.Length > 0 && !source.EndsWith(".sock", StringComparison.Ordinal) && (own is null || !source.Contains(own, StringComparison.Ordinal)))
+                if (writes && source.Length > 0 && !source.EndsWith(".sock", StringComparison.Ordinal) && (own is null || !source.Contains(own, StringComparison.Ordinal))
+                    && !moved.Contains(HostFolders.Clean(source) ?? source))
                     return source;
             }
-        return plan.Saved?.App.Volumes.FirstOrDefault(v => VolumeNames.IsBind(v.Source) && !v.ReadOnly)?.Source;
+        return plan.Saved?.App.Volumes.FirstOrDefault(v => VolumeNames.IsBind(v.Source) && !v.ReadOnly && !moved.Contains(HostFolders.Clean(v.Source) ?? v.Source))?.Source;
     }
 
     private static PickPlan AppPlan(RestorePick pick, BackupItem item, SavedAppRows rows, List<SavedContainer> containers, List<SavedVolume> volumes, HereNow here,
@@ -448,7 +465,7 @@ public sealed partial class RestoreService
             // Its database before its volumes: restored aside first, it's the step most likely to fail, and nothing here has
             // changed until it worked.
             if (plan.Saved?.Databases.Any(d => d.Kind == DatabaseKind.Postgres) == true) Add("database", "database");
-            if (plan.Volumes.Count > 0 || app?.IsCompose == true) Add("volumes", "volumes and files");
+            if (plan.Volumes.Count > 0 || plan.Folders.Count > 0 || app?.IsCompose == true) Add("volumes", "volumes and files");
             if (plan.IsApp) Add("app", $"settings ({verb})");
             if (plan.Containers.Any(c => c.How != ComesBack.Deploy)) Add("container", "container");
             if (plan.Containers.Any(c => manifest.Databases.Any(d => d.Container == c.Name))) Add("dump", "its dump loaded");
@@ -607,7 +624,7 @@ public sealed partial class RestoreService
         await Stage("app", () => PickRowsAsync(plan, ct));
         await Stage("container", () => PickContainersAsync(plan, manifest, ct));
         await Stage("dump", () => PickDumpAsync(plan, manifest, key, ct));
-        await Stage("deploy", () => PickDeployAsync(plan, ct));
+        await Stage("deploy", () => PickDeployAsync(plan, key, ct));
         await Stage("domains", async () =>
         {
             if (_domains is null || !await _domains.EnabledAsync(ct)) return Skip("Domains aren't turned on.");
@@ -660,16 +677,22 @@ public sealed partial class RestoreService
         async Task<string> OwnImage() => own ??= await OwnImageAsync(ct);
         var said = new List<string>();
         var parts = plan.Volumes.Where(v => v.Part is not null).ToDictionary(v => v.Part!, StringComparer.Ordinal);
+        var folders = plan.Folders.Where(f => f.Part is not null).ToDictionary(f => f.Part!, StringComparer.Ordinal);
         var app = plan.Saved?.App;
         var compose = app?.IsCompose == true;
-        if (parts.Count > 0 || compose)
+        if (parts.Count > 0 || folders.Count > 0 || compose)
         {
             await using var file = OpenUpload();
             using var reader = await BackupReader.OpenAsync(file, key, ct);
-            while ((parts.Count > 0 || compose) && await reader.NextPartAsync(ct) is { } part)
+            while ((parts.Count > 0 || folders.Count > 0 || compose) && await reader.NextPartAsync(ct) is { } part)
             {
                 if (part.Kind == BackupPartKind.Volume && parts.Remove(part.Name, out var volume))
                     said.Add(await PickVolumeAsync(plan, volume, part.Content, here, OwnImage, ct));
+                else if (part.Kind == BackupPartKind.HostFolder && folders.Remove(part.Name, out var folder))
+                {
+                    var note = await FillFolderAsync(plan.Folder(folder.Path), folder, part.Content, plan.Pick.Action, await OwnImage(), ct);
+                    said.Add(note.StartsWith(SkipMark, StringComparison.Ordinal) ? note[SkipMark.Length..] : note);
+                }
                 else if (compose && part.Kind == BackupPartKind.DataFolder && part.Name == "data/compose")
                 {
                     compose = false;
@@ -791,6 +814,18 @@ public sealed partial class RestoreService
         return !Directory.Exists(target) ? "It had no Compose files saved."
             : keepData ? $"Its Compose files are in {target}; the data/ folder there is kept as it was, not the saved one."
             : $"Its Compose files are in {target}.";
+    }
+
+    // [builder B, B6] An uploaded app's kept uploads (data/uploads/<its saved ID>/) into its folder here, under its ID here.
+    internal async Task<string> UploadFilesAsync(AppDefinition saved, int appId, Stream tar, CancellationToken ct)
+    {
+        var root = Deploy.AppDataFolders.UploadsRoot(_options);
+        var prefix = $"uploads/{saved.Id.ToString(CultureInfo.InvariantCulture)}/";
+        var target = appId.ToString(CultureInfo.InvariantCulture) + "/";
+        await ExtractAsync(tar, root, ct, name => name.StartsWith(prefix, StringComparison.Ordinal) && name.Length > prefix.Length ? target + name[prefix.Length..] : null);
+        var kept = Directory.Exists(Path.Combine(root, appId.ToString(CultureInfo.InvariantCulture)))
+            ? Directory.EnumerateFiles(Path.Combine(root, appId.ToString(CultureInfo.InvariantCulture))).Count() : 0;
+        return kept == 0 ? "It had no uploads saved: upload it again on its page." : $"Its {kept} kept upload{(kept == 1 ? "" : "s")} came back.";
     }
 
     // ---- one database out of its server's dump (P5) ----
@@ -1091,7 +1126,8 @@ public sealed partial class RestoreService
         foreach (var v in app.EnvVars)
             row.EnvVars.Add(new EnvVar { Key = v.Key, ProtectedValue = v.ProtectedValue, IsSecret = v.IsSecret, BuildTime = v.BuildTime, Scope = v.Scope });
         // A named volume's short name is the app's own (gb-<slug>-<name> when it's deployed): a copy's are the copy's.
-        foreach (var v in app.Volumes) row.Volumes.Add(new VolumeMount { Source = v.Source, Target = v.Target, ReadOnly = v.ReadOnly });
+        // A host folder the backup holds is the copy's own (filled from the file).
+        foreach (var v in app.Volumes) row.Volumes.Add(new VolumeMount { Source = copy ? plan.Folder(v.Source) : v.Source, Target = v.Target, ReadOnly = v.ReadOnly });
         foreach (var n in app.Networks)
             row.Networks.Add(new AppNetwork { Network = n.Network, Alias = copy ? null : n.Alias, IPv4Address = copy ? null : n.IPv4Address });
         if (!copy)
@@ -1134,6 +1170,19 @@ public sealed partial class RestoreService
                 HookName = d.HookName, NoCache = d.NoCache, RequestedBy = d.RequestedBy, Images = d.Images,
             });
         await db.SaveChangesAsync(ct);
+
+        // [builder B, B3] Its config files, as files of its own here; an image app's saved settings mount those.
+        var configs = await Workbench.ConfigFiles.RestoreAsync(db, _options, _protector, row.Id, saved.ConfigFiles, ct);
+        if (configs.Count > 0 && row.SpecProtected is { } saving && _protector?.TryUnprotect(saving) is { Length: > 0 } savedJson
+            && JsonSerializer.Deserialize<AppSnapshot>(savedJson, SnapshotJson) is { } withConfigs)
+        {
+            row.SpecProtected = _protector.Protect(JsonSerializer.Serialize(withConfigs with
+            {
+                Settings = withConfigs.Settings with { Mounts = Workbench.ConfigFiles.Remap(withConfigs.Settings.Mounts, row.Id, configs) },
+            }, SnapshotJson));
+            await db.SaveChangesAsync(ct);
+        }
+        // [builder B, B3] end.
 
         // An image app's copy runs from its saved settings: its own databases' URLs in them, and its own slug on its label.
         if (copy && row.SpecProtected is { } spec && _protector?.TryUnprotect(spec) is { Length: > 0 } json
@@ -1199,6 +1248,15 @@ public sealed partial class RestoreService
         row.WebService = app.WebService;
         row.PreviewDatabases = app.PreviewDatabases;
         row.TemplateId = app.TemplateId;
+        // [builder B] An uploaded app's upload (B6) and any app's release command (B2).
+        row.UploadName = app.UploadName;
+        row.UploadSha = app.UploadSha;
+        row.UploadSize = app.UploadSize;
+        row.UploadedAt = app.UploadedAt;
+        row.UploadedBy = app.UploadedBy;
+        row.ReleaseCommand = app.ReleaseCommand;
+        row.ReleaseTimeoutMinutes = app.ReleaseTimeoutMinutes;
+        row.ReleaseService = app.ReleaseService;
         row.UpdatedAt = DateTime.UtcNow;
     }
 
@@ -1228,7 +1286,12 @@ public sealed partial class RestoreService
         if (snapshot is null) return spec;
         var settings = snapshot.Settings with
         {
-            Mounts = snapshot.Settings.Mounts.Select(m => m.Kind == MountKind.Volume ? m with { Source = plan.Rename(m.Source) } : m).ToList(),
+            Mounts = snapshot.Settings.Mounts.Select(m => m.Kind switch
+            {
+                MountKind.Volume => m with { Source = plan.Rename(m.Source) },
+                MountKind.Bind => m with { Source = plan.Folder(m.Source) },
+                _ => m,
+            }).ToList(),
             Ports = snapshot.Settings.Ports.Select(p =>
             {
                 if (p.HostPort is not { } wanted || !taken.Contains(wanted)) return p;
@@ -1324,13 +1387,25 @@ public sealed partial class RestoreService
         if (copy && labels.ContainsKey("gitberth.app")) labels["gitberth.app"] = plan.Slug;
         settings = settings with
         {
-            Mounts = settings.Mounts.Select(m => m.Kind == MountKind.Volume ? m with { Source = plan.Rename(m.Source) } : m).ToList(),
+            Mounts = settings.Mounts.Select(m => m.Kind switch
+            {
+                MountKind.Volume => m with { Source = plan.Rename(m.Source) },
+                MountKind.Bind => m with { Source = plan.Folder(m.Source) },
+                _ => m,
+            }).ToList(),
             Ports = ports,
             Labels = labels,
         };
         // A copied app's own container takes its own databases' URLs, never the original's.
         if (copy && plan.AppId is { } appId && plan.Saved?.App.ContainerName == saved.Name)
             settings = ForCopy(settings, await ValuesOfAsync(appId, ct), plan.Slug);
+        // [builder B, B3] Its config files' mounts are its own files here, by their paths in the container.
+        if (plan.AppId is { } configApp && plan.Saved?.App.ContainerName == saved.Name)
+        {
+            await using var configDb = await _dbFactory.CreateDbContextAsync(ct);
+            var configs = await configDb.ConfigFiles.AsNoTracking().Where(f => f.AppId == configApp).ToListAsync(ct);
+            if (configs.Count > 0) settings = settings with { Mounts = Workbench.ConfigFiles.Remap(settings.Mounts, configApp, configs) };
+        }
         var here = (await _engine.ListNetworksJsonAsync(ct)).OfType<JsonObject>().Select(n => BackupInventory.Str(n, "Name")).ToHashSet(StringComparer.Ordinal);
         // A copy answers to none of the saved one's aliases or addresses (they're the original's); a copy's Redis to the copy's.
         var redis = copy && DatabaseNames.IsMember(labels);
@@ -1370,10 +1445,24 @@ public sealed partial class RestoreService
     }
 
     // A Git app built at the commit it ran, a Compose app brought up at its release; waited for.
-    private async Task<string> PickDeployAsync(PickPlan plan, CancellationToken ct)
+    private async Task<string> PickDeployAsync(PickPlan plan, BackupKey key, CancellationToken ct)
     {
         if (plan.Saved?.App is not { Deployed: true } app || plan.AppId is not { } appId) return Skip("Gitberth doesn't deploy it.");
-        if (app.DesiredState != DesiredState.Running) return Skip("It was stopped: it's deployed when you start it.");
+        // [builder B, B6] An uploaded app's kept uploads come with it (under its ID here), stopped or not, so a deploy here
+        // builds its saved upload.
+        var uploads = "";
+        if (app.FromUpload)
+        {
+            await using var file = OpenUpload();
+            using var reader = await BackupReader.OpenAsync(file, key, ct);
+            while (await reader.NextPartAsync(ct) is { } part)
+                if (part.Kind == BackupPartKind.DataFolder && part.Name == "data/uploads")
+                {
+                    uploads = await UploadFilesAsync(app, appId, part.Content, ct) + " ";
+                    break;
+                }
+        }
+        if (app.DesiredState != DesiredState.Running) return Skip(uploads + "It was stopped: it's deployed when you start it.");
         if (_actions is null) return Skip("Nothing here deploys it.");
         AppDefinition row;
         await using (var db = await _dbFactory.CreateDbContextAsync(ct))

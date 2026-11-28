@@ -57,7 +57,7 @@ Only for apps whose **Updates** choice is **Automatically**, in the hours set in
 Yes. If the new container fails its checks, Gitberth puts the old one back by itself. After a successful update, click **Roll back to …** on the app's **Updates** card or in its **More** menu, while the image it ran before is still on the host. See [Roll back an update](guides/updates.md#roll-back-an-update). To go further back, set an older tag in the app's **Settings › Image** (see [Go back to an older version](guides/updates.md#go-back-to-an-older-version)).
 
 **Does Gitberth update itself?**
-No. Run `docker compose pull && docker compose up -d` in `/opt/gitberth`. See [Updating Gitberth](guides/updating-gitberth.md).
+When you ask it to: **Settings › Updates** shows a new version with its notes and **Update to …**, and **When a new version comes out** can be set to **Update by itself** (between 03:00 and 05:00). It keeps a copy of its data and goes back by itself if the new version doesn't start. See [Updating Gitberth](guides/updating-gitberth.md).
 
 ## Networking and domains
 

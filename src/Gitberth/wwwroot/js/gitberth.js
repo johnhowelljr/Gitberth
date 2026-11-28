@@ -153,8 +153,9 @@
         // 404 while signed in). Once it sends the browser to its sign-in instead, open the Restoring page afresh: the
         // sign-in comes first, then it. Also once it answers again after being down while the page is cut off. The
         // reconnect box says why it's waiting. Settings starts it before the restore, the Restoring page again, and stops
-        // it once the restore has finished.
-        reloadAfterRestart(note) {
+        // it once the restore has finished. (builder A) An update of Gitberth uses it too, with `to` the page to open
+        // afresh (Settings › Updates) instead of the Restoring page.
+        reloadAfterRestart(note, to) {
             if (window.gitberth.restartWatch) return;
             const box = document.getElementById('components-reconnect-modal');
             if (note) {
@@ -175,7 +176,10 @@
                     || (!!box && (box.open || /components-reconnect-(show|retrying|failed|paused|resume-failed)/.test(box.className)));
                 try {
                     const answer = await fetch('help-media/restart-check', { cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(1500) });
-                    if (answer.type === 'opaqueredirect' || (seenDown && cutOff && answer.status > 0)) location.assign('restoring');
+                    if (answer.type === 'opaqueredirect' || (seenDown && cutOff && answer.status > 0)) {
+                        // The same page with another #part wouldn't load afresh: the address changes in place, then it reloads.
+                        if (to) { history.replaceState(null, '', to); location.reload(); } else location.assign('restoring');
+                    }
                 } catch {
                     seenDown = true;
                 } finally {

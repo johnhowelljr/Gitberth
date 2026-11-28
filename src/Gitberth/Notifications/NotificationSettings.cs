@@ -15,12 +15,16 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
 {
     /// <summary>
     /// What's sent when nothing was chosen yet: failures (an app down, an app Gitberth had to bring back, a certificate or a
-    /// token about to expire, Docker's disk getting full too), not successes.
+    /// token about to expire, Docker's disk getting full too) and new versions, not successes.
     /// </summary>
     public static readonly ImmutableHashSet<NotifyEvent> DefaultEvents =
     [
         NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down, NotifyEvent.CertificateExpiring,
         NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow,
+        // ---- builder A ----
+        NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable,
+        // [builder B, B2]
+        NotifyEvent.JobFailed,
     ];
 
     /// <summary>
@@ -32,6 +36,10 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
     [
         NotifyEvent.DeployFailed, NotifyEvent.DeploySucceeded, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.Down,
         NotifyEvent.BroughtBack, NotifyEvent.CertificateExpiring, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow,
+        // ---- builder A ----
+        NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable,
+        // [builder B, B2]
+        NotifyEvent.JobFailed,
     ];
 
     /// <summary>
@@ -65,6 +73,11 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
         NotifyEvent.GaveUp => _events.Contains(NotifyEvent.BroughtBack),
         NotifyEvent.TokenRefused => _events.Contains(NotifyEvent.TokenExpiring),
         NotifyEvent.DiskOk => _events.Contains(NotifyEvent.DiskLow),
+        // ---- builder A ----
+        NotifyEvent.BackupOk => _events.Contains(NotifyEvent.BackupFailed),
+        NotifyEvent.GitberthUpdated or NotifyEvent.GitberthUpdateFailed => _events.Contains(NotifyEvent.UpdateAvailable),
+        // [builder B, B2]
+        NotifyEvent.JobOk => _events.Contains(NotifyEvent.JobFailed),
         _ => _events.Contains(e),
     };
 
@@ -148,6 +161,11 @@ public sealed class NotificationSettings(SettingsService settings, Audit.AuditLo
         NotifyEvent.CertificateExpiring => "a certificate is about to expire",
         NotifyEvent.TokenExpiring => "a token is about to expire or is refused",
         NotifyEvent.DiskLow => "Docker's disk gets full",
+        // ---- builder A ----
+        NotifyEvent.BackupFailed => "an automatic backup fails",
+        NotifyEvent.UpdateAvailable => "a new version is out",
+        // [builder B, B2]
+        NotifyEvent.JobFailed => "a scheduled command fails",
         _ => throw new ArgumentException($"{e} isn't chosen in Settings.", nameof(e)),
     };
 

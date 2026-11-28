@@ -274,6 +274,8 @@ public static class Format
         DeployTrigger.Promote => "Promoted",
         DeployTrigger.Hook => "Deploy hook",
         DeployTrigger.Recover => "Brought back",
+        // [builder B, B6]
+        DeployTrigger.Upload => "New upload",
         _ => trigger.ToString(),
     };
 

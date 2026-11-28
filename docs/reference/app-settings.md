@@ -128,6 +128,36 @@ its own; nothing here restarts the app. See [Deploy hooks](../guides/deploy-hook
 
 Each hook also says when it was last used (**Last used 2 h ago**, or **Never used**).
 
+### Release command
+
+Every app but Gitberth itself, its tunnel, previews (which run their parent's) and containers another Compose project
+looks after: a command that runs once for each new version, in a one-off container of it, before it takes over. If it
+fails, the running version stays. Saved on its own; nothing here restarts the app. See
+[Release command](../guides/deploys-and-rollbacks.md#release-command).
+
+| Field or button | What it does | Default | Applies |
+|---|---|---|---|
+| **Command** | One line, run with `/bin/sh -c` and the app's variables, like `npm run migrate`. Empty: none. | None | From the next new version |
+| **Time limit** | Minutes it may run, from 1 to 60. Still running then, it's stopped and the new version doesn't take over. | 10 minutes | From the next new version |
+| **Service** | Compose apps: the service whose one-off container runs it. | The web service | From the next new version |
+| **Save release command** | Saves the three. **Undo** puts back what's saved. | | At once |
+
+### Config files
+
+Every app but Gitberth itself, its tunnel and previews: files Gitberth keeps for the app and mounts read-only at a path in
+its container. Saved on its own. See [Config files](../guides/terminal-and-files.md#config-files).
+
+| Field or button | What it does | Default | Applies |
+|---|---|---|---|
+| **Path in the container** | Where the app reads it, like `/etc/nginx/conf.d/site.conf`. Not under `/proc`, `/sys` or `/dev`. | | A new path: at the next deploy (Git, uploaded and Compose apps), else with **Review and apply** |
+| **Mode** | Its permissions, in octal as `chmod` takes them. | `0644` | At once |
+| **Service** | Compose apps: the service whose container mounts it. | The web service | At the next deploy |
+| **Secret** | Its contents are never shown again once saved; to change them, write new ones. | Off | At once |
+| **Contents** | Up to 256 KiB of text. A change is written over the mounted file, so the app sees it at once; **Restart** is offered. | | At once |
+| **Remove** (bin) | Takes it out, after asking: at the next deploy, or with **Review and apply**. | | |
+
+Each file says whether its container has it: **Mounted**, **At the next deploy** or **Review and apply**.
+
 ### Databases
 
 Every app but Gitberth itself, its tunnel and previews (whose follow their parent's): a Postgres database or a Redis of
@@ -338,6 +368,19 @@ The **Uptime** card on the app's **Overview** checks the app from outside, the w
 | **Uptime check** | Checks the app every minute (as set in **Settings › Uptime and status page**): its main domain over HTTPS, else its web port on the LAN. Off, it isn't checked, sends no down or back-up notifications, and the status page leaves it out unless you picked it there. | On | At once, saved on its own |
 | **Path** | The path the check asks for, like `/health`. | `/` | At once, saved on its own |
 | **Check now** | Checks it at once. A stopped app isn't checked: it says why instead. | | |
+
+## Overview tab: Scheduled commands
+
+The **Scheduled commands** card on the app's **Overview** runs commands of the app on a schedule, in Gitberth's time zone.
+Every app has it but Gitberth's own containers and previews. See
+[Scheduled commands](../guides/scheduled-jobs-and-restarts.md#scheduled-commands).
+
+| Field or button | What it does | Default | Applies |
+|---|---|---|---|
+| **Add** | Schedules a command: its **Name**, **Command**, when it **Runs** (**Every N minutes**, **Hourly**, **Daily**, **Weekly** or **Cron**), **Where it runs** (**In the running container** or **In a new container**), a Compose app's **Service**, and its **Time limit** (1 minute to 24 hours). | Daily at 03:00, in the running container, 30 minutes | At once, saved on its own |
+| **Run now** | Runs the command at once, unless it's running. | | |
+| **Last runs** (clock) | Its last 20 runs, each with how it ended, when, how long and what started it; click one to see its output. | | |
+| **Change** (pencil), **Remove** (bin) | Changes the command, or removes it with its runs, after asking. | | At once |
 
 ## Related
 

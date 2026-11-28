@@ -12,6 +12,7 @@ sections:
     pages:
       - guides/add-an-app
       - guides/deploy-from-github
+      - guides/deploy-a-folder
       - guides/run-a-registry-image
       - guides/use-a-local-image
       - guides/paste-docker-run-or-compose
@@ -28,6 +29,7 @@ sections:
       - guides/updates
       - guides/scheduled-jobs-and-restarts
       - guides/deploy-hooks
+      - guides/terminal-and-files
 
   - title: Networks and domains
     pages:
@@ -50,6 +52,7 @@ sections:
   - title: Look after Gitberth
     pages:
       - guides/backups-and-restore
+      - guides/automatic-backups
       - guides/updating-gitberth
       - guides/troubleshooting
       - faq
@@ -100,6 +103,10 @@ routes:
     page: reference/app-settings#settings-tab
   - route: /apps/*/logs
     page: guides/manage-apps#the-tabs
+  - route: /apps/*/terminal
+    page: guides/terminal-and-files#the-terminal
+  - route: /apps/*/files
+    page: guides/terminal-and-files#the-files-tab
   - route: /apps/*/activity
     page: guides/deploys-and-rollbacks#the-activity-tab
   - route: /apps/*/deployments

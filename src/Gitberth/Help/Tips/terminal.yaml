@@ -1,0 +1,53 @@
+# Tips for an app's Terminal tab (B3): Components/Apps/AppTerminalTab.razor and its tab on the app's page.
+# See Help/TipCatalog.cs.
+
+terminal.tab:
+  title: Terminal
+  text: >-
+    A shell in the app's running container, in the browser: bash when the image has it, else sh. What you type isn't
+    recorded.
+  more: guides/terminal-and-files#the-terminal
+
+terminal.card:
+  title: Terminal
+  text: >-
+    Connect opens a shell in the container named here. Type exit, or click Disconnect, to close it; one with no input for
+    30 minutes closes by itself.
+  more: guides/terminal-and-files#open-a-terminal
+
+terminal.connect:
+  title: Connect
+  text: >-
+    Opens the shell. The page gets a one-time ticket from Gitberth, good for 30 seconds, and opens Gitberth's connection
+    with it.
+  more: guides/terminal-and-files#whats-recorded
+
+terminal.disconnect:
+  title: Disconnect
+  text: >-
+    Closes the terminal: the shell is hung up, and what it was running with it.
+  more: guides/terminal-and-files#open-a-terminal
+
+terminal.service:
+  title: Service
+  text: >-
+    The Compose service whose container the shell runs in.
+  more: guides/terminal-and-files#open-a-terminal
+
+terminal.user:
+  title: Run as
+  text: >-
+    The user the shell runs as: the image's own, or root, which can read and change anything in the container.
+  more: guides/terminal-and-files#open-a-terminal
+
+terminal.user.own:
+  title: Its own user
+  text: >-
+    The user the image runs its app as, so the shell can do what the app can.
+  more: guides/terminal-and-files#open-a-terminal
+
+terminal.user.root:
+  title: root
+  text: >-
+    Root in the container: every file and process in it. The audit log records that the terminal ran as root.
+  more: guides/terminal-and-files#whats-recorded

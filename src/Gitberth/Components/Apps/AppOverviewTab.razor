@@ -104,7 +104,7 @@
                 @if (View.Details is not { } d)
                 {
                     <EmptyState Small="true" Title="No container">
-                        @(App.Source == AppSource.Git ? "It's created by its first deploy." : "Gitberth has its settings: Start creates it.")
+                        @(App.Source is AppSource.Git or AppSource.Upload ? "It's created by its first deploy." : "Gitberth has its settings: Start creates it.")
                     </EmptyState>
                 }
                 else
@@ -206,6 +206,12 @@
     </div>
 
     <div>
+        @* An uploaded app's source: its uploads, and a new version dropped here deploys at once. *@
+        @if (View.Row is { FromUpload: true, IsPreview: false })
+        {
+            <UploadCard View="View" Changed="Changed" />
+        }
+
         <SectionCard Title="Recent activity" Icon="@Icons.Material.Outlined.History" Tip="app.overview.activity">
             <Actions><a class="gb-card-link" href="@($"{App.Href}/activity")">All<SvgIcon Icon="@Icons.Material.Outlined.ChevronRight" /></a></Actions>
             <ChildContent>
@@ -236,7 +242,7 @@
             <DatabasesCard AppId="databasesId" Href="@App.Href" Preview="@(View.Row is { IsPreview: true })" />
         }
 
-        @if (App.Source != AppSource.Git && App.Role != ContainerRole.Self && Update is { } update)
+        @if (App.Source is not (AppSource.Git or AppSource.Upload) && App.Role != ContainerRole.Self && Update is { } update)
         {
             <SectionCard Title="Updates" Icon="@Icons.Material.Outlined.CloudDownload" Tip="app.overview.updates">
                 <ChildContent>
@@ -293,10 +299,13 @@
             </SectionCard>
         }
 
-        @if (App.Source == AppSource.Git && App.AppId is int appId)
+        @if (App.Source is AppSource.Git or AppSource.Upload && App.AppId is int appId)
         {
             <ScheduledJobsCard AppId="appId" />
         }
+
+        @* [builder B, B2] Its scheduled commands, for every app but Gitberth's own containers and previews. *@
+        @if (CommandJobsCard.Shows(View)) { <CommandJobsCard View="View" Changed="Changed" /> }
     </div>
 </div>
 
@@ -320,6 +329,8 @@
     [Parameter] public EventCallback OnCheck { get; set; }
     /// <summary>Roll back: the page opens the change dialog for it, as for an update.</summary>
     [Parameter] public EventCallback OnRollBack { get; set; }
+    /// <summary>Something on the tab changed the app (a new upload): the page reads it again.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
 
     private IReadOnlyList<ActivityItem>? activity;
     private bool longView;

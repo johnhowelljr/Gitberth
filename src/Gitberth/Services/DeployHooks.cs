@@ -62,8 +62,9 @@ public sealed class DeployHooks(IDbContextFactory<GitberthDb> dbFactory, SecretP
     /// <summary>What a hook does on this app, or null when it can't have hooks.</summary>
     public static HookKind? KindOf(AppSummary app, AppDefinition? row) =>
         app.Source == AppSource.Git ? (row is { IsPreview: true } ? null : HookKind.Git)
-        // An inline Compose app is deployed again: its file's images are pulled anew.
-        : app.Source == AppSource.Compose ? HookKind.Git
+        // An inline Compose app is deployed again: its file's images are pulled anew. [builder B, B6] An uploaded app's newest
+        // upload is built again, as its Deploy does.
+        : app.Source is AppSource.Compose or AppSource.Upload ? HookKind.Git
         // Gitberth itself would be recreated by its own hook, cutting the call short.
         : app.Role == ContainerRole.Self ? null
         : app.Origin == ImageOrigin.Registry ? HookKind.Image

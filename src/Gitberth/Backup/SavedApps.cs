@@ -16,6 +16,8 @@ internal sealed class SavedAppRows
     public List<DeployHook> Hooks { get; init; } = [];
     public List<ManagedDatabase> Databases { get; init; } = [];
     public List<Deployment> Deployments { get; init; } = [];
+    // [builder B, B3] Its config files, their contents encrypted for this Gitberth.
+    public List<ConfigFile> ConfigFiles { get; init; } = [];
 }
 
 /// <summary>
@@ -68,6 +70,8 @@ internal static class SavedApps
             var hooks = (await db.DeployHooks.AsNoTracking().ToListAsync(ct)).Where(h => ids.Contains(h.AppId)).ToLookup(h => h.AppId);
             var databases = (await db.ManagedDatabases.AsNoTracking().ToListAsync(ct)).Where(d => ids.Contains(d.AppId)).ToLookup(d => d.AppId);
             var deployments = (await db.Deployments.AsNoTracking().ToListAsync(ct)).Where(d => ids.Contains(d.AppId)).ToLookup(d => d.AppId);
+            // [builder B, B3]
+            var configs = (await db.ConfigFiles.AsNoTracking().ToListAsync(ct)).Where(f => ids.Contains(f.AppId)).ToLookup(f => f.AppId);
 
             var result = new Dictionary<int, SavedAppRows>();
             foreach (var app in apps)
@@ -81,9 +85,12 @@ internal static class SavedApps
                     Hooks = hooks[app.Id].ToList(),
                     Databases = databases[app.Id].ToList(),
                     Deployments = deployments[app.Id].OrderBy(d => d.Id).ToList(),
+                    // [builder B, B3]
+                    ConfigFiles = configs[app.Id].OrderBy(f => f.Id).ToList(),
                 };
                 foreach (var hook in rows.Hooks) hook.ProtectedToken = Again(hook.ProtectedToken);
                 foreach (var database in rows.Databases) database.ProtectedPassword = Again(database.ProtectedPassword);
+                foreach (var config in rows.ConfigFiles) config.ContentProtected = Again(config.ContentProtected); // [builder B, B3]
                 result[app.Id] = rows;
             }
             return result;

@@ -281,7 +281,7 @@ public sealed partial class RestoreService : IRestoreService
     private async Task<string?> TooNewAsync(BackupManifest manifest, CancellationToken ct)
     {
         const string update = "This backup was made by a newer Gitberth ({0}). Update Gitberth, then restore it.";
-        if (manifest.Format > BackupFormat.Version) return string.Format(CultureInfo.InvariantCulture, update, manifest.GitberthVersion);
+        if (manifest.Format > BackupFormat.Newest) return string.Format(CultureInfo.InvariantCulture, update, manifest.GitberthVersion);
         if (manifest.LastMigration is not { Length: > 0 } last) return null;
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         return db.Database.GetMigrations().Contains(last, StringComparer.Ordinal) ? null : string.Format(CultureInfo.InvariantCulture, update, manifest.GitberthVersion);
@@ -399,6 +399,7 @@ public sealed partial class RestoreService : IRestoreService
             var volumes = (await _engine.ListVolumesAsync(ct)).OfType<JsonObject>().Select(v => BackupInventory.Str(v, "Name")).ToHashSet(StringComparer.Ordinal);
             var byPart = manifest.Volumes.Where(v => v.Part is not null).ToDictionary(v => v.Part!, StringComparer.Ordinal);
             var images = manifest.Images.Where(i => i.Part is not null).ToDictionary(i => i.Part!, StringComparer.Ordinal);
+            var folders = manifest.HostFolders.Where(f => f.Part is not null).ToDictionary(f => f.Part!, StringComparer.Ordinal);
             if (Directory.Exists(_paths.Staged)) Directory.Delete(_paths.Staged, recursive: true);
             Directory.CreateDirectory(_paths.Staged);
             await using (var file = OpenUpload())
@@ -416,6 +417,9 @@ public sealed partial class RestoreService : IRestoreService
                             break;
                         case BackupPartKind.Volume when byPart.TryGetValue(part.Name, out var volume):
                             await StepAsync("volume:" + volume.Name, () => FillVolumeAsync(volume, part.Content, volumes, ownImage, ct));
+                            break;
+                        case BackupPartKind.HostFolder when folders.TryGetValue(part.Name, out var folder):
+                            await StepAsync(HostFolders.ItemId(folder.Path), () => FillFolderAsync(folder.Path, folder, part.Content, RestoreAction.Restore, ownImage, ct));
                             break;
                         case BackupPartKind.Image when images.TryGetValue(part.Name, out var image):
                             await StepAsync("image:" + image.Id, async () =>
@@ -608,6 +612,32 @@ public sealed partial class RestoreService : IRestoreService
             }
         }
         return volume.Bytes is { } bytes ? $"Filled ({Size(bytes)})." : "Filled.";
+    }
+
+    /// <summary>
+    /// A host folder from the file, into <paramref name="target"/> (its own path, or a copy's): a missing or empty one is
+    /// filled. Restore keeps one that holds files as it is (and says so); Replace moves its files aside first
+    /// (&lt;path&gt;.before-&lt;time&gt;); a copy's own folder must be new.
+    /// </summary>
+    internal async Task<string> FillFolderAsync(string target, SavedHostFolder folder, Stream tar, RestoreAction action, string ownImage, CancellationToken ct)
+    {
+        if (await HostFolders.HasFilesAsync(_engine, ownImage, target, ct))
+        {
+            switch (action)
+            {
+                case RestoreAction.Restore:
+                    return Skip($"{target} holds files here already: it's kept as it is, and the saved files aren't copied over them.");
+                case RestoreAction.Copy:
+                    throw new InvalidOperationException($"The folder {target} holds files here already, and it isn't this copy's.");
+                default:
+                    var before = HostFolders.BeforePath(target, DateTime.UtcNow);
+                    await HostFolders.MoveAsideAsync(_engine, ownImage, target, before, ct);
+                    Log.Line($"{target}: its files as they were are kept in {before}.");
+                    break;
+            }
+        }
+        await HostFolders.FillAsync(_engine, ownImage, target, tar, ct);
+        return folder.Bytes is { } bytes ? $"{target}: filled ({Size(bytes)})." : $"{target}: filled.";
     }
 
     private async Task<string> PullAsync(SavedImage image, CancellationToken ct)

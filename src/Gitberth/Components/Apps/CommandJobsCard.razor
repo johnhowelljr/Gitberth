@@ -1,0 +1,329 @@
+@using Gitberth.Deploy
+@implements IDisposable
+@inject CommandJobs Jobs
+@inject Gitberth.Compose.ComposeApps ComposeApps
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@*
+    An app's scheduled commands (B2), on its Overview: each one's name, schedule (in Gitberth's time zone), command, where it
+    runs, when it runs next and how its last run went, with Run now, its last runs and their output, Change and Remove. Add
+    schedules another. Every app has it but Gitberth's own containers and previews.
+*@
+<SectionCard Id="gb-jobs" Title="Scheduled commands" Icon="@Icons.Material.Outlined.EventRepeat" Sub="@($"in {Zone}")" Flush="true" Tip="jobs.card">
+    <Actions>
+        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Add" OnClick="AddAsync" Disabled="busy" Tip="jobs.add">Add</Btn>
+    </Actions>
+    <ChildContent>
+        @if (jobs is null)
+        {
+            <div style="padding:14px 18px"><div class="gb-skel" style="height:64px"></div></div>
+        }
+        else if (jobs.Count == 0)
+        {
+            <div style="padding:14px 18px">
+                <EmptyState Small="true" Title="No scheduled commands">A command that runs on a schedule, like a nightly cleanup or a report: in the running container, or in a new one of its image.</EmptyState>
+            </div>
+        }
+        else
+        {
+            @foreach (var job in jobs)
+            {
+                var c = job.Command;
+                var (tone, label) = Pill(job.Last);
+                var open = opened == c.Id;
+                <div class="gb-feed-row gb-jobrow" @key="c.Id" data-job="@c.Name">
+                    <div class="gb-jobrow-main">
+                        <span class="gb-row" style="gap:8px;flex-wrap:wrap">
+                            <strong class="gb-jobrow-name">@c.Name</strong>
+                            <span class="@($"gb-pill gb-pill--{tone}{(job.Running ? " gb-pill--pulse" : "")}")" data-tip="jobs.last-run" data-tip-detail="@job.Last?.Error"><span class="gb-pill-dot"></span>@label</span>
+                        </span>
+                        <span class="gb-mono gb-jobrow-cmd" data-tip-text="@Shown(c.Command)">@Shown(c.Command)</span>
+                        <span class="gb-t3">@JobSchedules.Describe(c.Schedule) · @CommandJobs.Where(c)</span>
+                        <span class="gb-t3">
+                            <span data-tip-text="@(job.NextUtc is { } n ? Format.Local(n) : null)">@NextLine(job)</span>@(job.Last is { } last ? $" · {LastLine(last)}" : "")
+                        </span>
+                    </div>
+                    <div class="gb-jobrow-actions">
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.PlayArrow" OnClick="() => RunNowAsync(job)" Disabled="@(busy || job.Running || starting.Contains(c.Id))" Tip="jobs.run-now">Run now</Btn>
+                        <button type="button" class="gb-iconbtn @(open ? "on" : null)" data-tip="jobs.runs" aria-expanded="@(open ? "true" : "false")" aria-label="@($"Last runs of {c.Name}")"
+                                @onclick="() => ToggleAsync(job)">
+                            <SvgIcon Icon="@Icons.Material.Outlined.History" />
+                        </button>
+                        <button type="button" class="gb-iconbtn" data-tip="jobs.edit" aria-label="@($"Change {c.Name}")" disabled="@busy" @onclick="() => EditAsync(c)">
+                            <SvgIcon Icon="@Icons.Material.Outlined.Edit" />
+                        </button>
+                        <button type="button" class="gb-iconbtn" data-tip="jobs.remove" aria-label="@($"Remove {c.Name}")" disabled="@busy" @onclick="() => RemoveAsync(c)">
+                            <SvgIcon Icon="@Icons.Material.Outlined.Delete" />
+                        </button>
+                    </div>
+                </div>
+                @if (open)
+                {
+                    <div class="gb-jobruns" @key="@($"runs-{c.Id}")">
+                        @if (job.Runs.Count == 0)
+                        {
+                            <p class="gb-help" style="margin:0">It hasn't run yet. Run now runs it at once.</p>
+                        }
+                        else
+                        {
+                            <div class="gb-jobruns-list" role="list" aria-label="@($"Last runs of {c.Name}")">
+                                @foreach (var run in job.Runs)
+                                {
+                                    var (rt, rl) = Pill(run);
+                                    <button type="button" role="listitem" class="gb-jobrun @(shown == run.Id ? "on" : null)" @key="run.Id" @onclick="() => ShowAsync(run)">
+                                        <span class="@($"gb-pill gb-pill--{rt}")"><span class="gb-pill-dot"></span>@rl</span>
+                                        <span class="gb-t2" data-tip-text="@Format.Local(run.StartedAt)">@Format.Ago(run.StartedAt)</span>
+                                        <span class="gb-t3">@(run.Status == CommandRunStatus.Skipped ? "" : Format.Duration(run.StartedAt, run.FinishedAt))</span>
+                                        <span class="gb-t3 gb-ellipsis">@(run.Trigger == CommandTrigger.RunNow ? $"Run now{(run.RequestedBy is { } by ? $" by {by}" : "")}" : "On schedule")</span>
+                                    </button>
+                                }
+                            </div>
+                            @if (job.Runs.FirstOrDefault(r => r.Id == shown) is { } picked)
+                            {
+                                @if (picked.Error is { } why)
+                                {
+                                    <div class="gb-ro-note"><SvgIcon Icon="@Icons.Material.Outlined.Info" Size="sm" /><span>@why</span></div>
+                                }
+                                <pre class="gb-output" id="@($"job-output-{c.Id}")" data-tip="jobs.output">@(output is null ? "Reading its output…" : output.Length == 0 ? (picked.Status == CommandRunStatus.Running ? "Nothing printed yet." : "It printed nothing.") : output)</pre>
+                            }
+                        }
+                    </div>
+                }
+            }
+        }
+    </ChildContent>
+    <Foot>
+        <span>@FootLine</span>
+    </Foot>
+</SectionCard>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>Raised after the first command of a container Gitberth kept nothing about: it has a row now, and the page reads it again.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private IReadOnlyList<JobView>? jobs;
+    private int? loadedFor = -1;
+    private int? opened;
+    private int? shown;
+    private string? output;
+    private bool busy;
+    private readonly HashSet<int> starting = [];
+    private Timer? timer;
+
+    /// <summary>Every app has it but Gitberth's own containers (itself, its tunnel, its helpers), a service of a Compose app (its app's has it) and previews.</summary>
+    public static bool Shows(AppView view) =>
+        !view.Summary.System && view.Summary.Role is not (ContainerRole.Self or ContainerRole.AppInternal or ContainerRole.Helper)
+        && view.Row is not { IsPreview: true };
+
+    private static string Zone => JobSchedules.ZoneName();
+
+    private string FootLine => View.Summary.Running || View.Row is null
+        ? "A run due while the one before it still runs is skipped. A failed run is told in Notifications and Activity."
+        : "It isn't running: commands that run in its container wait for it, and none runs while it's stopped.";
+
+    protected override void OnInitialized()
+    {
+        Jobs.Changed += OnChanged;
+        // Moves "next run" along, and follows a run Gitberth started in the background.
+        timer = new Timer(_ => Refresh(), null, 15000, 15000);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == View.Summary.AppId && jobs is not null) return;
+        loadedFor = View.Summary.AppId;
+        jobs = null;
+        (opened, shown, output) = (null, null, null);
+        await LoadAsync();
+    }
+
+    private void OnChanged(int appId)
+    {
+        if (appId == View.Summary.AppId) Refresh();
+    }
+
+    private void Refresh() => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        // The run shown may have ended: its output is read again.
+        if (shown is int runId) output = await Jobs.OutputAsync(runId);
+        StateHasChanged();
+    });
+
+    private async Task LoadAsync()
+    {
+        // The page keeps this card when it moves to another app; what's loaded for the old one isn't shown there.
+        var appId = View.Summary.AppId;
+        try
+        {
+            var loaded = appId is int id ? await Jobs.ListAsync(id) : [];
+            if (appId == View.Summary.AppId) jobs = loaded;
+        }
+        catch (Exception)
+        {
+            jobs ??= [];
+        }
+    }
+
+    // The services a Compose app's command can run in: its own as Docker has them, its web service first.
+    private async Task<IReadOnlyList<string>> ServicesAsync()
+    {
+        if (View.Row is not { IsCompose: true } row) return [];
+        var names = new List<string>();
+        if (row.WebService is { Length: > 0 } web) names.Add(web);
+        try
+        {
+            names.AddRange((await ComposeApps.MembersAsync(row)).Select(m => m.Service));
+        }
+        catch (Exception)
+        {
+            // Docker didn't answer: the web service is offered still.
+        }
+        return names.Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    private async Task AddAsync() => await OpenAsync(null);
+
+    private async Task EditAsync(ScheduledCommand command) => await OpenAsync(command);
+
+    private async Task OpenAsync(ScheduledCommand? current)
+    {
+        var compose = View.Row?.IsCompose == true;
+        var services = compose ? await ServicesAsync() : [];
+        var hadRow = View.Summary.AppId is not null;
+        var parameters = new DialogParameters<CommandJobDialog>
+        {
+            { d => d.Current, current },
+            { d => d.AppTitle, View.Summary.Title },
+            { d => d.Compose, compose },
+            { d => d.Services, services },
+            { d => d.Web, View.Row?.WebService },
+            { d => d.Save, input => current is null ? Jobs.AddAsync(View.Summary.Key, input) : Jobs.ChangeAsync(current.Id, input) },
+        };
+        var dialog = await Dialogs.ShowAsync<CommandJobDialog>(null, parameters, new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true });
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not JobOutcome outcome) return;
+        Snackbar.Add(outcome.Message, Severity.Success);
+        // A container without a row got one just now: the page reads it again, with its row.
+        if (!hadRow)
+        {
+            await Changed.InvokeAsync();
+            return;
+        }
+        await LoadAsync();
+    }
+
+    private async Task RemoveAsync(ScheduledCommand command)
+    {
+        if (await Dialogs.ShowMessageBoxAsync($"Remove {command.Name}?", "It no longer runs, and its runs and their output go with it.",
+                yesText: "Remove", cancelText: "Cancel") != true) return;
+        busy = true;
+        try
+        {
+            var outcome = await Jobs.RemoveAsync(command.Id);
+            Snackbar.Add(outcome.Message, outcome.Ok ? Severity.Success : Severity.Error);
+            if (opened == command.Id) (opened, shown, output) = (null, null, null);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RunNowAsync(JobView job)
+    {
+        var id = job.Command.Id;
+        starting.Add(id);
+        try
+        {
+            var outcome = await Jobs.RunNowAsync(id);
+            Snackbar.Add(outcome.Message, outcome.Ok ? Severity.Info : Severity.Warning);
+            await LoadAsync();
+            // Its runs open on the new one, which shows its output as it ends.
+            if (outcome.Ok && jobs?.FirstOrDefault(j => j.Command.Id == id) is { Last: { } newest })
+            {
+                opened = id;
+                await ShowAsync(newest);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            starting.Remove(id);
+        }
+    }
+
+    private async Task ToggleAsync(JobView job)
+    {
+        if (opened == job.Command.Id)
+        {
+            (opened, shown, output) = (null, null, null);
+            return;
+        }
+        opened = job.Command.Id;
+        if (job.Last is { } last) await ShowAsync(last);
+        else (shown, output) = (null, null);
+    }
+
+    private async Task ShowAsync(CommandRun run)
+    {
+        shown = run.Id;
+        output = null;
+        try
+        {
+            output = await Jobs.OutputAsync(run.Id) ?? "";
+        }
+        catch (Exception ex)
+        {
+            output = $"Its output couldn't be read: {ex.Message}";
+        }
+    }
+
+    // A command as the card shows it: its secrets (a password option, a URL's password) hidden.
+    private static string Shown(string command) => Security.Masking.Text(command);
+
+    internal static (string Tone, string Label) Pill(CommandRun? run) => run switch
+    {
+        null => ("secondary", "Not run yet"),
+        { Status: CommandRunStatus.Running } => ("info", "Running"),
+        { Status: CommandRunStatus.Succeeded } => ("success", "Succeeded"),
+        { Status: CommandRunStatus.TimedOut } => ("danger", "Timed out"),
+        { Status: CommandRunStatus.Skipped } => ("secondary", "Skipped"),
+        { ExitCode: int code } when run.Error is null => ("danger", $"Failed ({code})"),
+        _ => ("danger", "Failed"),
+    };
+
+    private static string NextLine(JobView job) => job.NextUtc is { } next ? $"Next {In(next)}" : "Never runs: no date matches its schedule";
+
+    private static string LastLine(CommandRun run) => run.Status switch
+    {
+        CommandRunStatus.Running => $"started {Format.Ago(run.StartedAt)}",
+        CommandRunStatus.Skipped => $"skipped {Format.Ago(run.StartedAt)}",
+        _ => $"last {Format.Ago(run.StartedAt)}, took {Format.Duration(run.StartedAt, run.FinishedAt)}",
+    };
+
+    private static string In(DateTime utc)
+    {
+        var d = utc - DateTime.UtcNow;
+        return d.TotalMinutes < 1 ? "in under a minute"
+            : d.TotalHours < 1 ? $"in {(int)Math.Ceiling(d.TotalMinutes)} min"
+            : d.TotalDays < 2 ? $"in {(int)d.TotalHours} h"
+            : $"in {(int)d.TotalDays} d";
+    }
+
+    public void Dispose()
+    {
+        Jobs.Changed -= OnChanged;
+        timer?.Dispose();
+    }
+}

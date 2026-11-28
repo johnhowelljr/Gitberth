@@ -54,6 +54,9 @@ public sealed class BackupManifest
     public List<SavedImage> Images { get; set; } = [];
     public List<SavedNetwork> Networks { get; set; } = [];
 
+    /// <summary>The host folders the saved containers bind-mount, with their files' parts.</summary>
+    public List<SavedHostFolder> HostFolders { get; set; } = [];
+
     /// <summary>Gitberth's own data, by part name (data/gitberth.db, data/keys…).</summary>
     public List<string> DataParts { get; set; } = [];
 
@@ -126,6 +129,21 @@ public sealed class SavedImage
     public string? Part { get; set; }
 
     public long? Bytes { get; set; }
+}
+
+/// <summary>A host folder a saved container bind-mounts: its path on the old host, and its files' part.</summary>
+public sealed class SavedHostFolder
+{
+    /// <summary>Its absolute path on the host (/srv/photos).</summary>
+    public string Path { get; set; } = "";
+
+    /// <summary>The containers that mount it, by name.</summary>
+    public List<string> Users { get; set; } = [];
+
+    public long? Bytes { get; set; }
+
+    /// <summary>Its files' part (folder:&lt;path&gt;).</summary>
+    public string? Part { get; set; }
 }
 
 /// <summary>A network the saved containers are on, as Docker described it.</summary>

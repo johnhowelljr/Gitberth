@@ -39,7 +39,27 @@
 .gb-cstep--skipped .gb-cstep-mark { box-shadow: inset 0 0 0 1.5px var(--gb-line-3); color: var(--gb-text-3); }
 .gb-cstep--skipped .gb-cstep-t { color: var(--gb-text-3); }
 
+/* Automatic backups (Shared/AutoBackupSection.razor): what's saved, folded away; the last runs, and the restore's list. */
+.gb-ab-what > summary { cursor: pointer; padding: 6px 0; }
+.gb-ab-what[open] > summary { margin-bottom: 8px; }
+.gb-ab-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); overflow: hidden; }
+.gb-ab-run, .gb-ab-file { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--gb-line-1); background: var(--gb-surface-2); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.gb-ab-run:first-child, .gb-ab-file:first-child { border-top: 0; }
+.gb-ab-run .gb-i { width: 16px; height: 16px; flex: none; color: var(--tone, var(--gb-text-3)); }
+
 @media (max-width: 900px) {
     .gb-bk-restoring { grid-template-columns: minmax(0, 1fr); }
     .gb-bk-row--child { padding-left: 24px; }
 }
+
+/* ---- Settings › Updates › Gitberth (GitberthUpdateCard.razor): its own update's steps and the release's notes. ---- */
+.gb-gu { display: flex; flex-direction: column; gap: 10px; margin-bottom: 6px; }
+.gb-gu > .gb-bk-sub:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+.gb-gu-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); overflow: hidden; }
+.gb-gu-step { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-top: 1px solid var(--gb-line-1); background: var(--gb-surface-2); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.gb-gu-step:first-child { border-top: 0; }
+.gb-gu-step .gb-i { width: 16px; height: 16px; flex: none; color: var(--tone, var(--gb-text-3)); }
+.gb-gu-notes > summary { cursor: pointer; padding: 6px 0; }
+.gb-gu-notes-body { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; max-height: 420px; overflow: auto; padding: 4px 14px; border: 1px solid var(--gb-line-1); border-radius: var(--gb-r-md); background: var(--gb-surface-2); margin-bottom: 6px; }
+.gb-gu-notes-body h1, .gb-gu-notes-body h2, .gb-gu-notes-body h3 { font-size: 14px; margin: 12px 0 6px; }
+.gb-gu-notes-body ul { padding-left: 20px; }

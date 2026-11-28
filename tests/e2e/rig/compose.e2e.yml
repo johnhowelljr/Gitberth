@@ -45,6 +45,9 @@ services:
       # holds up the next. Unset: these. Set but empty (E2E_TEST_TIMINGS=, or E2E_TIMINGS=production with run.sh): as an
       # install runs.
       GITBERTH_TEST_TIMINGS: "${E2E_TEST_TIMINGS-stableFor=3,pullsEvery=20,restartMinute=20,restartTick=2,keepEvery=3,hubWait=10}"
+      # (builder A) Gitberth's "published" image in the rig: its own gitberth:<tag> builds, so Settings › Updates can update
+      # it to a newer one a scenario builds (test_44). An install never sets it: there it's ghcr.io/johnhowelljr/gitberth.
+      GITBERTH_UPDATE_IMAGE: gitberth
     volumes:
       - gbe2e-trust:/e2e-trust:ro
     networks:

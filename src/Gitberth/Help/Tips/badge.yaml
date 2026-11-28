@@ -84,6 +84,14 @@ badge.source.existing:
     any other app.
   more: guides/manage-apps#the-apps-list
 
+# [builder B, B6]
+badge.source.upload:
+  title: Upload
+  text: >-
+    Built by Gitberth from a folder or an archive someone uploaded, with no repository. Each new upload is a new
+    version, deployed at once.
+  more: guides/deploy-a-folder
+
 # ---- A Git app's auto-deploy ----
 
 badge.watch.on:

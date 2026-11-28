@@ -25,6 +25,9 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
     public DbSet<DeployHook> DeployHooks => Set<DeployHook>();
     public DbSet<ManagedDatabase> ManagedDatabases => Set<ManagedDatabase>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<ScheduledCommand> ScheduledCommands => Set<ScheduledCommand>();
+    public DbSet<CommandRun> CommandRuns => Set<CommandRun>();
+    public DbSet<ConfigFile> ConfigFiles => Set<ConfigFile>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -148,6 +151,29 @@ public class GitberthDb(DbContextOptions<GitberthDb> options) : DbContext(option
             e.ToTable("ApiTokens");
             e.HasIndex(t => t.TokenHash).IsUnique();
             e.Property(t => t.Access).HasConversion<string>();
+        });
+        // An app's scheduled commands (its Jobs card) and their runs, and its config files: each goes with its app. The
+        // tables that have the keys change, not Apps.
+        b.Entity<ScheduledCommand>(e =>
+        {
+            e.ToTable("ScheduledCommands");
+            e.HasIndex(c => c.AppId);
+            e.Property(c => c.Place).HasConversion<string>();
+            e.HasOne<AppDefinition>().WithMany().HasForeignKey(c => c.AppId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<CommandRun>(e =>
+        {
+            e.ToTable("CommandRuns");
+            e.HasIndex(r => new { r.CommandId, r.Id });
+            e.Property(r => r.Trigger).HasConversion<string>();
+            e.Property(r => r.Status).HasConversion<string>();
+            e.HasOne<ScheduledCommand>().WithMany().HasForeignKey(r => r.CommandId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<ConfigFile>(e =>
+        {
+            e.ToTable("ConfigFiles");
+            e.HasIndex(f => new { f.AppId, f.Path }).IsUnique();
+            e.HasOne<AppDefinition>().WithMany().HasForeignKey(f => f.AppId).OnDelete(DeleteBehavior.Cascade);
         });
 
         // SQLite hands DateTime back as Unspecified; everything is stored as UTC.

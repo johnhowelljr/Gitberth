@@ -69,6 +69,14 @@
                    Sub="A GitHub, GitLab or Cloudflare token, a registry sign-in or an API token in use: 3 weeks, a week and a day before it expires (an API token a week and a day before), once it has, and the moment its service refuses it." />
         <SwitchRow @key="@($"dk{switchKey}")" Title="Docker's disk gets full" Value="@Notify.IsOn(NotifyEvent.DiskLow)" ValueChanged="v => SetAsync(NotifyEvent.DiskLow, v)" Disabled="busy" Tip="settings.notifications.disk-low"
                    Sub="Free space drops under the warning line Settings › Disk shows, and again when it's so low Gitberth stops pulling images; and once there's room again." />
+        @* ---- builder A: automatic backups, updates, health alerts ---- *@
+        <SwitchRow @key="@($"bk{switchKey}")" Title="An automatic backup fails" Value="@Notify.IsOn(NotifyEvent.BackupFailed)" ValueChanged="v => SetAsync(NotifyEvent.BackupFailed, v)" Disabled="busy" Tip="settings.notifications.backup-failed"
+                   Sub="A scheduled backup (or Back up now) didn't reach its destination: once, then again if the reason changes or a day later; and once one works again." />
+        <SwitchRow @key="@($"ua{switchKey}")" Title="A new version is out" Value="@Notify.IsOn(NotifyEvent.UpdateAvailable)" ValueChanged="v => SetAsync(NotifyEvent.UpdateAvailable, v)" Disabled="busy" Tip="settings.notifications.update-available"
+                   Sub="A new version of Gitberth, or a newer image of an app set to Tell me: once for each. And how an update of Gitberth itself ended." />
+        @* [builder B, B2] *@
+        <SwitchRow @key="@($"jb{switchKey}")" Title="A scheduled command fails" Value="@Notify.IsOn(NotifyEvent.JobFailed)" ValueChanged="v => SetAsync(NotifyEvent.JobFailed, v)" Disabled="busy" Tip="jobs.notify"
+                   Sub="A command on an app's Jobs card ends with an error or runs too long; and once it passes again." />
         <SwitchRow @key="@($"pv{switchKey}")" Title="Previews too" Value="@Notify.Previews" ValueChanged="SetPreviewsAsync" Disabled="busy" Tip="settings.notifications.previews"
                    Sub="Deploys of previews. Off, only production apps are told about." />
         <p class="gb-help">

@@ -1,6 +1,6 @@
 # Gitberth documentation
 
-Gitberth runs apps in Docker on your home server and gives every container on the host one place to be managed: a web page where you add apps, change their settings, watch them run and keep them up to date. Apps come from a GitHub repo or a GitLab project (built for you and redeployed on every push, with Compose when it has a Compose file), a registry image, an image already on the host, a `docker run` command or Compose file you paste, or a template.
+Gitberth runs apps in Docker on your home server and gives every container on the host one place to be managed: a web page where you add apps, change their settings, watch them run and keep them up to date. Apps come from a GitHub repo or a GitLab project (built for you and redeployed on every push, with Compose when it has a Compose file), a folder you upload, a registry image, an image already on the host, a `docker run` command or Compose file you paste, or a template.
 
 These pages are built into Gitberth too: click **?** in its top bar, or **Help** at the foot of its sidebar (see
 [Get help in Gitberth](getting-started/first-steps.md#get-help-in-gitberth)). Their examples and screenshots come from a
@@ -19,8 +19,9 @@ demo server, `homelab` at `192.168.50.10`; yours show your own host's name and a
 
 | | |
 |---|---|
-| [Add an app](guides/add-an-app.md) | The New app page: its five sources and the three steps every app goes through. |
+| [Add an app](guides/add-an-app.md) | The New app page: its six sources and the three steps every app goes through. |
 | [Deploy from GitHub or GitLab](guides/deploy-from-github.md) | Paste a repo URL; Gitberth works out how to build it and redeploys on every push. |
+| [Deploy a folder](guides/deploy-a-folder.md) | Upload a folder, or a .zip or .tar.gz of one; Gitberth works out what it is and brings it up. |
 | [Run a registry image](guides/run-a-registry-image.md) | Docker Hub, ghcr.io or your own registry. |
 | [Use a local image](guides/use-a-local-image.md) | An image already on the host, with no pull. |
 | [Paste a docker run or Compose file](guides/paste-docker-run-or-compose.md) | Bring an existing command, service or whole Compose file across as it is. |
@@ -39,6 +40,7 @@ demo server, `homelab` at `192.168.50.10`; yours show your own host's name and a
 | [Image updates](guides/updates.md) | Checking for newer images, update policies, what happens when an update fails, and rolling one back. |
 | [Scheduled jobs and restarts](guides/scheduled-jobs-and-restarts.md) | Commands on a schedule, and restarts on a timer. |
 | [Deploy hooks](guides/deploy-hooks.md) | Secret URLs that deploy an app when a CMS, a scheduled job or CI calls them. |
+| [Terminal, files and config files](guides/terminal-and-files.md) | A shell in an app's container, its volumes' files, and files Gitberth mounts into it. |
 
 ## Networks and domains
 

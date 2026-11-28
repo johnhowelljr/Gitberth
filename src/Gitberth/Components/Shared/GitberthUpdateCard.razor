@@ -1,0 +1,208 @@
+@using Gitberth.Images
+@inject UpdateGitberth Updates
+@inject IJSRuntime JS
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@*
+    Settings › Updates › Gitberth (src/Gitberth/Images/UpdateGitberth.cs): the version this Gitberth runs, the newest
+    release and its notes, Update now and Check now, and what happens when a new version comes out. While an update runs,
+    its steps; once the updater has taken over, this page comes back by itself on the version that answers.
+*@
+<div class="gb-gu" id="gitberth-update">
+    <div class="gb-h3 gb-bk-sub">Gitberth<Tip Key="settings.updates.gitberth" /></div>
+    @if (status is null)
+    {
+        <div class="gb-skel" style="height:80px"></div>
+    }
+    else
+    {
+        var s = status;
+        var latest = s.State.Latest;
+        <div role="status" class="gb-stack" style="gap:6px">
+            <p class="gb-help" id="gu-current">This Gitberth runs @(s.Commit.Length > 0 ? $"{s.Current} ({s.Commit})" : s.Current).</p>
+            @if (s.Newer && latest is not null)
+            {
+                <div class="gb-impact-row gb-tone-accent" id="gu-latest">
+                    <SvgIcon Icon="@Icons.Material.Outlined.NewReleases" />
+                    <span>Gitberth @latest.Version is out@(latest.PublishedAt is { } at ? $" ({AutoBackupView.When(at, Zone)})" : "").</span>
+                </div>
+            }
+            else
+            {
+                <p class="gb-help" id="gu-latest">@UpToDate(s)</p>
+            }
+            @if (s.State.CheckProblem is { } problem)
+            {
+                <p class="gb-help gb-tone-warning" id="gu-check-problem">The last check didn't work: @problem.TrimEnd('.'). Gitberth asks again in 6 hours.</p>
+            }
+            @if (s.State.LastResult is { } result && !s.Updating)
+            {
+                <div class="gb-impact-row gb-tone-@(result.Ok ? "good" : "critical")" id="gu-result">
+                    <SvgIcon Icon="@(result.Ok ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.ErrorOutline)" />
+                    <span>@UpdateGitberthRules.Said(result) <span class="gb-t3">@AutoBackupView.When(result.At, Zone)</span></span>
+                </div>
+            }
+            @if (s.Steps.Count > 0)
+            {
+                <ul class="gb-gu-steps" id="gu-steps" aria-label="The update's steps">
+                    @foreach (var step in s.Steps)
+                    {
+                        <li class="gb-gu-step gb-tone-@Tone(step.State)" data-state="@step.State">
+                            <SvgIcon Icon="@StepIcon(step.State)" />
+                            <span>@step.Title@(step.Note is { Length: > 0 } note ? $": {note}" : "")</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+
+        @if (s.Newer && latest?.Notes is { Length: > 0 } notes)
+        {
+            <details class="gb-gu-notes" id="gu-notes">
+                <summary class="gb-help">What's new in @latest.Version</summary>
+                <div class="gb-gu-notes-body">@((MarkupString)UpdateGitberthRules.NotesHtml(notes))</div>
+                @if (latest.Url is { Length: > 0 } url && url.StartsWith("https://", StringComparison.Ordinal))
+                {
+                    <a class="gb-help" href="@url" target="_blank" rel="noopener noreferrer">The release on GitHub</a>
+                }
+            </details>
+        }
+
+        @if (s.CantUpdate is { } cant)
+        {
+            <p class="gb-help" id="gu-cant">@cant.TrimEnd('.'). <a href="help/guides/updating-gitberth">Updating Gitberth</a> says how to update it.</p>
+        }
+        else if (s.Newer && s.Busy is { } busy && !s.Updating)
+        {
+            <p class="gb-help" id="gu-busy">@busy</p>
+        }
+
+        <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+            <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Refresh" OnClick="CheckAsync" Busy="checking" Disabled="@s.Updating" Tip="settings.updates.gitberth.check">Check now</Btn>
+            @if (s.Newer && s.CantUpdate is null && latest is not null)
+            {
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.SystemUpdateAlt" OnClick="UpdateNowAsync" Busy="@(starting || s.Updating)" Disabled="@(s.Busy is not null || s.Updating)"
+                     Tip="settings.updates.gitberth.update-now">Update to @latest.Version</Btn>
+            }
+        </div>
+
+        <Field Label="When a new version comes out" Tip="settings.updates.gitberth.policy">
+            <Seg T="GitberthUpdatePolicy" Options="PolicyOptions" Value="s.State.Policy" ValueChanged="SetPolicyAsync" Label="When a new version of Gitberth comes out" />
+        </Field>
+        <p class="gb-help" id="gu-policy">@PolicyHelp(s)</p>
+    }
+</div>
+
+@code {
+    private GitberthUpdateStatus? status;
+    private bool checking, starting, watching;
+
+    private static TimeZoneInfo Zone => TimeProvider.System.LocalTimeZone;
+
+    private static readonly List<SegOption<GitberthUpdatePolicy>> PolicyOptions =
+    [
+        new(GitberthUpdatePolicy.Tell, "Tell me", Icons.Material.Outlined.NotificationsActive, Tip: "settings.updates.gitberth.policy.tell"),
+        new(GitberthUpdatePolicy.Auto, "Update by itself", Icons.Material.Outlined.Autorenew, Tip: "settings.updates.gitberth.policy.auto"),
+        new(GitberthUpdatePolicy.Nothing, "Do nothing", Icons.Material.Outlined.Block, Tip: "settings.updates.gitberth.policy.nothing"),
+    ];
+
+    private static string UpToDate(GitberthUpdateStatus s) => s.State switch
+    {
+        { CheckedAt: null } => "Not checked yet: Gitberth looks for a new version a few minutes after it starts, then every 6 hours.",
+        { Latest: null, CheckProblem: null } => "No release of Gitberth found yet.",
+        { Latest: { } l } => $"Up to date: {l.Version} is the newest release (checked {AutoBackupView.When(s.State.CheckedAt!.Value, Zone)}).",
+        _ => "Up to date, as far as the last check knows.",
+    };
+
+    private static string PolicyHelp(GitberthUpdateStatus s) => s.State.Policy switch
+    {
+        GitberthUpdatePolicy.Auto => s.CantUpdate is null
+            ? $"Between 03:00 and 05:00 ({UpdateWatcher.ZoneName()}), once no deploy, backup or restore runs. A copy of its data is kept, and it goes back by itself if the new version doesn't answer."
+            : "This Gitberth can't replace itself, so it tells you instead.",
+        GitberthUpdatePolicy.Nothing => "The new version shows here, with no notification.",
+        _ => "A notification once for each new version (Settings › Notifications, A new version is out), and Update now here.",
+    };
+
+    private static string Tone(Gitberth.Backup.RestoreStepState state) => state switch
+    {
+        Gitberth.Backup.RestoreStepState.Done => "good",
+        Gitberth.Backup.RestoreStepState.Failed => "critical",
+        Gitberth.Backup.RestoreStepState.Running => "accent",
+        _ => "neutral",
+    };
+
+    private static string StepIcon(Gitberth.Backup.RestoreStepState state) => state switch
+    {
+        Gitberth.Backup.RestoreStepState.Done => Icons.Material.Outlined.CheckCircle,
+        Gitberth.Backup.RestoreStepState.Failed => Icons.Material.Outlined.ErrorOutline,
+        Gitberth.Backup.RestoreStepState.Running => Icons.Material.Outlined.HourglassTop,
+        _ => Icons.Material.Outlined.RadioButtonUnchecked,
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Updates.Changed += OnChanged;
+        status = await Updates.StatusAsync();
+    }
+
+    public void Dispose() => Updates.Changed -= OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        var was = status?.Updating == true;
+        status = await Updates.StatusAsync();
+        // The updater ended without replacing this Gitberth (it failed before it stopped it): nothing comes back to wait for.
+        if (was && !status.Updating && watching)
+        {
+            watching = false;
+            await JS.InvokeVoidAsync("gitberth.stopRestartWatch");
+        }
+        StateHasChanged();
+    });
+
+    private async Task CheckAsync()
+    {
+        checking = true;
+        try
+        {
+            var state = await Updates.CheckAsync();
+            status = await Updates.StatusAsync();
+            if (state.CheckProblem is { } problem) Snackbar.Add($"The check didn't work: {problem}", Severity.Warning);
+            else if (status.Newer) Snackbar.Add($"Gitberth {state.Latest!.Version} is out.", Severity.Info);
+            else Snackbar.Add("Gitberth is up to date.", Severity.Success);
+        }
+        finally
+        {
+            checking = false;
+        }
+    }
+
+    private async Task UpdateNowAsync()
+    {
+        starting = true;
+        try
+        {
+            // The watch starts first: the updater may stop this Gitberth the moment it's started.
+            watching = true;
+            await JS.InvokeVoidAsync("gitberth.reloadAfterRestart", "Gitberth is updating; this page comes back by itself.", "settings#gitberth-update");
+            if (await Updates.UpdateNowAsync() is { } why)
+            {
+                watching = false;
+                await JS.InvokeVoidAsync("gitberth.stopRestartWatch");
+                Snackbar.Add(why, Severity.Warning);
+            }
+            status = await Updates.StatusAsync();
+        }
+        finally
+        {
+            starting = false;
+        }
+    }
+
+    private async Task SetPolicyAsync(GitberthUpdatePolicy policy)
+    {
+        await Updates.SetPolicyAsync(policy);
+        status = await Updates.StatusAsync();
+    }
+}

@@ -2,8 +2,8 @@
 
 A deploy builds a Git app's image from its repository and swaps the running container for a new one. Gitberth deploys by
 itself when the branch gets a new commit, and you can deploy by hand. This page covers when deploys happen, which commits
-are skipped, how to read the deploy log, what Gitberth checks before a new version takes over, how failed builds are
-retried, and how to roll back to an earlier version.
+are skipped, how to read the deploy log, what Gitberth checks before a new version takes over, a release command that
+runs before it does, how failed builds are retried, and how to roll back to an earlier version.
 
 Deploys are for Git apps and [Compose apps](compose-apps.md). An app that runs an image is updated, and rolled back, from
 its **Updates** card instead; see [Image updates](updates.md).
@@ -221,6 +221,42 @@ host's network. The log says when it can't, and why.
 Every other deploy swaps the containers with a few seconds offline: the old one stops, then the new one starts on the
 same host port. Visitors who use the host port rather than the domain always see that gap.
 [How deploys work](../concepts/how-deploys-work.md) describes both, step by step.
+
+## Release command
+
+A release command runs once for each new version, before it takes over: database migrations, such as `npm run migrate`
+or `python manage.py migrate`. It runs in a one-off container of the new version's image, with the variables, volumes
+and networks the new container gets, but no ports, no domains and no restart policy, so nothing reaches it while it runs.
+Its output is in the deploy log, with secret values masked like the rest of the log.
+
+Every app can have one, whatever its source. A Git or uploaded app runs it on each deploy of a new version. A
+[Compose app](compose-apps.md) runs it with `docker compose run` in a one-off container of its web service, or of the
+service you pick, after starting the services it depends on. An app that runs an image runs it before an
+[update](updates.md), a rollback or a new image or tag replaces its container.
+
+### Set a release command
+
+1. Open the app's **Settings** tab and go to **Release command**.
+2. Type the command. It runs with `/bin/sh -c`, so `&&` joins several, and the image needs a shell.
+3. Change **Time limit** if it needs longer than 10 minutes. It can be up to 60.
+4. For a Compose app, pick the **Service** whose new container runs it.
+5. Click **Save release command**. Nothing restarts: it runs from the app's next new version on.
+
+To remove it, empty the field and save. Each change is recorded in the [audit log](audit-log.md). A
+[preview](previews.md) runs its parent's release command, with its own variables and databases.
+
+### When it runs
+
+It runs when the image changes: a deploy that builds (a new commit, **Deploy**, a deploy hook, a new upload, a promote),
+a rollback to an earlier version, and an image app's update, rollback or new image. It doesn't run on a restart, a
+scheduled restart, or a settings change that recreates the container on the same image. The migrations Gitberth's build
+detection runs when a container starts stay as they are.
+
+### When it fails
+
+A command that ends with a non-zero exit code, or still runs at its time limit, stops the deploy: it ends as **Failed**,
+the log shows the command's output and says why, and the running version stays as it was, since nothing of it was
+touched. For an image app, nothing changes, and the change says why, with the command's last lines of output.
 
 ## Retries
 

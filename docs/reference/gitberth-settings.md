@@ -85,6 +85,8 @@ The events are switches under **Tell me when**. With no destination the section 
 | **A certificate is about to expire** | A domain's certificate expires within 14 days, and again within 3. | On |
 | **A token is about to expire or is refused** | A GitHub, GitLab or Cloudflare token, a registry sign-in or an API token in use: 3 weeks, a week and a day before it expires (an API token a week and a day before), once it has, and the moment its service refuses it. | On |
 | **Docker's disk gets full** | Free space drops under the warning line (see [Disk](#disk)), again when it's so low Gitberth stops pulling images, and once there's room again. | On |
+| **An automatic backup fails** | A scheduled backup or **Back up now** didn't reach its destination: once, again when the reason changes or a day later, and once a backup works again (see [Automatic backups](#automatic-backups)). | On |
+| **A new version is out** | A new version of Gitberth (see [Updates](#updates)), or a newer image of an app set to **Tell me**: once for each; and how an update of Gitberth itself ended. | On |
 | **Previews too** | Deploys of previews as well. | Off |
 
 Each destination's row shows where it goes without its secret (`https://discord.com/…`), and how its last message went: **Sent 2 min ago** or **Failed 2 min ago** with the reason. An app's own **Notifications** switch (its Settings tab, **General**) leaves it out; the line under the switches counts the apps left out.
@@ -109,7 +111,19 @@ Each saved sign-in shows its registry, user name, when it was added, and **signe
 
 ## Updates
 
-How often images are checked for a newer version, and when apps may update on their own. See [Image updates](../guides/updates.md).
+Gitberth's own new versions, how often images are checked for a newer version, and when apps may update on their own. See [Updating Gitberth](../guides/updating-gitberth.md) and [Image updates](../guides/updates.md).
+
+**Gitberth** comes first: the version this Gitberth runs (and its commit), the newest release and when it came out, **What's new in …** with the release's notes, and how the last update of Gitberth ended (**Updated to 1.10.0.**, or why it went back).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| **Check now** | Asks GitHub for Gitberth's newest release now. Gitberth also asks a few minutes after it starts and then every 6 hours. | |
+| **Update to …** | Shown when a newer version is out and this Gitberth can replace itself (it runs in a container from its published image). Pulls the new version, keeps a copy of Gitberth's data, and starts the update; each step shows as it runs, and the page comes back by itself on the new version. Refused while a deploy, a backup or a restore runs. | |
+| **When a new version comes out** | **Tell me**: a notification once for each new version, and **Update to …** here. **Update by itself**: between 03:00 and 05:00 in Gitberth's time zone, once no deploy, backup or restore runs. **Do nothing**: the new version only shows here. | **Tell me** |
+
+A Gitberth that can't replace itself (one you built yourself, one pinned by digest, one not in a container) says why, and still tells you about new versions.
+
+**Apps' images** follow:
 
 ![Settings, Updates](../images/settings-updates.webp)
 
@@ -263,6 +277,26 @@ role of its own, or a Redis. See [Databases](../guides/databases.md).
 
 Choosing the default and setting up a server are recorded in the audit log.
 
+## Automatic backups
+
+Backups on a schedule, to a folder on this host, a network share, an FTP server or an S3 bucket, encrypted so only your
+passphrase opens them. See [Automatic backups](../guides/automatic-backups.md).
+
+| Field or button | What it does | Default |
+|---|---|---|
+| The status lines | The last backup (when, its size and how long it took, or why it failed), and when the next runs. While one is made, its progress. | |
+| **Back up now** | Makes one now, to the destination as saved. Not while a backup downloads to your browser or a restore runs. | |
+| **Passphrase** and **Passphrase again**, **Set passphrase** | Makes the key pair backups are locked with. Gitberth keeps the public key and the private key sealed with the passphrase, never the passphrase. **Change passphrase…** makes a new pair for new backups; older ones keep opening with theirs. | None: backups can't run until one is set |
+| **When** | **Off**, **Every day** or **Every week** at a time (and day), or **Every N hours** (1 to 168), in Gitberth's time zone. A backup missed while Gitberth was down runs 5 minutes after it starts. | Off |
+| **Where** | **A folder on this host** (its whole path), **A network share (SMB)** (`//server/share[/folder]`, user, password, domain), **An FTP server** (`ftp://server/folder` or `ftps://…`, user, password; TLS whenever the server offers it) or **An S3 bucket** (endpoint, region, bucket, folder, access key, secret key, path-style addresses). Passwords and secret keys are kept encrypted; left empty, the saved one stays. | A folder on this host |
+| **Test the destination** | Writes a small file there, lists it, reads it back and removes it, with the settings as typed. | |
+| **Keep the last** | How many of this Gitberth's automatic backups stay at the destination; older ones go after each backup. Nothing else there is touched. | 7 |
+| **What's saved** | The same list as **Save a backup**'s. What you untick is kept as left out, so a new app is saved by itself. | Everything the list ticks |
+| **Stop everything while saving** | As under **Save a backup**. | Off |
+| **The last runs** | The last 20 backups: when, how each started, its size and time, or why it failed. | |
+
+Every change, test and backup is recorded in the [audit log](../guides/audit-log.md).
+
 ## Save and restore
 
 One file with everything this host runs, compressed and encrypted with a passphrase, to bring it all back here or on
@@ -289,6 +323,7 @@ Under **Restore from a file**, offered in any Gitberth (while a restore runs, it
 | **Restore the picked items** | Asks first (type `restore` when one replaces what's here), then opens the **Restoring** page: its steps and live log. There's no restart, and nothing else here changes. |
 | **Restore everything…** | Only on a Gitberth with no apps yet, with the warnings for this host. Asks you to type `restore`, then brings back all of it and opens the **Restoring** page. Gitberth restarts on the saved data partway through; afterwards you sign in with the admin password of the machine the backup was saved on. A warning in red keeps it off until it's dealt with. |
 | **Remove the file** | Deletes the uploaded file without restoring it. |
+| **List them** and **Use this one** | Once automatic backups have a destination: the backups there with their date, size, host and key; **Use this one** fetches one into Gitberth as an upload would, then **Its passphrase** and **Open the file** as above. |
 
 While this Gitberth has no apps, the dashboard says **Moving from another machine? Restore a backup.**, and while a
 restore runs, **A restore is running** with a link to its page.

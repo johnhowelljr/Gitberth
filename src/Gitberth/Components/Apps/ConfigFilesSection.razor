@@ -1,0 +1,302 @@
+@using Gitberth.Workbench
+@inject ConfigFiles Configs
+@inject Gitberth.Services.AppActions Actions
+@inject ISnackbar Snackbar
+@inject IDialogService Dialogs
+
+@*
+    An app's Config files section on its Settings tab (B3), saved on its own: files Gitberth keeps for the app and mounts
+    read-only at a path in its container. Changing a file's contents rewrites it in place, so the app sees it at once
+    (Restart offered). Adding, moving or removing one changes the app's mounts: a Git, uploaded or Compose app's at its next
+    deploy; any other app's through the apply bar, as any mount (the section puts the mount in the page's draft).
+*@
+<SettingsSection Id="sec-configs" Title="Config files" Icon="@Icons.Material.Outlined.Description" Tip="configs.section" Description="@Description">
+    @if (files is null)
+    {
+        <div class="gb-skel" style="height:64px"></div>
+    }
+    else
+    {
+        @if (files.Count == 0 && editing is null)
+        {
+            <EmptyState Small="true" Icon="@Icons.Material.Outlined.Description" Title="No config files">A file Gitberth keeps for the app, like an nginx site or a settings file, mounted read-only where the app reads it.</EmptyState>
+        }
+        else if (files.Count > 0)
+        {
+            <div class="gb-cfgs" role="list" aria-label="Config files">
+                @foreach (var f in files)
+                {
+                    var (tone, label, tip) = StatusOf(f);
+                    <div class="gb-cfg" role="listitem" @key="f.Id" data-path="@f.Path">
+                        <SvgIcon Icon="@Icons.Material.Outlined.Description" Size="sm" />
+                        <span class="gb-mono gb-cfg-path gb-ellipsis">@f.Path</span>
+                        @if (f.Service is { } s)
+                        {
+                            <span class="gb-tag">@s</span>
+                        }
+                        @if (f.Secret)
+                        {
+                            <span class="gb-tag gb-tag--accent" data-tip="configs.secret">Secret</span>
+                        }
+                        <span class="gb-t3 gb-mono">@f.Mode</span>
+                        <span class="gb-t3">@Sizes(f.Size)</span>
+                        <span class="@($"gb-pill gb-pill--{tone}")" data-tip="@tip"><span class="gb-pill-dot"></span>@label</span>
+                        <span class="gb-grow"></span>
+                        <button type="button" class="gb-iconbtn" data-tip="configs.edit" aria-label="@($"Change {f.Path}")" disabled="@busy" @onclick="() => Edit(f)"><SvgIcon Icon="@Icons.Material.Outlined.Edit" /></button>
+                        <button type="button" class="gb-iconbtn" data-tip="configs.remove" aria-label="@($"Remove {f.Path}")" disabled="@busy" @onclick="() => RemoveAsync(f)"><SvgIcon Icon="@Icons.Material.Outlined.Delete" /></button>
+                    </div>
+                }
+            </div>
+        }
+        @if (rewritten is { } changedPath && View.Summary.Running)
+        {
+            <Banner Tone="good" Title="@($"{changedPath} is saved")" OnDismiss="() => rewritten = null">
+                <ChildContent>The app sees the new contents at once. One that reads its config only when it starts needs a restart.</ChildContent>
+                <Actions><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.RestartAlt" OnClick="RestartAsync" Busy="restarting" Tip="configs.restart">Restart @View.Summary.Title</Btn></Actions>
+            </Banner>
+        }
+        @if (editing is { } e)
+        {
+            <div class="gb-cfg-editor" id="gb-cfg-editor">
+                <div class="gb-fgrid">
+                    <Field Label="Path in the container" For="cfg-path" Tip="configs.path" Error="@problem" Help="Where the app reads it, like /etc/nginx/conf.d/site.conf.">
+                        <input id="cfg-path" class="gb-input gb-input--mono" placeholder="/etc/app/config.yml" value="@e.Path" spellcheck="false" autocomplete="off"
+                               @oninput="v => { e.Path = v.Value?.ToString() ?? string.Empty; problem = null; }" />
+                    </Field>
+                    <Field Label="Mode" For="cfg-mode" Tip="configs.mode" Help="Octal, as chmod takes it: 644 lets everyone read it, 600 only its owner (root).">
+                        <input id="cfg-mode" class="gb-input gb-input--mono" value="@e.Mode" maxlength="4" spellcheck="false" autocomplete="off"
+                               @oninput="v => { e.Mode = v.Value?.ToString() ?? string.Empty; problem = null; }" />
+                    </Field>
+                    @if (View.Row?.IsCompose == true && ServiceList.Count > 0)
+                    {
+                        <Field Label="Service" For="cfg-service" Tip="configs.service">
+                            <select id="cfg-service" class="gb-input" value="@e.Service" @onchange="v => e.Service = v.Value?.ToString() ?? string.Empty">
+                                @foreach (var s in ServiceList)
+                                {
+                                    <option value="@s">@(s == View.Row?.WebService ? $"{s} (the web service)" : s)</option>
+                                }
+                            </select>
+                        </Field>
+                    }
+                </div>
+                <SwitchRow Title="Secret" Value="e.Secret" ValueChanged="v => e.Secret = v" Tip="configs.secret"
+                           Sub="Its contents are never shown again once saved, here or anywhere in Gitberth." />
+                <Field Label="Contents" For="cfg-content" Tip="configs.content" Help="@ContentHelp(e)">
+                    <textarea id="cfg-content" class="gb-input gb-input--mono" rows="12" spellcheck="false" placeholder="@(e.Id is not null && e.WasSecret ? "Leave empty to keep its contents" : null)"
+                              @bind="e.Content" @bind:event="oninput"></textarea>
+                </Field>
+                <div class="gb-row" style="justify-content:flex-end;gap:8px">
+                    <Btn Kind="BtnKind.Ghost" OnClick="() => { editing = null; problem = null; }" Disabled="busy">Cancel</Btn>
+                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveAsync" Busy="busy" Tip="configs.save">@(e.Id is null ? "Add config file" : "Save config file")</Btn>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="gb-row" style="gap:8px">
+                <Btn Icon="@Icons.Material.Outlined.Add" OnClick="Add" Disabled="busy" Tip="configs.add">Add config file</Btn>
+            </div>
+        }
+    }
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>The page's draft of the container's settings: an image app's mounts change through it.</summary>
+    [Parameter] public ContainerSettingsDraft? Draft { get; set; }
+    /// <summary>Raised after the draft changed (a mount added or taken out), for the apply bar.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+    /// <summary>Raised after a save made a row for a container that had none, so the page reads the app again.</summary>
+    [Parameter] public EventCallback Saved { get; set; }
+    /// <summary>A Compose app's services, the web service first.</summary>
+    [Parameter] public IReadOnlyList<string> Services { get; set; } = [];
+
+    private sealed class Editing
+    {
+        public int? Id { get; init; }
+        public string Path { get; set; } = "";
+        public string Mode { get; set; } = "0644";
+        public bool Secret { get; set; }
+        public bool WasSecret { get; init; }
+        public string Content { get; set; } = "";
+        public string Service { get; set; } = "";
+        public string? OldPath { get; init; }
+        public string? OldHostPath { get; init; }
+    }
+
+    private IReadOnlyList<ConfigFileView>? files;
+    private Editing? editing;
+    private string? problem;
+    private string? rewritten;
+    private bool busy, restarting;
+    private int? loadedFor = -1;
+
+    /// <summary>Whether an app has the section: every app but Gitberth's own containers and previews.</summary>
+    public static bool Shows(AppView view) => TerminalSessions.Offered(view.Summary) && view.Row is not { IsPreview: true };
+
+    // A Git, uploaded or Compose app: Gitberth starts its containers, so its deploys mount them.
+    private bool Deployed => View.Row is { Deployed: true };
+
+    // A Compose app's services as its last good release ran them, the web service first.
+    private IReadOnlyList<string> ServiceList
+    {
+        get
+        {
+            if (Services.Count > 0) return Services;
+            if (View.Row is not { IsCompose: true } row) return [];
+            var names = Gitberth.Deploy.DeployPipeline.ParseImages(View.Git?.Deployments.FirstOrDefault(d => d.Status == DeployStatus.Succeeded)?.Images).Keys
+                .OrderBy(s => s == row.WebService ? 0 : 1).ThenBy(s => s, StringComparer.Ordinal).ToList();
+            return names.Count > 0 ? names : row.WebService is { Length: > 0 } web ? [web] : [];
+        }
+    }
+
+    private string Description => Deployed
+        ? "Files Gitberth keeps for the app and mounts read-only into its container. A change to a file's contents shows at once; a new or removed file at its next deploy."
+        : "Files Gitberth keeps for the app and mounts read-only into its container. A change to a file's contents shows at once; a new or removed file through Review and apply, like any mount.";
+
+    private static string ContentHelp(Editing e) => e.Id is not null && e.WasSecret
+        ? "Up to 256 KiB of text. It's secret, so its contents aren't shown: what you write here replaces them."
+        : "Up to 256 KiB of text, written as it is.";
+
+    // The container's mounts now: the host paths it has at each path.
+    private HashSet<(string Source, string Target)> Mounted =>
+        (View.Inspect?["Mounts"] as System.Text.Json.Nodes.JsonArray ?? []).OfType<System.Text.Json.Nodes.JsonObject>()
+            .Select(m => ((string?)m["Source"] ?? "", (string?)m["Destination"] ?? "")).ToHashSet();
+
+    // (Each status's tip is named Tip: so the tips' test finds its key.)
+    private (string Tone, string Label, string Tip) StatusOf(ConfigFileView f)
+    {
+        if (f.HostPath is { } host && Mounted.Contains((host, f.Path))) return ("success", "Mounted", Tip: "configs.status.mounted");
+        if (Deployed) return ("info", "At the next deploy", Tip: "configs.status.deploy");
+        return ("warning", "Review and apply", Tip: "configs.status.apply");
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (loadedFor == View.Summary.AppId && files is not null) return;
+        loadedFor = View.Summary.AppId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            files = View.Summary.AppId is int appId ? await Configs.ListAsync(appId) : [];
+            // An image app's files that nothing keeps or mounts any more go.
+            if (View.Summary.AppId is int id && !Deployed) await Configs.SweepAsync(id, Mounted.Select(m => m.Source).ToList());
+        }
+        catch (Exception ex)
+        {
+            files ??= [];
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private static string Sizes(int bytes) => AppFiles.Size(bytes);
+
+    private void Add()
+    {
+        editing = new Editing { Service = View.Row?.WebService ?? ServiceList.FirstOrDefault() ?? "" };
+        problem = null;
+    }
+
+    private void Edit(ConfigFileView f)
+    {
+        editing = new Editing
+        {
+            Id = f.Id, Path = f.Path, Mode = f.Mode, Secret = f.Secret, WasSecret = f.Secret, Content = f.Content ?? "",
+            Service = f.Service ?? View.Row?.WebService ?? "", OldPath = f.Path, OldHostPath = f.HostPath,
+        };
+        problem = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (editing is not { } e) return;
+        busy = true;
+        try
+        {
+            var content = e.Id is not null && e.WasSecret && e.Content.Length == 0 ? null : e.Content;
+            var input = new ConfigFileInput(e.Path, content, e.Secret, e.Mode, View.Row?.IsCompose == true ? e.Service : null);
+            var hadRow = View.Summary.AppId is not null;
+            var saved = await Configs.SaveAsync(View.Summary.Key, e.Id, input);
+            if (!saved.Ok)
+            {
+                problem = saved.Message;
+                return;
+            }
+            Snackbar.Add(saved.Message, Severity.Success);
+            var path = ConfigFiles.CleanPath(e.Path);
+            // An image app's mount goes through the apply bar, as any mount: the old one out, the new one in.
+            if (!Deployed && Draft is not null && saved.HostPath is { } host && !saved.Rewritten && saved.Message != "Nothing changed.")
+            {
+                if (e.OldHostPath is { } oldHost && e.OldPath is { } oldPath) TakeOut(oldHost, oldPath);
+                var row = Draft.AddMount(Gitberth.Apps.MountKind.Bind);
+                (row.Source, row.Target, row.ReadOnly) = (host, path, true);
+                await Changed.InvokeAsync();
+            }
+            rewritten = saved.Rewritten ? path : null;
+            editing = null;
+            if (!hadRow)
+            {
+                loadedFor = -1;
+                await Saved.InvokeAsync();
+            }
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    // The draft's mount of a config file taken out (an image app's), as removing a mount on the Volumes section does.
+    private void TakeOut(string host, string path)
+    {
+        if (Draft?.Mounts.FirstOrDefault(m => !m.Removed && m.Source == host && m.Target == path) is { } mount) Draft.RemoveMount(mount);
+    }
+
+    private async Task RemoveAsync(ConfigFileView f)
+    {
+        if (await Dialogs.ShowMessageBoxAsync($"Remove {f.Path}?",
+                Deployed ? "It goes from the app's container at its next deploy, and Gitberth forgets its contents now." : "It goes from the app's container with Review and apply, and Gitberth forgets its contents now.",
+                yesText: "Remove", cancelText: "Cancel") != true) return;
+        busy = true;
+        try
+        {
+            var removed = await Configs.RemoveAsync(f.Id);
+            Snackbar.Add(removed.Message, removed.Ok ? Severity.Success : Severity.Warning);
+            if (!Deployed && removed.HostPath is { } host)
+            {
+                TakeOut(host, f.Path);
+                await Changed.InvokeAsync();
+            }
+            if (editing?.Id == f.Id) editing = null;
+            await LoadAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task RestartAsync()
+    {
+        restarting = true;
+        try
+        {
+            var error = await Actions.RestartAsync(View.Summary.Key);
+            Snackbar.Add(error ?? $"Restarted {View.Summary.Title}.", error is null ? Severity.Success : Severity.Error);
+            if (error is null) rewritten = null;
+        }
+        finally
+        {
+            restarting = false;
+        }
+    }
+}

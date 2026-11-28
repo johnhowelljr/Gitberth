@@ -1,0 +1,37 @@
+# Tips for an app's release command (B2): the Release command section of its Settings tab
+# (Components/Apps/ReleaseCommandSection.razor). See Help/TipCatalog.cs.
+
+release.section:
+  title: Release command
+  text: >-
+    A command that runs once for each new version, in a one-off container of it, before it takes over: database
+    migrations, say. If it fails or runs too long, the running version stays.
+  more: guides/deploys-and-rollbacks#release-command
+
+release.command:
+  title: Command
+  text: >-
+    Run with /bin/sh -c in a one-off container of the new version, with its variables, volumes and networks but no
+    ports. Its output goes in the deploy's log, masked. Leave it empty for none.
+  more: guides/deploys-and-rollbacks#set-a-release-command
+
+release.timeout:
+  title: Time limit
+  text: >-
+    How long it may run, from 1 to 60 minutes. Still running then, it's stopped, the deploy fails and the running
+    version stays.
+  more: guides/deploys-and-rollbacks#when-it-fails
+
+release.service:
+  title: Service
+  text: >-
+    The Compose service whose one-off container runs it, with docker compose run: the web service unless you pick
+    another. The services it depends on are started first.
+  more: guides/deploys-and-rollbacks#release-command
+
+release.save:
+  title: Save release command
+  text: >-
+    Saves it for the app's next new version: a deploy that builds, a rollback, or an image app's update or new image.
+    Nothing restarts now.
+  more: guides/deploys-and-rollbacks#when-it-runs

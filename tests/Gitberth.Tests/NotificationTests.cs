@@ -251,7 +251,7 @@ public sealed class NotificationTests : IDisposable
         // Chosen in 1.2 as a plain list: what it says, and the kinds added since (an app down, a certificate, an app brought
         // back, a token, Docker's disk) as their defaults say.
         Assert.True(NotificationSettings.ParseEvents("""["Crashed","Nonsense","Test"]""").SetEquals([NotifyEvent.Crashed, NotifyEvent.Down, NotifyEvent.CertificateExpiring,
-            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow]));
+            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow, NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.JobFailed]));
         Assert.Empty(NotificationSettings.ParseMuted("[]"));
     }
 
@@ -262,7 +262,7 @@ public sealed class NotificationTests : IDisposable
         const string saved = """{"on":["CertificateExpiring","Crashed","DeployFailed","Unhealthy"],"known":["DeployFailed","DeploySucceeded","Crashed","Unhealthy","Down","CertificateExpiring"]}""";
         var on = NotificationSettings.ParseEvents(saved);
         Assert.True(on.SetEquals([NotifyEvent.DeployFailed, NotifyEvent.Crashed, NotifyEvent.Unhealthy, NotifyEvent.CertificateExpiring,
-            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow]), string.Join(", ", on.Order()));
+            NotifyEvent.BroughtBack, NotifyEvent.TokenExpiring, NotifyEvent.DiskLow, NotifyEvent.BackupFailed, NotifyEvent.UpdateAvailable, NotifyEvent.JobFailed]), string.Join(", ", on.Order()));
         // Saved again now, every kind is known: one turned off stays off.
         var written = NotificationSettings.WriteEvents(on.Remove(NotifyEvent.DiskLow));
         Assert.DoesNotContain(NotifyEvent.DiskLow, NotificationSettings.ParseEvents(written));
@@ -305,6 +305,9 @@ public sealed class NotificationTests : IDisposable
             [NotifyEvent.CertificateExpiring] = "a certificate is about to expire",
             [NotifyEvent.TokenExpiring] = "a token is about to expire or is refused",
             [NotifyEvent.DiskLow] = "Docker's disk gets full",
+            [NotifyEvent.BackupFailed] = "an automatic backup fails",
+            [NotifyEvent.UpdateAvailable] = "a new version is out",
+            [NotifyEvent.JobFailed] = "a scheduled command fails",
         };
         // Every switch Settings has is here: a new one needs its words.
         Assert.Equal(NotificationSettings.Choosable.Order(), words.Keys.Order());
@@ -328,6 +331,8 @@ public sealed class NotificationTests : IDisposable
     [InlineData(NotifyEvent.GaveUp, "app.gave-up")]
     [InlineData(NotifyEvent.TokenExpiring, "token.expiring")]
     [InlineData(NotifyEvent.TokenRefused, "token.refused")]
+    [InlineData(NotifyEvent.JobFailed, "job.failed")]
+    [InlineData(NotifyEvent.JobOk, "job.ok")]
     public void The_new_kinds_have_their_own_names_in_a_webhook(NotifyEvent kind, string name)
     {
         Assert.Equal(name, NotificationFormats.EventName(kind));

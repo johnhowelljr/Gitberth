@@ -1,0 +1,176 @@
+@using Gitberth.Workbench
+@implements IAsyncDisposable
+@inject TerminalSessions Terminals
+@inject IJSRuntime JS
+
+@*
+    An app's Terminal tab (B3): a shell in its running container (bash, else sh), in the browser. Connect asks the server
+    for a one-time ticket, then the page's terminal (xterm.js) opens Gitberth's WebSocket with it. A Compose app picks the
+    service; any app may run it as root instead of its own user. What's typed isn't recorded; opening and closing are.
+*@
+<SectionCard Id="gb-terminal-card" Title="Terminal" Icon="@Icons.Material.Outlined.Terminal" Sub="@Sub" Flush="true" Tip="terminal.card">
+    <Actions>
+        @if (state == State.Connected)
+        {
+            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.LinkOff" OnClick="DisconnectAsync" Tip="terminal.disconnect">Disconnect</Btn>
+        }
+    </Actions>
+    <ChildContent>
+        <div class="gb-term-bar">
+            @if (Services.Count > 1)
+            {
+                <span class="gb-t3"><Tip Key="terminal.service">Service</Tip></span>
+                <Seg T="string" Options="@(Services.Select(s => new SegOption<string>(s, s == View.Row?.WebService ? $"{s} (web)" : s)).ToList())" Value="Service" ValueChanged="PickService"
+                     Label="Service" Disabled="@(state is State.Connecting or State.Connected)" />
+            }
+            <span class="gb-t3"><Tip Key="terminal.user">Run as</Tip></span>
+            <Seg T="bool" Options="UserOptions" Value="root" ValueChanged="v => root = v" Label="Run as" Disabled="@(state is State.Connecting or State.Connected)" />
+            <span class="gb-grow"></span>
+            @if (state is not (State.Connecting or State.Connected))
+            {
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Terminal" OnClick="ConnectAsync" Disabled="@(!View.Summary.Running)" Tip="terminal.connect">
+                    @(state == State.Ended ? "Connect again" : "Connect")
+                </Btn>
+            }
+        </div>
+        @if (problem is not null)
+        {
+            <div style="padding:0 18px 14px"><Banner Tone="serious" Title="The terminal didn't open">@problem</Banner></div>
+        }
+        else if (!View.Summary.Running && state != State.Connected)
+        {
+            <div style="padding:0 18px 14px">
+                <EmptyState Small="true" Icon="@Icons.Material.Outlined.Terminal" Title="@($"{View.Summary.Title} isn't running")">Start it, then connect: a terminal opens in its running container.</EmptyState>
+            </div>
+        }
+        @* The terminal's element is xterm.js's alone: nothing of Blazor's is ever rendered in it. *@
+        <div class="gb-term-wrap">
+            @if (state == State.Idle && View.Summary.Running)
+            {
+                <span class="gb-term-hint">Connect opens a shell in <span class="gb-mono">@Container</span>.</span>
+            }
+            <div class="gb-term" id="gb-term" @onclick="FocusAsync"></div>
+        </div>
+    </ChildContent>
+    <Foot>
+        <span>@(ended ?? "What you type isn't recorded; opening and closing a terminal are, with who and from where. One with no input for 30 minutes closes.")</span>
+    </Foot>
+</SectionCard>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>A Compose app's services, the web service first; empty for any other app.</summary>
+    [Parameter] public IReadOnlyList<string> Services { get; set; } = [];
+
+    private enum State { Idle, Connecting, Connected, Ended }
+
+    private State state;
+    private string? problem;
+    private string? ended;
+    private bool root;
+    private string? service;
+    private DotNetObjectReference<AppTerminalTab>? self;
+
+    private static readonly IReadOnlyList<SegOption<bool>> UserOptions =
+    [
+        new(false, "Its own user", Tip: "terminal.user.own"),
+        new(true, "root", Tip: "terminal.user.root"),
+    ];
+
+    private string Service => service is { } s && Services.Contains(s) ? s : View.Row?.WebService ?? Services.FirstOrDefault() ?? "";
+
+    private string Container => View.Row is { IsCompose: true } row && Service.Length > 0 && Service != row.WebService
+        ? Gitberth.Compose.ComposeNames.Member(row.Slug, Service)
+        : View.Summary.Container;
+
+    private string Sub => state switch
+    {
+        State.Connected => $"{Container} · connected",
+        State.Connecting => $"{Container} · connecting…",
+        _ => Container,
+    };
+
+    private void PickService(string value) => service = value;
+
+    private async Task ConnectAsync()
+    {
+        problem = null;
+        ended = null;
+        var user = Audit.AuditScope.Current is { Kind: Audit.AuditActorKind.User } actor ? actor.Name : null;
+        if (user is null)
+        {
+            problem = "You're signed out. Sign in again, then connect.";
+            return;
+        }
+        var issued = await Terminals.IssueAsync(View.Summary.Key, View.Row?.IsCompose == true ? Service : null, root, 120, 32, user);
+        if (issued.Ticket is not { } ticket)
+        {
+            problem = issued.Problem;
+            return;
+        }
+        state = State.Connecting;
+        self ??= DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthTerminal.open", "gb-term", ticket, self);
+        }
+        catch (JSException ex)
+        {
+            state = State.Ended;
+            problem = ex.Message;
+        }
+    }
+
+    private async Task DisconnectAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthTerminal.close", "gb-term");
+        }
+        catch (JSException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private async Task FocusAsync()
+    {
+        if (state != State.Connected) return;
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthTerminal.focus", "gb-term");
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    [JSInvokable]
+    public void Connected()
+    {
+        state = State.Connected;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void Ended(string? why)
+    {
+        state = State.Ended;
+        ended = why;
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthTerminal.close", "gb-term");
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException or TaskCanceledException)
+        {
+        }
+        self?.Dispose();
+    }
+}

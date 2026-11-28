@@ -88,7 +88,7 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
         var slug = container.StartsWith("gb-", StringComparison.Ordinal) ? container["gb-".Length..] : null;
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         return await db.Apps.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.Source != AppSource.Git && a.Source != AppSource.Compose && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
+            .FirstOrDefaultAsync(a => a.Source != AppSource.Git && a.Source != AppSource.Compose && a.Source != AppSource.Upload && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
     }
 
     // Off the event loop, which goes on to the next event at once.
@@ -127,7 +127,7 @@ public sealed class AppSync(ContainerEventWatcher events, AppCatalog catalog, ID
         AppDefinition? row;
         await using (var db = await dbFactory.CreateDbContextAsync(ct))
             row = await db.Apps.AsNoTracking()
-                .FirstOrDefaultAsync(a => a.Source != AppSource.Git && a.Source != AppSource.Compose && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
+                .FirstOrDefaultAsync(a => a.Source != AppSource.Git && a.Source != AppSource.Compose && a.Source != AppSource.Upload && (a.Container == container || (a.Container == null && slug != null && a.Slug == slug)), ct);
         if (row is null) return false;
         var id = ContainerPorts.Str(await network.InspectAsync(container, ct), "Id");
         if (id.Length == 0 || id == row.ContainerId) return false;

@@ -582,6 +582,8 @@ public sealed partial class AppActions(IDbContextFactory<GitberthDb> dbFactory, 
             DeployPaths.TryDeleteFile(DeployPaths.DockerfileCopy(options, id));
             DeployPaths.TryDeleteFile(DeployPaths.RailpackPlanCopy(options, id));
         }
+        // [builder B] An uploaded app's kept uploads (B6) and any app's config files (B3) go with it.
+        AppDataFolders.Remove(options, appId);
         // The kept copy of the repo's GitHub variables goes with the repo's last app.
         var (owner, repo) = (app.Owner.ToLowerInvariant(), app.Repo.ToLowerInvariant());
         if (app.FromRepo && !await db.Apps.AnyAsync(a => a.Owner.ToLower() == owner && a.Repo.ToLower() == repo))

@@ -1,14 +1,50 @@
 # Updating Gitberth
 
-Gitberth comes as a ready-made image, `ghcr.io/johnhowelljr/gitberth`, for Intel/AMD and ARM machines. Updating it replaces Gitberth's own container with one on a newer image; your apps keep running, and its data volume stays. Gitberth never updates itself, even when other apps update automatically, so you update it from the host's shell. This page also covers pinning a version, going back to an earlier one, and building Gitberth from source.
+Gitberth comes as a ready-made image, `ghcr.io/johnhowelljr/gitberth`, for Intel/AMD and ARM machines. Updating it replaces Gitberth's own container with one on a newer image; your apps keep running, and its data volume stays. Gitberth can do it itself, from **Settings › Updates**, or you can do it from the host's shell. This page also covers pinning a version, going back to an earlier one, and building Gitberth from source.
 
 ## Before you start
 
 Back up Gitberth's data volume (see [Back up and restore](backups-and-restore.md#back-up-gitberths-data)). A new version may change Gitberth's database when it starts, and the backup is how you go back.
 
-## Update to the newest version
+## Update from Gitberth
 
-The quickest way is to run the installer again. It keeps your settings and data, pulls the newest release, backs up
+**Settings › Updates** starts with **Gitberth**: the version it runs, like **This Gitberth runs 1.9.0 (3f9c2ab).**, and whether a newer one is out. Gitberth asks GitHub for its newest release a few minutes after it starts and then every 6 hours; **Check now** asks at once. A pre-release is never offered.
+
+When a new version is out, the card says **Gitberth 1.10.0 is out**, **What's new in 1.10.0** opens the release's notes, and **Update to 1.10.0** updates it:
+
+1. **Pull** the new version's image, by its version tag.
+2. **Check its version**: the image must say it's that version, or it isn't used.
+3. **Copy Gitberth's data** into a volume of its own, `gitberth-data-before-<version>`, like `gitberth-data-before-1.9.0`. Its databases are copied consistently while Gitberth runs. The two newest copies are kept.
+4. **Start the updater**: a container of the new version that stops this Gitberth, keeps it as `gitberth-before-<version>`, and starts the new version under Gitberth's own name with all of its settings (ports, volumes, networks, environment, labels, restart policy). Then it waits up to 3 minutes for the new version to answer.
+
+The page says **Gitberth is updating; this page comes back by itself.** and loads again on the new version, where the card says **Updated to 1.10.0.** The old container is removed. Your apps keep running throughout, as in [What happens while Gitberth restarts](#what-happens-while-gitberth-restarts).
+
+An update waits while a deploy, a backup or a restore runs: the card says which, and **Update by itself** tries again later.
+
+### If the new version doesn't start
+
+If the new version stops, or doesn't answer within 3 minutes, the updater removes it, puts Gitberth's data back from the copy (the new version may have changed its database), and starts the old Gitberth again. The card then says why, like **The update to 1.10.0 failed and Gitberth went back to 1.9.0: It stopped right after it started (exit code 1).**, and the notification **The update of Gitberth to 1.10.0 failed** says the same. The updater's own log is in Gitberth's data volume, at `update/updater.log`.
+
+### When a new version comes out
+
+| Choice | What Gitberth does |
+|---|---|
+| **Tell me** | A [notification](notifications.md) once for each new version (**A new version is out**), and **Update to …** on the card. The default. |
+| **Update by itself** | Updates between 03:00 and 05:00 in Gitberth's time zone (its `TZ`), once no deploy, backup or restore runs, the same way as **Update to …**. |
+| **Do nothing** | The new version shows on the card, and nothing else happens. |
+
+A `latest` install stays on `latest`, which moves to the new version on this host. A pinned version, like `1.9.0`, moves to the new version's tag; when the installer's `.env` pins `GITBERTH_IMAGE`, the updater changes that line too, so `docker compose up -d` later doesn't go back.
+
+### When Gitberth can't update itself
+
+Gitberth replaces itself only when it runs in a container from its published image. Otherwise the card says why and links here, and it still tells you about new versions:
+
+- **A build of your own**, like `gitberth:local`: update it as in [Build Gitberth yourself](#build-gitberth-yourself).
+- **An image pinned by its digest**: it doesn't move to another version by itself. Change the pin, as in [Pin a version](#pin-a-version).
+- **Not in a container**, as when you run it from the source with `dotnet run`.
+
+## Update from the host
+The quickest way from the host's shell is to run the installer again. It keeps your settings and data, pulls the newest release, backs up
 Gitberth's data to `/opt/gitberth/backups` before the new version starts (the five newest backups are kept), and checks
 that Gitberth answers afterwards. For a Gitberth you built from source, it shows the command that updates it that way
 instead.

@@ -1,0 +1,182 @@
+@using System.Text.Json
+@using Gitberth.Sources
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+@*
+    An uploaded app's source (B6), on its Overview: its newest upload (what Deploy builds) and the one it runs, a drop zone
+    for a new version, which deploys at once, and the same from a script (the API's upload, with a token).
+*@
+<SectionCard Title="Source" Icon="@Icons.Material.Outlined.DriveFolderUpload" Tip="upload.card" Sub="An uploaded folder: each new upload is a new version">
+    <ChildContent>
+        <div class="gb-stack" style="gap:12px">
+            <dl class="gb-upl-facts" id="upload-facts">
+                <dt><Tip Key="upload.newest">Newest upload</Tip></dt>
+                <dd>
+                    @if (Row.UploadName is { } name)
+                    {
+                        <span class="gb-mono">@name</span>
+                        <span class="gb-t3"> · @(Row.UploadSize is long size ? UploadArchives.Size(size) : "") · @(Row.UploadedAt is { } at ? Format.Ago(at) : "")@(Row.UploadedBy is { Length: > 0 } by ? $" · {by}" : "")</span>
+                        @if (Row.UploadSha is { } sha)
+                        {
+                            <span class="gb-mono gb-t3" data-tip-text="@sha"> · @UploadArchives.Short(sha)</span>
+                        }
+                    }
+                    else
+                    {
+                        <span class="gb-t3">Nothing yet</span>
+                    }
+                </dd>
+                <dt><Tip Key="upload.running">Runs</Tip></dt>
+                <dd>
+                    @if (Row.CurrentCommit is { Length: >= 7 } running)
+                    {
+                        <span class="gb-mono" data-tip-text="@running">@UploadArchives.Short(running)</span>
+                        <span class="gb-t3">@(running == Row.UploadSha ? " · the newest upload" : " · an earlier upload")</span>
+                    }
+                    else
+                    {
+                        <span class="gb-t3">Nothing yet: it runs once its first deploy works.</span>
+                    }
+                </dd>
+            </dl>
+
+            <div id="gb-upl-zone" class="gb-dropzone gb-dropzone--small @(sending ? "gb-dropzone--busy" : null)" data-tip="upload.new-version">
+                @if (sending)
+                {
+                    <div class="gb-dropzone-t">Uploading @sendingName…</div>
+                    <div class="gb-progress"><i style="width:@(Math.Clamp(Percent, 3, 100))%"></i></div>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="CancelAsync">Cancel</Btn>
+                }
+                else
+                {
+                    <div class="gb-dropzone-t">Upload a new version</div>
+                    <div class="gb-dropzone-s">Drop a folder or an archive here. It deploys at once; the version that runs now keeps running until the new one works.</div>
+                    <div class="gb-dropzone-btns">
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.FolderOpen" OnClick="@(() => PickAsync("gb-upl-folder"))" Disabled="Disabled" Tip="upload.choose-folder">Choose a folder</Btn>
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.FolderZip" OnClick="@(() => PickAsync("gb-upl-file"))" Disabled="Disabled" Tip="upload.choose-file">Choose a file</Btn>
+                    </div>
+                }
+                <input type="file" id="gb-upl-file" accept=".zip,.tar,.tgz,.gz,application/zip,application/x-tar,application/gzip" hidden />
+                <input type="file" id="gb-upl-folder" webkitdirectory directory multiple hidden />
+            </div>
+            @if (error is not null)
+            {
+                <Banner Tone="critical" Title="Gitberth didn't take it">@error</Banner>
+            }
+
+            <div>
+                <div class="gb-label" style="margin-bottom:6px"><SvgIcon Icon="@Icons.Material.Outlined.Terminal" Size="sm" /><Tip Key="upload.curl">From a script</Tip></div>
+                <CodeBlock Title="curl" Code="@UploadEndpoints.CurlLine(Nav.BaseUri, View.Summary.Key, Row.UploadName)" Icon="@Icons.Material.Outlined.Terminal" />
+                <p class="gb-help" style="margin-top:6px">Set GITBERTH_TOKEN to a token with Operate access (Settings › AI agents and API). Add ?wait=true to wait for the deploy.</p>
+            </div>
+        </div>
+    </ChildContent>
+</SectionCard>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>After a new version is queued: the page reads the app again.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private AppDefinition Row => View.Row!;
+    private DotNetObjectReference<UploadCard>? self;
+    private bool bound, sending, disposed;
+    private string? sendingName, error;
+    private long sent, total;
+
+    private bool Disabled => sending || View.Summary.State == AppState.Deploying;
+
+    private int Percent => total > 0 ? (int)(100.0 * sent / total) : 5;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (bound || disposed) return;
+        bound = true;
+        self ??= DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthUploads.bind", "gb-upl-zone", "gb-upl-file", "gb-upl-folder",
+                $"{UploadEndpoints.BrowserPath.TrimStart('/')}?app={Uri.EscapeDataString(View.Summary.Key)}", self);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private async Task PickAsync(string input)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthUploads.pick", input);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthUploads.cancel");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    [JSInvokable]
+    public Task Starting(string name, long size) => InvokeAsync(() =>
+    {
+        (sending, sendingName, sent, total, error) = (true, name, 0, size, null);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Uploading(long done, long of) => InvokeAsync(() =>
+    {
+        (sent, total) = (done, of > 0 ? of : total);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Refused(string sentence) => InvokeAsync(() =>
+    {
+        error = sentence;
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Uploaded(bool ok, bool aborted, int status, string answer) => InvokeAsync(async () =>
+    {
+        sending = false;
+        if (!ok)
+        {
+            error = aborted ? null : status == 0 ? "The upload didn't reach Gitberth. Check the connection and try again." : answer.Length > 0 ? answer : $"Gitberth answered {status}.";
+            StateHasChanged();
+            return;
+        }
+        var deployment = 0;
+        try
+        {
+            using var json = JsonDocument.Parse(answer);
+            deployment = json.RootElement.GetProperty("deployment_id").GetInt32();
+        }
+        catch (Exception)
+        {
+        }
+        Snackbar.Add(deployment > 0 ? $"Uploaded {sendingName}: deploy #{deployment} is under way." : $"Uploaded {sendingName}.", Severity.Success);
+        await Changed.InvokeAsync();
+        StateHasChanged();
+    });
+
+    public ValueTask DisposeAsync()
+    {
+        disposed = true;
+        self?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

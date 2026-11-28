@@ -49,9 +49,9 @@
         {
             <span>The releases of the last 3 successful deploys (their files and images) are kept for rolling back.</span>
         }
-        else if (View.Summary.Source == AppSource.Git)
+        else if (View.Summary.Source is AppSource.Git or AppSource.Upload)
         {
-            <span>The images from the last 3 successful deploys are kept for rolling back.</span>
+            <span>The images from the last 3 successful deploys are kept for rolling back@(View.Summary.Source == AppSource.Upload ? ", and the newest 5 uploads" : "").</span>
         }
         else
         {
@@ -129,6 +129,7 @@
         var compose = View.Row?.IsCompose == true;
         var text = compose
             ? $"Its services run that release again ({(to.ShortSha is { Length: > 0 } sha ? sha : $"deploy #{to.Id}")}), with its images and the app's settings now.{(View.Row?.FromRepo == true ? " New commits still deploy automatically." : "")}"
+            : View.Row?.FromUpload == true ? $"The container restarts from the image built from the upload {to.ShortSha}. Deploy builds the newest upload again."
             : $"The container restarts from the image built from {to.ShortSha}. New commits still deploy automatically.";
         if (await Dialogs.ShowMessageBoxAsync($"Roll back to #{to.Id}?", text, yesText: "Roll back", cancelText: "Cancel") != true) return;
         busy = true;

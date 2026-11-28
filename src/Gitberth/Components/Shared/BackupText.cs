@@ -63,7 +63,8 @@ public static class BackupText
     }
 
     /// <summary>Whether Docker measures the item (so a missing size is still coming), rather than having no size of its own.</summary>
-    public static bool Measured(BackupItemKind kind) => kind is BackupItemKind.GitberthData or BackupItemKind.Volume or BackupItemKind.Database or BackupItemKind.Image;
+    public static bool Measured(BackupItemKind kind) =>
+        kind is BackupItemKind.GitberthData or BackupItemKind.Volume or BackupItemKind.Database or BackupItemKind.Image or BackupItemKind.HostFolder;
 
     /// <summary>An item's size on its row: "254 MB", "measuring…" while Docker measures it, nothing for an app or container.</summary>
     public static string? Size(BackupItem item) =>
@@ -161,6 +162,7 @@ public static class BackupText
         {
             Of(items, BackupItemKind.App, "app"),
             Of(items, BackupItemKind.Volume, "volume"),
+            Of(items, BackupItemKind.HostFolder, "host folder"),
             Of(items, BackupItemKind.Database, "database server"),
             Of(items, BackupItemKind.Container, "other container"),
             Of(items, BackupItemKind.Image, "image only that host had", "images only that host had"),

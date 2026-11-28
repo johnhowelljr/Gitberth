@@ -1,0 +1,89 @@
+# Tips for an app's Config files section on its Settings tab (B3): Components/Apps/ConfigFilesSection.razor.
+# See Help/TipCatalog.cs.
+
+configs.section:
+  title: Config files
+  text: >-
+    Files Gitberth keeps for the app and mounts read-only into its container, like an nginx site or a settings file.
+    Their contents are kept encrypted.
+  more: guides/terminal-and-files#config-files
+
+configs.add:
+  title: Add config file
+  text: >-
+    A new file at a path in the container. A Git, uploaded or Compose app's next deploy mounts it; any other app's mount
+    goes through Review and apply.
+  more: guides/terminal-and-files#add-a-config-file
+
+configs.path:
+  title: Path in the container
+  text: >-
+    Where the app reads the file, like /etc/nginx/conf.d/site.conf. Whatever the image has there is hidden by it.
+  more: guides/terminal-and-files#add-a-config-file
+
+configs.mode:
+  title: Mode
+  text: >-
+    Its permissions, in octal as chmod takes them: 644 lets every user in the container read it, 600 only root.
+  more: guides/terminal-and-files#add-a-config-file
+
+configs.service:
+  title: Service
+  text: >-
+    The Compose service whose container mounts it.
+  more: guides/terminal-and-files#add-a-config-file
+
+configs.secret:
+  title: Secret
+  text: >-
+    Its contents are never shown again once saved, here or anywhere in Gitberth. To change them, write new ones.
+  more: guides/terminal-and-files#add-a-config-file
+
+configs.content:
+  title: Contents
+  text: >-
+    The file's text, up to 256 KiB, written as it is. A change is written over the file the container has, so the app
+    sees it at once.
+  more: guides/terminal-and-files#change-one
+
+configs.save:
+  title: Save config file
+  text: >-
+    Saves it and writes the file. New contents show in the container at once; a new path is mounted as a new file is.
+  more: guides/terminal-and-files#change-one
+
+configs.edit:
+  title: Change
+  text: >-
+    Changes its path, mode, contents or whether it's secret.
+  more: guides/terminal-and-files#change-one
+
+configs.remove:
+  title: Remove
+  text: >-
+    Takes it out of the app, after asking: at its next deploy, or with Review and apply.
+  more: guides/terminal-and-files#remove-one
+
+configs.restart:
+  title: Restart
+  text: >-
+    Restarts the app, for one that reads its config only when it starts.
+  more: guides/terminal-and-files#change-one
+
+configs.status.mounted:
+  title: Mounted
+  text: >-
+    The app's container has the file at its path now.
+  more: guides/terminal-and-files#add-a-config-file
+
+configs.status.deploy:
+  title: At the next deploy
+  text: >-
+    Saved: the app's next deploy mounts it. Click Deploy on the app's page to do it now.
+  more: guides/terminal-and-files#add-a-config-file
+
+configs.status.apply:
+  title: Review and apply
+  text: >-
+    Saved: its mount waits in the bar at the bottom of the Settings tab. Review and apply recreates the app with it.
+  more: guides/terminal-and-files#add-a-config-file

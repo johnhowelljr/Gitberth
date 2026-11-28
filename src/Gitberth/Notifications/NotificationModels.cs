@@ -14,12 +14,21 @@ public enum SmtpSecurity { StartTls, None }
 /// CertificateExpiring from the certificate an uptime check saw. DiskLow and DiskOk are Docker's disk getting full and
 /// having room again (DiskOk goes with DiskLow); BroughtBack and GaveUp the keep-running check starting an app again and
 /// giving up on one (GaveUp goes with BroughtBack); TokenExpiring and TokenRefused a token Gitberth uses, about to expire
-/// or refused by its service (TokenRefused goes with TokenExpiring).
+/// or refused by its service (TokenRefused goes with TokenExpiring). BackupFailed and BackupOk are an automatic backup
+/// failing and working again (BackupOk goes with BackupFailed). UpdateAvailable is a new version of Gitberth or of an
+/// app's image set to Tell me; GitberthUpdated and GitberthUpdateFailed how Gitberth's own update ended (both go with
+/// UpdateAvailable).
 /// </summary>
 public enum NotifyEvent
 {
     DeployFailed, DeploySucceeded, Crashed, Unhealthy, Healthy, Test, Down, BackUp, CertificateExpiring,
     DiskLow, DiskOk, BroughtBack, GaveUp, TokenExpiring, TokenRefused,
+    // ---- builder A: automatic backups ----
+    BackupFailed, BackupOk,
+    // ---- builder A: updates ----
+    UpdateAvailable, GitberthUpdated, GitberthUpdateFailed,
+    // [builder B, B2] A scheduled command's run failed, or passed again after failing (JobOk goes with JobFailed).
+    JobFailed, JobOk,
 }
 
 /// <summary>How bad it is: the color of a Discord embed, an ntfy priority, the word in a webhook's JSON.</summary>

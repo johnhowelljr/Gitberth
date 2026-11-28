@@ -1,0 +1,468 @@
+@using Gitberth.Backup
+@inject AutoBackups Auto
+@inject IBackupService Backup
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+@*
+    Settings › Save and restore › Automatic backups (src/Gitberth/Backup/AutoBackups.cs): backups on a schedule to a folder
+    on the host, an SMB share or an S3-compatible bucket, sealed to a key pair the owner's passphrase locks; the same items
+    as Save a backup, chosen once (the ones left out are kept, so a new app is saved by itself).
+*@
+<section class="gb-card gb-sec" id="auto-backup" aria-labelledby="auto-backup-t">
+    <div class="gb-sec-head">
+        <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Schedule" /></span>
+        <div style="min-width:0">
+            <div class="gb-h3"><span id="auto-backup-t">Automatic backups</span><Tip Key="settings.backup.auto" /></div>
+            <p>Backups on a schedule, to a folder on this host, a network share or an S3 bucket, encrypted so only your passphrase opens them.</p>
+        </div>
+    </div>
+    <div class="gb-sec-body">
+        @if (status is null)
+        {
+            <div class="gb-skel" style="height:120px"></div>
+        }
+        else
+        {
+            var s = status;
+            @* Always there, so screen readers hear a run's progress and how it ended. *@
+            <div role="status" class="gb-stack" id="ab-status" style="gap:6px">
+                @if (s.Running is { } p)
+                {
+                    @if (BackupText.Fraction(p) is { } f)
+                    {
+                        <div class="gb-progress"><i style="width:@((f * 100).ToString("0.#", CultureInfo.InvariantCulture))%"></i></div>
+                    }
+                    <div class="gb-impact-row gb-tone-accent"><SvgIcon Icon="@Icons.Material.Outlined.CloudUpload" /><span>Backing up to @AutoDestinations.Describe(s.Config): @BackupText.Progress(p)</span></div>
+                }
+                else if (AutoBackupView.Last(s.State.Runs.FirstOrDefault(), Zone) is { } last)
+                {
+                    var ok = s.State.Runs[0].Ok;
+                    <div class="gb-impact-row gb-tone-@(ok ? "good" : "critical")" id="ab-last">
+                        <SvgIcon Icon="@(ok ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.ErrorOutline)" /><span>@last</span>
+                    </div>
+                }
+                <p class="gb-help" id="ab-next">@AutoBackupView.Next(s.Config, s.Next, Zone) @s.Waiting</p>
+            </div>
+            <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                <Btn Icon="@Icons.Material.Outlined.Backup" OnClick="BackUpNowAsync" Busy="starting" Disabled="@(s.Running is not null || Auto.Running)" Tip="settings.backup.auto.now">Back up now</Btn>
+            </div>
+
+            @* ---- The passphrase: set once; Gitberth keeps a key it can only lock files with. ---- *@
+            <div class="gb-h3 gb-bk-sub">Passphrase<Tip Key="settings.backup.auto.passphrase" /></div>
+            @if (s.Config.Key is { } key && !changingPass)
+            {
+                <div class="gb-row gb-row--wrap" style="justify-content:space-between">
+                    <span class="gb-help" id="ab-key">Set on @AutoBackupView.When(key.MadeAt, Zone) · key @key.ShortId. Each file shows the key it's locked with.</span>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Key" OnClick="() => changingPass = true" Tip="settings.backup.auto.change-passphrase">Change passphrase…</Btn>
+                </div>
+            }
+            else
+            {
+                <div class="gb-fgrid">
+                    <Field Label="Passphrase" For="ab-pass" Tip="settings.backup.auto.passphrase" Help="@($"{BackupText.MinPassphrase} characters at least. {BackupText.NeverKept}")" Error="@BackupText.TooShort(pass)">
+                        <input id="ab-pass" type="password" class="gb-input" value="@pass" @oninput="e => pass = e.Value?.ToString()" autocomplete="new-password" />
+                    </Field>
+                    <Field Label="Passphrase again" For="ab-pass-again" Tip="settings.backup.passphrase-again" Error="@BackupText.Mismatch(pass, passAgain)">
+                        <input id="ab-pass-again" type="password" class="gb-input" value="@passAgain" @oninput="e => passAgain = e.Value?.ToString()" autocomplete="new-password" />
+                    </Field>
+                </div>
+                <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                    @if (s.Config.Key is not null)
+                    {
+                        <span class="gb-help gb-grow">A new key is made for it. Files made before keep opening with the passphrase they were made with.</span>
+                        <Btn Kind="BtnKind.Ghost" OnClick="() => { changingPass = false; pass = passAgain = null; }">Cancel</Btn>
+                    }
+                    <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Lock" OnClick="SetPassphraseAsync" Busy="settingPass" Disabled="@(!BackupText.CanSave(pass, passAgain))"
+                         Tip="settings.backup.auto.set-passphrase">Set passphrase</Btn>
+                </div>
+            }
+
+            @* ---- When ---- *@
+            <div class="gb-h3 gb-bk-sub">When<Tip Key="settings.backup.auto.schedule" /></div>
+            <Seg T="AutoSchedule" Options="ScheduleOptions" Value="draft.Schedule" ValueChanged="v => draft = draft with { Schedule = v }" Label="When automatic backups run" />
+            @if (draft.Schedule != AutoSchedule.Off)
+            {
+                <div class="gb-fgrid">
+                    @if (draft.Schedule == AutoSchedule.Weekly)
+                    {
+                        <Field Label="Day" For="ab-day" Tip="settings.backup.auto.day">
+                            <select id="ab-day" class="gb-input" value="@draft.Day.ToString()" @onchange="e => draft = draft with { Day = Enum.TryParse<DayOfWeek>(e.Value?.ToString(), out var d) ? d : draft.Day }">
+                                @foreach (var day in Days)
+                                {
+                                    <option value="@day.ToString()">@day</option>
+                                }
+                            </select>
+                        </Field>
+                    }
+                    @if (draft.Schedule is AutoSchedule.Daily or AutoSchedule.Weekly)
+                    {
+                        <Field Label="At" For="ab-at" Tip="settings.backup.auto.at" Help="@ZoneHelp">
+                            <input id="ab-at" type="time" class="gb-input gb-input--mono" value="@draft.At" @onchange="e => draft = draft with { At = e.Value?.ToString() ?? draft.At }" />
+                        </Field>
+                    }
+                    else
+                    {
+                        <Field Label="Every" For="ab-hours" Tip="settings.backup.auto.every" Help="1 to 168 hours, counted from the last backup.">
+                            <label class="gb-input"><input id="ab-hours" type="number" min="1" max="168" value="@draft.EveryHours"
+                                   @onchange="e => draft = draft with { EveryHours = int.TryParse(e.Value?.ToString(), out var h) ? h : 0 }" /><span class="gb-input-suffix">hours</span></label>
+                        </Field>
+                    }
+                </div>
+            }
+
+            @* ---- Where ---- *@
+            <div class="gb-h3 gb-bk-sub">Where<Tip Key="settings.backup.auto.where" /></div>
+            <Seg T="AutoDestinationKind" Options="WhereOptions" Value="draft.Where" ValueChanged="v => { draft = draft with { Where = v }; test = null; }" Label="Where automatic backups go" />
+            @switch (draft.Where)
+            {
+                case AutoDestinationKind.Folder:
+                    <Field Label="Folder on this host" For="ab-folder" Tip="settings.backup.auto.folder" Help="Made when it isn't there. A helper container writes there, since Gitberth itself can't see the host's folders.">
+                        <input id="ab-folder" class="gb-input gb-input--mono" placeholder="/mnt/backups" value="@draft.Folder" spellcheck="false" autocomplete="off"
+                               @oninput="e => draft = draft with { Folder = e.Value?.ToString() }" />
+                    </Field>
+                    break;
+                case AutoDestinationKind.Smb:
+                    <div class="gb-fgrid">
+                        <Field Label="Share" For="ab-share" Tip="settings.backup.auto.share" Help="//server/share, or //server/share/folder.">
+                            <input id="ab-share" class="gb-input gb-input--mono" placeholder="//nas/backups" value="@draft.SmbShare" spellcheck="false" autocomplete="off"
+                                   @oninput="e => draft = draft with { SmbShare = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="User" For="ab-smb-user" Tip="settings.backup.auto.smb-user">
+                            <input id="ab-smb-user" class="gb-input gb-input--mono" value="@draft.SmbUser" spellcheck="false" autocomplete="off" @oninput="e => draft = draft with { SmbUser = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="Password" For="ab-smb-pass" Tip="settings.backup.auto.smb-password" Help="@(saved?.SmbPassword is not null ? "Saved, encrypted: leave it empty to keep it." : "Kept encrypted.")">
+                            <input id="ab-smb-pass" type="password" class="gb-input" value="@smbPassword" autocomplete="new-password" @oninput="e => smbPassword = e.Value?.ToString()" />
+                        </Field>
+                        <Field Label="Domain (optional)" For="ab-smb-domain" Tip="settings.backup.auto.smb-domain">
+                            <input id="ab-smb-domain" class="gb-input gb-input--mono" value="@draft.SmbDomain" spellcheck="false" autocomplete="off" @oninput="e => draft = draft with { SmbDomain = e.Value?.ToString() }" />
+                        </Field>
+                    </div>
+                    break;
+                case AutoDestinationKind.Ftp:
+                    <div class="gb-fgrid">
+                        <Field Label="Address" For="ab-ftp-address" Tip="settings.backup.auto.ftp-address" Help="ftp://server/folder: TLS when the server offers it. ftps:// for TLS from the start.">
+                            <input id="ab-ftp-address" class="gb-input gb-input--mono" placeholder="ftp://nas/backups" value="@draft.FtpAddress" spellcheck="false" autocomplete="off"
+                                   @oninput="e => draft = draft with { FtpAddress = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="User" For="ab-ftp-user" Tip="settings.backup.auto.ftp-user">
+                            <input id="ab-ftp-user" class="gb-input gb-input--mono" value="@draft.FtpUser" spellcheck="false" autocomplete="off" @oninput="e => draft = draft with { FtpUser = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="Password" For="ab-ftp-pass" Tip="settings.backup.auto.ftp-password" Help="@(saved?.FtpPassword is not null ? "Saved, encrypted: leave it empty to keep it." : "Kept encrypted.")">
+                            <input id="ab-ftp-pass" type="password" class="gb-input" value="@ftpPassword" autocomplete="new-password" @oninput="e => ftpPassword = e.Value?.ToString()" />
+                        </Field>
+                    </div>
+                    break;
+                default:
+                    <div class="gb-fgrid">
+                        <Field Label="Endpoint" For="ab-s3-endpoint" Tip="settings.backup.auto.s3-endpoint" Help="Empty for AWS S3. Backblaze B2, Wasabi, MinIO and Cloudflare R2 give theirs.">
+                            <input id="ab-s3-endpoint" class="gb-input gb-input--mono" placeholder="https://s3.us-west-004.backblazeb2.com" value="@draft.S3Endpoint" spellcheck="false" autocomplete="off"
+                                   @oninput="e => draft = draft with { S3Endpoint = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="Region" For="ab-s3-region" Tip="settings.backup.auto.s3-region">
+                            <input id="ab-s3-region" class="gb-input gb-input--mono" placeholder="us-east-1" value="@draft.S3Region" spellcheck="false" autocomplete="off" @oninput="e => draft = draft with { S3Region = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="Bucket" For="ab-s3-bucket" Tip="settings.backup.auto.s3-bucket">
+                            <input id="ab-s3-bucket" class="gb-input gb-input--mono" value="@draft.S3Bucket" spellcheck="false" autocomplete="off" @oninput="e => draft = draft with { S3Bucket = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="Folder in the bucket" For="ab-s3-prefix" Tip="settings.backup.auto.s3-prefix" Help="Optional, like backups/gitberth.">
+                            <input id="ab-s3-prefix" class="gb-input gb-input--mono" value="@draft.S3Prefix" spellcheck="false" autocomplete="off" @oninput="e => draft = draft with { S3Prefix = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="Access key" For="ab-s3-key" Tip="settings.backup.auto.s3-access-key">
+                            <input id="ab-s3-key" class="gb-input gb-input--mono" value="@draft.S3AccessKey" spellcheck="false" autocomplete="off" @oninput="e => draft = draft with { S3AccessKey = e.Value?.ToString() }" />
+                        </Field>
+                        <Field Label="Secret key" For="ab-s3-secret" Tip="settings.backup.auto.s3-secret" Help="@(saved?.S3Secret is not null ? "Saved, encrypted: leave it empty to keep it." : "Kept encrypted.")">
+                            <input id="ab-s3-secret" type="password" class="gb-input" value="@s3Secret" autocomplete="new-password" @oninput="e => s3Secret = e.Value?.ToString()" />
+                        </Field>
+                    </div>
+                    <SwitchRow Title="Path-style addresses" Value="@PathStyle" ValueChanged="v => draft = draft with { S3PathStyle = v }" Tip="settings.backup.auto.s3-path-style"
+                               Sub="The bucket in the path (endpoint/bucket/file), as MinIO and most services take it. AWS S3 uses its own (bucket.endpoint/file) unless the bucket's name has dots." />
+                    break;
+            }
+            <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.NetworkCheck" OnClick="TestAsync" Busy="testing" Tip="settings.backup.auto.test">Test the destination</Btn>
+            </div>
+            @if (test is { } t)
+            {
+                <div class="gb-impact-row gb-tone-@(t.Ok ? "good" : "critical")" id="ab-test" role="status">
+                    <SvgIcon Icon="@(t.Ok ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.ErrorOutline)" />
+                    <span>@(t.Ok ? "It works: " + string.Join(" ", t.Steps) : (t.Steps.Count > 0 ? string.Join(" ", t.Steps) + " " : "") + t.Problem)</span>
+                </div>
+            }
+
+            <Field Label="Keep the last" For="ab-keep" Tip="settings.backup.auto.keep" Help="Only this Gitberth's own automatic files at the destination are counted and removed, never anything else there.">
+                <label class="gb-input" style="max-width:220px"><input id="ab-keep" type="number" min="1" max="365" value="@draft.Keep"
+                       @onchange="e => draft = draft with { Keep = int.TryParse(e.Value?.ToString(), out var k) ? k : 0 }" /><span class="gb-input-suffix">backups</span></label>
+            </Field>
+
+            @* ---- What ---- *@
+            <div class="gb-h3 gb-bk-sub">What's saved<Tip Key="settings.backup.auto.what" /></div>
+            @if (items is null)
+            {
+                <div class="gb-skel" style="height:60px"></div>
+            }
+            else
+            {
+                <details class="gb-ab-what">
+                    <summary class="gb-help" id="ab-what">@AutoBackupView.What(items, ticked) Choose…</summary>
+                    <ul class="gb-bk-list" aria-label="What automatic backups save">
+                        @foreach (var item in items)
+                        {
+                            <li class="gb-bk-row @(item.Parent is null ? null : "gb-bk-row--child")" data-item="@item.Id" data-parent="@item.Parent" @key="item.Id">
+                                <label class="gb-bk-pick">
+                                    <input type="checkbox" checked="@(item.Required || ticked.Contains(item.Id))" disabled="@item.Required"
+                                           @onchange="e => ticked = BackupText.Toggle(items, ticked, item.Id, e.Value is true)" aria-label="@($"Back up {item.Title}")" />
+                                    <span class="gb-bk-text">
+                                        <span class="gb-bk-t">@item.Title</span>
+                                        @if (item.Detail is { Length: > 0 } detail)
+                                        {
+                                            <span class="gb-bk-s">@detail</span>
+                                        }
+                                    </span>
+                                </label>
+                                <span class="gb-bk-size">@BackupText.Size(item)</span>
+                            </li>
+                        }
+                    </ul>
+                </details>
+            }
+            <SwitchRow Title="Stop everything while saving" Value="draft.StopEverything" ValueChanged="v => draft = draft with { StopEverything = v }" Tip="settings.backup.stop-everything"
+                       Sub="As on Save a backup: one moment for every container, at the cost of downtime while the backup is made." />
+
+            @if (saveError is { } failed)
+            {
+                <Banner Tone="critical" Title="Not saved" OnDismiss="() => saveError = null">@failed</Banner>
+            }
+            <div class="gb-row gb-row--wrap" style="justify-content:flex-end">
+                <Btn Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveAsync" Busy="saving" Disabled="@(Problem is not null)" Tip="settings.backup.auto.save">Save</Btn>
+            </div>
+            @if (Problem is { } problem)
+            {
+                <p class="gb-help" style="text-align:right" id="ab-problem">@problem</p>
+            }
+
+            @if (s.State.Runs.Count > 0)
+            {
+                <div class="gb-h3 gb-bk-sub">The last runs<Tip Key="settings.backup.auto.runs" /></div>
+                <ul class="gb-ab-runs" id="ab-runs" aria-label="The last automatic backups">
+                    @foreach (var run in s.State.Runs)
+                    {
+                        <li class="gb-ab-run gb-tone-@(run.Ok ? "good" : "critical")">
+                            <SvgIcon Icon="@(run.Ok ? Icons.Material.Outlined.CheckCircle : Icons.Material.Outlined.ErrorOutline)" /><span>@AutoBackupView.Run(run, Zone)</span>
+                        </li>
+                    }
+                </ul>
+            }
+        }
+    </div>
+</section>
+
+@code {
+    private AutoBackupStatus? status;
+    // What the form shows (saved when Save is clicked), and the settings as saved.
+    private AutoBackupConfig draft = new();
+    private AutoBackupConfig? saved;
+    private string? smbPassword, s3Secret, ftpPassword, pass, passAgain, saveError;
+    private bool starting, saving, testing, settingPass, changingPass;
+    private DestinationTest? test;
+    private IReadOnlyList<BackupItem>? items;
+    private HashSet<string> ticked = new(StringComparer.Ordinal);
+    private Timer? timer;
+    private int ticking;
+
+    private static TimeZoneInfo Zone => TimeProvider.System.LocalTimeZone;
+
+    private static string ZoneHelp => $"Gitberth's time zone: {Gitberth.Images.UpdateWatcher.ZoneName()} (set with TZ). A backup missed while Gitberth was down runs 5 minutes after it starts.";
+
+    private static readonly DayOfWeek[] Days = [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
+
+    private static readonly List<SegOption<AutoSchedule>> ScheduleOptions =
+    [
+        new(AutoSchedule.Off, "Off", Icons.Material.Outlined.Block, Tip: "settings.backup.auto.schedule.off"),
+        new(AutoSchedule.Daily, "Every day", Icons.Material.Outlined.Today, Tip: "settings.backup.auto.schedule.daily"),
+        new(AutoSchedule.Weekly, "Every week", Icons.Material.Outlined.DateRange, Tip: "settings.backup.auto.schedule.weekly"),
+        new(AutoSchedule.Hours, "Every N hours", Icons.Material.Outlined.Update, Tip: "settings.backup.auto.schedule.hours"),
+    ];
+
+    private static readonly List<SegOption<AutoDestinationKind>> WhereOptions =
+    [
+        new(AutoDestinationKind.Folder, "A folder on this host", Icons.Material.Outlined.Folder, Tip: "settings.backup.auto.where.folder"),
+        new(AutoDestinationKind.Smb, "A network share (SMB)", Icons.Material.Outlined.Lan, Tip: "settings.backup.auto.where.smb"),
+        new(AutoDestinationKind.Ftp, "An FTP server", Icons.Material.Outlined.DriveFolderUpload, Tip: "settings.backup.auto.where.ftp"),
+        new(AutoDestinationKind.S3, "An S3 bucket", Icons.Material.Outlined.Cloud, Tip: "settings.backup.auto.where.s3"),
+    ];
+
+    // The S3 switch as it stands: what the form says, else what Gitberth picks for its endpoint.
+    private bool PathStyle => draft.S3PathStyle ?? S3Target.PathStyleFor(draft);
+
+    // Why Save can't go yet: the schedule, the passphrase it needs, or the destination as typed.
+    private string? Problem
+    {
+        get
+        {
+            if (AutoBackupRules.ScheduleProblem(draft with { Key = saved?.Key }) is { } schedule) return schedule;
+            var secret = draft.Where switch
+            {
+                AutoDestinationKind.Smb => !string.IsNullOrEmpty(smbPassword) || saved?.SmbPassword is not null,
+                AutoDestinationKind.S3 => !string.IsNullOrEmpty(s3Secret) || saved?.S3Secret is not null,
+                AutoDestinationKind.Ftp => !string.IsNullOrEmpty(ftpPassword) || saved?.FtpPassword is not null,
+                _ => true,
+            };
+            if (draft.Schedule == AutoSchedule.Off && !Typed(draft)) return null;
+            return AutoBackupRules.DestinationProblem(draft, secret) ?? draft.Where switch
+            {
+                AutoDestinationKind.Smb => AutoBackupRules.SmbPasswordProblem(smbPassword),
+                AutoDestinationKind.Ftp => AutoBackupRules.FtpPasswordProblem(ftpPassword),
+                _ => null,
+            };
+        }
+    }
+
+    private static bool Typed(AutoBackupConfig c) => c.Where switch
+    {
+        AutoDestinationKind.Folder => !string.IsNullOrWhiteSpace(c.Folder),
+        AutoDestinationKind.Smb => !string.IsNullOrWhiteSpace(c.SmbShare),
+        AutoDestinationKind.Ftp => !string.IsNullOrWhiteSpace(c.FtpAddress),
+        _ => !string.IsNullOrWhiteSpace(c.S3Bucket),
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Auto.Changed += OnChanged;
+        await ReadAsync(form: true);
+        try
+        {
+            items = await Backup.ItemsAsync();
+            ticked = AutoBackupRules.Ticked(items, saved?.Excluded ?? [], saved?.Added ?? []);
+        }
+        catch (Exception)
+        {
+            items = [];
+        }
+        timer = new Timer(_ => Tick(), null, 2000, 2000);
+    }
+
+    public void Dispose()
+    {
+        Auto.Changed -= OnChanged;
+        timer?.Dispose();
+    }
+
+    private async Task ReadAsync(bool form)
+    {
+        status = await Auto.StatusAsync();
+        saved = status.Config;
+        if (form) draft = saved;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        await ReadAsync(form: false);
+        StateHasChanged();
+    });
+
+    // While a backup is being made, its progress line follows it.
+    private void Tick()
+    {
+        if (!Auto.Running && status?.Running is null) return;
+        if (Interlocked.Exchange(ref ticking, 1) == 1) return;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await ReadAsync(form: false);
+                StateHasChanged();
+            }
+            finally
+            {
+                Interlocked.Exchange(ref ticking, 0);
+            }
+        });
+    }
+
+    private async Task BackUpNowAsync()
+    {
+        starting = true;
+        try
+        {
+            if (await Auto.BackUpNowAsync() is { } why) Snackbar.Add(why, Severity.Warning);
+            else Snackbar.Add($"Backing up to {AutoDestinations.Describe(saved ?? draft)}.", Severity.Info);
+            await Task.Delay(300);
+            await ReadAsync(form: false);
+        }
+        finally
+        {
+            starting = false;
+        }
+    }
+
+    private async Task SetPassphraseAsync()
+    {
+        settingPass = true;
+        try
+        {
+            await Auto.SetPassphraseAsync(pass ?? "", passAgain ?? "");
+            (pass, passAgain, changingPass) = (null, null, false);
+            await ReadAsync(form: false);
+            Snackbar.Add($"The passphrase is set: new backups are locked with key {saved?.Key?.ShortId}.", Severity.Success);
+        }
+        catch (ArgumentException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Warning);
+        }
+        finally
+        {
+            settingPass = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (items is not null)
+        {
+            var (excluded, added) = AutoBackupRules.Kept(items, ticked);
+            draft = draft with { Excluded = excluded, Added = added };
+        }
+        saving = true;
+        saveError = null;
+        try
+        {
+            await Auto.SaveAsync(draft, NullIfEmpty(smbPassword), NullIfEmpty(s3Secret), ftpPassword: NullIfEmpty(ftpPassword));
+            (smbPassword, s3Secret, ftpPassword) = (null, null, null);
+            await ReadAsync(form: true);
+            Snackbar.Add(draft.Schedule == AutoSchedule.Off ? "Saved. Automatic backups are off." : $"Saved. Backups run {AutoBackupText.Schedule(draft)}.", Severity.Success);
+        }
+        catch (ArgumentException ex)
+        {
+            saveError = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            saveError = $"They couldn't be saved: {ex.Message.TrimEnd('.')}.";
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private async Task TestAsync()
+    {
+        testing = true;
+        test = null;
+        try
+        {
+            test = await Auto.TestAsync(draft, NullIfEmpty(smbPassword), NullIfEmpty(s3Secret), ftpPassword: NullIfEmpty(ftpPassword));
+        }
+        catch (Exception ex)
+        {
+            test = new DestinationTest(false, [], $"The test didn't run: {ex.Message.TrimEnd('.')}.");
+        }
+        finally
+        {
+            testing = false;
+        }
+    }
+
+    private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
+}

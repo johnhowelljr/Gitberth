@@ -1,0 +1,228 @@
+@using Gitberth.Deploy
+
+@*
+    Adds or changes one of an app's scheduled commands (B2): its name, its schedule (every N minutes, hourly, daily, weekly,
+    or a cron expression, in Gitberth's time zone, with when it runs next), the command, where it runs (the running
+    container, or a new one of the app's image), a Compose app's service, and its time limit. It closes once the card's
+    save took it; what's refused is said here.
+*@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.EventRepeat" />
+            <span>@(Current is null ? $"Schedule a command for {AppTitle}" : $"Change {Current.Name}")</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="gb-stack" style="gap:14px" id="gb-job-dialog">
+            <Field Label="Name" For="job-name" Tip="jobs.name" Help="What the card and notifications call it.">
+                <input id="job-name" class="gb-input" placeholder="Nightly cleanup" maxlength="60" value="@name" autocomplete="off"
+                       @oninput="e => { name = e.Value?.ToString() ?? string.Empty; error = null; }" />
+            </Field>
+            <Field Label="Command" For="job-command" Tip="jobs.command" Help="@CommandHelp">
+                <input id="job-command" class="gb-input gb-input--mono" placeholder="npm run cleanup" maxlength="@CommandJobs.MaxCommand" value="@command" spellcheck="false" autocomplete="off"
+                       @oninput="e => { command = e.Value?.ToString() ?? string.Empty; error = null; }" />
+            </Field>
+            <Field Label="Runs" Tip="jobs.schedule">
+                <Seg T="JobEvery" Options="EveryOptions" Value="every" ValueChanged="v => { every = v; error = null; }" Label="How often it runs" Class="gb-seg--wrap" />
+            </Field>
+            <div class="gb-fgrid">
+                @switch (every)
+                {
+                    case JobEvery.Minutes:
+                        <Field Label="Every" For="job-every" Tip="jobs.every.n">
+                            <label class="gb-input"><input id="job-every" type="number" min="1" max="59" value="@minutes"
+                                                           @oninput="e => minutes = int.TryParse(e.Value?.ToString(), out var m) ? m : 0" /><span class="gb-input-suffix">minutes</span></label>
+                        </Field>
+                        break;
+                    case JobEvery.Hourly:
+                        <Field Label="At minute" For="job-minute" Tip="jobs.at-minute" Help="From 0 to 59: 15 runs at 00:15, 01:15 and so on.">
+                            <input id="job-minute" type="number" min="0" max="59" class="gb-input" value="@minute"
+                                   @oninput="e => minute = int.TryParse(e.Value?.ToString(), out var m) ? m : -1" />
+                        </Field>
+                        break;
+                    case JobEvery.Daily:
+                    case JobEvery.Weekly:
+                        @if (every == JobEvery.Weekly)
+                        {
+                            <Field Label="On" For="job-day" Tip="jobs.day">
+                                <select id="job-day" class="gb-input" value="@day" @onchange="e => day = Enum.TryParse<DayOfWeek>(e.Value?.ToString(), out var d) ? d : DayOfWeek.Monday">
+                                    @foreach (var d in Days)
+                                    {
+                                        <option value="@d">@d</option>
+                                    }
+                                </select>
+                            </Field>
+                        }
+                        <Field Label="At" For="job-time" Tip="jobs.time">
+                            <input id="job-time" type="time" class="gb-input" value="@time" @oninput="e => time = e.Value?.ToString() ?? string.Empty" />
+                        </Field>
+                        break;
+                    default:
+                        <Field Label="Cron expression" For="job-cron" Tip="jobs.cron" Help="Minute, hour, day of the month, month, day of the week.">
+                            <input id="job-cron" class="gb-input gb-input--mono" placeholder="30 2 * * 1-5" value="@cron" spellcheck="false" autocomplete="off"
+                                   @oninput="e => { cron = e.Value?.ToString() ?? string.Empty; error = null; }" />
+                        </Field>
+                        break;
+                }
+            </div>
+            <p class="gb-help" style="margin-top:-6px" id="job-when">@When</p>
+            <Field Label="Where it runs" Tip="jobs.place">
+                <Seg T="CommandPlace" Options="PlaceOptions" Value="place" ValueChanged="v => place = v" Label="Where it runs" Class="gb-seg--wrap" />
+            </Field>
+            <p class="gb-help" style="margin-top:-6px">@PlaceHelp</p>
+            <div class="gb-fgrid">
+                @if (Compose)
+                {
+                    <Field Label="Service" For="job-service" Tip="jobs.service">
+                        <select id="job-service" class="gb-input" value="@service" @onchange="e => service = e.Value?.ToString() ?? string.Empty">
+                            @foreach (var s in Services)
+                            {
+                                <option value="@s">@(s == Web ? $"{s} (the web service)" : s)</option>
+                            }
+                        </select>
+                    </Field>
+                }
+                <Field Label="Time limit" For="job-timeout" Tip="jobs.timeout" Help="Still running then, it's stopped and counts as failed.">
+                    <label class="gb-input"><input id="job-timeout" type="number" min="1" max="1440" value="@timeout"
+                                                   @oninput="e => timeout = int.TryParse(e.Value?.ToString(), out var t) ? t : 0" /><span class="gb-input-suffix">minutes</span></label>
+                </Field>
+            </div>
+            @if (error is not null)
+            {
+                <Banner Tone="critical" Title="Not saved">@error</Banner>
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()" Disabled="busy">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="busy" data-tip="jobs.save">@(Current is null ? "Add" : "Save")</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    /// <summary>The command being changed; null to add one.</summary>
+    [Parameter] public ScheduledCommand? Current { get; set; }
+    [Parameter] public string AppTitle { get; set; } = "";
+    /// <summary>A Compose app: the service is picked.</summary>
+    [Parameter] public bool Compose { get; set; }
+    [Parameter] public IReadOnlyList<string> Services { get; set; } = [];
+    [Parameter] public string? Web { get; set; }
+    /// <summary>Saves what's asked (the card's add or change); the dialog closes when it worked, and says why when it didn't.</summary>
+    [Parameter, EditorRequired] public Func<JobInput, Task<JobOutcome>> Save { get; set; } = default!;
+
+    private string name = "", command = "", cron = "", time = "03:00", service = "";
+    private JobEvery every = JobEvery.Daily;
+    private int minutes = 5, minute, timeout = CommandJobs.DefaultMinutes;
+    private DayOfWeek day = DayOfWeek.Monday;
+    private CommandPlace place = CommandPlace.Exec;
+    private string? error;
+    private bool busy;
+
+    private static readonly DayOfWeek[] Days =
+        [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
+
+    private static readonly IReadOnlyList<SegOption<JobEvery>> EveryOptions =
+    [
+        new(JobEvery.Minutes, "Every N minutes", Tip: "jobs.every.minutes"),
+        new(JobEvery.Hourly, "Hourly", Tip: "jobs.every.hourly"),
+        new(JobEvery.Daily, "Daily", Tip: "jobs.every.daily"),
+        new(JobEvery.Weekly, "Weekly", Tip: "jobs.every.weekly"),
+        new(JobEvery.Cron, "Cron", Tip: "jobs.every.cron"),
+    ];
+
+    private static readonly IReadOnlyList<SegOption<CommandPlace>> PlaceOptions =
+    [
+        new(CommandPlace.Exec, "In the running container", Tip: "jobs.place.exec"),
+        new(CommandPlace.NewContainer, "In a new container", Tip: "jobs.place.new"),
+    ];
+
+    // Set from C#: an ampersand in a component parameter's markup would be read as an entity's start.
+    private const string CommandHelp = "One line, run with /bin/sh -c and the app's variables. Join several with &&.";
+
+    private string PlaceHelp => place == CommandPlace.Exec
+        ? "docker exec in the app's container, as it runs: it sees its files as they are now. The app must be running."
+        : "A one-off container of the app's image, with its variables, volumes and networks, removed when it ends. The app's own container isn't touched.";
+
+    protected override void OnInitialized()
+    {
+        service = Web ?? Services.FirstOrDefault() ?? "";
+        if (Current is not { } c) return;
+        (name, command, place, timeout) = (c.Name, c.Command, c.Place, c.TimeoutMinutes);
+        service = c.Service ?? Web ?? service;
+        var form = JobSchedules.FormOf(c.Schedule);
+        every = form.Every;
+        (minutes, minute, day, cron) = (form.Minutes, form.Minute, form.Day, form.Every == JobEvery.Cron ? form.Cron : "");
+        time = $"{form.Hour:00}:{form.Minute:00}";
+    }
+
+    private JobScheduleForm Form
+    {
+        get
+        {
+            var (hour, min) = TimeOf(time);
+            return every switch
+            {
+                JobEvery.Minutes => new JobScheduleForm(JobEvery.Minutes, Minutes: minutes),
+                JobEvery.Hourly => new JobScheduleForm(JobEvery.Hourly, Minute: minute),
+                JobEvery.Daily => new JobScheduleForm(JobEvery.Daily, Minute: min, Hour: hour),
+                JobEvery.Weekly => new JobScheduleForm(JobEvery.Weekly, Minute: min, Hour: hour, Day: day),
+                _ => new JobScheduleForm(JobEvery.Cron, Cron: cron.Trim()),
+            };
+        }
+    }
+
+    // "03:00" from the time field; out of range when it's empty or unreadable, so the check says so.
+    private static (int Hour, int Minute) TimeOf(string text) =>
+        TimeOnly.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, out var t) ? (t.Hour, t.Minute) : (-1, -1);
+
+    // What the schedule says, in words, in Gitberth's time zone, and when it runs next.
+    private string When
+    {
+        get
+        {
+            var (expression, problem) = JobSchedules.ToCron(Form);
+            if (expression is null) return problem ?? "";
+            var zone = JobSchedules.ZoneName();
+            return JobSchedules.NextUtc(expression, DateTime.UtcNow) is { } next
+                ? $"Runs {JobSchedules.Describe(expression)} ({zone}). Next: {Format.Local(next)}."
+                : $"Runs {JobSchedules.Describe(expression)} ({zone}), but no date matches it, so it never runs.";
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        var (expression, problem) = JobSchedules.ToCron(Form);
+        if (expression is null)
+        {
+            error = problem;
+            return;
+        }
+        var input = new JobInput(name, expression, command, place, Compose ? service : null, timeout);
+        if (CommandJobs.Problem(input) is { } why)
+        {
+            error = why;
+            return;
+        }
+        busy = true;
+        try
+        {
+            var outcome = await Save(input);
+            if (!outcome.Ok)
+            {
+                error = outcome.Message;
+                return;
+            }
+            MudDialog.Close(DialogResult.Ok(outcome));
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

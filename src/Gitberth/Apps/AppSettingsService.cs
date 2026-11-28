@@ -49,9 +49,9 @@ public sealed class AppSettingsService
         _audit = audit;
     }
 
-    /// <summary>The app's record when Gitberth deploys it (a Git app, or an inline Compose app), as its page has the app; null otherwise.</summary>
+    /// <summary>The app's record when Gitberth deploys it (a Git app, an uploaded one, or an inline Compose app), as its page has the app; null otherwise.</summary>
     private static AppDefinition? DeployedRow(AppView view) =>
-        view.Summary.Source is AppSource.Git or AppSource.Compose ? view.Row : null;
+        view.Summary.Source is AppSource.Git or AppSource.Compose or AppSource.Upload ? view.Row : null;
 
     /// <summary>Null when there's no such app. Without a container, the settings are the snapshot's (ApplyKind.Snapshot).</summary>
     public async Task<SettingsView?> LoadAsync(string key, CancellationToken ct = default)

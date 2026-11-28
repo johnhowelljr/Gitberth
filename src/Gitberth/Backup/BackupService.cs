@@ -34,8 +34,12 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
     private readonly BackupPaths _paths = new(options);
     private readonly object _sizesGate = new();
     private IReadOnlyDictionary<string, long> _sizes = new Dictionary<string, long>();
+    private IReadOnlyDictionary<string, HostPathInfo> _folders = new Dictionary<string, HostPathInfo>();
     private DateTime _sizesAt = DateTime.MinValue;
     private Task? _measuring;
+
+    /// <summary>The automatic backup being made now, for its card's progress line; null between them.</summary>
+    internal SaveJob? AutoJob { get; private set; }
 
     /// <summary>PBKDF2's iterations and the chunk size of new files (fewer and smaller in tests).</summary>
     internal int Iterations { get; init; } = BackupFormat.DefaultIterations;
@@ -50,8 +54,38 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
         // known (asked again every two minutes at most). The rest is read each time: an app made a moment ago is listed.
         var measuring = MeasureSizes();
         if (measuring is not null) await Task.WhenAny(measuring, Task.Delay(TimeSpan.FromSeconds(2), ct));
-        var inventory = await BackupInventory.ReadAsync(engine, dbFactory, options, _sizes, DataBytes(), ct, RegistryDigestAsync);
+        var inventory = await BackupInventory.ReadAsync(engine, dbFactory, options, _sizes, DataBytes(), ct, RegistryDigestAsync, _folders);
         return inventory.Items;
+    }
+
+    /// <summary>
+    /// An automatic backup: the items <paramref name="choice"/> says (as the save list would tick them), written to
+    /// <paramref name="output"/> with <paramref name="key"/> (format 2) as they're made. It waits up to
+    /// <paramref name="wait"/> for a save being made to end; one at a time, never two. Returns how it ended (Problem set
+    /// when it failed); the key is disposed when it's done.
+    /// </summary>
+    /// <param name="choose">The items to save, from the list as it is now (a new app is in it).</param>
+    internal async Task<SaveProgress> SaveToAsync(Func<IReadOnlyList<BackupItem>, BackupChoice> choose, BackupKey key, string fileName, Stream output,
+        TimeSpan wait, CancellationToken ct)
+    {
+        var now = Time.GetUtcNow().UtcDateTime;
+        var job = new SaveJob(Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant(), new BackupChoice(new HashSet<string>(), false), key, fileName,
+            now + TicketLife) { Auto = true, Choose = choose, Wait = wait };
+        job.TryClaim();
+        AutoJob = job;
+        try
+        {
+            await WriteAsync(job, output, ct);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // How it ended is in its progress.
+        }
+        finally
+        {
+            AutoJob = null;
+        }
+        return job.Snapshot();
     }
 
     // How long what registries said about a reference is kept.
@@ -126,7 +160,7 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
     /// </summary>
     internal async Task WriteAsync(SaveJob job, Stream output, CancellationToken ct)
     {
-        if (!await _saving.WaitAsync(0, ct))
+        if (!await _saving.WaitAsync(job.Wait, ct))
         {
             // Lost to another save: this one's key goes now, and its progress says why.
             const string busy = "Another save is being made. Wait for it to end, then save again.";
@@ -142,7 +176,15 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
         {
             var key = job.Key ?? throw new InvalidOperationException("This save's ticket has expired. Save again.");
             job.Report("Reading what's on this host", null);
-            var inventory = await BackupInventory.ReadAsync(engine, dbFactory, options, _sizes, DataBytes(), ct, RegistryDigestAsync);
+            // An automatic backup has nobody to wait for sizes: the host folders are measured now (a big one stays out
+            // unless the owner ticked it).
+            if (job.Auto && MeasureSizes() is { } measuring) await measuring.WaitAsync(HostFolders.MeasureFor + TimeSpan.FromSeconds(30), ct);
+            var inventory = await BackupInventory.ReadAsync(engine, dbFactory, options, _sizes, DataBytes(), ct, RegistryDigestAsync, _folders);
+            if (job.Choose is { } choose)
+            {
+                job.Choice = choose(inventory.Items);
+                stopAll = job.Choice.StopEverything;
+            }
             var chosen = inventory.Items.Where(i => i.Required || job.Choice.Included.Contains(i.Id)).Select(i => i.Id).ToHashSet(StringComparer.Ordinal);
 
             var containers = inventory.Containers.Values.Where(c => chosen.Contains(c.Item)).ToList();
@@ -154,13 +196,17 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
                 .Where(v => chosen.Contains(v.Item) && !dumped.Contains(v.Volume.Name))
                 .Select(v => v.Volume).OrderBy(v => v.Name, StringComparer.Ordinal).ToList();
             var images = inventory.Images.Values.Where(i => i.Item is { } item && chosen.Contains(item)).Select(i => i.Image).ToList();
+            var folders = inventory.Folders.Values.Where(f => chosen.Contains(f.Item)).Select(f => f.Folder).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+            foreach (var folder in folders) folder.Part = HostFolders.PartName(folder.Path);
 
             // ---- The manifest: everything the restore needs to know, first.
             var manifest = await ManifestAsync(inventory, chosen, containers, dumps, volumes, images, stopAll, ct);
+            manifest.Format = key.Header.Version;
+            manifest.HostFolders = folders;
             var dataParts = DataParts();
             manifest.DataParts = dataParts.Select(p => p.Part).ToList();
             manifest.Plan = RestorePlanner.Steps(manifest);
-            job.Total = 1 + dataParts.Count + dumps.Count + volumes.Count + images.Count;
+            job.Total = 1 + dataParts.Count + dumps.Count + volumes.Count + folders.Count + images.Count;
 
             // ---- Stop everything: the list first, so a restart in the middle still starts them again.
             if (stopAll)
@@ -209,7 +255,7 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
             }
 
             // ---- Volumes, through a helper of Gitberth's own image; what uses each is paused for exactly its copy.
-            if (volumes.Count > 0)
+            if (volumes.Count > 0 || folders.Count > 0)
             {
                 var image = inventory.SelfName is { } self ? BackupInventory.Str(inventory.Inspects[self], "Image") : null;
                 if (string.IsNullOrEmpty(image))
@@ -217,7 +263,16 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
                 foreach (var volume in volumes)
                 {
                     job.Report("Volumes", "volume " + volume.Name);
-                    await CopyVolumeAsync(writer, volume, image, inventory, ct);
+                    await CopyVolumeAsync(writer, volume.Part!, volume.Name + ":/v:ro", "/v", c => UsesVolume(c, volume.Name), image, inventory, ct);
+                    job.Done++;
+                }
+
+                // ---- Host folders, the same way: mounted read-only in the helper, their users paused for the copy.
+                foreach (var folder in folders)
+                {
+                    job.Report("Host folders", "folder " + folder.Path);
+                    await CopyVolumeAsync(writer, folder.Part!, folder.Path + ":/h:ro", "/h", c => UsesFolder(c, folder.Path), image, inventory, ct,
+                        BackupPartKind.HostFolder);
                     job.Done++;
                 }
             }
@@ -234,19 +289,20 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
             await writer.FinishAsync(ct);
             job.Finish(null, Time.GetUtcNow().UtcDateTime + TicketLife);
             logger.LogInformation("Saved a backup: {Parts} parts, {Bytes} bytes", job.Total, writer.BytesWritten);
-            Audited(job, stopAll, null);
+            if (!job.Auto) Audited(job, stopAll, null);
         }
         catch (Exception ex)
         {
             var why = ex switch
             {
+                OperationCanceledException when job.Auto => "Gitberth stopped in the middle of it.",
                 OperationCanceledException => "The download was stopped, so the save ended.",
                 BackupSaveException or InvalidOperationException => ex.Message,
                 _ => "The save failed: " + ex.Message,
             };
             job.Finish(why, Time.GetUtcNow().UtcDateTime + TicketLife);
             if (ex is not OperationCanceledException) logger.LogWarning(ex, "A save failed");
-            Audited(job, stopAll, why);
+            if (!job.Auto) Audited(job, stopAll, why);
             throw;
         }
         finally
@@ -393,19 +449,20 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
     private static UnixFileMode ModeOf(FileSystemInfo entry, string fallback) =>
         OperatingSystem.IsWindows() ? (UnixFileMode)Convert.ToInt32(fallback, 8) : File.GetUnixFileMode(entry.FullName);
 
-    // A volume's files through a helper made (never started) with the volume at /v, read-only; its running users paused
-    // for exactly that copy, and unpaused whatever happens.
-    private async Task CopyVolumeAsync(BackupWriter writer, SavedVolume volume, string image, BackupInventory inventory, CancellationToken ct)
+    // A volume's (or a host folder's) files through a helper made (never started) with it at /v (or /h), read-only; its
+    // running users paused for exactly that copy, and unpaused whatever happens.
+    private async Task CopyVolumeAsync(BackupWriter writer, string part, string bind, string at, Func<JsonObject, bool> uses, string image,
+        BackupInventory inventory, CancellationToken ct, BackupPartKind kind = BackupPartKind.Volume)
     {
         var helper = $"{HostScanHelper.NamePrefix}backup-{Convert.ToHexString(RandomNumberGenerator.GetBytes(6)).ToLowerInvariant()}";
-        await engine.CreateContainerAsync(helper, HelperBody(image, volume.Name + ":/v:ro"), ct);
+        await engine.CreateContainerAsync(helper, HelperBody(image, bind), ct);
         var paused = new List<string>();
         var pausedListed = false;
         try
         {
             // What runs now (a "stop everything" save stopped them all; something may have started or stopped since the list).
             var users = new List<string>();
-            foreach (var name in inventory.Inspects.Where(c => c.Key != inventory.SelfName && UsesVolume(c.Value, volume.Name)).Select(c => c.Key))
+            foreach (var name in inventory.Inspects.Where(c => c.Key != inventory.SelfName && uses(c.Value)).Select(c => c.Key))
                 if (await engine.InspectContainerAsync(name, ct) is { } now && BackupInventory.Running(now) && !BackupInventory.Paused(now))
                     users.Add(name);
             if (users.Count > 0)
@@ -420,8 +477,8 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
                     ct.ThrowIfCancellationRequested();
                 }
             }
-            await using var archive = await engine.GetArchiveAsync(helper, "/v", ct);
-            await writer.WritePartAsync(BackupPartKind.Volume, volume.Part!, 0, archive, ct);
+            await using var archive = await engine.GetArchiveAsync(helper, at, ct);
+            await writer.WritePartAsync(kind, part, 0, archive, ct);
         }
         finally
         {
@@ -450,6 +507,11 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
 
     private static bool UsesVolume(JsonObject inspect, string volume) =>
         (inspect["Mounts"] as JsonArray ?? []).OfType<JsonObject>().Any(m => BackupInventory.Str(m, "Type") == "volume" && BackupInventory.Str(m, "Name") == volume);
+
+    // A container that bind-mounts the folder, or something in it, or a folder it's in.
+    private static bool UsesFolder(JsonObject inspect, string path) =>
+        (inspect["Mounts"] as JsonArray ?? []).OfType<JsonObject>().Any(m => BackupInventory.Str(m, "Type") == "bind"
+            && HostFolders.Clean(BackupInventory.Str(m, "Source")) is { } source && (HostFolders.Under(source, path) || HostFolders.Under(path, source)));
 
     // Its own stop timeout, else Docker's 10 s (a database 60 s: it flushes first).
     private static int StopSeconds(JsonObject inspect) =>
@@ -488,7 +550,7 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
     {
         // The helpers a copy left (made, never started): they'd keep their volume in use.
         foreach (var c in await engine.ListAllAsync(ct))
-            if (c.Labels.TryGetValue(HostScanHelper.Label, out var kind) && kind is "backup" or "restore")
+            if (c.Labels.TryGetValue(HostScanHelper.Label, out var kind) && kind is "backup" or "restore" or AutoDestinations.HelperKind)
                 try
                 {
                     await engine.RemoveContainerAsync(c.Id, force: true, ct);
@@ -535,7 +597,8 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(names), ct);
     }
 
-    // Volumes' sizes, asked of Docker in the background at most every two minutes; the task while one is asked.
+    // Volumes' sizes, asked of Docker in the background at most every two minutes, and the host folders containers mount,
+    // measured by a helper; the task while one is asked.
     private Task? MeasureSizes()
     {
         lock (_sizesGate)
@@ -553,8 +616,31 @@ public sealed class BackupService(IBackupEngine engine, IDbContextFactory<Gitber
                 {
                     logger.LogDebug(ex, "Docker didn't size the volumes");
                 }
+                try
+                {
+                    _folders = await MeasureFoldersAsync(CancellationToken.None);
+                }
+                catch (Exception ex) when (ex is DockerApiException or HttpRequestException or TimeoutException or IOException or JsonException)
+                {
+                    logger.LogDebug(ex, "The host folders couldn't be measured");
+                }
             });
         }
+    }
+
+    // Every bind source a container (Gitberth aside) mounts that may be saved, looked at by one helper of Gitberth's own
+    // image: a folder and its size, or not a folder. None outside a container (there's no own image to run).
+    private async Task<IReadOnlyDictionary<string, HostPathInfo>> MeasureFoldersAsync(CancellationToken ct)
+    {
+        if (options.OwnContainer is not { } self || await engine.InspectContainerAsync(self, ct) is not { } me
+            || BackupInventory.Str(me, "Image") is not { Length: > 0 } image) return new Dictionary<string, HostPathInfo>();
+        var ownData = BackupInventory.DataSource(me, options.DataDir);
+        var paths = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var c in await engine.ListAllAsync(ct))
+            if (c.Id != BackupInventory.Str(me, "Id") && !c.Labels.ContainsKey(HostScanHelper.Label) && await engine.InspectContainerAsync(c.Id, ct) is { } inspect)
+                foreach (var (path, _) in BackupInventory.BindSources(inspect, ownData))
+                    paths.Add(path);
+        return await HostFolders.MeasureAsync(engine, image, [.. paths], HostFolders.MeasureFor, ct);
     }
 
     // What Gitberth's own data takes on disk, roughly.
@@ -687,8 +773,17 @@ internal sealed class SaveJob(string id, BackupChoice choice, BackupKey key, str
     private bool _done;
 
     public string Id { get; } = id;
-    public BackupChoice Choice { get; } = choice;
+    public BackupChoice Choice { get; set; } = choice;
     public BackupKey? Key { get; set; } = key;
+
+    /// <summary>An automatic backup: no download, no ticket; it waits its turn (<see cref="Wait"/>) and records its own end.</summary>
+    public bool Auto { get; init; }
+
+    /// <summary>An automatic backup's items, chosen from the list as it is when it starts.</summary>
+    public Func<IReadOnlyList<BackupItem>, BackupChoice>? Choose { get; init; }
+
+    /// <summary>How long it waits for a save being made to end (none for a download).</summary>
+    public TimeSpan Wait { get; init; } = TimeSpan.Zero;
     public string FileName { get; } = fileName;
     public DateTime ExpiresAt { get; private set; } = expiresAt;
     public BackupWriter? Writer { get; set; }

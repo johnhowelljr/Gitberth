@@ -25,6 +25,8 @@ public static class AuditText
             DeployTrigger.Promote => $"Queued the promotion of a preview's commit to {app}{at}.",
             DeployTrigger.Hook => $"Queued a deploy of {app} for the deploy hook {dep.HookName ?? "?"}{noCache}.",
             DeployTrigger.Recover => $"Queued a deploy of {app} to bring it back: its container was gone.",
+            // [builder B, B6]
+            DeployTrigger.Upload => $"Queued a deploy of {app}: a new upload{at}.",
             _ => $"Queued a deploy of {app}{noCache}.",
         };
     }
@@ -80,6 +82,8 @@ public static class AuditText
         DeployTrigger.Promote => "promote",
         DeployTrigger.Hook => "deploy hook",
         DeployTrigger.Recover => "brought back",
+        // [builder B, B6]
+        DeployTrigger.Upload => "new upload",
         _ => trigger.ToString(),
     };
 

@@ -510,6 +510,22 @@ def c_gh_token_change(req, token):
     return t.public()
 
 
+@route("PUT", "/github/releases/(?P<o>[^/]+)/(?P<r>[^/]+)/latest")
+def c_gh_set_latest_release(req, o, r):
+    """builder A: the repo's newest release from now on: {tag, name?, body?, published_at?}. A draft or a pre-release is
+    never the latest on GitHub, so there's no such choice."""
+    b = body_of(req)
+    with GH.lock:
+        return GH.set_latest_release(o, r, b["tag"], b.get("name"), b.get("body"), b.get("published_at"))
+
+
+@route("DELETE", "/github/releases/(?P<o>[^/]+)/(?P<r>[^/]+)/latest")
+def c_gh_delete_latest_release(req, o, r):
+    with GH.lock:
+        GH.releases.pop(f"{o}/{r}".lower(), None)
+    return {"ok": True}
+
+
 @route("GET", "/github/tokens")
 def c_gh_tokens(req):
     return {"tokens": [t.public() for t in GH.tokens.values()]}

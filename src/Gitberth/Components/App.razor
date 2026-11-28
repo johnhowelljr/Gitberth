@@ -25,6 +25,8 @@
     @* The built-in Help's pages, and the tips' cards (1.4). *@
     <link rel="stylesheet" href="@Assets["css/help.css"]" />
     <link rel="stylesheet" href="@Assets["css/tips.css"]" />
+    @* Uploaded folders, release and scheduled commands, the terminal, files and config files (builder B). *@
+    <link rel="stylesheet" href="@Assets["css/workbench.css"]" />
     <link rel="stylesheet" href="@Assets["Gitberth.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/svg+xml" href="@Assets["favicon.svg"]" />
@@ -52,6 +54,8 @@
     </form>
     <ReconnectModal />
     <script src="@Assets["js/gitberth.js"]"></script>
+    @* Uploads, the terminal and the files (builder B). *@
+    <script src="@Assets["js/workbench.js"]"></script>
     @* The tips' cards, for any [data-tip] on any page; the catalog comes once per version. *@
     <script src="@Assets["js/tips.js"]" data-catalog="@Gitberth.Help.HelpEndpoints.TipsUrl(Tips)" defer></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>

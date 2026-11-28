@@ -957,7 +957,8 @@ public sealed class AppKeeper(
     private static KeepKind KindOf(AppDefinition app) => app switch
     {
         { IsCompose: true } => KeepKind.Compose,
-        { Source: AppSource.Git } => KeepKind.Git,
+        // [builder B, B6] An uploaded app is built and deployed as a Git app is: it comes back the same way.
+        { Source: AppSource.Git or AppSource.Upload } => KeepKind.Git,
         { Source: AppSource.Existing } => KeepKind.Existing,
         _ => KeepKind.Image,
     };

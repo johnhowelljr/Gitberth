@@ -1,0 +1,146 @@
+@inject Gitberth.Deploy.ReleaseCommands Release
+@inject Gitberth.Compose.ComposeApps ComposeApps
+@inject ISnackbar Snackbar
+
+@*
+    An app's Release command section on its Settings tab (B2), saved on its own (none of it touches the container): a
+    command, like npm run migrate, that runs once for each new version in a one-off container of it, before it takes over.
+    One that fails or runs too long stops the new version, and the running one stays. For a Compose app it runs in the web
+    service unless another is picked; for an image app, before an update, a rollback or a new image replaces it.
+*@
+<SettingsSection Id="sec-release" Title="Release command" Icon="@Icons.Material.Outlined.RocketLaunch" Changed="Dirty" Tip="release.section" Description="@Description">
+    <div class="gb-fgrid">
+        <Field Label="Command" For="set-release" Tip="release.command" Changed="@(command.Trim() != loaded.Command)" Was="@(loaded.Command.Length == 0 ? "none" : loaded.Command)"
+               OnUndo="() => { command = loaded.Command; problem = null; }" Error="@problem"
+               Help="One line, run with /bin/sh -c and the app's variables. Leave it empty for none.">
+            <input id="set-release" class="gb-input gb-input--mono" placeholder="npm run migrate" value="@command" spellcheck="false" autocomplete="off"
+                   maxlength="@Gitberth.Deploy.ReleaseCommands.MaxLength" @oninput="e => { command = e.Value?.ToString() ?? string.Empty; problem = null; }" />
+        </Field>
+        <Field Label="Time limit" For="set-release-minutes" Tip="release.timeout" Changed="@(minutes != loaded.Minutes)" Was="@($"{loaded.Minutes} min")"
+               OnUndo="() => minutes = loaded.Minutes" Error="@(minutes is < 1 or > 60 ? "From 1 to 60 minutes." : null)"
+               Help="Still running then, it's stopped and the new version doesn't take over.">
+            <label class="gb-input"><input id="set-release-minutes" type="number" min="1" max="60" value="@minutes"
+                                           @oninput="e => minutes = int.TryParse(e.Value?.ToString(), out var m) ? m : 0" /><span class="gb-input-suffix">minutes</span></label>
+        </Field>
+        @if (IsCompose)
+        {
+            <Field Label="Service" For="set-release-service" Tip="release.service" Changed="@(service != loaded.Service)" Was="@loaded.Service" OnUndo="() => service = loaded.Service"
+                   Help="Its new container runs the command, on the app's network, with that service's variables and volumes.">
+                <select id="set-release-service" class="gb-input" value="@service" @onchange="e => service = e.Value?.ToString() ?? string.Empty">
+                    @foreach (var s in services)
+                    {
+                        <option value="@s">@(s == Web ? $"{s} (the web service)" : s)</option>
+                    }
+                </select>
+            </Field>
+        }
+    </div>
+    <div class="gb-row" style="justify-content:flex-end;gap:8px;margin-top:6px">
+        @if (Dirty)
+        {
+            <Btn Kind="BtnKind.Ghost" OnClick="Undo" Disabled="busy">Undo</Btn>
+        }
+        <Btn Kind="BtnKind.Primary" OnClick="SaveAsync" Busy="busy" Disabled="@(!Dirty || minutes is < 1 or > 60)" Tip="release.save">Save release command</Btn>
+    </div>
+</SettingsSection>
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>Raised after a save, so the page reads the app again (a container without a row has one now).</summary>
+    [Parameter] public EventCallback Saved { get; set; }
+
+    private sealed record Values(string Command, int Minutes, string Service);
+
+    private Values loaded = new("", Gitberth.Deploy.ReleaseCommands.DefaultMinutes, "");
+    private string command = "";
+    private int minutes = Gitberth.Deploy.ReleaseCommands.DefaultMinutes;
+    private string service = "";
+    private string? problem;
+    private bool busy;
+    private IReadOnlyList<string> services = [];
+    private (int? Id, string? Command, int? Minutes, string? Service)? loadedFrom;
+
+    /// <summary>
+    /// Whether an app has the section: every app Gitberth brings a new version or image to (a deploy, an update, a rollback,
+    /// a new image in its settings), so not Gitberth itself, its tunnel, a preview (its parent's runs in it), a service of a
+    /// Compose app (its app's has it) or a container another Compose project looks after.
+    /// </summary>
+    public static bool Shows(AppView view, SettingsView? settings) =>
+        !view.Summary.System && view.Summary.Role is not (ContainerRole.Self or ContainerRole.AppInternal or ContainerRole.Helper)
+        && view.Row is not { IsPreview: true }
+        && (view.Row is { Deployed: true } || settings?.Access.Compose is null);
+
+    private bool IsCompose => View.Row?.IsCompose == true;
+
+    private string Web => View.Row?.WebService ?? "";
+
+    private bool Dirty => new Values(command.Trim(), minutes, service) != loaded;
+
+    private string Description => View.Row switch
+    {
+        { IsCompose: true } => "Runs once for each new release, in a one-off container of its web service (or the one you pick), before the release is brought up: database migrations, say. If it fails, the running release stays.",
+        { Deployed: true } => "Runs once for each new version, in a one-off container of it, before it takes over: database migrations, say. If it fails, the deploy stops and the running version stays.",
+        _ => "Runs before a new image replaces the running container (an update, a rollback, a new tag), in a one-off container of the new image: database migrations, say. If it fails, nothing changes.",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var row = View.Row;
+        var now = (row?.Id, row?.ReleaseCommand, row?.ReleaseTimeoutMinutes, row?.ReleaseService);
+        // Follows the app as it's saved, unless there's an edit of the same app in progress.
+        if (loadedFrom == now || loadedFrom is { } before && before.Id == now.Id && Dirty) return;
+        loadedFrom = now;
+        loaded = new Values(row?.ReleaseCommand ?? "", row?.ReleaseTimeoutMinutes ?? Gitberth.Deploy.ReleaseCommands.DefaultMinutes, row?.ReleaseService ?? Web);
+        Undo();
+        if (IsCompose && row is not null) await ReadServicesAsync(row);
+    }
+
+    // The services to pick from: the app's own as Docker has them, the web service first; just the web service before its first deploy.
+    private async Task ReadServicesAsync(AppDefinition row)
+    {
+        var names = new List<string>();
+        try
+        {
+            names.AddRange((await ComposeApps.MembersAsync(row)).Select(m => m.Service));
+        }
+        catch (Exception)
+        {
+            // Docker didn't answer: the web service and the one chosen are offered still.
+        }
+        if (Web.Length > 0) names.Insert(0, Web);
+        if (loaded.Service.Length > 0) names.Add(loaded.Service);
+        services = names.Where(n => n.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    private void Undo()
+    {
+        (command, minutes, service) = (loaded.Command, loaded.Minutes, loaded.Service);
+        problem = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        busy = true;
+        try
+        {
+            var saved = await Release.SaveAsync(View.Summary.Key, command, minutes, IsCompose ? service : null);
+            if (!saved.Ok)
+            {
+                problem = saved.Message;
+                return;
+            }
+            loaded = new Values(command.Trim(), command.Trim().Length == 0 ? Gitberth.Deploy.ReleaseCommands.DefaultMinutes : minutes, IsCompose ? service : "");
+            Undo();
+            Snackbar.Add(saved.Message, Severity.Success);
+            await Saved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -1,0 +1,759 @@
+@using System.Text.Json
+@using Gitberth.Railpack
+@using Gitberth.Sources
+@implements IAsyncDisposable
+@inject UploadStore Store
+@inject UploadApps Uploads
+@inject IRailpackPlanner Railpack
+@inject AppService Apps
+@inject AppCatalog Catalog
+@inject HostScanner Scanner
+@inject ContainerStatsCollector Stats
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@*
+    New app › Upload a folder (B6): a folder from this computer (chosen, or dropped), or a .zip, .tar or .tar.gz of one. It goes
+    straight to Gitberth (POST /uploads), which unpacks it safely and keeps it staged; then Gitberth's detection runs on it as
+    on a repo (Railpack for what it doesn't know, its Compose file when it has one), its settings are filled in, and Deploy
+    makes the app and brings it up.
+*@
+<div class="gb-stack">
+    <section class="gb-card gb-sec">
+        <div class="gb-sec-head">
+            <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.DriveFolderUpload" /></span>
+            <div style="min-width:0">
+                <div class="gb-h3">Upload a folder<Tip Key="upload.drop" /></div>
+                <p>A folder from this computer, or a .zip, .tar or .tar.gz of one. Gitberth works out what it is, as it does for a repo.</p>
+            </div>
+        </div>
+        <div class="gb-sec-body">
+            @if (staged is { } made && !replacing)
+            {
+                <div class="gb-upl-made" id="upload-made">
+                    <SvgIcon Icon="@(made.Folder ? Icons.Material.Outlined.Folder : Icons.Material.Outlined.FolderZip)" />
+                    <span class="gb-mono">@made.Name</span>
+                    <span class="gb-t3">@UploadArchives.Size(made.Size) · @Files(made.Files)@(made.Folder ? " · a folder" : "")</span>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Upload" OnClick="UploadAnother" Disabled="Busy" Tip="upload.another">Upload another</Btn>
+                </div>
+            }
+            else
+            {
+                <div id="gb-upload-zone" class="gb-dropzone @(sending ? "gb-dropzone--busy" : null)" data-tip="upload.drop">
+                    <span class="gb-dropzone-ic"><SvgIcon Icon="@Icons.Material.Outlined.DriveFolderUpload" /></span>
+                    @if (sending)
+                    {
+                        <div class="gb-dropzone-t">Uploading @sendingName…</div>
+                        <div class="gb-progress"><i style="width:@(Math.Clamp(Percent, 3, 100))%"></i></div>
+                        <div class="gb-dropzone-s">@UploadArchives.Size(sent) of @UploadArchives.Size(total)</div>
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="CancelAsync">Cancel</Btn>
+                    }
+                    else
+                    {
+                        <div class="gb-dropzone-t">Drop a folder or an archive here</div>
+                        <div class="gb-dropzone-btns">
+                            <Btn Icon="@Icons.Material.Outlined.FolderOpen" OnClick="@(() => PickAsync("gb-upload-folder"))" Tip="upload.choose-folder">Choose a folder</Btn>
+                            <Btn Icon="@Icons.Material.Outlined.FolderZip" OnClick="@(() => PickAsync("gb-upload-file"))" Tip="upload.choose-file">Choose a file</Btn>
+                        </div>
+                        <div class="gb-dropzone-s">
+                            .zip, .tar, .tar.gz or .tgz, up to 2 GiB. A folder leaves out .git, node_modules, .venv, venv, __pycache__, .next/cache and .DS_Store: the build makes them again.
+                        </div>
+                    }
+                    <input type="file" id="gb-upload-file" accept=".zip,.tar,.tgz,.gz,application/zip,application/x-tar,application/gzip" hidden />
+                    <input type="file" id="gb-upload-folder" webkitdirectory directory multiple hidden />
+                </div>
+            }
+            @if (error is not null)
+            {
+                <Banner Tone="critical" Title="Gitberth didn't take it">@error</Banner>
+            }
+            @if (candidates.Count > 1)
+            {
+                <div>
+                    <div class="gb-label" style="margin-bottom:8px">This upload has @candidates.Count apps Gitberth can run. The most likely one is picked.</div>
+                    <div class="gb-choices" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))" role="radiogroup">
+                        @foreach (var c in candidates)
+                        {
+                            var on = Key(c) == SelectedKey;
+                            <button type="button" class="gb-choice @(on ? "on" : null)" role="radio" aria-checked="@(on ? "true" : "false")" disabled="@Busy" @onclick="() => OnCandidateChanged(Key(c))">
+                                <span class="gb-radio @(on ? "on" : null)"></span>
+                                <span style="min-width:0"><span class="gb-choice-title" style="display:block">@c.Title</span><span class="gb-choice-sub">@c.Detail</span></span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+            @if (analyzing)
+            {
+                <div class="gb-progress"><i style="width:60%"></i></div>
+                @if (askingRailpack)
+                {
+                    <p class="gb-help" style="margin:0">@RailpackText.Asking</p>
+                }
+            }
+        </div>
+    </section>
+
+    @if (detection is not null && composeInfo is { Error: null, Services.Count: > 0 } compose)
+    {
+        <section class="gb-card gb-sec" aria-labelledby="gb-upl-compose-title">
+            <div class="gb-sec-head">
+                <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" /></span>
+                <div style="min-width:0">
+                    <div class="gb-h3"><span id="gb-upl-compose-title">It has a @composeFile with @Count(compose.Services.Count, "service")</span><Tip Key="upload.compose" /></div>
+                    <p>Deploy it with Compose, as one app with all its services, or build one container from the folder.</p>
+                </div>
+            </div>
+            <div class="gb-sec-body">
+                <div class="gb-choices" role="radiogroup" aria-label="How to deploy it">
+                    <button type="button" class="gb-choice @(useCompose ? "on" : null)" role="radio" aria-checked="@(useCompose ? "true" : "false")" disabled="@Busy" data-tip="newapp.git.with-compose" @onclick="() => UseComposeAsync(true)">
+                        <span class="gb-radio @(useCompose ? "on" : null)"></span>
+                        <span style="min-width:0"><span class="gb-choice-title" style="display:block">With Compose</span>
+                            <span class="gb-choice-sub">@string.Join(", ", compose.Services.Select(s => s.Name)): one app, deployed with docker compose</span></span>
+                    </button>
+                    <button type="button" class="gb-choice @(useCompose ? null : "on")" role="radio" aria-checked="@(useCompose ? "false" : "true")" disabled="@Busy" data-tip="newapp.git.one-container" @onclick="() => UseComposeAsync(false)">
+                        <span class="gb-radio @(useCompose ? null : "on")"></span>
+                        <span style="min-width:0"><span class="gb-choice-title" style="display:block">As one container</span>
+                            <span class="gb-choice-sub">@(detection.CanBuild ? detection.Title : "Nothing else was found to build: it needs a Dockerfile of its own")</span></span>
+                    </button>
+                </div>
+                @if (useCompose)
+                {
+                    <div class="gb-fgrid">
+                        @if (composeFiles.Count > 1)
+                        {
+                            <Field Label="Compose file" For="upl-compose-file" Tip="newapp.git.compose-file">
+                                <select id="upl-compose-file" class="gb-input gb-input--mono" value="@composeFile" @onchange="e => PickComposeFileAsync(e.Value?.ToString())">
+                                    @foreach (var f in composeFiles)
+                                    {
+                                        <option value="@f">@f</option>
+                                    }
+                                </select>
+                            </Field>
+                        }
+                        <Field Label="Web service" Tip="newapp.web-service" Help="Its container is the app's: its domains, LAN port, health URL and logs. The others stay inside the app.">
+                            <Seg T="string" Options="@(compose.Services.Select(s => new SegOption<string>(s.Name, s.Name)).ToList())" Value="composeWeb" ValueChanged="PickWebAsync" Label="Web service" />
+                        </Field>
+                    </div>
+                    @foreach (var problem in Gitberth.Compose.ComposeApps.Problems(composeTexts.GetValueOrDefault(composeFile ?? "") ?? "", composeWeb))
+                    {
+                        <Banner Tone="warn" Title="Worth knowing">@problem</Banner>
+                    }
+                }
+            </div>
+        </section>
+    }
+
+    @if (detection is not null && !useCompose)
+    {
+        <section class="gb-card gb-sec" id="upload-detected">
+            <div class="gb-sec-head">
+                <span class="gb-sec-icon"><SvgIcon Icon="@(detection.CanBuild ? Icons.Material.Outlined.Layers : Icons.Material.Outlined.HelpOutline)" /></span>
+                <div style="min-width:0">
+                    <div class="gb-h3">How it will run: @detection.Title<Tip Key="newapp.git.detected" /></div>
+                    <p>@(staged is { } s ? $"From {s.Name}" + (subdir is { Length: > 0 } sd ? $", its folder {sd}/" : "") : "")</p>
+                </div>
+            </div>
+            <div class="gb-sec-body">
+                @if (!detection.CanBuild)
+                {
+                    <Banner Tone="serious" Title="Gitberth can't tell what this is">@UploadApps.CantTell(detection)</Banner>
+                }
+                @if (detection.Evidence.Count > 0)
+                {
+                    <div class="gb-keeps">
+                        @foreach (var e in detection.Evidence)
+                        {
+                            <span class="gb-keep"><SvgIcon Icon="@Icons.Material.Outlined.Check" /><span>@e</span></span>
+                        }
+                    </div>
+                }
+                @foreach (var w in detection.Warnings)
+                {
+                    <Banner Tone="warn" Title="Worth knowing">@w</Banner>
+                }
+                @if (detection is { Kind: ProjectKind.Railpack, RailpackPlan: { } plan })
+                {
+                    <p class="gb-help">@(detection.Unrecognized ? RailpackText.FallbackNote : RailpackText.ChosenNote)</p>
+                    <div class="gb-label" style="margin:0">@RailpackText.PlanTitle<Tip Key="newapp.git.railpack-plan" /></div>
+                    <CodeBlock Title="railpack prepare" Code="@GitSource.PlanText(plan)" Icon="@Icons.Material.Outlined.Description" />
+                }
+                @if (RailpackRefusal is { } refusal)
+                {
+                    <Banner Tone="critical" Title="Railpack couldn't plan the build">@refusal</Banner>
+                }
+                @if (ShowRailpackSwitch)
+                {
+                    <SwitchRow Title="@RailpackText.SwitchTitle" Tip="newapp.git.railpack" Disabled="Busy"
+                               Sub="@(gitberthDetection?.Kind == ProjectKind.Dockerfile ? RailpackText.SwitchSubRepoDockerfile : RailpackText.SwitchSub)"
+                               Value="railpackOn" ValueChanged="SetRailpackAsync" />
+                }
+                @if (detection.ProjectCandidates.Count > 1 && candidates.Count <= 1)
+                {
+                    <Field Label="Project to run" For="upl-proj" Tip="newapp.git.project">
+                        <select id="upl-proj" class="gb-input gb-input--mono" value="@projectHint" @onchange="e => OnProjectChanged(e.Value?.ToString() ?? string.Empty)">
+                            @foreach (var p in detection.ProjectCandidates)
+                            {
+                                <option value="@p">@p</option>
+                            }
+                        </select>
+                    </Field>
+                }
+                <SwitchRow Title="Customize the Dockerfile" Tip="newapp.git.customize" Sub="Stored with the app and used as it is on every deploy." Value="customize" ValueChanged="SetCustomize" />
+                @if (customize)
+                {
+                    <textarea class="gb-input gb-input--mono gb-paste" rows="16" spellcheck="false" aria-label="Dockerfile" value="@customDockerfile" @onchange="e => customDockerfile = e.Value?.ToString()"></textarea>
+                    <p class="gb-help">Gitberth fills in the <code>@DockerfileMarkers.BuildArgs</code> and <code>@DockerfileMarkers.Volumes</code> lines.</p>
+                }
+                else if (detection.Kind == ProjectKind.Dockerfile)
+                {
+                    <p class="gb-help">Gitberth builds with its own <code>@detection.RepoDockerfile</code>.</p>
+                }
+                else if (detection.Dockerfile is not null)
+                {
+                    <CodeBlock Title="Generated Dockerfile" Code="@detection.Dockerfile" Icon="@Icons.Material.Outlined.Description" />
+                }
+            </div>
+        </section>
+    }
+
+    @if (detection is not null && (detection.CanBuild || customize || useCompose))
+    {
+        <section class="gb-card gb-sec" id="upload-settings">
+            <div class="gb-sec-head">
+                <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.Tune" /></span>
+                <div style="min-width:0"><div class="gb-h3">Settings</div><p>Everything here can change later, in its Settings tab.</p></div>
+            </div>
+            <div class="gb-sec-body">
+                <div class="gb-fgrid">
+                    <Field Label="Name" For="upl-name" Tip="newapp.name" Help="@NameHelp">
+                        <input id="upl-name" class="gb-input" value="@model.Name" @oninput="e => SetNameAsync(e.Value?.ToString())" />
+                    </Field>
+                    <Field Label="Health URL (optional)" For="upl-health" Tip="newapp.git.health-url">
+                        <input id="upl-health" class="gb-input gb-input--mono" placeholder="/health" value="@model.HealthCheckPath" @onchange="e => model.HealthCheckPath = e.Value?.ToString()" />
+                    </Field>
+                </div>
+                @if (!useCompose)
+                {
+                    <Field Label="Restart" Tip="newapp.restart">
+                        <Seg T="string" Options="AppFacts.RestartOptions" Value="model.RestartPolicy" ValueChanged="v => model.RestartPolicy = v" Label="Restart policy" />
+                    </Field>
+                }
+            </div>
+            <div class="gb-sec-head" style="border-top:1px solid var(--gb-line-1)">
+                <span class="gb-sec-icon"><SvgIcon Icon="@Icons.Material.Outlined.SettingsEthernet" /></span>
+                <div style="min-width:0"><div class="gb-h3">Ports<Tip Key="newapp.cfg.ports" /></div><p>@(AfterDeploy() is { } after ? $"After the deploy: {after}." : "On the LAN by default, at a free host port.")</p></div>
+                <div style="margin-left:auto"><Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Add" OnClick="AddPort" Tip="newapp.cfg.add-port">Add port</Btn></div>
+            </div>
+            <PortsTable Draft="ports" Name="@Slug" LanHost="@lanHost" LanIpv4Only="lanIpv4Only" Problems="portProblems" Disabled="@Busy" Marks="false" OnChanged="PortsChanged" />
+            <div class="gb-sec-body">
+                <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Key" Size="sm" />
+                    @if (useCompose)
+                    {
+                        <Tip Key="newapp.git.compose-vars">Variables (they fill the Compose file's ${…})</Tip>
+                    }
+                    else
+                    {
+                        <Tip Key="newapp.git.env">Environment variables</Tip>
+                    }
+                </div>
+                <EnvEditor Rows="model.Env" />
+                @if (!useCompose)
+                {
+                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Storage" Size="sm" /><Tip Key="newapp.git.volumes">Volumes</Tip></div>
+                    <VolumesEditor Rows="model.Volumes" Slug="@Slug" />
+                    <div class="gb-label"><SvgIcon Icon="@Icons.Material.Outlined.Speed" Size="sm" /><Tip Key="newapp.git.resources">Resources</Tip></div>
+                    <ResourceFields Draft="resources" Create="true" HostCpus="HostCpus" />
+                }
+                @if (errors.Count > 0)
+                {
+                    <Banner Tone="critical" Title="Not created yet">@string.Join(" ", errors)</Banner>
+                }
+            </div>
+            <div class="gb-card-foot" style="justify-content:flex-end;gap:10px">
+                <span class="gb-help" style="margin-right:auto">@(useCompose ? $"Creates the Compose project gb-{Slug}, then builds and starts its services." : $"Creates gb-{Slug}, then builds and starts it.") The deploy's log shows every step.</span>
+                <Btn Kind="BtnKind.Ghost" Href="apps">Cancel</Btn>
+                <Btn Kind="BtnKind.Primary" Size="BtnSize.Lg" Icon="@Icons.Material.Outlined.RocketLaunch" OnClick="CreateAsync" Busy="creating" Disabled="Busy" Tip="upload.deploy">Deploy</Btn>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    /// <summary>Where the flow is: Source until the upload is looked at, Configure once it can be deployed.</summary>
+    [Parameter] public EventCallback<NewAppStep> OnStage { get; set; }
+
+    private DotNetObjectReference<UploadSource>? self;
+    private bool bindPending = true, sending, replacing, analyzing, creating, customize, disposed;
+    private string? sendingName, error;
+    private long sent, total;
+    private StagedUpload? staged;
+    private string? subdir, projectHint, analyzedDir;
+    private List<AppCandidate> candidates = [];
+    private DetectionResult? detection, gitberthDetection, railpackDetection;
+    private RailpackPlanResult? railpackPlan;
+    private bool railpackOn, askingRailpack, planRailpackNext;
+    private string? customDockerfile;
+    private AppSettingsModel model = new();
+    private ContainerSettingsDraft resources = ContainerSettingsDraft.From(new ContainerSettings());
+    private ContainerPortsDraft ports = ContainerPortsDraft.ForNew([], null);
+    private List<string> errors = [];
+    private List<PortProblem> portProblems = [];
+    private bool triedCreate;
+    private string lanHost = "";
+    private bool lanIpv4Only;
+    private NetworkName? networkName;
+    private string? networkNameFor;
+    private List<string> composeFiles = [];
+    private IReadOnlyDictionary<string, string> composeTexts = new Dictionary<string, string>();
+    private string? composeFile;
+    private Gitberth.Compose.ComposeFileInfo? composeInfo;
+    private bool useCompose;
+    private string composeWeb = "";
+
+    private bool Busy => sending || analyzing || creating;
+
+    private int Percent => total > 0 ? (int)(100.0 * sent / total) : 5;
+
+    private static string Files(int n) => n == 1 ? "1 file" : $"{n:N0} files";
+
+    private static string Count(int n, string what) => n == 1 ? $"1 {what}" : $"{n} {what}s";
+
+    private int HostCpus => Stats.Current.Host?.Cpus ?? Environment.ProcessorCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));
+        try
+        {
+            lanIpv4Only = (await Scanner.LatestAsync()).LanIpv4Only;
+        }
+        catch (Exception)
+        {
+            lanIpv4Only = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The drop zone is bound each time it's drawn anew (after Upload another).
+        if (!bindPending || disposed || staged is not null && !replacing) return;
+        bindPending = false;
+        self ??= DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthUploads.bind", "gb-upload-zone", "gb-upload-file", "gb-upload-folder", UploadEndpoints.BrowserPath.TrimStart('/'), self);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private async Task PickAsync(string input)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthUploads.pick", input);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthUploads.cancel");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private async Task UploadAnother()
+    {
+        replacing = true;
+        bindPending = true;
+        error = null;
+        await OnStage.InvokeAsync(NewAppStep.Source);
+    }
+
+    [JSInvokable]
+    public Task Starting(string name, long size) => InvokeAsync(() =>
+    {
+        (sending, sendingName, sent, total, error) = (true, name, 0, size, null);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Uploading(long done, long of) => InvokeAsync(() =>
+    {
+        (sent, total) = (done, of > 0 ? of : total);
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Refused(string sentence) => InvokeAsync(() =>
+    {
+        error = sentence;
+        StateHasChanged();
+    });
+
+    [JSInvokable]
+    public Task Uploaded(bool ok, bool aborted, int status, string answer) => InvokeAsync(async () =>
+    {
+        sending = false;
+        if (!ok)
+        {
+            error = aborted ? null : status == 0 ? "The upload didn't reach Gitberth. Check the connection and try again." : answer.Length > 0 ? answer : $"Gitberth answered {status}.";
+            StateHasChanged();
+            return;
+        }
+        string? id;
+        try
+        {
+            using var json = JsonDocument.Parse(answer);
+            id = json.RootElement.GetProperty("id").GetString();
+        }
+        catch (Exception)
+        {
+            id = null;
+        }
+        if (Store.Find(id) is not { } found)
+        {
+            error = "Gitberth didn't keep the upload. Upload it again.";
+            StateHasChanged();
+            return;
+        }
+        // A new upload replaces the one before it, which goes.
+        if (staged is { } before && before.Id != found.Id) Store.Discard(before.Id);
+        (staged, replacing, subdir, projectHint, candidates) = (found, false, null, null, []);
+        model.Name = "";
+        resources = ContainerSettingsDraft.From(new ContainerSettings());
+        (errors, portProblems, triedCreate) = ([], [], false);
+        (gitberthDetection, railpackDetection, railpackPlan, railpackOn, planRailpackNext) = (null, null, null, false, false);
+        await AnalyzeAsync(pickBest: true);
+    });
+
+    // ---- Railpack (as New app's Git source has it) ----
+
+    private bool RailpackFallback => detection is { Kind: ProjectKind.Railpack, Unrecognized: true };
+
+    private bool ShowRailpackSwitch => !useCompose && !RailpackFallback && gitberthDetection is { CanBuild: true };
+
+    private string? RailpackRefusal => railpackOn && !useCompose && railpackDetection is null && railpackPlan is { Ok: false } failed
+        ? failed.Error ?? RailpackText.NotInstalled : null;
+
+    private async Task SetRailpackAsync(bool on)
+    {
+        if (on == railpackOn) return;
+        railpackOn = on;
+        if (on) customize = false;
+        if (on && railpackPlan is null)
+        {
+            planRailpackNext = true;
+            await AnalyzeAsync(keepHint: true);
+            return;
+        }
+        detection = GitSource.CardFor(gitberthDetection, railpackDetection, railpackOn) ?? detection;
+        if (detection is not null && ports.WebPort != detection.ContainerPort) await CardPortsAsync();
+    }
+
+    private async Task SetCustomize(bool on)
+    {
+        customize = on;
+        if (on && railpackOn) await SetRailpackAsync(false);
+    }
+
+    private async Task PlanWithRailpackAsync(string root, string sub, string folder)
+    {
+        gitberthDetection = detection;
+        (railpackDetection, railpackPlan) = (null, null);
+        var wanted = planRailpackNext || railpackOn;
+        planRailpackNext = false;
+        railpackOn = false;
+        if (useCompose || detection is null) return;
+        var suggested = RailpackProviders.Suggested(folder, detection);
+        if (!detection.Unrecognized && !suggested && !wanted) return;
+        askingRailpack = true;
+        StateHasChanged();
+        RailpackPlanResult plan;
+        try
+        {
+            plan = await Railpack.PlanAsync(new RailpackPlanRequest(root, sub, [], HasStartCommand: false, Previous: []), null, CancellationToken.None);
+        }
+        finally
+        {
+            askingRailpack = false;
+        }
+        railpackPlan = plan;
+        var chosen = suggested || wanted;
+        if (plan.Ok)
+        {
+            railpackDetection = RailpackDetection.ToDetection(plan, sub, folder, port: chosen ? detection.ContainerPort : null, fallback: !chosen);
+            railpackDetection.EnvSuggestions.AddRange(detection.EnvSuggestions);
+        }
+        else if (!detection.CanBuild)
+        {
+            RailpackDetection.CouldntEither(detection, plan);
+        }
+        railpackOn = chosen && (plan.Ok || detection.CanBuild);
+        detection = GitSource.CardFor(gitberthDetection, railpackDetection, railpackOn);
+    }
+
+    // ---- Looking at it ----
+
+    private static string Key(AppCandidate c) => $"{c.Dir}|{c.Hint}";
+
+    private string SelectedKey => analyzedDir is null ? "" : $"{analyzedDir}|{projectHint}";
+
+    private async Task OnCandidateChanged(string key)
+    {
+        if (candidates.FirstOrDefault(c => Key(c) == key) is not { } chosen) return;
+        subdir = chosen.Dir;
+        projectHint = chosen.Hint;
+        model.Name = "";
+        railpackOn = false;
+        await AnalyzeAsync(keepHint: true);
+    }
+
+    private async Task OnProjectChanged(string value)
+    {
+        projectHint = value;
+        await AnalyzeAsync(keepHint: true);
+    }
+
+    private async Task AnalyzeAsync(bool pickBest = false, bool keepHint = false)
+    {
+        if (staged is null) return;
+        error = null;
+        analyzing = true;
+        StateHasChanged();
+        try
+        {
+            var a = await Uploads.AnalyzeAsync(staged, pickBest ? null : subdir ?? "", keepHint || pickBest ? projectHint : null);
+            if (pickBest) candidates = a.Candidates.ToList();
+            (subdir, projectHint, detection) = (a.Dir, a.Hint, a.Detection);
+            (composeFiles, composeTexts) = (a.ComposeFiles.ToList(), a.ComposeTexts);
+            ReadCompose(a.ComposeFile);
+            useCompose = composeInfo is { } found && GitSource.PreferCompose(found, detection.Kind != ProjectKind.Unknown);
+            customDockerfile = detection.Dockerfile ?? DockerfileTemplates.Starter;
+            var root = Store.SourceOf(staged);
+            var folder = a.Dir.Length == 0 ? root : Path.Combine(root, a.Dir.Replace('/', Path.DirectorySeparatorChar));
+            await PlanWithRailpackAsync(root, a.Dir, folder);
+            customize = detection!.Kind == ProjectKind.Unknown && !useCompose;
+            analyzedDir = a.Dir;
+            await PrefillAsync();
+            await OnStage.InvokeAsync(NewAppStep.Configure);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            error = ex.Message;
+            detection = null;
+        }
+        finally
+        {
+            analyzing = false;
+            // Started from the upload's end (a call from the page's script, not an event of the page): drawn by hand.
+            StateHasChanged();
+        }
+    }
+
+    private void ReadCompose(string? file)
+    {
+        composeFile = file;
+        composeInfo = file is not null && composeTexts.TryGetValue(file, out var text) ? Gitberth.Compose.ComposeFiles.Read(text) : null;
+        composeWeb = composeInfo is { Services.Count: > 0 } info ? Gitberth.Compose.ComposeFiles.PickWeb(info.Services)?.Service ?? info.Services[0].Name : "";
+    }
+
+    private async Task UseComposeAsync(bool on)
+    {
+        if (useCompose == on) return;
+        useCompose = on;
+        await PrefillAsync();
+    }
+
+    private async Task PickComposeFileAsync(string? file)
+    {
+        ReadCompose(file);
+        await PrefillAsync();
+    }
+
+    private async Task PickWebAsync(string service)
+    {
+        composeWeb = service;
+        await ComposePortsAsync();
+    }
+
+    private async Task ComposePortsAsync()
+    {
+        if (composeInfo?.Service(composeWeb) is not { } web)
+        {
+            ports = ContainerPortsDraft.ForNew([], null);
+            model.Ports = [];
+            return;
+        }
+        var port = Gitberth.Compose.ComposeFiles.WebPortOf(web);
+        var rules = new List<PortRule>();
+        foreach (var p in web.Ports.DistinctBy(p => (p.Target, p.Protocol)))
+            rules.Add(p.Published is int published
+                ? new PortRule(p.Target, p.Protocol, PortAccess.Lan, await SuggestHostPortAsync(published))
+                : new PortRule(p.Target, p.Protocol, p.Target == port ? PortAccess.Lan : PortAccess.Internal, p.Target == port ? await SuggestHostPortAsync(p.Target) : null));
+        if (port is int webPort && rules.All(r => r.ContainerPort != webPort)) rules.Insert(0, new PortRule(webPort, "tcp", PortAccess.Lan, await SuggestHostPortAsync(webPort)));
+        ports = ContainerPortsDraft.ForNew(rules.OrderBy(r => r.ContainerPort == port ? 0 : 1).ToList(), port);
+        model.Ports = ports.ToPortRows().ToList();
+    }
+
+    private async Task CardPortsAsync()
+    {
+        var rules = new List<PortRule>();
+        if (detection!.ContainerPort is int port) rules.Add(new PortRule(port, "tcp", PortAccess.Lan, await SuggestHostPortAsync(port)));
+        ports = ContainerPortsDraft.ForNew(rules, detection.ContainerPort);
+        model.Ports = ports.ToPortRows().ToList();
+    }
+
+    private async Task PrefillAsync()
+    {
+        var name = !string.IsNullOrWhiteSpace(model.Name) ? model.Name
+            : subdir is { Length: > 0 } sub ? $"{staged!.AppName}-{sub.Split('/')[^1]}" : staged!.AppName;
+        model = new AppSettingsModel { Name = name, RestartPolicy = model.RestartPolicy, AutoDeploy = false };
+        (portProblems, triedCreate) = ([], false);
+        await ChooseNameAsync();
+        if (useCompose && composeInfo is { } compose)
+        {
+            await ComposePortsAsync();
+            foreach (var v in compose.Variables)
+                model.Env.Add(new EnvRow
+                {
+                    Key = v.Name, Value = "", IsSecret = Security.Masking.IsSecret(v.Name, ""),
+                    Hint = v.Default is { Length: > 0 } d ? $"{composeFile} uses {d} when it's empty" : v.Required ? $"{composeFile} needs it" : $"Used by {composeFile}",
+                });
+            return;
+        }
+        await CardPortsAsync();
+        foreach (var s in detection!.EnvSuggestions)
+            model.Env.Add(new EnvRow { Key = s.Key, Value = s.Value, IsSecret = s.IsSecret && !EnvRules.IsRailpackKey(s.Key), BuildTime = s.BuildTime, Hint = s.Source });
+    }
+
+    // ---- The name, the ports ----
+
+    private string Slug => networkNameFor == model.Name && networkName is { } chosen ? chosen.Slug
+        : AppService.Slugify(model.Name) is { Length: > 0 } slug ? slug : "app";
+
+    private string? NameHelp => AppService.Slugify(model.Name).Length == 0 ? null
+        : networkNameFor == model.Name && networkName is { Taken: { } taken } ? $"Network name {Slug} ({taken}) · container {ContainerShown}"
+        : $"Network name {Slug} · container {ContainerShown}";
+
+    private string ContainerShown => useCompose && composeWeb.Length > 0 ? Gitberth.Compose.ComposeNames.Member(Slug, composeWeb) : $"gb-{Slug}";
+
+    private async Task SetNameAsync(string? name)
+    {
+        model.Name = name ?? "";
+        await ChooseNameAsync();
+    }
+
+    private async Task ChooseNameAsync()
+    {
+        var name = model.Name;
+        if (AppService.Slugify(name).Length == 0) return;
+        try
+        {
+            var chosen = await Apps.ChooseSlugAsync(name);
+            if (name == model.Name) (networkName, networkNameFor) = (chosen, name);
+        }
+        catch (Exception)
+        {
+            if (name == model.Name) (networkName, networkNameFor) = (null, null);
+        }
+    }
+
+    private void AddPort() => ports.Rows.Add(ports.NewRow());
+
+    private void PortsChanged()
+    {
+        model.Ports = ports.ToPortRows().ToList();
+        if (triedCreate) portProblems = PortRules.Check(model.Ports, PortContext.None);
+    }
+
+    private string? AfterDeploy() =>
+        ports.Web is { } web && ContainerPortAddress.Of(web, lanHost, Slug, named: true, database: false) is { } address
+            ? web.Access == PortAccess.Internal ? $"{address.Text} inside Docker" : $"{address.Text} {(web.Access == PortAccess.HostOnly ? "on the host only" : "on the LAN")}"
+            : null;
+
+    private async Task<int?> SuggestHostPortAsync(int port)
+    {
+        try
+        {
+            return await Apps.SuggestHostPortAsync(port, "tcp", null, []);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    // ---- Deploy ----
+
+    private async Task CreateAsync()
+    {
+        if (staged is null || detection is null) return;
+        if (Store.Find(staged.Id) is null)
+        {
+            errors = ["The upload waited too long and was let go of. Upload it again."];
+            return;
+        }
+        if (!customize && !useCompose && !detection.CanBuild)
+        {
+            errors = [UploadApps.CantTell(detection)];
+            return;
+        }
+        if (!customize && RailpackRefusal is { } refusal)
+        {
+            errors = [refusal];
+            return;
+        }
+        model.Branch = "main";
+        model.AutoDeploy = false;
+        model.Subdirectory = analyzedDir is { Length: > 0 } dir ? dir : null;
+        model.ProjectHint = projectHint;
+        model.DockerfileMode = customize && !useCompose ? DockerfileMode.Custom : railpackOn && !useCompose ? DockerfileMode.Railpack : DockerfileMode.Auto;
+        model.CustomDockerfile = customize && !useCompose ? customDockerfile : null;
+        model.Ports = ports.ToPortRows().ToList();
+        (model.ComposeFile, model.WebService) = useCompose ? (composeFile, composeWeb) : (null, null);
+        if (!useCompose) GitSource.SetLimits(model, resources);
+        creating = true;
+        try
+        {
+            triedCreate = true;
+            portProblems = await Apps.ValidatePortsAsync(null, model.Ports);
+            var all = await Apps.ValidateAsync(null, model);
+            errors = all.Where(e => portProblems.All(p => p.Message != e)).ToList();
+            if (errors.Count == 0 && portProblems.Count > 0) errors = ["Some ports need changing: see the Ports table."];
+            if (useCompose && Gitberth.Compose.ComposeApps.Problems(composeTexts.GetValueOrDefault(composeFile ?? "") ?? "", composeWeb) is { Count: > 0 } composeProblems)
+            {
+                errors.AddRange(composeProblems);
+                return;
+            }
+            if (all.Count > 0 || portProblems.Count > 0) return;
+            var (appId, _) = await Uploads.CreateAsync(staged, model, customize && !useCompose ? gitberthDetection ?? detection : detection);
+            staged = null;
+            Nav.NavigateTo($"apps/{Uri.EscapeDataString(await Catalog.KeyForIdAsync(appId) ?? $"gb-{Slug}")}");
+        }
+        catch (Exception ex)
+        {
+            errors = [ex.Message];
+        }
+        finally
+        {
+            creating = false;
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        disposed = true;
+        self?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

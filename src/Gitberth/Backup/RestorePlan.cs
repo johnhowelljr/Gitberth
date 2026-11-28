@@ -89,6 +89,7 @@ public static class RestorePlanner
         var steps = new List<PlannedStep> { new("check", "Check the whole file", 1) };
         steps.AddRange(m.Networks.Select(n => new PlannedStep("network:" + n.Name, "Network " + n.Name, 1)));
         steps.AddRange(m.Volumes.Select(v => new PlannedStep("volume:" + v.Name, "Volume " + v.Name, 1)));
+        steps.AddRange(m.HostFolders.Where(f => f.Part is not null).Select(f => new PlannedStep(HostFolders.ItemId(f.Path), "Host folder " + f.Path, 1)));
         foreach (var image in m.Images)
             steps.Add(image.Part is not null
                 ? new PlannedStep("image:" + image.Id, "Image " + (image.Tags.FirstOrDefault() ?? image.Id), 1)

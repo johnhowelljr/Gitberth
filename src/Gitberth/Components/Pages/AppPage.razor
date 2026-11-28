@@ -114,15 +114,21 @@ else
         case "activity":
             <AppActivityTab View="view" Changed="ReloadAsync" />
             break;
+        case "terminal":
+            <AppTerminalTab View="view" Services="ComposeServices" />
+            break;
+        case "files":
+            <AppFilesTab View="view" Services="ComposeServices" />
+            break;
         default:
             <AppOverviewTab View="view" Health="Health" Settings="settings" OnConnect="ConnectAsync" HostMemory="@Stats.Current.Host?.MemoryBytes"
-                            Update="update" Checking="checking" Busy="busy" OnCheck="() => CheckUpdateAsync(quiet: true)" OnRollBack="RollBackAsync" />
+                            Update="update" Checking="checking" Busy="busy" OnCheck="() => CheckUpdateAsync(quiet: true)" OnRollBack="RollBackAsync" Changed="ReloadAsync" />
             break;
     }
 }
 
 @code {
-    private static readonly string[] TabKeys = ["overview", "environment", "network", "previews", "settings", "logs", "activity"];
+    private static readonly string[] TabKeys = ["overview", "environment", "network", "previews", "settings", "logs", "terminal", "files", "activity"];
 
     [Parameter] public string Key { get; set; } = "";
     [Parameter] public string? Tab { get; set; }
@@ -181,6 +187,7 @@ else
         // A preview's settings and variables are its parent's: it has neither tab.
         "environment" or "settings" when IsPreview => "overview",
         "previews" when !HasPreviews => "overview",
+        "terminal" or "files" when !HasWorkbench => "overview",
         { } t when TabKeys.Contains(t) => t,
         _ => "overview",
     };
@@ -189,6 +196,9 @@ else
 
     // A Git app's Previews tab (a preview has no previews of its own).
     private bool HasPreviews => view is { Summary.Source: AppSource.Git, Row: { IsPreview: false } };
+
+    // The Terminal and Files tabs (B3): every app but Gitberth's own containers (itself, its tunnel, its helpers).
+    private bool HasWorkbench => view is not null && Gitberth.Workbench.TerminalSessions.Offered(view.Summary);
 
     private string BaseHref => "apps/" + Uri.EscapeDataString(view?.Summary.Key ?? Key);
 
@@ -206,6 +216,11 @@ else
         .. HasPreviews ? new TabItem[] { new("previews", "Previews", Icons.Material.Outlined.Preview, $"{BaseHref}/previews", Tip: "app.tab.previews") } : [],
         .. IsPreview ? [] : new TabItem[] { new("settings", "Settings", Icons.Material.Outlined.Tune, $"{BaseHref}/settings", SettingsChanges, Tip: "app.tab.settings") },
         new("logs", "Logs", Icons.Material.Outlined.Article, $"{BaseHref}/logs", Tip: "app.tab.logs"),
+        .. HasWorkbench ? new TabItem[]
+        {
+            new("terminal", "Terminal", Icons.Material.Outlined.Terminal, $"{BaseHref}/terminal", Short: "Shell", Tip: "terminal.tab"),
+            new("files", "Files", Icons.Material.Outlined.FolderOpen, $"{BaseHref}/files", Tip: "files.tab"),
+        } : [],
         new("activity", "Activity", Icons.Material.Outlined.History, $"{BaseHref}/activity", Tip: "app.tab.activity"),
     ];
 
@@ -398,6 +413,27 @@ else
             @if (r.ComposeFile is { } composeFile)
             {
                 <span class="gb-tag gb-tag--outline" data-tip="app.hero.compose"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @composeFile</span>
+            }
+        }
+        else if (view?.Row is { Source: AppSource.Upload } uploaded)
+        {
+            @* An uploaded folder: what it came as, and the upload it runs (its "commit"). *@
+            <span data-tip="upload.hero"><SvgIcon Icon="@Icons.Material.Outlined.DriveFolderUpload" />Uploaded folder</span>
+            @if (uploaded.UploadName is { } uploadName)
+            {
+                <span class="gb-mono gb-ellipsis" style="max-width:260px" data-tip-text="@uploadName">@uploadName</span>
+            }
+            @if (uploaded.UploadSize is long uploadSize)
+            {
+                <span>@Gitberth.Sources.UploadArchives.Size(uploadSize)@(uploaded.UploadedAt is { } uploadedAt ? $" · {Format.Ago(uploadedAt)}" : "")</span>
+            }
+            @if (uploaded.CurrentCommit is { Length: >= 7 } upSha)
+            {
+                <span data-tip="upload.hero-sha" data-tip-detail="@upSha"><SvgIcon Icon="@Icons.Material.Outlined.Commit" /><span class="gb-mono">@upSha[..7]</span></span>
+            }
+            @if (uploaded.ComposeFile is { } upCompose)
+            {
+                <span class="gb-tag gb-tag--outline" data-tip="app.hero.compose"><SvgIcon Icon="@Icons.Material.Outlined.AccountTree" />Compose: @upCompose</span>
             }
         }
         else if (view?.Row is { Source: AppSource.Compose } inline)
@@ -754,6 +790,9 @@ else
         (AppState.Missing, AppSource.Compose) when lastImage => "Gitberth still has its Compose file and its last release. Start brings its services up again from that release.",
         (AppState.Missing, AppSource.Compose) => "Gitberth still has its Compose file. Start deploys it again.",
         (_, AppSource.Compose) => "Start it to deploy it.",
+        (AppState.Missing, AppSource.Upload) when lastImage => "Gitberth still has its settings and its last image. Start makes its container again from that image, without a build.",
+        (AppState.Missing, AppSource.Upload) => "Gitberth still has its settings, but its last image isn't on this host any more. Start builds its newest upload again and deploys it.",
+        (_, AppSource.Upload) => "Start it to deploy it.",
         (AppState.Missing, AppSource.Existing) => $"{app.Container} was removed outside Gitberth. Gitberth kept its record (its name, ports and domains); forget it if it's gone for good.",
         (AppState.Missing, _) => "Gitberth still has its settings. Create it again makes the container from them; Forget drops the record.",
         (_, AppSource.Git) => "Start it to deploy it.",
@@ -879,7 +918,7 @@ else
                     {
                         <Btn Icon="@Icons.Material.Outlined.CloudDownload" OnClick="PullAsync" Busy="@(pull is not null)" Tip="app.apply.pull">@(pull is { } p ? PullWords(p) : "Pull it")</Btn>
                     }
-                    @if (view?.Summary.Source == AppSource.Git && settings?.Access.ViaDeploy == true && plan is { Change: null, Blocked: null } && plan.Lines.Any(l => l.How is ApplyKind.Deploy or ApplyKind.Rebuild))
+                    @if (view?.Summary.Source is AppSource.Git or AppSource.Upload && settings?.Access.ViaDeploy == true && plan is { Change: null, Blocked: null } && plan.Lines.Any(l => l.How is ApplyKind.Deploy or ApplyKind.Rebuild))
                     {
                         <Btn Kind="BtnKind.Ghost" OnClick="() => ApplyAsync(ApplyTiming.NextDeploy)" Disabled="busy" Tip="app.apply.save-later">Save for next deploy</Btn>
                     }

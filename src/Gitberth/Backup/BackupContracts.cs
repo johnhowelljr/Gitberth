@@ -24,6 +24,12 @@ public enum BackupItemKind
 
     /// <summary>An image that's only on this host (no registry has it): saved whole so its apps can come back.</summary>
     Image,
+
+    /// <summary>
+    /// A folder of the host a container bind-mounts (never Docker's socket, the system's folders or Gitberth's own data):
+    /// its files, copied through a helper that mounts it read-only while what uses it is paused for that moment.
+    /// </summary>
+    HostFolder,
 }
 
 /// <summary>

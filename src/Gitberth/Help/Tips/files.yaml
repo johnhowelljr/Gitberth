@@ -1,0 +1,108 @@
+# Tips for an app's Files tab (B3): Components/Apps/AppFilesTab.razor, its name dialog (FileNameDialog.razor) and its tab
+# on the app's page. See Help/TipCatalog.cs.
+
+files.tab:
+  title: Files
+  text: >-
+    The app's volumes and host folders: browse them, download and upload files, rename, delete, and edit small text
+    files.
+  more: guides/terminal-and-files#the-files-tab
+
+files.card:
+  title: Files
+  text: >-
+    One volume or host folder of the container named here, read through a helper container of Gitberth's own image.
+    Nothing runs in the app's container.
+  more: guides/terminal-and-files#browse-a-volume
+
+files.service:
+  title: Service
+  text: >-
+    The Compose service whose volumes and host folders are listed.
+  more: guides/terminal-and-files#browse-a-volume
+
+files.mount:
+  title: Volume
+  text: >-
+    Where the container has it, and what it is: a named volume, or a folder of the host. Docker's socket and Gitberth's
+    own data are never listed.
+  more: guides/terminal-and-files#whats-never-offered
+
+files.refresh:
+  title: Refresh
+  text: >-
+    Reads the folder again, for what the app changed since.
+  more: guides/terminal-and-files#browse-a-volume
+
+files.download-folder:
+  title: Download folder
+  text: >-
+    Downloads the folder, with everything in it, as a .tar.gz.
+  more: guides/terminal-and-files#download-upload-and-change-files
+
+files.new-folder:
+  title: New folder
+  text: >-
+    Makes a folder here, owned like the folder it's in.
+  more: guides/terminal-and-files#download-upload-and-change-files
+
+files.mode:
+  title: Mode
+  text: >-
+    Who may read, write and run it, in octal as chmod writes it: 0644 is read and write for its owner, read for the
+    others.
+  more: guides/terminal-and-files#browse-a-volume
+
+files.owner:
+  title: Owner
+  text: >-
+    Its owner's and group's numbers (uid:gid), as the container's users have them.
+  more: guides/terminal-and-files#browse-a-volume
+
+files.download:
+  title: Download
+  text: >-
+    Downloads the file as it is.
+  more: guides/terminal-and-files#download-upload-and-change-files
+
+files.edit:
+  title: Edit
+  text: >-
+    Opens a text file of up to 1 MiB below the list, to change and save. It keeps its owner and mode.
+  more: guides/terminal-and-files#edit-a-text-file
+
+files.rename:
+  title: Rename
+  text: >-
+    Gives it another name in the same folder. A name that's taken is refused.
+  more: guides/terminal-and-files#download-upload-and-change-files
+
+files.delete:
+  title: Delete
+  text: >-
+    Deletes it, after asking. There's no bin: it's gone for good.
+  more: guides/terminal-and-files#download-upload-and-change-files
+
+files.upload:
+  title: Upload files
+  text: >-
+    Drop files here, or choose them: they go into the folder shown, owned like it, and replace a file of the same name.
+  more: guides/terminal-and-files#download-upload-and-change-files
+
+files.choose:
+  title: Choose files
+  text: >-
+    Picks files on this computer to upload into the folder shown.
+  more: guides/terminal-and-files#download-upload-and-change-files
+
+files.save:
+  title: Save
+  text: >-
+    Writes the file back, with its owner and mode as they were.
+  more: guides/terminal-and-files#edit-a-text-file
+
+files.name:
+  title: Name
+  text: >-
+    A file's or folder's name: no / in it, and not . or .., up to 255 bytes.
+  more: guides/terminal-and-files#download-upload-and-change-files

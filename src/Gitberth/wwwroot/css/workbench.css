@@ -1,0 +1,112 @@
+/* Builder B's app tools: New app's Upload a folder and an app's Upload card (B6), release and scheduled commands (B2), the
+   Terminal and Files tabs and config files (B3). Built from the design system's tokens. */
+
+/* ---------- The source cards: six of them now ---------- */
+
+@media (min-width: 1181px) {
+    .gb-srcgrid--6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (min-width: 901px) and (max-width: 1180px) {
+    .gb-srcgrid--6 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ---------- A drop zone: a folder or an archive dropped, or chosen with its buttons ---------- */
+
+.gb-dropzone {
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center;
+    padding: 26px 18px; border: 1.5px dashed var(--gb-line-3); border-radius: var(--gb-r-lg); background: var(--gb-inset);
+    color: var(--gb-text-2); transition: border-color var(--gb-t) var(--gb-ease), background var(--gb-t) var(--gb-ease);
+}
+.gb-dropzone--small { padding: 16px 14px; gap: 8px; }
+.gb-dropzone--over { border-color: var(--gb-accent-line); background: var(--gb-accent-soft); color: var(--gb-text-1); }
+.gb-dropzone--busy { border-style: solid; }
+.gb-dropzone-ic { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--gb-surface-3); color: var(--gb-accent-text); }
+.gb-dropzone-ic svg { width: 21px; height: 21px; }
+.gb-dropzone-t { font-weight: 600; font-size: 14px; color: var(--gb-text-1); }
+.gb-dropzone-s { font-size: 12.5px; color: var(--gb-text-3); max-width: 560px; }
+.gb-dropzone-btns { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.gb-dropzone .gb-progress { width: min(420px, 100%); }
+
+/* What came: its name, size and files, on one line. */
+.gb-upl-made { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13.5px; }
+.gb-upl-made .gb-mono { font-weight: 600; }
+
+/* An uploaded app's source card: what it runs, what Deploy builds, and the curl line. */
+.gb-upl-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; font-size: 13px; margin: 0; }
+.gb-upl-facts dt { color: var(--gb-text-3); }
+.gb-upl-facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+
+/* ---------- Scheduled commands (B2): one row per command, its last runs and their output under it ---------- */
+
+.gb-jobrow { align-items: start; gap: 12px; }
+.gb-jobrow-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; }
+.gb-jobrow-name { font-size: 13.5px; color: var(--gb-text-1); overflow-wrap: anywhere; }
+.gb-jobrow-cmd { font-size: 12.5px; color: var(--gb-text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gb-jobrow-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.gb-iconbtn.on { background: var(--gb-surface-3); color: var(--gb-text-1); }
+.gb-jobruns { display: flex; flex-direction: column; gap: 10px; padding: 4px 18px 16px; border-bottom: 1px solid var(--gb-line-1); }
+.gb-jobruns-list { display: flex; flex-direction: column; max-height: 220px; overflow: auto; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); }
+.gb-jobrun {
+    display: grid; grid-template-columns: 112px 74px 56px minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px 10px;
+    border: 0; border-bottom: 1px solid var(--gb-line-1); background: transparent; color: inherit; font: inherit; font-size: 12.5px;
+    text-align: left; cursor: pointer;
+}
+.gb-jobrun:last-child { border-bottom: 0; }
+.gb-jobrun:hover { background: var(--gb-surface-2); }
+.gb-jobrun.on { background: var(--gb-accent-soft); }
+.gb-jobruns .gb-output { max-height: 280px; }
+
+/* ---------- The terminal (B3): xterm.js on the inset colour, a bar of choices above it ---------- */
+
+.gb-term-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--gb-line-1); }
+.gb-term-wrap { position: relative; }
+.gb-term { position: relative; height: min(62vh, 640px); min-height: 280px; padding: 8px 10px; background: var(--gb-inset); overflow: hidden; }
+.gb-term-hint { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; color: var(--gb-text-3); font-size: 13px; pointer-events: none; }
+.gb-term .xterm { height: 100%; }
+.gb-term .xterm-viewport { background: transparent !important; }
+
+/* ---------- An app's files (B3): the volume, the path, a table of entries, the drop zone and the editor ---------- */
+
+.gb-files-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--gb-line-1); }
+.gb-files-mount { min-width: 260px; max-width: 100%; }
+.gb-files-path { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 10px 18px; }
+.gb-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; font: 13px var(--gb-mono); }
+.gb-crumb { border: 0; background: transparent; color: var(--gb-accent-text); font: inherit; padding: 2px 4px; border-radius: var(--gb-r-xs); cursor: pointer; }
+.gb-crumb:hover { background: var(--gb-hover); }
+.gb-crumb-sep { color: var(--gb-text-4); }
+.gb-files { display: flex; flex-direction: column; border-top: 1px solid var(--gb-line-1); }
+.gb-files-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) 86px 96px 58px 76px 132px; align-items: center; gap: 10px;
+    padding: 6px 18px; border-bottom: 1px solid var(--gb-line-1); font-size: 13px; min-height: 38px;
+}
+.gb-files-row:hover:not(.gb-files-head) { background: var(--gb-hover); }
+.gb-files-head { min-height: 32px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--gb-text-3); }
+.gb-files-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.gb-files-name svg { flex-shrink: 0; color: var(--gb-text-3); }
+.gb-linkbtn { border: 0; background: transparent; color: var(--gb-text-1); font: inherit; padding: 0; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gb-linkbtn:hover { color: var(--gb-accent-text); text-decoration: underline; }
+.gb-files-actions { display: flex; justify-content: flex-end; gap: 2px; }
+.gb-files-empty { padding: 16px 18px; color: var(--gb-text-3); font-size: 13px; }
+.gb-files-drop { margin: 14px 18px; }
+.gb-files-editor { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px 18px; border-top: 1px solid var(--gb-line-1); }
+.gb-files-editor textarea { min-height: 280px; resize: vertical; }
+
+/* ---------- Config files (B3): one row each, and the editor under them ---------- */
+
+.gb-cfgs { display: flex; flex-direction: column; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); }
+.gb-cfg { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--gb-line-1); font-size: 13px; }
+.gb-cfg:last-child { border-bottom: 0; }
+.gb-cfg > svg { color: var(--gb-text-3); flex-shrink: 0; }
+.gb-cfg-path { min-width: 0; max-width: 46ch; color: var(--gb-text-1); }
+.gb-cfg-editor { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--gb-line-2); border-radius: var(--gb-r-md); background: var(--gb-surface-2); }
+.gb-cfg-editor textarea { min-height: 220px; resize: vertical; }
+
+@media (max-width: 900px) {
+    .gb-dropzone { padding: 20px 12px; }
+    .gb-files-row { grid-template-columns: minmax(0, 1fr) 70px 112px; }
+    .gb-files-row > :nth-child(3), .gb-files-row > :nth-child(4), .gb-files-row > :nth-child(5) { display: none; }
+    .gb-term { height: 56vh; }
+    .gb-jobrow { flex-wrap: wrap; }
+    .gb-jobrun { grid-template-columns: 104px minmax(0, 1fr) auto; }
+    .gb-jobrun > :last-child { display: none; }
+}

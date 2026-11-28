@@ -1,6 +1,7 @@
 @using Gitberth.Backup
 @inject IBackupService Backup
 @inject IRestoreService Restore
+@inject AutoBackups Auto
 @inject IJSRuntime JS
 @inject IDialogService Dialogs
 @inject NavigationManager Nav
@@ -102,6 +103,46 @@
             @if (uploadError is { } failed && !uploading && uploadedBytes is null)
             {
                 <Banner Tone="critical" Title="Not uploaded" OnDismiss="() => uploadError = null">@failed</Banner>
+            }
+            @* ---- builder A: one of the automatic backups, fetched from their destination into the upload. ---- *@
+            @if (!uploading && uploadedBytes is null && autoWhere is { } where)
+            {
+                <div class="gb-stack" id="ab-restore" style="gap:8px">
+                    <div class="gb-row gb-row--wrap" style="justify-content:space-between">
+                        <span class="gb-help">Or restore one of the automatic backups at @where.<Tip Key="settings.backup.auto-restore" /></span>
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.List" OnClick="ListAutoAsync" Busy="listingAuto" Disabled="@(Auto.Fetching is not null)"
+                             Tip="settings.backup.auto-list">List them</Btn>
+                    </div>
+                    @if (autoError is { } autoFailed)
+                    {
+                        <Banner Tone="critical" Title="The automatic backups couldn't be read" OnDismiss="() => autoError = null">@autoFailed</Banner>
+                    }
+                    @if (Auto.Fetching is { } fetching)
+                    {
+                        <div class="gb-progress"><i style="width:@((BackupText.UploadFraction(fetching.Bytes, fetching.Total) * 100).ToString("0.#", CultureInfo.InvariantCulture))%"></i></div>
+                        <span class="gb-help" role="status">@AutoBackupView.Fetching(fetching.Name, fetching.Bytes, fetching.Total)</span>
+                    }
+                    else if (autoFiles is { } files)
+                    {
+                        @if (files.Count == 0)
+                        {
+                            <p class="gb-help" id="ab-none">There are none there yet.</p>
+                        }
+                        else
+                        {
+                            <ul class="gb-ab-runs" id="ab-files" aria-label="The automatic backups at the destination">
+                                @foreach (var f in files)
+                                {
+                                    <li class="gb-ab-file" data-file="@f.Name" @key="f.Name">
+                                        <span class="gb-grow">@AutoBackupView.File(f, autoKey, TimeProvider.System.LocalTimeZone)</span>
+                                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.Restore" OnClick="() => UseAutoAsync(f)" Label="@($"Use the backup of {AutoBackupView.When(f.SavedAt, TimeProvider.System.LocalTimeZone)}")"
+                                             Tip="settings.backup.auto-use">Use this one</Btn>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    }
+                </div>
             }
         }
         @if (cantRestore is not null || (!uploading && uploadedBytes is null))
@@ -223,14 +264,84 @@
     protected override async Task OnInitializedAsync()
     {
         ReadRestore();
+        await ReadAutoAsync();
+        Auto.Changed += OnAutoChanged;
         await ReadItemsAsync(first: true);
         timer = new Timer(_ => Tick(), null, 1000, 1000);
     }
 
     public void Dispose()
     {
+        Auto.Changed -= OnAutoChanged;
         timer?.Dispose();
         self?.Dispose();
+    }
+
+    // ---- builder A: restore from automatic backups ----
+    private string? autoWhere, autoKey, autoError;
+    private IReadOnlyList<RemoteBackup>? autoFiles;
+    private bool listingAuto;
+
+    // Where automatic backups go, once one is set; the key set now, to mark its files.
+    private async Task ReadAutoAsync()
+    {
+        try
+        {
+            var config = await Auto.ConfigAsync();
+            var set = config.Where switch
+            {
+                AutoDestinationKind.Folder => !string.IsNullOrWhiteSpace(config.Folder),
+                AutoDestinationKind.Smb => !string.IsNullOrWhiteSpace(config.SmbShare),
+                AutoDestinationKind.Ftp => !string.IsNullOrWhiteSpace(config.FtpAddress),
+                _ => !string.IsNullOrWhiteSpace(config.S3Bucket),
+            };
+            (autoWhere, autoKey) = (set ? AutoDestinations.Describe(config) : null, config.Key?.ShortId);
+        }
+        catch (Exception)
+        {
+            autoWhere = null;
+        }
+    }
+
+    private void OnAutoChanged() => _ = InvokeAsync(async () =>
+    {
+        await ReadAutoAsync();
+        StateHasChanged();
+    });
+
+    private async Task ListAutoAsync()
+    {
+        (listingAuto, autoError) = (true, null);
+        try
+        {
+            autoFiles = await Auto.ListAsync();
+        }
+        catch (Exception ex)
+        {
+            autoError = ex.Message;
+        }
+        finally
+        {
+            listingAuto = false;
+        }
+    }
+
+    // Use this one: fetched into the upload, then the usual Open the file.
+    private async Task UseAutoAsync(RemoteBackup file)
+    {
+        (autoError, uploadError, checkError, summary) = (null, null, null, null);
+        try
+        {
+            await Auto.FetchAsync(file.Name, file.Bytes);
+            fileName = file.Name;
+            autoFiles = null;
+            ReadRestore();
+        }
+        catch (Exception ex)
+        {
+            autoError = ex.Message;
+            ReadRestore();
+        }
     }
 
     private void ReadRestore()
@@ -255,7 +366,12 @@
         {
             var read = await Backup.ItemsAsync();
             if (first || items is null) ticked = BackupText.Defaults(read);
-            else foreach (var item in read.Where(i => items.All(o => o.Id != i.Id) && (i.Included || i.Required))) ticked.Add(item.Id);
+            else
+            {
+                foreach (var item in read.Where(i => items.All(o => o.Id != i.Id) && (i.Included || i.Required))) ticked.Add(item.Id);
+                // A host folder measured since, and found big, isn't saved unless someone ticked it.
+                foreach (var item in read.Where(i => !i.Included && !touched.Contains(i.Id) && items.Any(o => o.Id == i.Id && o.Included))) ticked.Remove(item.Id);
+            }
             items = read;
             readProblem = null;
             measuring = read.Any(i => i.Bytes is null && BackupText.Measured(i.Kind)) ? measuring + 1 : 0;
@@ -332,6 +448,7 @@
         BackupItemKind.Volume => Icons.Material.Outlined.Storage,
         BackupItemKind.Database => GitberthIcons.Database,
         BackupItemKind.Image => Icons.Material.Outlined.Layers,
+        BackupItemKind.HostFolder => Icons.Material.Outlined.FolderOpen,
         _ => Icons.Material.Outlined.ViewInAr,
     };
 
@@ -386,8 +503,12 @@
         }
     </li>;
 
+    // The items someone ticked or unticked: a size measured later doesn't change them.
+    private readonly HashSet<string> touched = new(StringComparer.Ordinal);
+
     private void Toggle(BackupItem item, bool on)
     {
+        touched.Add(item.Id);
         if (items is not null) ticked = BackupText.Toggle(items, ticked, item.Id, on);
     }
 

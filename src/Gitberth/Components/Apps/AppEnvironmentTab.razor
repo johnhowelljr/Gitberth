@@ -27,10 +27,12 @@ else
     var fromImage = Draft.Env.Where(r => r.Original?.FromImage == true).ToList();
     var imageOpen = showImage || fromImage.Any(r => r.Changed);
     var git = View.Summary.Source == AppSource.Git;
+    // An uploaded folder is built as a Git app is: its variables can go to the build; it has no previews, so no scopes.
+    var built = git || View.Summary.Source == AppSource.Upload;
     var compose = View.Row?.IsCompose == true;
     <SectionCard Title="Environment" Icon="@Icons.Material.Outlined.Key" Id="sec-env" Tip="app.env"
                  Sub="@(compose ? $"What the Compose file's ${{…}} are filled with, also written to its .env for env_file: .env; build-time ones go to its builds too.{(git ? " Each is for every deploy, for production, or for previews." : "")}"
-                     : git ? "Passed to the container when it starts; build-time ones to the build too. Each is for every deploy, for production, or for previews." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
+                     : git ? "Passed to the container when it starts; build-time ones to the build too. Each is for every deploy, for production, or for previews." : built ? "Passed to the container when it starts; build-time ones to the build too." : "Variables set on the container. Secret values stay masked; Copy copies the real one.")">
         <Actions>
             @if (Draft.EnvChanged)
             {
@@ -50,7 +52,7 @@ else
                 }
                 @foreach (var row in own)
                 {
-                    @Row(row, git)
+                    @Row(row, built, git)
                 }
                 @if (fromImage.Count > 0)
                 {
@@ -63,7 +65,7 @@ else
                     {
                         @foreach (var row in fromImage)
                         {
-                            @Row(row, git)
+                            @Row(row, built, git)
                         }
                     }
                 }
@@ -253,7 +255,9 @@ else
             ? copy[..copy.IndexOf("VERCEL_", StringComparison.Ordinal)]
             : null;
 
-    private RenderFragment Row(EnvRowDraft row, bool git) => __builder =>
+    /// <param name="git">It's built (a Git app's, an uploaded one's): build-time variables, and Railpack's rules.</param>
+    /// <param name="scoped">A Git app's: each variable is for every deploy, production's, or previews'.</param>
+    private RenderFragment Row(EnvRowDraft row, bool git, bool scoped) => __builder =>
     {
         // A Git app's RAILPACK_ variable configures Railpack's build, so it's always build-time (the model's rule), and
         // never secret: Railpack writes it into its plan and the image (RailpackSettings).
@@ -302,7 +306,7 @@ else
                 {
                     <span class="gb-tag gb-tag--accent" data-tip="app.env.build-time">Build time</span>
                 }
-                @if (git && row.Scope != EnvScope.All)
+                @if (scoped && row.Scope != EnvScope.All)
                 {
                     <span class="gb-tag gb-tag--outline" data-tip="app.env.scope" data-tip-detail="@ScopeTitle(row.Scope)">@EnvScopes.Label(row.Scope)</span>
                 }
@@ -328,7 +332,7 @@ else
                 }
             </span>
             <span class="gb-envrow-actions" role="cell">
-                @if (git && !row.Removed && !ReadOnly && row.Original?.FromImage != true)
+                @if (scoped && !row.Removed && !ReadOnly && row.Original?.FromImage != true)
                 {
                     <select class="gb-input gb-input--sm" style="width:auto;margin-right:4px" aria-label="@($"Which deploys get {row.Key}")" data-tip-text="Which deploys get it"
                             value="@row.Scope" @onchange="e => SetScope(row, e.Value?.ToString())">
@@ -392,7 +396,7 @@ else
         return Changed.InvokeAsync();
     }
 
-    private bool IsGitApp => View.Summary.Source == AppSource.Git;
+    private bool IsGitApp => View.Summary.Source is AppSource.Git or AppSource.Upload;
 
     private Task SetValue(EnvRowDraft row, string? value)
     {

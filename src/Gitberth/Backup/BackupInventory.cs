@@ -44,6 +44,9 @@ internal sealed class BackupInventory
     /// <summary>The networks the saved containers are on, as Docker lists them.</summary>
     public List<SavedNetwork> Networks { get; } = [];
 
+    /// <summary>Every host folder that can be saved, by path, with its item ("folder:/srv/photos").</summary>
+    public Dictionary<string, (SavedHostFolder Folder, string Item)> Folders { get; } = new(StringComparer.Ordinal);
+
     /// <summary>Every container's state now, by name (running, paused…), the ones not saved too.</summary>
     public Dictionary<string, JsonObject> Inspects { get; } = new(StringComparer.Ordinal);
 
@@ -51,8 +54,10 @@ internal sealed class BackupInventory
 
     /// <summary>Reads the host and Gitberth's rows. <paramref name="sizes"/> is each volume's size when known.</summary>
     /// <param name="registryDigest">Whether a registry has a reference, and its digest (null: none has it); asked only of images nothing else places.</param>
+    /// <param name="folders">What a helper found at each bind source (a folder and its size); a source not in it is listed, its size unknown.</param>
     public static async Task<BackupInventory> ReadAsync(IBackupEngine engine, IDbContextFactory<GitberthDb> dbFactory, GitberthOptions options,
-        IReadOnlyDictionary<string, long> sizes, long? dataBytes, CancellationToken ct, Func<string, CancellationToken, Task<string?>>? registryDigest = null)
+        IReadOnlyDictionary<string, long> sizes, long? dataBytes, CancellationToken ct, Func<string, CancellationToken, Task<string?>>? registryDigest = null,
+        IReadOnlyDictionary<string, HostPathInfo>? folders = null)
     {
         registryDigest ??= engine.RegistryDigestAsync;
         var inv = new BackupInventory();
@@ -201,6 +206,26 @@ internal sealed class BackupInventory
             else orphans.Add(new BackupItem(item, BackupItemKind.Volume, name, detail, bytes, false, true, null));
         }
 
+        // ---- Host folders the saved containers bind-mount: under the item of the first that does; never Docker's socket,
+        // the host's own folders or Gitberth's data. A path a helper found isn't a folder (a file, or nothing) isn't listed.
+        var ownData = inv.SelfName is { } mine ? DataSource(inv.Inspects[mine], options.DataDir) : null;
+        foreach (var (name, saved) in inv.Containers.OrderBy(c => c.Key, StringComparer.Ordinal))
+            foreach (var (path, destination) in BindSources(saved.Inspect, ownData))
+            {
+                if (folders?.GetValueOrDefault(path) is { Folder: false }) continue;
+                if (inv.Folders.TryGetValue(path, out var known))
+                {
+                    if (!known.Folder.Users.Contains(name)) known.Folder.Users.Add(name);
+                    continue;
+                }
+                var bytes = folders?.GetValueOrDefault(path)?.Bytes;
+                var record = new SavedHostFolder { Path = path, Users = [name], Bytes = bytes };
+                var item = HostFolders.ItemId(path);
+                inv.Folders[path] = (record, item);
+                Child(saved.Item, new BackupItem(item, BackupItemKind.HostFolder, path, $"host folder · {name} mounts it at {destination}", bytes, false,
+                    bytes is not > HostFolders.BigBytes, saved.Item));
+            }
+
         // ---- Database servers: one row each, under their app or container.
         foreach (var plan in inv.Databases.Values)
         {
@@ -271,6 +296,19 @@ internal sealed class BackupInventory
 
     private const string RailpackBuildKitPrefix = Railpack.RailpackRelease.BuildKitContainer;
 
+    /// <summary>A container's bind mounts that may be saved as host folders: each source (clean) and where it's mounted.</summary>
+    internal static IEnumerable<(string Path, string Destination)> BindSources(JsonObject inspect, string? ownData) =>
+        (inspect["Mounts"] as JsonArray ?? []).OfType<JsonObject>()
+            .Where(m => Str(m, "Type") == "bind" && HostFolders.Offered(Str(m, "Source"), ownData))
+            .Select(m => (HostFolders.Clean(Str(m, "Source"))!, Str(m, "Destination")));
+
+    /// <summary>Where a container's <paramref name="destination"/> comes from on the host (Gitberth's own /data, say); null when nothing is mounted there.</summary>
+    internal static string? DataSource(JsonObject inspect, string destination) =>
+        (inspect["Mounts"] as JsonArray ?? []).OfType<JsonObject>()
+            .FirstOrDefault(m => Str(m, "Destination").TrimEnd('/') == destination.TrimEnd('/')) is { } mount && Str(mount, "Source") is { Length: > 0 } source
+            ? source
+            : null;
+
     private static string AppDetail(AppDefinition app) => app.Source switch
     {
         AppSource.Git when app.IsCompose => "Compose app · " + app.RepoFullName,
@@ -279,6 +317,8 @@ internal sealed class BackupInventory
         AppSource.Registry => "Registry app · " + app.ImageRef,
         AppSource.Local => "Local image app · " + app.ImageRef,
         AppSource.Manual => "App · " + app.ImageRef,
+        // [builder B, B6]
+        AppSource.Upload => "Uploaded app · " + app.UploadName,
         _ => "Container app · " + app.ContainerName,
     };
 

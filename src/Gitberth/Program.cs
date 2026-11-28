@@ -27,6 +27,17 @@ using Microsoft.EntityFrameworkCore;
 using MudBlazor;
 using MudBlazor.Services;
 
+// ---- builder A: Gitberth's own update. --version says which version this build is (an update asks a new image when it
+// has no version label); --self-update <plan> is the updater, a container of the new version that the Gitberth being
+// replaced starts (UpdateGitberth): it swaps the containers, and nothing else of Gitberth runs in it.
+if (args is ["--version"])
+{
+    Console.WriteLine(AppVersion.Number);
+    return;
+}
+if (args is [UpdateGitberthRunner.Flag, var updatePlan])
+    Environment.Exit(await UpdateGitberthRunner.RunAsync(updatePlan));
+
 var builder = WebApplication.CreateBuilder(args);
 
 var options = GitberthOptions.FromConfiguration(builder.Configuration, builder.Environment.ContentRootPath);
@@ -223,13 +234,42 @@ builder.Services.AddSingleton<Gitberth.Backup.BackupService>();
 builder.Services.AddSingleton<Gitberth.Backup.IBackupService>(sp => sp.GetRequiredService<Gitberth.Backup.BackupService>());
 builder.Services.AddSingleton<Gitberth.Backup.RestoreService>();
 builder.Services.AddSingleton<Gitberth.Backup.IRestoreService>(sp => sp.GetRequiredService<Gitberth.Backup.RestoreService>());
+// ---- builder A: automatic backups, on a schedule, to a folder on the host, an SMB share or an S3-compatible bucket,
+// sealed to a key pair (Settings › Save and restore › Automatic backups).
+builder.Services.AddHttpClient(Gitberth.Backup.S3Client.ClientName, c => c.Timeout = TimeSpan.FromMinutes(30));
+builder.Services.AddSingleton<Gitberth.Backup.AutoDestinations>();
+builder.Services.AddSingleton<Gitberth.Backup.AutoBackups>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Gitberth.Backup.AutoBackups>());
 // Images, registries and updates (through the Engine API: pulls, /distribution and /auth; New app also reads an image's
 // config from its registry before it's pulled), and new apps from any source.
 builder.Services.AddSingleton<RegistryService>();
 builder.Services.AddSingleton<ImageService>();
 builder.Services.AddSingleton<UpdateService>();
 builder.Services.AddSingleton<IHookUpdates>(sp => sp.GetRequiredService<UpdateService>());
+// ---- builder A: Gitberth's own updates (Settings › Updates › Gitberth): its newest release every 6 hours, Update now and
+// the updater, and how the last update ended.
+builder.Services.AddSingleton<UpdateGitberth>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<UpdateGitberth>());
 builder.Services.AddSingleton<AppCreator>();
+// ---- Builder B: uploaded folders as apps (B6), release and scheduled commands (B2), terminal, files and config files (B3).
+builder.Services.AddSingleton<UploadStore>();
+builder.Services.AddSingleton<UploadApps>();
+// Release commands run before a new version takes over (the pipeline's, the change engine's); scheduled commands run on
+// their schedules. Both adopt a container Gitberth keeps nothing about yet, through the catalog, when first set.
+builder.Services.AddSingleton(sp => new Lazy<AppCatalog>(sp.GetRequiredService<AppCatalog>));
+builder.Services.AddSingleton(sp => new Gitberth.Deploy.OneOffRunner(sp.GetRequiredService<DockerCli>(), options,
+    sp.GetRequiredService<ILogger<Gitberth.Deploy.OneOffRunner>>(), sp.GetRequiredService<DockerApi>()));
+builder.Services.AddSingleton<Gitberth.Deploy.ReleaseCommands>();
+builder.Services.AddSingleton(sp => new Lazy<Gitberth.Deploy.ReleaseCommands>(sp.GetRequiredService<Gitberth.Deploy.ReleaseCommands>));
+builder.Services.AddSingleton<Gitberth.Deploy.CommandJobs>();
+builder.Services.AddHostedService<Gitberth.Deploy.CommandScheduler>();
+// An app's terminal and files in the browser, with one-time tickets for the terminal's WebSocket and the files' downloads
+// and uploads; and the config files Gitberth keeps for an app and mounts into it.
+builder.Services.AddSingleton<Gitberth.Workbench.WorkbenchTickets>(_ => new Gitberth.Workbench.WorkbenchTickets());
+builder.Services.AddSingleton<Gitberth.Workbench.TerminalSessions>();
+builder.Services.AddSingleton<Gitberth.Workbench.AppFiles>();
+builder.Services.AddSingleton<Gitberth.Workbench.ConfigFiles>();
+// ---- end of builder B's registrations.
 // Deploy hooks (1.2): secret URLs that build a Git app again or update an image app, for a CMS, a scheduled job or CI.
 builder.Services.AddSingleton<DeployHooks>();
 builder.Services.AddSingleton<DeployHookEndpoint>();
@@ -371,6 +411,8 @@ app.UseAuthorization();
 // What an API token changes is the token's in the audit log.
 app.Use(Gitberth.Agents.AgentPaths.ActorMiddleware);
 app.UseAntiforgery();
+// [builder B, B3] The terminal's WebSocket (/terminal): it checks the sign-in, its Origin and its one-time ticket itself.
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
@@ -384,6 +426,10 @@ GitLabWebhookEndpoint.Map(app);
 // Deploy hooks: anonymous too, the token in the path being the secret; every method and path under /hooks/deploy is mapped
 // for the same reason.
 DeployHookEndpoint.Map(app);
+
+// ---- builder A: whether Gitberth answers, and as which version: without signing in (an update waits for the new version's
+// answer; a health check of one's own can use it too).
+app.MapMethods("/healthz", ["GET", "HEAD"], () => Results.Json(new { status = "ok", version = AppVersion.Number, commit = AppVersion.Commit })).AllowAnonymous();
 
 // The status page on the LAN, without signing in, while it's on (a bare 404 while it's off).
 app.MapMethods("/status", ["GET", "HEAD"], (HttpContext context, Gitberth.Public.PublicPages pages) => pages.StatusAsync(context, json: false)).AllowAnonymous();
@@ -416,6 +462,12 @@ Gitberth.Audit.AuditEndpoints.Map(app);
 Gitberth.Backup.BackupEndpoints.Map(app);
 // The app templates' icons, for New app's gallery (signed in only).
 Gitberth.Templates.TemplateEndpoints.Map(app);
+// ---- Builder B: an uploaded folder or archive (New app's, an app's new version; and the API's, with a token).
+UploadEndpoints.Map(app);
+// An app's terminal (a WebSocket) and its files' downloads and uploads: signed in, each with a one-time ticket.
+Gitberth.Workbench.TerminalEndpoint.Map(app);
+Gitberth.Workbench.FileEndpoints.Map(app);
+// ---- end of builder B's endpoints.
 // The help's pictures and the tips' catalog (signed in only).
 Gitberth.Help.HelpEndpoints.Map(app);
 

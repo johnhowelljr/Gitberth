@@ -265,7 +265,8 @@ public sealed class ComposeApps(IDbContextFactory<GitberthDb> dbFactory, AppServ
         if (webService.Trim().Length == 0 || !ComposeNames.IsServiceName(webService)) return ("Pick the web service.", null);
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var app = await db.Apps.FirstOrDefaultAsync(a => a.Id == appId, ct);
-        if (app is not { Source: AppSource.Git, ComposeFile: not null }) return ("That isn't a Git app deployed with Compose.", null);
+        // [builder B, B6] An uploaded folder's Compose file is in its upload, as a repo's is in its repo.
+        if (app is not { Source: AppSource.Git or AppSource.Upload, ComposeFile: not null }) return ("That isn't a Git app deployed with Compose.", null);
         var changes = new List<Audit.AuditChange>();
         if (app.ComposeFile != file)
         {

@@ -161,7 +161,8 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         var view = await ctx.AppAsync(app, ct);
         var loaded = await LoadAsync(view, ct);
         if (loaded.Access.ReadOnly.Contains(SettingField.Env)) throw ToolError.Conflict(loaded.Access.Recreate ?? $"Gitberth doesn't change {view.Summary.Title}'s environment.");
-        var isGit = view.Summary.Source == AppSource.Git;
+        // [builder B, B6] An uploaded app is built as a Git app is: its variables may go to the build too.
+        var isGit = view.Summary.Source is AppSource.Git or AppSource.Upload;
         var managed = view.Summary.AppId is int appId ? (await databases.RowsAsync(appId, ct)).Select(d => d.Variable).ToHashSet(StringComparer.Ordinal) : [];
         var draft = ContainerSettingsDraft.From(loaded.Container, loaded.Options.SecretKeys);
         foreach (var v in set ?? [])
@@ -248,6 +249,9 @@ public sealed class AppAdminTools(AgentContext ctx, AppCatalog catalog, AppServi
         // The Settings tab has no Image field for a Git or Compose app: their images come from their repo or Compose file.
         if (image is not null && view.Summary.Source == AppSource.Git)
             throw new ToolError($"{title} is a Git app: its image is built from its repo, so image is an image app's.");
+        // [builder B, B6]
+        if (image is not null && view.Summary.Source == AppSource.Upload)
+            throw new ToolError($"{title} is an uploaded app: its image is built from its upload, so image is an image app's.");
         if (image is not null && view.Row?.IsCompose == true)
             throw new ToolError($"{title} is a Compose app: its images are its Compose file's, so image is an image app's.");
         if (containerChange)

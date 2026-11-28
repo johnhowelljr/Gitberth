@@ -36,5 +36,6 @@ public sealed class BackupPaths(GitberthOptions options)
     /// <summary>Gitberth's own files and folders a backup holds, as they're named under the data folder.</summary>
     public static readonly IReadOnlyList<string> DataFiles = ["gitberth.db", "stats.db", "uptime.db", "audit.db"];
 
-    public static readonly IReadOnlyList<string> DataFolders = ["keys", "compose", "logs"];
+    // [builder B] uploads: uploaded apps' archives (B6); configs: apps' config files (B3), mounted into their containers.
+    public static readonly IReadOnlyList<string> DataFolders = ["keys", "compose", "logs", "uploads", "configs"];
 }

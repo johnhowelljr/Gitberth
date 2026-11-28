@@ -20,4 +20,5 @@ regexes = [
     '''s3cr3t-route-7f4e9a''',                                          # a test's secret variable (the agent tools never return it)
     '''s3cr3t-api-key''',                                               # a test's secret variable (the audit log never shows it)
     '''gbt_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_abcdef''',             # a test's API token: the alphabet in order
+    '''^t\.TwoKeyMap=void$''',                                          # not a value: minified code in the vendored xterm.js (t.FourKeyMap=t.TwoKeyMap=void 0)
 ]

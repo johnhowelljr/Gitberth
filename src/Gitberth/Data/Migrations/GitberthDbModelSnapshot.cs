@@ -233,6 +233,15 @@ namespace Gitberth.Data.Migrations
                     b.Property<int?>("RegistryId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ReleaseCommand")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReleaseService")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ReleaseTimeoutMinutes")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Repo")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -273,6 +282,21 @@ namespace Gitberth.Data.Migrations
                         .HasDefaultValue("Off");
 
                     b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UploadName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UploadSha")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("UploadSize")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("UploadedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UploadedBy")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("UptimeCheck")
@@ -328,6 +352,91 @@ namespace Gitberth.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("AppNetworks", (string)null);
+                });
+
+            modelBuilder.Entity("Gitberth.Data.CommandRun", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AppId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CommandId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ExitCode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Output")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RequestedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Trigger")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommandId", "Id");
+
+                    b.ToTable("CommandRuns", (string)null);
+                });
+
+            modelBuilder.Entity("Gitberth.Data.ConfigFile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AppId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ContentProtected")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("Secret")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Service")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppId", "Path")
+                        .IsUnique();
+
+                    b.ToTable("ConfigFiles", (string)null);
                 });
 
             modelBuilder.Entity("Gitberth.Data.ContainerChangeEntry", b =>
@@ -837,6 +946,50 @@ namespace Gitberth.Data.Migrations
                     b.ToTable("Registries", (string)null);
                 });
 
+            modelBuilder.Entity("Gitberth.Data.ScheduledCommand", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AppId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Command")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Place")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Schedule")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Service")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TimeoutMinutes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppId");
+
+                    b.ToTable("ScheduledCommands", (string)null);
+                });
+
             modelBuilder.Entity("Gitberth.Data.Setting", b =>
                 {
                     b.Property<string>("Key")
@@ -890,6 +1043,24 @@ namespace Gitberth.Data.Migrations
                 {
                     b.HasOne("Gitberth.Data.AppDefinition", null)
                         .WithMany("Networks")
+                        .HasForeignKey("AppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Gitberth.Data.CommandRun", b =>
+                {
+                    b.HasOne("Gitberth.Data.ScheduledCommand", null)
+                        .WithMany()
+                        .HasForeignKey("CommandId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Gitberth.Data.ConfigFile", b =>
+                {
+                    b.HasOne("Gitberth.Data.AppDefinition", null)
+                        .WithMany()
                         .HasForeignKey("AppId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -954,6 +1125,15 @@ namespace Gitberth.Data.Migrations
                     b.HasOne("Gitberth.Data.AppDefinition", null)
                         .WithOne()
                         .HasForeignKey("Gitberth.Data.PreviewInfo", "AppId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Gitberth.Data.ScheduledCommand", b =>
+                {
+                    b.HasOne("Gitberth.Data.AppDefinition", null)
+                        .WithMany()
+                        .HasForeignKey("AppId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

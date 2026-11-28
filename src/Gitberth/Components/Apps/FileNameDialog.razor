@@ -1,0 +1,48 @@
+@using Gitberth.Workbench
+
+@* A name for a new folder, or a file's or folder's new name (the Files tab): checked as the Files tab's service checks it. *@
+<MudDialog>
+    <TitleContent>
+        <div class="gb-dialog-title">
+            <MudIcon Icon="@Icons.Material.Outlined.DriveFileRenameOutline" />
+            <span>@Title</span>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <Field Label="@Label" For="gb-file-name" Tip="files.name" Error="@error">
+            <input id="gb-file-name" class="gb-input gb-input--mono" value="@value" maxlength="255" spellcheck="false" autocomplete="off"
+                   @oninput="e => { value = e.Value?.ToString() ?? string.Empty; error = null; }" @onkeydown="KeyAsync" />
+        </Field>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="() => MudDialog.Cancel()">Cancel</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="Save">OK</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Label { get; set; } = "Name";
+    [Parameter] public string Value { get; set; } = "";
+
+    private string value = "";
+    private string? error;
+
+    protected override void OnInitialized() => value = Value;
+
+    private void Save()
+    {
+        if (AppFiles.NameProblem(value.Trim()) is { } problem)
+        {
+            error = problem;
+            return;
+        }
+        MudDialog.Close(DialogResult.Ok(value.Trim()));
+    }
+
+    private void KeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") Save();
+    }
+}

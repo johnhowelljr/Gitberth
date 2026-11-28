@@ -10,9 +10,10 @@ namespace Gitberth.Apps;
 /// <summary>
 /// How an app came to Gitberth. What "update" means goes by <see cref="ImageOrigin"/>, not by this. Compose: a whole
 /// Compose file kept by Gitberth (pasted, or a template's) and deployed as one app; a Git repo deployed with Compose stays
-/// Git (<see cref="Data.AppDefinition.ComposeFile"/>). Stored as strings: values are only ever appended.
+/// Git (<see cref="Data.AppDefinition.ComposeFile"/>). Upload: a folder or an archive someone uploaded, built and deployed as
+/// a Git app is, without a repo. Stored as strings: values are only ever appended.
 /// </summary>
-public enum AppSource { Git, Registry, Local, Manual, Existing, Compose }
+public enum AppSource { Git, Registry, Local, Manual, Existing, Compose, Upload }
 
 /// <summary>
 /// Where the image an app runs comes from: a registry known to have it (Gitberth pulled it, or a check found it there), this
@@ -376,7 +377,9 @@ public sealed record NewContainerRequest
 // Stored as strings: only ever added. BroughtBack and GaveUp are the keep-running check's: a try to bring back an app that
 // stopped by itself, and its giving up after the last one.
 public enum ActivityKind { Created, Adopted, Settings, Live, Recreated, Updated, RolledBack, Started, Stopped, Restarted, Removed,
-    UpdateFound, RecreatedOutside, Deploy, Change, Event, BroughtBack, GaveUp }
+    UpdateFound, RecreatedOutside, Deploy, Change, Event, BroughtBack, GaveUp,
+    // A scheduled command's run that failed, or passed again (B2); a terminal opened or closed (B3).
+    Job, Terminal }
 
 public enum ActivityTone { Neutral, Good, Warning, Danger }
 

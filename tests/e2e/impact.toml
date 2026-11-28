@@ -97,6 +97,27 @@ factor = 0.75
 # Estimates (the whole restore measured at 2.4 min on rig b, 2026-11-23; the picked ones about 4 more, plan2 P8): Git
 # builds, Postgres made once per rig volume; minutes adds production's stay-up checks. Refresh both from a run's junit.xml.
 "40" = { file = "test_40_save_restore.py", minutes = 10, test_minutes = 6.5 }
+# Automatic backups: a folder on the rig's host (keep-N, and one container restored from a listed backup), an S3 server
+# (SeaweedFS's S3 gateway: MinIO's images aren't public any more), a Samba server (SMB) and an FTP server (vsftpd), each
+# with Test the destination and Back up now. Measured on the first rig (2026-11-28): 2 min without FTP; it deploys no app,
+# so production's minutes are about the same. SeaweedFS's image and the Samba, FTP and helper images once per rig volume.
+"41" = { file = "test_41_auto_backups.py", minutes = 5, test_minutes = 4 }
+# Gitberth updating itself: to a newer build of itself (gitberth:9.9.1, the GitHub stand-in's newest release), then to a
+# broken one that the updater undoes, then back to gitberth:e2e. Three swaps of Gitberth's container; estimate.
+"44" = { file = "test_44_self_update.py", minutes = 5, test_minutes = 4 }
+# Deploy a folder (B6): a static site zip and a Node app's folder (the browser's folder upload) made in New app and
+# deployed, the Node app's new version through the API with a token, and a zip-slip archive refused. Estimates: two first
+# builds (nginx and node pulled once per rig volume) and one more; minutes adds production's stay-up checks.
+"46" = { file = "test_46_uploads.py", minutes = 5, test_minutes = 3.5 }
+# Release and scheduled commands (B2): one uploaded app (nginx with a VOLUME) whose release command fails a new version's
+# deploy (the old one serving on) and then writes a marker the next version serves; its Scheduled commands card's Run
+# now, and a failing command every minute told to a webhook. Estimates: three nginx builds, a minute's wait for the
+# schedule; minutes adds production's stay-up checks.
+"42" = { file = "test_42_commands.py", minutes = 5, test_minutes = 4 }
+# Terminal, files and config files (B3): one image app with a volume: its terminal runs a command over the WebSocket (and
+# a socket without a ticket, or from another Origin, is refused), its Files tab uploads, downloads and deletes in the
+# volume and refuses a path out of it, and a config file appears in it and changes in place. Estimates.
+"43" = { file = "test_43_workbench.py", minutes = 5, test_minutes = 4 }
 
 [aliases]
 # The core smoke: sign in, and one app from GitHub deployed and answering. Always in an impact pass of a change outside
@@ -115,7 +136,7 @@ factor = 0.75
 # Every group, slow tests included, but the template smoke: ≈2 h 40-50 min serial.
 "@full" = ["00", "01", "02", "03", "04", "05", "06", "07", "09", "10", "11", "12+slow", "13", "14+slow", "15",
            "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "32", "33", "34",
-           "35", "36", "37", "38", "39", "40"]
+           "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "46"]
 "@release" = ["@full", "31"]  # and every template: + 16-30 min
 "@none" = []
 # Single tests the rules name.
@@ -268,6 +289,7 @@ refine = [
     { match = 'hook|deliver|signature|ping', groups = ["00", "14", "15", "23"] },
     { match = 'variable', groups = ["00", "09", "24"] },
     { match = 'rate|limit|permission|token', groups = ["00", "15"] },
+    { match = 'release', groups = ["44"] },   # Gitberth's own newest release (builder A)
     # gl.py (the GitLab stand-in) uses these: the GitHub groups as before, and GitLab's.
     { match = 'def git\(|describe_git_request|def tag\(', groups = ["00", "02", "12", "14", "33"] },
 ]
@@ -282,6 +304,7 @@ refine = [
     { match = 'cloudflare/tokens|expires_on', groups = ["00", "37"] },   # a Cloudflare token changed as in its dashboard
     # Docker Hub's and the registry's dispatch (dh.py): its self-tests and the image search's scenario.
     { match = '[Dd]ocker ?[Hh]ub|dockerhub|\bDH\b|registry\.e2e', groups = ["00", "39"] },
+    { match = 'github/releases', groups = ["44"] },   # Gitberth's own newest release, as a scenario sets it (builder A)
 ]
 
 # The Docker Hub stand-in (hub.docker.com, index.docker.io) and registry.e2e.test: its self-tests and the one scenario
@@ -383,6 +406,10 @@ refine = [
     { match = 'Activity', groups = ["20", "02"] },
     # A GitLab app is a Git app whose Owner is gitlab:<namespace>: its repo's names and links.
     { match = '[Gg]it[Ll]ab|RepoFullName|RepoWebUrl', groups = ["20", "@t33-new", "@t33-api"] },
+    # Builder B's columns and tables: an uploaded app's (B6), release and scheduled commands (B2), config files (B3).
+    { match = 'Upload|FromUpload|Built\b', groups = ["46"] },
+    { match = 'Release|ScheduledCommand|CommandRun|CommandPlace|CommandTrigger', groups = ["42"] },
+    { match = 'ConfigFile', groups = ["43"] },
 ]
 
 [[rule]]
@@ -400,6 +427,45 @@ groups = ["@smoke"]
 
 
 # ===== D. Single files and small sets =====
+# --- builder B's app tools
+# Deploy a folder (B6): the uploads' store, their safe unpacking, the endpoints (the browser's and the API's), the
+# pipeline's branch for an upload, New app's Upload a folder, an uploaded app's Source card, and their script and styles.
+[[rule]]
+globs = ["src/Gitberth/Sources/Upload*.cs", "src/Gitberth/Sources/AppService.Upload.cs", "src/Gitberth/Deploy/DeployPipeline.Upload.cs",
+         "src/Gitberth/Deploy/AppDataFolders.cs", "src/Gitberth/Components/NewApp/UploadSource.razor", "src/Gitberth/Components/Apps/UploadCard.razor",
+         "src/Gitberth/Help/Tips/upload.yaml"]
+groups = ["46"]
+
+# Terminal, files and config files (B3): the tickets, the terminal's WebSocket and its TTY exec, the files' helper and
+# endpoints, the config files and how deploys mount them, their tabs and section, their tips, and xterm.js.
+[[rule]]
+globs = ["src/Gitberth/Workbench/**", "src/Gitberth/Docker/DockerApi.Terminal.cs", "src/Gitberth/Deploy/DeployPipeline.Configs.cs",
+         "src/Gitberth/Components/Apps/AppTerminalTab.razor", "src/Gitberth/Components/Apps/AppFilesTab.razor",
+         "src/Gitberth/Components/Apps/FileNameDialog.razor", "src/Gitberth/Components/Apps/ConfigFilesSection.razor",
+         "src/Gitberth/Help/Tips/terminal.yaml", "src/Gitberth/Help/Tips/files.yaml", "src/Gitberth/Help/Tips/configs.yaml",
+         "src/Gitberth/wwwroot/lib/xterm/**"]
+groups = ["43"]
+
+# Builder B's script: uploads (B6), the terminal and the files (B3).
+[[rule]]
+globs = ["src/Gitberth/wwwroot/js/workbench.js"]
+groups = ["46", "43"]
+
+# Release and scheduled commands (B2): one-off commands (a new container, docker exec), the release command (the deploy's,
+# the change engine's), the scheduled commands and their scheduler, the Settings section, the Overview card and its dialog.
+[[rule]]
+globs = ["src/Gitberth/Deploy/OneOffRunner.cs", "src/Gitberth/Deploy/ReleaseCommands.cs", "src/Gitberth/Deploy/DeployPipeline.Release.cs",
+         "src/Gitberth/Deploy/CommandJobs.cs", "src/Gitberth/Deploy/JobSchedules.cs", "src/Gitberth/Components/Apps/ReleaseCommandSection.razor",
+         "src/Gitberth/Components/Apps/CommandJobsCard.razor", "src/Gitberth/Components/Apps/CommandJobDialog.razor",
+         "src/Gitberth/Help/Tips/jobs.yaml", "src/Gitberth/Help/Tips/release.yaml"]
+groups = ["42"]
+
+# Builder B's styles: the upload's drop zones and source card (B6), the scheduled commands' rows (B2), the terminal, the
+# files and the config files (B3).
+[[rule]]
+globs = ["src/Gitberth/wwwroot/css/workbench.css"]
+groups = ["46", "42", "43"]
+
 # --- deploy pipeline
 # Railpack, the second builder: its planner, gitberth-buildkit, the pipeline's branch for it, and the app the rig builds.
 [[rule]]
@@ -435,6 +501,8 @@ refine = [
     # A GitLab project's variables by scope, GitLab's compare for the build filters, and Vercel's provider.
     { match = '[Gg]it[Ll]ab|varsHost', groups = ["09", "22", "@t33-variables", "@t33-filters", "@t33-mr"] },
     { match = 'Railpack|Prepared\(', groups = ["38"] },   # the branch to Railpack's build (DeployPipeline.Railpack.cs)
+    { match = 'Upload|FromUpload', groups = ["46"] },   # an uploaded app's deploy (DeployPipeline.Upload.cs)
+    { match = 'ReleaseCommands|ReleaseAsync|commands\)', groups = ["42"] },   # a new version's release command (DeployPipeline.Release.cs)
 ]
 
 [[rule]]
@@ -949,6 +1017,7 @@ refine = [
     { match = '[Tt]ab', groups = ["01", "09", "@t02-opened"] },
     { match = 'Deploy', groups = ["20", "22"] },
     { match = '[Gg]it[Ll]ab|[Mm]erge request', groups = ["@t33-new", "@t33-mr"] },   # a GitLab app's links, a merge request's preview
+    { match = 'Terminal|Files|Workbench', groups = ["43"] },   # the Terminal and Files tabs (B3)
 ]
 
 [[rule]]
@@ -971,6 +1040,8 @@ refine = [
     { match = 'updates|Image', groups = ["@t24-registry"] },
     { match = '[Gg]it[Ll]ab', groups = ["@t33-filters", "@t33-fork"] },
     { match = '[Rr]ailpack', groups = ["38"] },     # Build's Railpack option and its note
+    { match = 'sec-release|ReleaseCommand', groups = ["42"] },   # the Release command section (B2)
+    { match = 'sec-configs|ConfigFiles', groups = ["43"] },   # the Config files section (B3)
 ]
 
 [[rule]]
@@ -999,6 +1070,7 @@ globs = ["src/Gitberth/Components/Apps/AppOverviewTab.razor"]
 groups = ["06", "19", "20"]
 refine = [
     { match = 'Job|Cron', groups = ["07"] },
+    { match = 'CommandJobs', groups = ["42"] },   # the Scheduled commands card (B2)
     { match = 'Database', groups = ["27"] },
     { match = 'Compose|Service', groups = ["@t28-repo"] },
     { match = 'Uptime', groups = ["26"] },
@@ -1120,13 +1192,26 @@ globs = ["src/Gitberth/Health/AttentionBoard.cs", "src/Gitberth/Components/Share
          "src/Gitberth/Components/Layout/AttentionPill.razor"]
 groups = ["37", "20"]                          # the dashboard's banners and the top bar's pill
 
+# --- automatic backups (41): the schedule, the destinations (a folder, SMB, S3) and their card; the sealed format and host
+# folders are the file's (both groups).
+[[rule]]
+globs = ["src/Gitberth/Backup/AutoBackups.cs", "src/Gitberth/Backup/AutoBackupConfig.cs", "src/Gitberth/Backup/AutoDestinations.cs",
+         "src/Gitberth/Backup/S3Client.cs", "src/Gitberth/Components/Shared/AutoBackupSection.razor", "src/Gitberth/Components/Shared/AutoBackupView.cs"]
+groups = ["41"]
+
+# --- Gitberth updating itself (44): the check, Update now, the updater and its way back, the card, /healthz's version.
+[[rule]]
+globs = ["src/Gitberth/Images/UpdateGitberth.cs", "src/Gitberth/Images/UpdateGitberthRules.cs", "src/Gitberth/Images/UpdateGitberthRunner.cs",
+         "src/Gitberth/Components/Shared/GitberthUpdateCard.razor", "src/Gitberth/AppVersion.cs"]
+groups = ["44"]
+
 # --- save and restore (40): the file, saving and restoring (Backup/), Settings › Save and restore, the Restoring page.
 # Program.cs (the endpoints, the boot swap) and the Docker client's new calls keep their own rules (@wide).
 [[rule]]
 globs = ["src/Gitberth/Backup/**", "src/Gitberth/Components/Shared/BackupSection.razor", "src/Gitberth/Components/Shared/BackupText.cs",
          "src/Gitberth/Components/Pages/RestoringPage.razor", "src/Gitberth/wwwroot/css/backup.css",
          "src/Gitberth/Components/Layout/ReconnectModal.razor.js"]   # its reload waits while a restore restarts Gitberth
-groups = ["40"]
+groups = ["40", "41"]
 
 
 # ===== E. Folders (new files and anything not named above) =====

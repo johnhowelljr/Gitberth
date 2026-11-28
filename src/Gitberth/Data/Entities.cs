@@ -10,8 +10,9 @@ public enum DesiredState { Running, Stopped }
 
 // Stored as strings: values are only ever added, never renamed. Webhook: started by GitHub telling Gitberth about a push;
 // Promote: a preview's commit made the production version. Hook: a deploy hook's URL was called. Recover: the keep-running
-// check made an app's container again (or built it again) because it was gone.
-public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart, Webhook, Promote, Hook, Recover }
+// check made an app's container again (or built it again) because it was gone. Upload: a new version of an uploaded app
+// (its folder or archive) came in.
+public enum DeployTrigger { Created, Manual, Start, ConfigChange, Rollback, Poll, Retry, Restart, Webhook, Promote, Hook, Recover, Upload }
 
 // Skipped: a new commit that changed only files the app's build filters leave out, or that asked not to be deployed;
 // the running version stays, and nothing was built.
@@ -42,7 +43,7 @@ public enum ApiAccess { Read, Operate, Admin }
 /// One app: a container Gitberth runs or knows. A Git app is a repo + branch (+ optional subfolder) and how its container
 /// should run; any other app's settings live in its container, and the row keeps Gitberth's own data about it.
 /// </summary>
-public class AppDefinition
+public partial class AppDefinition
 {
     public int Id { get; set; }
     public string Name { get; set; } = "";
@@ -194,10 +195,10 @@ public class AppDefinition
     public string NetworkName => Source == AppSource.Existing ? ContainerName : Slug;
 
     /// <summary>
-    /// Gitberth deploys it, from a repo or from a Compose file it keeps: its database row is the truth for its settings, and
-    /// a deploy applies them.
+    /// Gitberth deploys it, from a repo, an uploaded folder or a Compose file it keeps: its database row is the truth for its
+    /// settings, and a deploy applies them.
     /// </summary>
-    public bool Deployed => Source is AppSource.Git or AppSource.Compose;
+    public bool Deployed => Source is AppSource.Git or AppSource.Compose or AppSource.Upload;
 
     /// <summary>
     /// It comes from a GitHub repo: the watcher, previews, build filters and the GitHub integration are its. An inline

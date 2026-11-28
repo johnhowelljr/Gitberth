@@ -44,12 +44,12 @@
     @Stp(NewAppStep.Create, 3, "Create", Tip: "newapp.step.create")
 </ol>
 
-@if (step == NewAppStep.Source || source == NewAppSource.Git)
+@if (step == NewAppStep.Source || source is NewAppSource.Git or NewAppSource.Upload)
 {
     <div class="gb-stack">
         @if (OpenTemplate is null)
         {
-        <div class="gb-srcgrid gb-srcgrid--5" role="radiogroup" aria-label="Where it comes from">
+        <div class="gb-srcgrid gb-srcgrid--6" role="radiogroup" aria-label="Where it comes from">
             @foreach (var s in Enum.GetValues<NewAppSource>())
             {
                 var (title, text, icon, tags) = NewAppSources.Of(s);
@@ -79,6 +79,9 @@
                 break;
             case NewAppSource.Git:
                 <GitSource PrefillUrl="@Url" OnStage="s => gitStage = s" />
+                break;
+            case NewAppSource.Upload:
+                <UploadSource OnStage="s => uploadStage = s" />
                 break;
             case NewAppSource.Registry:
                 <RegistrySource Initial="@Image" OnPicked="FromRegistryAsync" Busy="drafting" />
@@ -145,6 +148,7 @@ else if (form is not null)
     private NewAppSource source = NewAppSource.Registry;
     private NewAppStep step = NewAppStep.Source;
     private NewAppStep gitStage = NewAppStep.Source;
+    private NewAppStep uploadStage = NewAppStep.Source;
     private HandMode hand = HandMode.DockerRun;
     private NewAppForm? form;
     private CreatePlan? plan;
@@ -161,6 +165,7 @@ else if (form is not null)
     private NewAppStep Shown => source switch
     {
         NewAppSource.Git => gitStage,
+        NewAppSource.Upload => uploadStage,
         NewAppSource.Templates => OpenTemplate is null ? NewAppStep.Source : NewAppStep.Configure,
         _ => step,
     };
@@ -168,7 +173,7 @@ else if (form is not null)
     private string Slug => plan?.Slug is { Length: > 0 } s && plan.Draft.Name == form?.Name.Trim() ? s : AppService.Slugify(form?.Name) is { Length: > 0 } slug ? slug : "app";
 
     private string HeadTitle => OpenTemplate is { } open ? $"Install {open.Name}"
-        : Shown == NewAppStep.Source || form is null || source is NewAppSource.Git or NewAppSource.Templates ? "New app" : $"New app from {form.Image}";
+        : Shown == NewAppStep.Source || form is null || source is NewAppSource.Git or NewAppSource.Upload or NewAppSource.Templates ? "New app" : $"New app from {form.Image}";
 
     private string Lead => Shown switch
     {
@@ -176,6 +181,7 @@ else if (form is not null)
         NewAppStep.Source when source == NewAppSource.Templates => "Pick an app to install. Gitberth sets up its database, secrets and domain, then deploys it.",
         NewAppStep.Source => "Run anything on this host. Pick where it comes from; every setting can change before it starts, and after.",
         NewAppStep.Configure when source == NewAppSource.Git => "Gitberth works out how to build it; check the settings and deploy.",
+        NewAppStep.Configure when source == NewAppSource.Upload => "Gitberth worked out what it is and how to build it; check the settings and deploy.",
         NewAppStep.Configure => "Filled in from the source. Check the parts that matter to you; the preview shows exactly what will run.",
         _ => NewAppText.CreateLead(job is not null, result?.Ok, result?.Key is not null || result?.AppId is not null),
     };
@@ -183,6 +189,7 @@ else if (form is not null)
     private string SourceWord => source switch
     {
         NewAppSource.Git => "Git",
+        NewAppSource.Upload => "Upload",
         NewAppSource.Registry => "Registry",
         NewAppSource.Local => "Local image",
         NewAppSource.Templates => "Template",
@@ -197,6 +204,7 @@ else if (form is not null)
         if (From == "paste") (source, hand) = (NewAppSource.Hand, HandMode.DockerRun);
         else if (From == "templates" || !string.IsNullOrWhiteSpace(TemplateId)) source = NewAppSource.Templates;
         else if (!string.IsNullOrWhiteSpace(Url)) source = NewAppSource.Git;
+        else if (From == "upload") source = NewAppSource.Upload;
         else if (SourceName == "local") source = NewAppSource.Local;
         lanHost = AddressBook.HostPart(await Apps.GetPublicHostAsync(Nav.BaseUri));
         try
@@ -229,6 +237,7 @@ else if (form is not null)
     [
         (NewAppSource.Templates, Tip: "newapp.source.templates"),
         (NewAppSource.Git, Tip: "newapp.source.git"),
+        (NewAppSource.Upload, Tip: "upload.source"),
         (NewAppSource.Registry, Tip: "newapp.source.registry"),
         (NewAppSource.Local, Tip: "newapp.source.local"),
         (NewAppSource.Hand, Tip: "newapp.source.hand"),

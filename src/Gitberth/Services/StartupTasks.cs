@@ -114,7 +114,7 @@ public sealed class StartupTasks(
         if (restoreGate?.Holding == true) logger.LogInformation("A restore is running: it brings the apps back itself");
         else
             await using (var db = await dbFactory.CreateDbContextAsync(stoppingToken))
-                apps = await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git || a.Source == AppSource.Compose).ToListAsync(stoppingToken);
+                apps = await db.Apps.AsNoTracking().Where(a => a.Source == AppSource.Git || a.Source == AppSource.Compose || a.Source == AppSource.Upload).ToListAsync(stoppingToken);
         foreach (var app in apps)
         {
             // A Compose app with a service's container missing comes back with its current release (or, with none kept, a deploy).

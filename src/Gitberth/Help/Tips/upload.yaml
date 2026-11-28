@@ -1,0 +1,98 @@
+# Tips for uploaded folders (B6): New app's Upload a folder (Components/NewApp/UploadSource.razor), an uploaded app's
+# Source card on its Overview (Components/Apps/UploadCard.razor) and its page's header. See Help/TipCatalog.cs.
+
+upload.source:
+  title: Upload a folder
+  text: >-
+    Deploys a folder from this computer, or a .zip, .tar or .tar.gz of one, with no repository. Gitberth works out what
+    it is as it does for a repo, and each new upload is a new version.
+  more: guides/deploy-a-folder
+
+upload.drop:
+  title: Upload a folder
+  text: >-
+    Drop a folder or an archive here, or choose one. It goes straight to Gitberth, which unpacks it safely and looks at
+    it before anything is made.
+  more: guides/deploy-a-folder#upload-it
+
+upload.choose-folder:
+  title: Choose a folder
+  text: >-
+    Sends a folder's files, each with its path in the folder. It leaves out .git, node_modules, .venv, venv,
+    __pycache__, .next/cache and .DS_Store, which the build makes again.
+  more: guides/deploy-a-folder#what-it-leaves-out
+
+upload.choose-file:
+  title: Choose a file
+  text: >-
+    Sends one archive: a .zip, .tar, .tar.gz or .tgz, up to 2 GiB. Its one top-level folder, when it has one, is the
+    app's root.
+  more: guides/deploy-a-folder#what-an-upload-can-hold
+
+upload.another:
+  title: Upload another
+  text: >-
+    Uploads something else in place of this one. Nothing has been made yet, so the one you uploaded is simply let go
+    of.
+  more: guides/deploy-a-folder#upload-it
+
+upload.compose:
+  title: A Compose file in the upload
+  text: >-
+    The folder has a Compose file: deploy it with Compose, as one app with all its services, or build one container
+    from the folder.
+  more: guides/compose-apps
+
+upload.deploy:
+  title: Deploy
+  text: >-
+    Makes the app and starts its first deploy: Gitberth unpacks the upload, builds it and starts it. The deploy's page
+    shows every step.
+  more: guides/deploy-a-folder#upload-it
+
+upload.card:
+  title: Source
+  text: >-
+    An uploaded folder: the upload it runs, its newest one (what Deploy builds), and where a new version goes. Gitberth
+    keeps the newest 5 uploads.
+  more: guides/deploy-a-folder#a-new-version
+
+upload.newest:
+  title: Newest upload
+  text: >-
+    The last folder or archive uploaded for it: its name, size, when and by whom, and the start of its SHA-256, which
+    its deploy shows as its commit. Deploy builds this one.
+  more: guides/deploy-a-folder#deploys-and-rolling-back
+
+upload.running:
+  title: Runs
+  text: >-
+    The upload the app's container runs now. After a roll back it's an earlier one, and Deploy builds the newest
+    again.
+  more: guides/deploy-a-folder#deploys-and-rolling-back
+
+upload.new-version:
+  title: Upload a new version
+  text: >-
+    Drop the folder or an archive of it here. It deploys at once, and the version that runs keeps running until the
+    new one has passed its checks.
+  more: guides/deploy-a-folder#a-new-version
+
+upload.curl:
+  title: From a script
+  text: >-
+    The same upload with curl, for a script or CI: it needs an API token with Operate access in GITBERTH_TOKEN. Add
+    ?wait=true to wait for the deploy.
+  more: guides/deploy-a-folder#from-a-script
+
+upload.hero:
+  title: Uploaded folder
+  text: >-
+    This app came as a folder or an archive, with no repository: a new upload on its Overview is its next version.
+  more: guides/deploy-a-folder
+
+upload.hero-sha:
+  title: Upload
+  text: >-
+    The upload it runs, by the start of its SHA-256: each upload is a deploy of its own, with this as its commit.
+  more: guides/deploy-a-folder#deploys-and-rolling-back

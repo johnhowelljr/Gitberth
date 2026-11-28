@@ -24,6 +24,9 @@ public enum BackupPartKind : byte
 
     /// <summary>An image only this host had, as docker save writes it.</summary>
     Image = 6,
+
+    /// <summary>A host folder's files as Docker's archive gives them: a tar whose entries start with h/.</summary>
+    HostFolder = 7,
 }
 
 /// <summary>How a part's bytes are kept: compressed, or as they are when they don't shrink (photos, video, archives).</summary>
@@ -54,14 +57,40 @@ public sealed class BackupFileException(UploadProblem problem, string message) :
 /// frame of length 0. Every part is compressed (Brotli, quality 4) unless its first MiB doesn't shrink by 5%: then it's
 /// stored as it is, which costs no CPU.
 /// </para>
+/// <para>
+/// Format 2 (automatic backups, made without the passphrase): the same 43 bytes (version 2), then u8 key mode (1:
+/// ECDH-ES on P-256, HKDF-SHA256, AES-256-GCM), the key pair's ID (8 bytes), and three blobs, each u16 length and bytes:
+/// the key pair's private key sealed with the passphrase (PBKDF2 of the header's salt and iterations, then AES-256-GCM),
+/// the file's ephemeral public key (SubjectPublicKeyInfo), and the file's random key wrapped with the key HKDF makes of
+/// their ECDH secret. The body is format 1's, the whole header still every chunk's additional data
+/// (<see cref="SealedKeys"/>). The file and its passphrase are enough to open it anywhere.
+/// </para>
 /// </summary>
 public static class BackupFormat
 {
     /// <summary>"GBAK", then CR LF, Ctrl-Z, LF: a text transfer or a type command shows it's mangled.</summary>
     public static ReadOnlySpan<byte> Magic => [(byte)'G', (byte)'B', (byte)'A', (byte)'K', 0x0D, 0x0A, 0x1A, 0x0A];
 
-    /// <summary>The format this Gitberth writes and reads.</summary>
+    /// <summary>The format Save a backup writes (its key from the passphrase).</summary>
     public const ushort Version = 1;
+
+    /// <summary>The format automatic backups write: sealed to a key pair, so Gitberth needs no passphrase to make one.</summary>
+    public const ushort Sealed = 2;
+
+    /// <summary>The newest format this Gitberth reads (it reads every one up to it).</summary>
+    public const ushort Newest = Sealed;
+
+    /// <summary>Format 2's key mode: ECDH-ES on P-256, HKDF-SHA256, AES-256-GCM.</summary>
+    public const byte KeyModeEcdhP256 = 1;
+
+    /// <summary>A key pair's ID: the first bytes of the SHA-256 of its public key.</summary>
+    public const int KeyIdBytes = 8;
+
+    /// <summary>Format 2's fixed part: format 1's header, its key mode and the key pair's ID.</summary>
+    public const int SealedFixedBytes = HeaderBytes + 1 + KeyIdBytes;
+
+    /// <summary>The largest blob a format 2 header may carry (a forged length can't make a reader allocate much).</summary>
+    public const int MaxBlobBytes = 1024;
 
     /// <summary>The key derivation: PBKDF2 with HMAC-SHA256.</summary>
     public const byte KdfPbkdf2Sha256 = 1;
@@ -135,10 +164,21 @@ public static class BackupFormat
 /// <summary>A backup file's plain header: how its key is made and how its body is sealed.</summary>
 public sealed class BackupHeader
 {
+    /// <summary>1: the key comes from the passphrase. 2: the file's key is sealed to a key pair (<see cref="SealedKeys"/>).</summary>
+    public ushort Version { get; init; } = BackupFormat.Version;
     public required int Iterations { get; init; }
     public required byte[] Salt { get; init; }
     public required int ChunkSize { get; init; }
     public required byte[] NoncePrefix { get; init; }
+
+    /// <summary>Format 2: the key pair's ID, its private key sealed with the passphrase, the file's ephemeral public key and its wrapped key.</summary>
+    public byte[]? KeyId { get; init; }
+    public byte[]? SealedPrivateKey { get; init; }
+    public byte[]? EphemeralPublicKey { get; init; }
+    public byte[]? WrappedKey { get; init; }
+
+    /// <summary>The key pair's short ID as the owner sees it ("3f9c2ab1"); null for format 1.</summary>
+    public string? ShortKeyId => KeyId is { } id ? SealedKeys.ShortId(id) : null;
 
     /// <summary>A new file's header: a fresh salt and nonce prefix.</summary>
     public static BackupHeader New(int iterations = BackupFormat.DefaultIterations, int chunkSize = BackupFormat.ChunkBytes) => new()
@@ -152,17 +192,75 @@ public sealed class BackupHeader
     /// <summary>The header's bytes, as written at the start of the file and given to every chunk as its additional data.</summary>
     public byte[] ToBytes()
     {
-        var b = new byte[BackupFormat.HeaderBytes];
+        var fixedPart = FixedBytes();
+        if (Version != BackupFormat.Sealed) return fixedPart;
+        var blobs = new[] { SealedPrivateKey!, EphemeralPublicKey!, WrappedKey! };
+        var b = new byte[fixedPart.Length + blobs.Sum(x => 2 + x.Length)];
+        fixedPart.CopyTo(b, 0);
+        var at = fixedPart.Length;
+        foreach (var blob in blobs)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(at), (ushort)blob.Length);
+            blob.CopyTo(b, at + 2);
+            at += 2 + blob.Length;
+        }
+        return b;
+    }
+
+    /// <summary>
+    /// The header's fixed part: format 1's whole header, or format 2's first <see cref="BackupFormat.SealedFixedBytes"/>
+    /// (what its wrapped key is bound to).
+    /// </summary>
+    internal byte[] FixedBytes()
+    {
+        var sealedFile = Version == BackupFormat.Sealed;
+        var b = new byte[sealedFile ? BackupFormat.SealedFixedBytes : BackupFormat.HeaderBytes];
         var s = b.AsSpan();
         BackupFormat.Magic.CopyTo(s);
-        BinaryPrimitives.WriteUInt16BigEndian(s[8..], BackupFormat.Version);
+        BinaryPrimitives.WriteUInt16BigEndian(s[8..], Version);
         s[10] = BackupFormat.KdfPbkdf2Sha256;
         BinaryPrimitives.WriteUInt32BigEndian(s[11..], (uint)Iterations);
         Salt.CopyTo(s[15..]);
         s[31] = BackupFormat.CipherAes256Gcm;
         BinaryPrimitives.WriteUInt32BigEndian(s[32..], (uint)ChunkSize);
         NoncePrefix.CopyTo(s[36..]);
+        if (sealedFile)
+        {
+            s[43] = BackupFormat.KeyModeEcdhP256;
+            KeyId!.CopyTo(s[44..]);
+        }
         return b;
+    }
+
+    /// <summary>
+    /// How many bytes of the header are needed, from its first bytes: its whole length once it can be told (format 1's 43,
+    /// or format 2's fixed part and its three blobs; <paramref name="complete"/> true), else how many to read before it can
+    /// say more. Never more than the header has, so nothing of the body is read with it. A
+    /// <see cref="BackupFileException"/> says why it isn't a header.
+    /// </summary>
+    internal static int Needed(ReadOnlySpan<byte> b, out bool complete)
+    {
+        complete = false;
+        if (b.Length < 10) return BackupFormat.HeaderBytes;
+        if (!b[..8].SequenceEqual(BackupFormat.Magic)) throw new BackupFileException(UploadProblem.NotABackup, "This isn't a Gitberth backup file.");
+        var version = BinaryPrimitives.ReadUInt16BigEndian(b[8..]);
+        if (version > BackupFormat.Newest)
+            throw new BackupFileException(UploadProblem.TooNew, "This backup was made by a newer Gitberth. Update Gitberth, then restore it.");
+        if (version != BackupFormat.Sealed)
+        {
+            complete = true;
+            return BackupFormat.HeaderBytes;
+        }
+        var at = BackupFormat.SealedFixedBytes;
+        for (var blob = 0; blob < 3; blob++)
+        {
+            if (b.Length < at + 2) return at + 2;
+            var length = BinaryPrimitives.ReadUInt16BigEndian(b[at..]);
+            if (length is 0 or > BackupFormat.MaxBlobBytes) throw new BackupFileException(UploadProblem.Damaged, "This backup's header is damaged.");
+            at += 2 + length;
+        }
+        complete = true;
+        return at;
     }
 
     /// <summary>The header at the start of a file; a <see cref="BackupFileException"/> says why it isn't one Gitberth reads.</summary>
@@ -171,9 +269,9 @@ public sealed class BackupHeader
         if (b.Length < 10 || !b[..8].SequenceEqual(BackupFormat.Magic))
             throw new BackupFileException(UploadProblem.NotABackup, "This isn't a Gitberth backup file.");
         var version = BinaryPrimitives.ReadUInt16BigEndian(b[8..]);
-        if (version > BackupFormat.Version)
+        if (version > BackupFormat.Newest)
             throw new BackupFileException(UploadProblem.TooNew, "This backup was made by a newer Gitberth. Update Gitberth, then restore it.");
-        if (version != BackupFormat.Version || b.Length < BackupFormat.HeaderBytes)
+        if (version is not (BackupFormat.Version or BackupFormat.Sealed) || b.Length < BackupFormat.HeaderBytes)
             throw new BackupFileException(UploadProblem.NotABackup, "This isn't a Gitberth backup file.");
         if (b[10] != BackupFormat.KdfPbkdf2Sha256 || b[31] != BackupFormat.CipherAes256Gcm)
             throw new BackupFileException(UploadProblem.TooNew, "This backup is encrypted in a way this Gitberth doesn't know. Update Gitberth, then restore it.");
@@ -181,12 +279,38 @@ public sealed class BackupHeader
         var chunk = BinaryPrimitives.ReadUInt32BigEndian(b[32..]);
         if (iterations is 0 or > BackupFormat.MaxIterations || chunk is 0 or > BackupFormat.MaxChunkBytes)
             throw new BackupFileException(UploadProblem.Damaged, "This backup's header is damaged.");
+        if (version == BackupFormat.Version)
+            return new BackupHeader
+            {
+                Iterations = (int)iterations,
+                Salt = b[15..31].ToArray(),
+                ChunkSize = (int)chunk,
+                NoncePrefix = b[36..43].ToArray(),
+            };
+
+        if (Needed(b, out var complete) is var length && (!complete || b.Length < length))
+            throw new BackupFileException(UploadProblem.Damaged, "This backup's header is damaged.");
+        if (b[43] != BackupFormat.KeyModeEcdhP256)
+            throw new BackupFileException(UploadProblem.TooNew, "This backup is encrypted in a way this Gitberth doesn't know. Update Gitberth, then restore it.");
+        var blobs = new byte[3][];
+        var at = BackupFormat.SealedFixedBytes;
+        for (var i = 0; i < 3; i++)
+        {
+            var n = BinaryPrimitives.ReadUInt16BigEndian(b[at..]);
+            blobs[i] = b.Slice(at + 2, n).ToArray();
+            at += 2 + n;
+        }
         return new BackupHeader
         {
+            Version = BackupFormat.Sealed,
             Iterations = (int)iterations,
             Salt = b[15..31].ToArray(),
             ChunkSize = (int)chunk,
             NoncePrefix = b[36..43].ToArray(),
+            KeyId = b.Slice(44, BackupFormat.KeyIdBytes).ToArray(),
+            SealedPrivateKey = blobs[0],
+            EphemeralPublicKey = blobs[1],
+            WrappedKey = blobs[2],
         };
     }
 }
@@ -216,9 +340,24 @@ public sealed class BackupKey : IDisposable
         return new BackupKey(header, BackupFormat.DeriveKey(passphrase, header.Salt, header.Iterations));
     }
 
-    /// <summary>The passphrase's key for a file with this header.</summary>
-    public static BackupKey ForFile(BackupHeader header, string passphrase) =>
-        new(header, BackupFormat.DeriveKey(passphrase, header.Salt, header.Iterations));
+    /// <summary>
+    /// A key for a new format 2 file, sealed to the key pair: a random file key, which only the pair's private key (and so
+    /// the passphrase) unwraps. No passphrase is needed to make one.
+    /// </summary>
+    public static BackupKey ForNewFile(SealedKeyPair pair, int chunkSize = BackupFormat.ChunkBytes)
+    {
+        var (header, key) = SealedKeys.NewFile(pair, chunkSize);
+        return new BackupKey(header, key);
+    }
+
+    /// <summary>
+    /// The passphrase's key for a file with this header: derived from it (format 1), or unwrapped with the private key it
+    /// unseals (format 2). A wrong passphrase is a <see cref="BackupFileException"/> (WrongPassphrase) for format 2 here, and
+    /// for format 1 when its first chunk doesn't open.
+    /// </summary>
+    public static BackupKey ForFile(BackupHeader header, string passphrase) => header.Version == BackupFormat.Sealed
+        ? new(header, SealedKeys.FileKey(header, passphrase))
+        : new(header, BackupFormat.DeriveKey(passphrase, header.Salt, header.Iterations));
 
     public void Dispose() => CryptographicOperations.ZeroMemory(_key);
 }

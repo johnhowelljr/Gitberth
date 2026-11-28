@@ -126,7 +126,7 @@
     private static readonly IReadOnlyList<SegOption<DatabaseKind>> KindOptions =
         [new(DatabaseKind.Postgres, "Postgres", Tip: "app.settings.databases.postgres"), new(DatabaseKind.Redis, "Redis", Tip: "app.settings.databases.redis")];
 
-    private bool IsGit => View.Summary.Source == AppSource.Git;
+    private bool IsGit => View.Summary.Source is AppSource.Git or AppSource.Upload;
 
     private string Description => "A Postgres database or a Redis of the app's own, made by Gitberth, with its connection string in a variable it sets.";
 

@@ -183,8 +183,9 @@ internal sealed class BackupTestEngine : IBackupEngine
     }
 
     /// <summary>A container as an inspect has it, its volumes made, on its networks.</summary>
+    /// <param name="folders">Host folders it bind-mounts: "/srv/photos:/photos".</param>
     public JsonObject AddContainer(string name, string image, string imageId, bool running = true, string[]? env = null, string[]? volumes = null,
-        IDictionary<string, string>? labels = null, string[]? networks = null, int? hostPort = null)
+        IDictionary<string, string>? labels = null, string[]? networks = null, int? hostPort = null, string[]? folders = null)
     {
         var id = (name.GetHashCode().ToString("x8") + new string('0', 64))[..64];
         var mounts = new JsonArray();
@@ -195,6 +196,12 @@ internal sealed class BackupTestEngine : IBackupEngine
             mounts.Add(new JsonObject { ["Type"] = "volume", ["Name"] = volume, ["Source"] = "/var/lib/docker/volumes/" + volume, ["Destination"] = target, ["RW"] = true });
             binds.Add(v);
             AddVolume(volume);
+        }
+        foreach (var f in folders ?? [])
+        {
+            var (source, target) = (f.Split(':')[0], f.Split(':')[1]);
+            mounts.Add(new JsonObject { ["Type"] = "bind", ["Source"] = source, ["Destination"] = target, ["RW"] = true });
+            binds.Add(f);
         }
         var endpoints = new JsonObject();
         foreach (var n in networks ?? ["bridge"])
@@ -319,6 +326,12 @@ internal sealed class BackupTestEngine : IBackupEngine
             foreach (var bind in (body["HostConfig"]?["Binds"] as JsonArray ?? []).Select(b => (string)b!))
             {
                 var parts = bind.Split(':');
+                // A host folder (a path), mounted as it is: its files are kept by path, like a volume's by name.
+                if (parts[0].StartsWith('/'))
+                {
+                    mounts.Add(new JsonObject { ["Type"] = "bind", ["Source"] = parts[0], ["Destination"] = parts[1], ["RW"] = parts.Length < 3 });
+                    continue;
+                }
                 if (!Volumes.ContainsKey(parts[0])) Volumes[parts[0]] = new JsonObject { ["Name"] = parts[0], ["Driver"] = "local" };
                 mounts.Add(new JsonObject { ["Type"] = "volume", ["Name"] = parts[0], ["Destination"] = parts[1], ["RW"] = parts.Length < 3 });
             }
@@ -412,6 +425,11 @@ internal sealed class BackupTestEngine : IBackupEngine
             if ((c["Config"]?["Entrypoint"] as JsonArray)?.FirstOrDefault()?.GetValue<string>() == "find")
                 foreach (var m in (c["Mounts"] as JsonArray ?? []).OfType<JsonObject>().Where(m => (string?)m["Destination"] == "/v"))
                     Files.Remove((string)m["Name"]!);
+            // A host folder's files moved aside (HostFolders.MoveAsideAsync): from the folder at /h to the one at /b.
+            var mounts = (c["Mounts"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+            if (mounts.FirstOrDefault(m => (string?)m["Destination"] == "/h") is { } from && mounts.FirstOrDefault(m => (string?)m["Destination"] == "/b") is { } to
+                && Files.Remove((string)from["Source"]!, out var moved))
+                Files[(string)to["Source"]!] = moved;
             c["State"] = State(false);
         }
         return Task.FromResult(0);
@@ -424,15 +442,16 @@ internal sealed class BackupTestEngine : IBackupEngine
         return Task.FromResult("net-" + body["Name"]);
     }
 
-    // A helper's archive of /v is its volume's files.
+    // A helper's archive of /v is its volume's files; of /h, its host folder's (kept by its path).
     private string VolumeAt(string container, string path)
     {
         lock (_gate)
         {
             var c = Get(container);
-            var mount = (c["Mounts"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(m => (string?)m["Destination"] == "/v")
+            var mount = (c["Mounts"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(m => (string?)m["Destination"] == path)
+                ?? (path == "/" ? (c["Mounts"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(m => (string?)m["Destination"] is "/v" or "/h") : null)
                 ?? throw new DockerApiException(404, $"Could not find the file {path} in container {container}");
-            return (string)mount["Name"]!;
+            return (string?)mount["Name"] ?? (string)mount["Source"]!;
         }
     }
 
@@ -440,12 +459,34 @@ internal sealed class BackupTestEngine : IBackupEngine
     {
         var volume = VolumeAt(container, path);
         Call($"get {container} {path} ({volume})");
-        lock (_gate) return Task.FromResult<Stream>(new MemoryStream(Files.GetValueOrDefault(volume) ?? Tar("")));
+        // A host folder with nothing in it: the folder alone.
+        lock (_gate) return Task.FromResult<Stream>(new MemoryStream(Files.GetValueOrDefault(volume) ?? (path == "/h" ? EmptyFolder("h") : Tar(""))));
+    }
+
+    /// <summary>An empty folder as Docker's archive of it gives it.</summary>
+    public static byte[] EmptyFolder(string name)
+    {
+        var tar = new MemoryStream();
+        using (var writer = new TarWriter(tar, TarEntryFormat.Pax, leaveOpen: true))
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.Directory, name + "/"));
+        return tar.ToArray();
+    }
+
+    /// <summary>A host folder's files as Docker's archive of /h gives them: the folder and a marker file.</summary>
+    public static byte[] FolderTar(string marker)
+    {
+        var tar = new MemoryStream();
+        using (var writer = new TarWriter(tar, TarEntryFormat.Pax, leaveOpen: true))
+        {
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.Directory, "h/") { Uid = 1000, Gid = 1000 });
+            writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, "h/photo.txt") { DataStream = new MemoryStream(Encoding.UTF8.GetBytes(marker)) });
+        }
+        return tar.ToArray();
     }
 
     public async Task PutArchiveAsync(string container, string path, Stream tar, CancellationToken ct = default)
     {
-        var volume = VolumeAt(container, "/v");
+        var volume = VolumeAt(container, "/");
         Call($"put {container} {path} ({volume})");
         var bytes = new MemoryStream();
         await tar.CopyToAsync(bytes, ct);

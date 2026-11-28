@@ -600,6 +600,9 @@ Access: **Admin** · idempotent
 | `certificate_expiring` | boolean | no | When a domain's certificate is about to expire. |
 | `token_expiring` | boolean | no | When a token Gitberth uses is about to expire or is refused. |
 | `disk_low` | boolean | no | When Docker's disk gets full (and has room again). |
+| `backup_failed` | boolean | no | When an automatic backup fails (and works again). |
+| `update_available` | boolean | no | When a new version of Gitberth, or a newer image of an app set to Tell me, is out (and how Gitberth's own update went). |
+| `job_failed` | boolean | no | When a scheduled command fails (and passes again). |
 | `previews` | boolean | no | About previews' deploys too. |
 
 ### `set_update_settings`
@@ -651,6 +654,27 @@ Access: **Admin**
 
 <!-- tools:end -->
 
+## Upload a folder or an archive
+
+`POST /api/v1/apps/<name>/upload` sends an uploaded app a new version, or makes one: it isn't a tool, since it carries a
+file. The body is a form upload with the archive as `file` (a `.zip`, `.tar`, `.tar.gz` or `.tgz`, up to 2 GiB), checked
+and unpacked as New app's **Upload a folder** does (see [What an upload can hold](../guides/deploy-a-folder.md#what-an-upload-can-hold)).
+
+```bash
+curl -X POST -H "Authorization: Bearer $GITBERTH_TOKEN" -F file=@site.zip \
+  http://192.168.50.10:8080/api/v1/apps/gb-site/upload
+```
+
+- **An uploaded app's name or key** takes a new version, deployed at once. It needs **Operate**. Another kind of app (a
+  Git app, an image app) is refused with 409.
+- **A name no app has** makes that app from the upload, as New app would (its most likely app, with New app's
+  defaults), and deploys it. It needs **Admin**, as `create_app` does. One Gitberth can't tell how to build is refused
+  with 400, saying what would make it work.
+- `?wait=true` follows the deploy for up to 10 minutes and returns how it ended, as a tool's `wait` does.
+
+The answer is `{"app", "key", "created", "deployment_id", "upload": {"name", "sha", "size"}, "message"}`, with `deploy`
+in place of `deployment_id` when it waited. A refused upload is `{"error": "…"}` with 400, saying why (a path that leaves
+its folder, a link outside it, a file over the limits).
 ## Related
 
 - [AI agents and the API](../guides/ai-agents.md): making a token and connecting Claude Code, VS Code, Cursor, Claude Desktop or a script.

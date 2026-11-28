@@ -111,6 +111,16 @@ the Docker socket or the host's files, which reach everything on the host; treat
 No tool manages tokens, changes the admin password or stops the audit log recording changes made outside Gitberth, but
 that's a promise about the tools: only for Read and Operate tokens is it the whole story.
 
+## The terminal and the Files tab
+
+An app's [terminal and files](../guides/terminal-and-files.md) are for a signed-in person only, from Gitberth's own pages.
+The terminal's WebSocket needs a one-time ticket the page gets from Gitberth a moment before (32 random bytes, good once,
+for 30 seconds, for that person), and its `Origin` must be Gitberth's own address; a download or an upload needs a ticket
+of its own just the same. Opening and closing a terminal are recorded with who and from where, never what's typed. The
+files are reached through a helper container of Gitberth's own image with only that volume mounted and no network; every
+path is checked to stay in the volume, links followed. Docker's socket and Gitberth's own data are never offered, and
+Gitberth's own containers have neither tab.
+
 ## Related
 
 - [Configuration](../reference/configuration.md)

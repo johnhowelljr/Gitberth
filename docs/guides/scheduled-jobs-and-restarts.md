@@ -1,8 +1,9 @@
 # Scheduled jobs and restarts
 
-Gitberth can do two things on a schedule. **Scheduled jobs** call a path of a Git app at set times, the way Vercel runs
-the `crons` in a project's `vercel.json`, so an app's jobs keep running after it moves off Vercel. **Scheduled restarts**
-restart any container every so often, for apps that leak memory or otherwise do better with a fresh start now and then.
+Gitberth can do three things on a schedule. **Scheduled jobs** call a path of a Git app at set times, the way Vercel runs
+the `crons` in a project's `vercel.json`, so an app's jobs keep running after it moves off Vercel. **Scheduled commands**
+run a shell command of any app at set times, such as a nightly cleanup. **Scheduled restarts** restart any container
+every so often, for apps that leak memory or otherwise do better with a fresh start now and then.
 
 ## Scheduled jobs
 
@@ -72,6 +73,59 @@ caught up. Unlike Vercel, a run that comes due while the same job's previous run
 Jobs run only while the app is running, and they go to its web port, so the app needs one. When it doesn't have one, or is
 stopped, the card says so. Mark the web port on the app's **Network** tab; see [Networking](networking.md).
 
+## Scheduled commands
+
+Any app can run a command on a schedule: a cleanup, a report, a backup of its own files. Unlike a
+[scheduled job](#scheduled-jobs), which calls a path of a Git app, a scheduled command is a shell command, and every app
+can have them, whatever its source: a Git app, an uploaded folder, a Compose app, an image, or a container Gitberth
+didn't start.
+
+### Add a scheduled command
+
+1. On the app's **Overview** tab, find the **Scheduled commands** card and click **Add**.
+2. Give it a **Name**, such as `Nightly cleanup`, and the **Command**, such as `npm run cleanup`. It runs with
+   `/bin/sh -c`, so `&&` joins several.
+3. Choose when it **Runs**: **Every N minutes**, **Hourly** at a minute, **Daily** or **Weekly** at a time, or a **Cron**
+   expression. The dialog says what that means and when it runs next.
+4. Choose **Where it runs**, and for a Compose app its **Service**. See [Where a command runs](#where-a-command-runs).
+5. Change the **Time limit** if it needs longer than 30 minutes (up to 24 hours), and click **Add**.
+
+The pencil changes a command and the bin removes it, with its runs. Adding, changing and removing a command, and every
+**Run now**, are recorded in the [audit log](audit-log.md).
+
+### Its schedule and time zone
+
+Schedules are in Gitberth's time zone: the `TZ` it was started with, or UTC without one. The card's title says which.
+A cron expression takes the five fields [above](#schedules), read in that time zone rather than in UTC. Gitberth looks
+for commands that are due every 15 seconds. A run that came due while Gitberth was down doesn't run late: the next one is
+on time.
+
+### Where a command runs
+
+- **In the running container**, the default: `docker exec` in the app's container, so it sees the app's files as they are
+  now. It runs only while the app runs: a stopped app's commands wait for it.
+- **In a new container**: a one-off container of the app's image, with its variables, volumes and networks but no ports,
+  removed when the command ends. The app's own container isn't touched, which suits a heavy job.
+
+Either way the image needs a shell (`/bin/sh`). A command still running at its time limit is stopped and counts as
+**Timed out**. In the running container, it's stopped with `timeout` when the image has it; when it doesn't, Gitberth
+stops waiting and says the command may still be running.
+
+### Runs and their output
+
+Each command on the card shows its schedule, where it runs, when it runs next, and how its last run went: **Succeeded**,
+**Failed** with its exit code, **Timed out**, **Skipped** or **Running**. **Run now** runs it at once. The history button
+lists its last 20 runs, each with when it started, how long it took and what started it; click one to see the last 64 KB
+of what it printed, with the app's secret values masked.
+
+A run that comes due while the one before it still runs is skipped, and shown as **Skipped**.
+
+### When a run fails
+
+A run that fails or times out is written on the app's **Activity** tab, and sends a message if **A scheduled command
+fails** is on in [notifications](notifications.md), as it is by default. The first run that passes after a failure says
+so in both places.
+
 ## Scheduled restarts
 
 Any container on the host can be restarted on a schedule: every so many minutes, hours or days, or never, which is the
@@ -123,7 +177,7 @@ A stopped container isn't started, an app in the middle of a deploy waits, and s
 
 ## Related
 
-- [Deploys and rollbacks](deploys-and-rollbacks.md)
+- [Deploys and rollbacks](deploys-and-rollbacks.md), and an app's [release command](deploys-and-rollbacks.md#release-command)
 - [Health and monitoring](health-and-monitoring.md)
 - [App settings](../reference/app-settings.md#restart)
 - [Environment variables](environment-variables.md)

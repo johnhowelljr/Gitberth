@@ -1,0 +1,178 @@
+# Tips for an app's scheduled commands (B2): the Scheduled commands card on its Overview
+# (Components/Apps/CommandJobsCard.razor), its dialog (CommandJobDialog.razor) and the switch in Settings › Notifications.
+# See Help/TipCatalog.cs.
+
+jobs.card:
+  title: Scheduled commands
+  text: >-
+    Commands of this app that run on a schedule, in Gitberth's time zone: in its running container, or in a new one of
+    its image. Each shows when it runs next and how its last run went.
+  more: guides/scheduled-jobs-and-restarts#scheduled-commands
+
+jobs.add:
+  title: Add
+  text: >-
+    Schedules a command: its name, when it runs, the command, where it runs and how long it may take.
+  more: guides/scheduled-jobs-and-restarts#add-a-scheduled-command
+
+jobs.last-run:
+  title: Last run
+  text: >-
+    How its last run ended: Succeeded, Failed with its exit code, Timed out, Skipped (the run before it still ran) or
+    Running. Not run yet until its first.
+  more: guides/scheduled-jobs-and-restarts#runs-and-their-output
+
+jobs.run-now:
+  title: Run now
+  text: >-
+    Runs the command at once, where it's set to run, and opens its runs on the new one. Not while it's running.
+  more: guides/scheduled-jobs-and-restarts#runs-and-their-output
+
+jobs.runs:
+  title: Last runs
+  text: >-
+    Its last 20 runs: how each ended, when, how long it took and what started it. Click one to see what it printed.
+  more: guides/scheduled-jobs-and-restarts#runs-and-their-output
+
+jobs.output:
+  title: Output
+  text: >-
+    The last 64 KB of what the run printed, with the app's secret values masked.
+  more: guides/scheduled-jobs-and-restarts#runs-and-their-output
+
+jobs.edit:
+  title: Change
+  text: >-
+    Changes its name, schedule, command, where it runs or its time limit. A run going on now isn't touched.
+  more: guides/scheduled-jobs-and-restarts#add-a-scheduled-command
+
+jobs.remove:
+  title: Remove
+  text: >-
+    Removes the command after asking, with its runs and their output. It no longer runs.
+  more: guides/scheduled-jobs-and-restarts#add-a-scheduled-command
+
+jobs.name:
+  title: Name
+  text: >-
+    What the card, the Activity tab and notifications call it, like Nightly cleanup. Up to 60 characters.
+  more: guides/scheduled-jobs-and-restarts#add-a-scheduled-command
+
+jobs.command:
+  title: Command
+  text: >-
+    One line, run with /bin/sh -c and the app's variables, like npm run cleanup. The image needs a shell.
+  more: guides/scheduled-jobs-and-restarts#add-a-scheduled-command
+
+jobs.schedule:
+  title: Runs
+  text: >-
+    When it runs, in Gitberth's time zone: every N minutes, hourly at a minute, daily or weekly at a time, or a cron
+    expression. A run due while the one before it still runs is skipped.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.every.minutes:
+  title: Every N minutes
+  text: >-
+    Runs every 1 to 59 minutes, on the minutes the hour divides into: every 15 runs at :00, :15, :30 and :45.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.every.hourly:
+  title: Hourly
+  text: >-
+    Runs once an hour, at the minute you give.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.every.daily:
+  title: Daily
+  text: >-
+    Runs once a day, at the time you give, in Gitberth's time zone.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.every.weekly:
+  title: Weekly
+  text: >-
+    Runs once a week, on the day and at the time you give, in Gitberth's time zone.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.every.cron:
+  title: Cron
+  text: >-
+    A cron expression of your own, for anything else: five fields, read in Gitberth's time zone.
+  more: guides/scheduled-jobs-and-restarts#schedules
+
+jobs.every.n:
+  title: Every
+  text: >-
+    How many minutes between runs, from 1 to 59. For longer, run it hourly or daily.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.at-minute:
+  title: At minute
+  text: >-
+    The minute of each hour it runs at, from 0 to 59.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.day:
+  title: On
+  text: >-
+    The day of the week it runs on.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.time:
+  title: At
+  text: >-
+    The time it runs at, in Gitberth's time zone, which the card's title names.
+  more: guides/scheduled-jobs-and-restarts#its-schedule-and-time-zone
+
+jobs.cron:
+  title: Cron expression
+  text: >-
+    Minute, hour, day of the month, month and day of the week, like `30 2 * * 1-5` for 02:30 on weekdays. Numbers,
+    ranges, lists and steps; no names like MON.
+  more: guides/scheduled-jobs-and-restarts#schedules
+
+jobs.place:
+  title: Where it runs
+  text: >-
+    In the running container with docker exec, which sees its files as they are now, or in a new container of its
+    image, removed when the command ends.
+  more: guides/scheduled-jobs-and-restarts#where-a-command-runs
+
+jobs.place.exec:
+  title: In the running container
+  text: >-
+    docker exec in the app's container. It runs only while the app runs: a stopped app's commands wait for it.
+  more: guides/scheduled-jobs-and-restarts#where-a-command-runs
+
+jobs.place.new:
+  title: In a new container
+  text: >-
+    A one-off container of the app's image, with its variables, volumes and networks but no ports, removed when the
+    command ends. The app's own container isn't touched.
+  more: guides/scheduled-jobs-and-restarts#where-a-command-runs
+
+jobs.service:
+  title: Service
+  text: >-
+    The Compose service the command runs in, or whose image a new container is made of.
+  more: guides/scheduled-jobs-and-restarts#where-a-command-runs
+
+jobs.timeout:
+  title: Time limit
+  text: >-
+    How long a run may take, from 1 minute to 24 hours. Still running then, it's stopped and counts as timed out.
+  more: guides/scheduled-jobs-and-restarts#where-a-command-runs
+
+jobs.save:
+  title: Save
+  text: >-
+    Saves the command. It runs from its next time on; Run now runs it at once.
+  more: guides/scheduled-jobs-and-restarts#add-a-scheduled-command
+
+jobs.notify:
+  title: A scheduled command fails
+  text: >-
+    A run of an app's scheduled command that fails or runs past its time limit, each time; and a message once one
+    passes again after failing.
+  more: guides/scheduled-jobs-and-restarts#when-a-run-fails

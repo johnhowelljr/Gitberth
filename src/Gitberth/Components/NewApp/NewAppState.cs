@@ -12,7 +12,7 @@ using MudBlazor;
 namespace Gitberth.Components.NewApp;
 
 /// <summary>Where a new app comes from, as the five source cards offer it.</summary>
-public enum NewAppSource { Git, Registry, Local, Hand, Templates }
+public enum NewAppSource { Git, Upload, Registry, Local, Hand, Templates }
 
 /// <summary>The wizard's three steps: Source, Configure, Create.</summary>
 public enum NewAppStep { Source, Configure, Create }
@@ -413,16 +413,21 @@ public static class PopularImages
     ];
 }
 
-/// <summary>The five source cards' words and icons.</summary>
+/// <summary>The six source cards' words and icons.</summary>
 public static class NewAppSources
 {
     /// <summary>The Git source's card: a github.com repository, or a project on Gitberth's GitLab.</summary>
     public const string GitTitle = "Git repository";
 
+    /// <summary>The Upload source's card: a folder from this computer, or an archive of one.</summary>
+    public const string UploadTitle = "Upload a folder";
+
     public static (string Title, string Text, string Icon, string[] Tags) Of(NewAppSource source) => source switch
     {
         NewAppSource.Git => (GitTitle, "Gitberth builds it from GitHub or GitLab, then again on every push. It detects Next.js, Python, Go, .NET, Dockerfiles and more.",
             Icons.Custom.Brands.GitHub, ["GitHub", "GitLab", "Deploy on push"]),
+        NewAppSource.Upload => (UploadTitle, "A folder from this computer, or a zip or tar of one. Gitberth works out what it is, as it does for a repo, and brings it up.",
+            Icons.Material.Outlined.DriveFolderUpload, ["Folder", ".zip", ".tar.gz"]),
         NewAppSource.Registry => ("Registry image", "Pull any image from Docker Hub, GitHub or your own registry, and keep it up to date.",
             Icons.Material.Outlined.CloudDownload, ["Docker Hub", "ghcr.io"]),
         NewAppSource.Local => ("Local image", "Run an image that's already on this host, with no pull.", Icons.Material.Outlined.Layers, ["No pull"]),

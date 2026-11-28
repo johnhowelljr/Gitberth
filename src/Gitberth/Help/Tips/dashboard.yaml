@@ -104,6 +104,13 @@ dashboard.disk-low:
     itself; **See what takes the room** opens Settings › Disk. Under the lower line it pulls no image, and builds may fail.
   more: guides/troubleshooting#dockers-disk-is-filling-up
 
+dashboard.backups-failing:
+  title: Automatic backups are failing
+  text: >-
+    The last automatic backup didn't reach its destination, or none has for twice the schedule's interval. The banner
+    says why; **Open automatic backups** shows the last runs and **Test the destination**. It goes once a backup works.
+  more: guides/automatic-backups#when-a-backup-fails
+
 dashboard.recent-deploys:
   title: Recent deploys
   text: >-

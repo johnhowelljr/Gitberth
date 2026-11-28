@@ -114,6 +114,12 @@ public sealed partial class PortChanger
         if (unheld.Count > 0) steps.Done(StepKind.Ports);
         ct.ThrowIfCancellationRequested();
 
+        // [builder B, B2] A new image (an update, a rollback, another image in its settings) runs the app's release command
+        // first, in a one-off container of the new body: one that fails or runs too long leaves everything as it was.
+        if (release is not null && (kind is ChangeKind.Update or ChangeKind.Rollback || fields.Contains(SettingField.Image))
+            && await release.Value.BeforeImageChangeAsync(name, body, ct) is { } releaseFailed)
+            return Nothing(scrub(releaseFailed));
+
         // From here on nothing is cancelled: a half-finished swap is worse than a finished one. The journal row comes
         // first, so a restart of Gitberth at any point after finds it. It holds names, IDs and policies, never a value.
         var policy = inspect["HostConfig"]?["RestartPolicy"] as JsonObject ?? new JsonObject { ["Name"] = "no" };

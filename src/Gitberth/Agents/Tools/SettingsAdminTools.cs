@@ -34,6 +34,10 @@ public sealed class SettingsAdminTools(NotificationSettings notifications, Setti
         [Description("When a domain's certificate is about to expire.")] bool? certificate_expiring = null,
         [Description("When a token Gitberth uses is about to expire or is refused.")] bool? token_expiring = null,
         [Description("When Docker's disk gets full (and has room again).")] bool? disk_low = null,
+        [Description("When an automatic backup fails (and works again).")] bool? backup_failed = null,
+        [Description("When a new version of Gitberth, or a newer image of an app set to Tell me, is out (and how Gitberth's own update went).")] bool? update_available = null,
+        // [builder B, B2]
+        [Description("When a scheduled command fails (and passes again).")] bool? job_failed = null,
         [Description("About previews' deploys too.")] bool? previews = null,
         CancellationToken ct = default)
     {
@@ -42,6 +46,9 @@ public sealed class SettingsAdminTools(NotificationSettings notifications, Setti
             (NotifyEvent.DeployFailed, deploy_failed), (NotifyEvent.DeploySucceeded, deploy_succeeded), (NotifyEvent.Crashed, crashed),
             (NotifyEvent.Unhealthy, unhealthy), (NotifyEvent.Down, down), (NotifyEvent.BroughtBack, brought_back),
             (NotifyEvent.CertificateExpiring, certificate_expiring), (NotifyEvent.TokenExpiring, token_expiring), (NotifyEvent.DiskLow, disk_low),
+            (NotifyEvent.BackupFailed, backup_failed), (NotifyEvent.UpdateAvailable, update_available),
+            // [builder B, B2]
+            (NotifyEvent.JobFailed, job_failed),
         };
         if (wanted.All(w => w.On is null) && previews is null) throw new ToolError("Say what to turn on or off: get_settings shows what's sent now.");
         foreach (var (e, on) in wanted)

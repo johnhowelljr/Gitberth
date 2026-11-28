@@ -45,7 +45,9 @@ public sealed partial class PortChanger(
     TimeProvider? time = null,
     ContainerUpdater? updater = null,
     IHealthProbe? health = null,
-    Audit.AuditLog? audit = null)
+    Audit.AuditLog? audit = null,
+    // [builder B, B2] An app's release command, run before a new image takes over; none in tests.
+    Lazy<Deploy.ReleaseCommands>? release = null)
 {
     private const int LogLines = 60;
     private static readonly IReadOnlyDictionary<string, NavApp> NoApps = new Dictionary<string, NavApp>();

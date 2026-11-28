@@ -1,0 +1,455 @@
+@using Gitberth.Workbench
+@implements IAsyncDisposable
+@inject AppFiles Files
+@inject WorkbenchTickets Tickets
+@inject DockerApi Api
+@inject IJSRuntime JS
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@*
+    An app's Files tab (B3): each of its container's volumes and host folders, browsed (name, size, when it changed, mode,
+    owner), with downloads (a file, or a folder as a .tar.gz), uploads (drop files, or choose them), a new folder, rename,
+    delete (asked first) and an editor for small text files. Everything goes through a helper container of Gitberth's
+    own image with that one volume mounted; downloads and uploads go straight to Gitberth with a one-time ticket. A
+    database's volume says to stop it first.
+*@
+@if (mounts is null)
+{
+    <div class="gb-skel" style="height:240px;border-radius:12px"></div>
+}
+else
+{
+    <SectionCard Id="gb-files-card" Title="Files" Icon="@Icons.Material.Outlined.FolderOpen" Sub="@container" Flush="true" Tip="files.card">
+        <ChildContent>
+            <div class="gb-files-bar">
+                @if (Services.Count > 1)
+                {
+                    <span class="gb-t3"><Tip Key="files.service">Service</Tip></span>
+                    <Seg T="string" Options="@(Services.Select(s => new SegOption<string>(s, s == View.Row?.WebService ? $"{s} (web)" : s)).ToList())" Value="Service" ValueChanged="PickServiceAsync" Label="Service" />
+                }
+                @if (mounts.Count > 0)
+                {
+                    <label class="gb-t3" for="gb-files-mount"><Tip Key="files.mount">Volume</Tip></label>
+                    <select id="gb-files-mount" class="gb-input gb-input--sm gb-files-mount" value="@mountIndex" @onchange="PickMountAsync">
+                        @for (var i = 0; i < mounts.Count; i++)
+                        {
+                            var m = mounts[i];
+                            <option value="@i">@m.Target · @(m.Volume is { } v ? $"volume {v}" : $"host folder {m.Source}")@(m.ReadOnly ? " · read-only" : "")</option>
+                        }
+                    </select>
+                }
+            </div>
+            @if (mounts.Count == 0)
+            {
+                <div style="padding:14px 18px 18px">
+                    <EmptyState Small="true" Icon="@Icons.Material.Outlined.FolderOff" Title="No volumes or host folders">
+                        @(problem ?? $"{container} keeps nothing in a volume or a host folder: what it writes is inside the container. Add a volume on its Settings tab for data that must stay.")
+                    </EmptyState>
+                </div>
+            }
+            else
+            {
+                @if (IsDatabase)
+                {
+                    <div style="padding:0 18px 12px">
+                        <Banner Tone="serious" Title="A database's files">A running database keeps its files open: changing them under it can break its data. Stop it first, and Gitberth asks before any change.</Banner>
+                    </div>
+                }
+                <div class="gb-files-path">
+                    <nav class="gb-crumbs" aria-label="Folder">
+                        <button type="button" class="gb-crumb" @onclick="() => GoAsync(string.Empty)">@Mount.Target</button>
+                        @foreach (var (name, at) in Crumbs)
+                        {
+                            <span class="gb-crumb-sep">/</span>
+                            <button type="button" class="gb-crumb" @onclick="() => GoAsync(at)">@name</button>
+                        }
+                    </nav>
+                    <span class="gb-grow"></span>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Refresh" OnClick="() => LoadAsync()" Disabled="busy" Tip="files.refresh">Refresh</Btn>
+                    <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.Download" OnClick="() => DownloadAsync(path, true)" Disabled="busy" Tip="files.download-folder">Download folder</Btn>
+                    @if (!Mount.ReadOnly)
+                    {
+                        <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" Icon="@Icons.Material.Outlined.CreateNewFolder" OnClick="NewFolderAsync" Disabled="busy" Tip="files.new-folder">New folder</Btn>
+                    }
+                </div>
+                @if (listing?.Problem is { } why)
+                {
+                    <div style="padding:0 18px 12px"><Banner Tone="critical" Title="It couldn't be read">@why</Banner></div>
+                }
+                <div class="gb-files" role="table" aria-label="@($"{Mount.Target}/{path}")">
+                    <div class="gb-files-row gb-files-head" role="row">
+                        <span role="columnheader">Name</span><span role="columnheader">Size</span><span role="columnheader">Changed</span>
+                        <span role="columnheader"><Tip Key="files.mode">Mode</Tip></span><span role="columnheader"><Tip Key="files.owner">Owner</Tip></span><span role="columnheader"></span>
+                    </div>
+                    @if (listing is null)
+                    {
+                        <div style="padding:14px 18px"><div class="gb-skel" style="height:80px"></div></div>
+                    }
+                    else if (listing.Entries.Count == 0 && listing.Problem is null)
+                    {
+                        <div class="gb-files-empty">This folder is empty.</div>
+                    }
+                    else
+                    {
+                        @foreach (var e in listing.Entries)
+                        {
+                            var at = path.Length == 0 ? e.Name : $"{path}/{e.Name}";
+                            <div class="gb-files-row" role="row" @key="e.Name" data-name="@e.Name">
+                                <span class="gb-files-name" role="cell">
+                                    <SvgIcon Icon="@IconOf(e)" Size="sm" />
+                                    @if (e.Type == FileType.Folder)
+                                    {
+                                        <button type="button" class="gb-linkbtn" @onclick="() => GoAsync(at)">@e.Name</button>
+                                    }
+                                    else
+                                    {
+                                        <span class="gb-ellipsis" data-tip-text="@(e.LinkTarget is { } link ? $"A link to {link}" : null)">@e.Name</span>
+                                    }
+                                </span>
+                                <span role="cell" class="gb-t3">@(e.Type == FileType.Folder ? "" : AppFiles.Size(e.Size))</span>
+                                <span role="cell" class="gb-t3" data-tip-text="@(e.Modified is { } m ? Format.Local(m) : null)">@(e.Modified is { } when ? Format.Ago(when) : "")</span>
+                                <span role="cell" class="gb-t3 gb-mono">@e.Mode</span>
+                                <span role="cell" class="gb-t3 gb-mono">@e.Uid:@e.Gid</span>
+                                <span role="cell" class="gb-files-actions">
+                                    @if (e.Type == FileType.File)
+                                    {
+                                        <button type="button" class="gb-iconbtn" data-tip="files.download" aria-label="@($"Download {e.Name}")" disabled="@busy" @onclick="() => DownloadAsync(at, false)"><SvgIcon Icon="@Icons.Material.Outlined.Download" /></button>
+                                        @if (e.Size <= AppFiles.MaxEdit)
+                                        {
+                                            <button type="button" class="gb-iconbtn" data-tip="files.edit" aria-label="@($"Edit {e.Name}")" disabled="@busy" @onclick="() => EditAsync(e)"><SvgIcon Icon="@Icons.Material.Outlined.Edit" /></button>
+                                        }
+                                    }
+                                    else if (e.Type == FileType.Folder)
+                                    {
+                                        <button type="button" class="gb-iconbtn" data-tip="files.download-folder" aria-label="@($"Download {e.Name} as a .tar.gz")" disabled="@busy" @onclick="() => DownloadAsync(at, true)"><SvgIcon Icon="@Icons.Material.Outlined.Download" /></button>
+                                    }
+                                    @if (!Mount.ReadOnly)
+                                    {
+                                        <button type="button" class="gb-iconbtn" data-tip="files.rename" aria-label="@($"Rename {e.Name}")" disabled="@busy" @onclick="() => RenameAsync(e)"><SvgIcon Icon="@Icons.Material.Outlined.DriveFileRenameOutline" /></button>
+                                        <button type="button" class="gb-iconbtn" data-tip="files.delete" aria-label="@($"Delete {e.Name}")" disabled="@busy" @onclick="() => DeleteAsync(e)"><SvgIcon Icon="@Icons.Material.Outlined.Delete" /></button>
+                                    }
+                                </span>
+                            </div>
+                        }
+                        @if (listing.Truncated)
+                        {
+                            <div class="gb-files-empty">Only the first @AppFiles.MaxEntries entries are shown: download the folder for all of them.</div>
+                        }
+                    }
+                </div>
+                @if (!Mount.ReadOnly)
+                {
+                    <div class="gb-dropzone gb-dropzone--small gb-files-drop @(uploading ? "gb-dropzone--busy" : null)" id="gb-files-zone">
+                        <span class="gb-dropzone-t"><Tip Key="files.upload">Upload files</Tip></span>
+                        <span class="gb-dropzone-s">@(uploading ? "Uploading…" : $"Drop files here, or choose them: they go into {Mount.Target.TrimEnd('/')}/{path}, owned like the folder.")</span>
+                        <input type="file" id="gb-files-input" multiple hidden />
+                        <Btn Size="BtnSize.Sm" Icon="@Icons.Material.Outlined.UploadFile" OnClick="ChooseAsync" Disabled="@(busy || uploading)" Tip="files.choose">Choose files</Btn>
+                    </div>
+                }
+                @if (editing is { } file)
+                {
+                    <div class="gb-files-editor" id="gb-files-editor">
+                        <div class="gb-row" style="gap:8px">
+                            <strong class="gb-mono gb-grow gb-ellipsis">@file</strong>
+                            <Btn Size="BtnSize.Sm" Kind="BtnKind.Ghost" OnClick="() => editing = null" Disabled="busy">Close</Btn>
+                            @if (!Mount.ReadOnly)
+                            {
+                                <Btn Size="BtnSize.Sm" Kind="BtnKind.Primary" Icon="@Icons.Material.Outlined.Save" OnClick="SaveEditAsync" Busy="busy" Tip="files.save">Save</Btn>
+                            }
+                        </div>
+                        <textarea id="gb-files-text" class="gb-input gb-input--mono" rows="18" spellcheck="false" readonly="@Mount.ReadOnly" @bind="text" @bind:event="oninput"></textarea>
+                    </div>
+                }
+            }
+        </ChildContent>
+        <Foot>
+            <span>Changes, uploads and downloads go in the audit log with their paths and sizes, never what's in them.</span>
+        </Foot>
+    </SectionCard>
+}
+
+@code {
+    [Parameter, EditorRequired] public AppView View { get; set; } = default!;
+    /// <summary>A Compose app's services, the web service first; empty for any other app.</summary>
+    [Parameter] public IReadOnlyList<string> Services { get; set; } = [];
+
+    private IReadOnlyList<FileMount>? mounts;
+    private int mountIndex;
+    private string path = "";
+    private FileListing? listing;
+    private string? problem;
+    private bool busy, uploading;
+    private string? service;
+    private string container = "";
+    private string? loadedFor;
+    private string? editing;
+    private string text = "";
+    private DotNetObjectReference<AppFilesTab>? self;
+    private bool bound;
+
+    private FileMount Mount => mounts![Math.Clamp(mountIndex, 0, mounts.Count - 1)];
+
+    private string Service => service is { } s && Services.Contains(s) ? s : View.Row?.WebService ?? Services.FirstOrDefault() ?? "";
+
+    private bool IsDatabase => View.Summary.Database || View.Summary.Role == ContainerRole.Database;
+
+    private IEnumerable<(string Name, string At)> Crumbs
+    {
+        get
+        {
+            var names = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            for (var i = 0; i < names.Length; i++) yield return (names[i], string.Join('/', names.Take(i + 1)));
+        }
+    }
+
+    private FilesOf Of => new(View.Summary.Title, View.Summary.AppId, container, Mount);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var key = $"{View.Summary.Key}|{Service}";
+        if (loadedFor == key) return;
+        loadedFor = key;
+        await ReadMountsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (bound || mounts is not { Count: > 0 } || Mount.ReadOnly) return;
+        bound = true;
+        self ??= DotNetObjectReference.Create(this);
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthFiles.bind", "gb-files-zone", "gb-files-input", self);
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    private async Task ReadMountsAsync()
+    {
+        container = View.Row is { IsCompose: true } row && Service.Length > 0 && Service != row.WebService
+            ? Gitberth.Compose.ComposeNames.Member(row.Slug, Service)
+            : View.Summary.Container;
+        (mountIndex, path, listing, editing, problem) = (0, "", null, null, null);
+        try
+        {
+            var inspect = await Api.InspectContainerAsync(container);
+            mounts = AppFiles.MountsOf(inspect, await Files.DataHostDirAsync());
+            if (inspect is null) problem = $"{container} has no container now.";
+        }
+        catch (Exception ex) when (ex is DockerApiException or HttpRequestException or IOException or TimeoutException)
+        {
+            mounts = [];
+            problem = $"Docker couldn't say what {container} mounts: {ex.Message.TrimEnd('.')}.";
+        }
+        bound = false;
+        if (mounts.Count > 0) await LoadAsync();
+    }
+
+    private async Task PickServiceAsync(string value)
+    {
+        service = value;
+        loadedFor = $"{View.Summary.Key}|{Service}";
+        mounts = null;
+        await ReadMountsAsync();
+    }
+
+    private async Task PickMountAsync(ChangeEventArgs e)
+    {
+        mountIndex = int.TryParse(e.Value?.ToString(), out var i) ? i : 0;
+        (path, editing, bound) = ("", null, false);
+        await LoadAsync();
+    }
+
+    private async Task GoAsync(string to)
+    {
+        path = to;
+        editing = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        busy = true;
+        listing = null;
+        try
+        {
+            listing = await Files.ListAsync(container, Mount, path);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private string User => Audit.AuditScope.Current is { Kind: Audit.AuditActorKind.User } actor ? actor.Name : "admin";
+
+    private async Task DownloadAsync(string at, bool folder)
+    {
+        var ticket = Tickets.Issue(TicketKind.Download, User, View.Summary.Key, container, new FileTicket(Of, at, folder));
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthFiles.download", $"{FileEndpoints.DownloadPath.TrimStart('/')}?ticket={Uri.EscapeDataString(ticket)}");
+        }
+        catch (JSException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    // A database's volume: asked before each change.
+    private async Task<bool> SureAsync(string what)
+    {
+        if (!IsDatabase) return true;
+        return await Dialogs.ShowMessageBoxAsync($"{what} in a database's volume?",
+            $"{View.Summary.Title} is a database: changing its files while it runs can break its data. Stop it first if it's running.",
+            yesText: "Go ahead", cancelText: "Cancel") == true;
+    }
+
+    private async Task NewFolderAsync()
+    {
+        var name = await AskAsync("New folder", "Folder name", "");
+        if (name is null || !await SureAsync("Make a folder")) return;
+        await ChangeAsync(() => Files.MakeFolderAsync(Of, path, name.Trim()));
+    }
+
+    private async Task RenameAsync(FileEntry e)
+    {
+        var name = await AskAsync($"Rename {e.Name}", "New name", e.Name);
+        if (name is null || name == e.Name || !await SureAsync("Rename it")) return;
+        await ChangeAsync(() => Files.RenameAsync(Of, path, e.Name, name.Trim()));
+    }
+
+    private async Task DeleteAsync(FileEntry e)
+    {
+        var what = e.Type == FileType.Folder ? $"the folder {e.Name} and everything in it" : e.Name;
+        if (await Dialogs.ShowMessageBoxAsync($"Delete {e.Name}?", $"This deletes {what} from {Mount.Target} for good: there's no bin to take it back from.",
+                yesText: "Delete", cancelText: "Cancel") != true) return;
+        if (!await SureAsync("Delete it")) return;
+        await ChangeAsync(() => Files.DeleteAsync(Of, path, e.Name));
+    }
+
+    private async Task EditAsync(FileEntry e)
+    {
+        busy = true;
+        try
+        {
+            var at = path.Length == 0 ? e.Name : $"{path}/{e.Name}";
+            var (content, why) = await Files.ReadTextAsync(container, Mount, at);
+            if (content is null)
+            {
+                Snackbar.Add(why ?? "It couldn't be read.", Severity.Warning);
+                return;
+            }
+            (editing, text) = (at, content);
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (editing is not { } at || !await SureAsync("Save the file")) return;
+        var (dir, name) = AppFiles.Split(at);
+        using var content = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(text));
+        await ChangeAsync(() => Files.WriteAsync(Of, dir, name, content, edit: true));
+    }
+
+    private async Task ChangeAsync(Func<Task<FileOutcome>> change)
+    {
+        busy = true;
+        try
+        {
+            var outcome = await change();
+            Snackbar.Add(outcome.Message, outcome.Ok ? Severity.Success : Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            busy = false;
+        }
+        await LoadAsync();
+    }
+
+    private async Task<string?> AskAsync(string title, string label, string value)
+    {
+        var dialog = await Dialogs.ShowAsync<FileNameDialog>(null, new DialogParameters<FileNameDialog>
+        {
+            { d => d.Title, title }, { d => d.Label, label }, { d => d.Value, value },
+        }, new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true });
+        var result = await dialog.Result;
+        return result is { Canceled: false, Data: string name } ? name : null;
+    }
+
+    private async Task ChooseAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthFiles.pick", "gb-files-input");
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    /// <summary>The page's upload asks for its one-time URL just before it sends.</summary>
+    [JSInvokable]
+    public string UploadUrl()
+    {
+        uploading = true;
+        _ = InvokeAsync(StateHasChanged);
+        var ticket = Tickets.Issue(TicketKind.Upload, User, View.Summary.Key, container, new FileTicket(Of, path, true));
+        return $"{FileEndpoints.UploadPath.TrimStart('/')}?ticket={Uri.EscapeDataString(ticket)}";
+    }
+
+    [JSInvokable]
+    public async Task Uploaded(bool ok, int status, string answer)
+    {
+        uploading = false;
+        if (!ok) Snackbar.Add(status == 0 ? "The upload didn't reach Gitberth." : answer.Length > 0 && !answer.StartsWith('{') ? answer : $"The upload failed ({status}).", Severity.Error);
+        else
+        {
+            try
+            {
+                var json = System.Text.Json.Nodes.JsonNode.Parse(answer);
+                var done = json?["uploaded"]?.AsArray().Count ?? 0;
+                var refused = json?["refused"]?.AsArray().Select(r => (string?)r).Where(r => r is not null).ToList() ?? [];
+                if (done > 0) Snackbar.Add(done == 1 ? $"{json!["uploaded"]![0]}" : $"Uploaded {done} files.", Severity.Success);
+                foreach (var r in refused) Snackbar.Add(r!, Severity.Warning);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                Snackbar.Add("Uploaded.", Severity.Success);
+            }
+        }
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private static string IconOf(FileEntry e) => e.Type switch
+    {
+        FileType.Folder => Icons.Material.Outlined.Folder,
+        FileType.Link => Icons.Material.Outlined.Link,
+        FileType.File => Icons.Material.Outlined.InsertDriveFile,
+        _ => Icons.Material.Outlined.HelpOutline,
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gitberthFiles.unbind", "gb-files-zone");
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException or TaskCanceledException)
+        {
+        }
+        self?.Dispose();
+    }
+}

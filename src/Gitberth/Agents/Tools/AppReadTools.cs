@@ -50,7 +50,7 @@ public sealed class AppReadTools(AgentContext ctx, AppCatalog catalog, AppSettin
                 state = a.State.ToString(),
                 state_text = a.StateText,
                 running = a.Running,
-                image = a.Source == AppSource.Git ? null : a.Image,
+                image = a.Source is AppSource.Git or AppSource.Upload ? null : a.Image,
                 repo = a.Repo,
                 address = Address(a),
                 cpu_percent = a.CpuPercent is double c ? Math.Round(c, 1) : (double?)null,
@@ -121,6 +121,20 @@ public sealed class AppReadTools(AgentContext ctx, AppCatalog catalog, AppSettin
                 build = g.DockerfileMode switch { DockerfileMode.Railpack => "railpack", DockerfileMode.Custom => "custom", _ => "auto" },
                 detected = g.DetectedSummary,
             } : null,
+            // [builder B, B6] An uploaded app's source: its newest upload (what Deploy builds), and the one it runs.
+            upload = row is { Source: AppSource.Upload } up ? new
+            {
+                name = up.UploadName,
+                sha = up.UploadSha,
+                size = up.UploadSize,
+                uploaded_at = up.UploadedAt,
+                uploaded_by = up.UploadedBy,
+                running = up.CurrentCommit,
+                compose_file = up.ComposeFile,
+                settings_pending = up.ConfigChangePending || up.RebuildPending ? true : (bool?)null,
+                build = up.DockerfileMode switch { DockerfileMode.Railpack => "railpack", DockerfileMode.Custom => "custom", _ => "auto" },
+                detected = up.DetectedSummary,
+            } : null,
             preview_of = row?.ParentAppId,
             web_port = loaded?.Options.WebPort,
             health_path = loaded?.Options.HealthCheckPath,
@@ -161,7 +175,7 @@ public sealed class AppReadTools(AgentContext ctx, AppCatalog catalog, AppSettin
                 path = j.Path, schedule = j.Schedule, description = j.Description, next_run = j.NextRun,
                 last = j.Last is { } l ? new { at = l.StartedAt, outcome = l.Outcome.ToString(), status = l.Status, detail = l.Detail } : null,
             }).ToList()) : null,
-            update = s.Source is AppSource.Git or AppSource.Compose ? null : await Try(async () => (await updates.StatusAsync(s.Key, ct)) is var u
+            update = s.Source is AppSource.Git or AppSource.Compose or AppSource.Upload ? null : await Try(async () => (await updates.StatusAsync(s.Key, ct)) is var u
                 ? new { available = u.Available, text = u.Text, tracked = u.Tracked, checked_at = u.CheckedAt, error = u.Error, can_roll_back = u.CanRollBack } : null),
             uptime = id is int uid ? UptimeOut(uptime.For(uid)) : null,
             down_page = id is int dpid && await uptimeSettings.OfAsync(dpid, ct) is { } dp

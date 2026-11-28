@@ -119,6 +119,15 @@ public static class NotificationFormats
         NotifyEvent.GaveUp => "app.gave-up",
         NotifyEvent.TokenExpiring => "token.expiring",
         NotifyEvent.TokenRefused => "token.refused",
+        // ---- builder A ----
+        NotifyEvent.BackupFailed => "backup.failed",
+        NotifyEvent.BackupOk => "backup.ok",
+        NotifyEvent.UpdateAvailable => "update.available",
+        NotifyEvent.GitberthUpdated => "gitberth.updated",
+        NotifyEvent.GitberthUpdateFailed => "gitberth.update-failed",
+        // [builder B, B2]
+        NotifyEvent.JobFailed => "job.failed",
+        NotifyEvent.JobOk => "job.ok",
         _ => "test",
     };
 
